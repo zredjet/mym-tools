@@ -1,0 +1,13 @@
+dist
+node_modules
+src-tauri/target
+src-tauri/gen
+package-lock.json
+
+# Markdown / ADR / 設計ドキュメントは prettier の整形対象から外す
+# (表組み・日本語の長文段落が誤改行されてレイアウトが壊れるため、
+#  原文のスタイルを保持する。レビューは目視で行う)
+docs/
+*.md
+CLAUDE.md
+README.md

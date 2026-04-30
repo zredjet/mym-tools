@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+/*
+ * MyMyTools グローバルスタイル
+ *
+ * デザイントークンの正典は docs/ui-design.md §2 / §12.4
+ * shadcn/ui の token 規約と Tailwind v4 の @theme ディレクティブを併用予定
+ * (Phase 1 着手時に shadcn init で `:root` / `.dark` 配下の CSS variables を生成し、
+ *  本ファイルに `@theme inline { ... }` で再エクスポートする方針)。
+ */
+
+:root {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell,
+    "Helvetica Neue", sans-serif;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+}

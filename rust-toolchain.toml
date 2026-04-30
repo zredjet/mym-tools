@@ -1,0 +1,6 @@
+[toolchain]
+# Tauri 2 の MSRV に揃える。Phase 1 着手時点の最新公式値を確認して固定すること。
+# 現時点の参考値: 1.83 (ADR-0010 §2.3)。ローカル環境で 1.83 以降の stable があれば動く。
+channel = "1.83"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

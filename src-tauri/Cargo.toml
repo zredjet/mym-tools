@@ -1,0 +1,53 @@
+[package]
+name = "mym-tools"
+version = "0.0.1"
+description = "MyMyTools — 軽量なクロスプラットフォーム多目的 GUI ツール"
+authors = ["zredjet"]
+edition = "2021"
+rust-version = "1.83"  # Tauri 2 の MSRV に揃える (Phase 1 着手時に最新公式値を再確認)
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "mym_tools_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri 本体 (ADR-0001)
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"   # ADR-0008 §2.7: 「最新版を確認」で OS 既定ブラウザ起動
+
+# DB (ADR-0003)
+rusqlite = { version = "0.32", features = ["bundled", "trace"] }
+# 注: FTS5 は bundled feature に含まれる。明示の `fts5` feature は rusqlite 0.32 では不要
+
+# 非同期 (Tauri 同梱、ADR-0009)
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+tokio-util = { version = "0.7", default-features = false }   # ADR-0009: CancellationToken
+
+# シリアライズ
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# エラー (ADR-0009: AppError / ModuleError)
+thiserror = "1"
+
+# 時刻 (ADR-0005: JST ISO8601 アプリ側生成)
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+
+# ロギング (architecture.md §10.2)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# UUID (ADR-0009: operation_id)
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# ハッシュ計算 (M-Hash)
+md-5 = "0.10"
+sha1 = "0.10"
+sha2 = "0.10"
+

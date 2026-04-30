@@ -1,0 +1,12 @@
+# clippy.toml — ADR-0009 §6.2 / ADR-0010 §2.4.1
+#
+# 設定キーは kebab-case (`disallowed-methods`)、対応する lint 名はアンダースコア (`disallowed_methods`)。
+# `disallowed_methods` lint は free function も捕捉対象。
+# 補完となる grep ベース fallback は CI 末尾で実行 (ADR-0010 §2.5)。
+
+disallowed-methods = [
+    { path = "tokio::task::spawn_blocking", reason = "use tauri::async_runtime::spawn_blocking instead (ADR-0009 §2.3 R-2)" },
+    { path = "std::thread::spawn", reason = "use tauri::async_runtime::spawn_blocking instead (ADR-0009 §2.3 R-2)" },
+    { path = "std::thread::Builder::spawn", reason = "use tauri::async_runtime::spawn_blocking instead (ADR-0009 §2.3 R-2)" },
+    { path = "tokio::runtime::Handle::block_on", reason = "do not block Tauri runtime (ADR-0009 §2.3 R-3)" },
+]
