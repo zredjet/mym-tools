@@ -1,0 +1,40 @@
+# ref: ADR-0010 §2.9 / §5
+#
+# 運用方針:
+#  - 通常 PR は groups でまとめ、目視レビューでマージ
+#  - security advisory 起点 PR (GitHub が自動付与する security label) のみ
+#    auto-merge を許可する 2 段運用 (ADR-0010 §2.9 / Round 5 M-7)
+#  - actions のメジャー更新 (例: actions/cache v3→v4) は dependabot まかせにせず
+#    手動で別 PR を切ってテスト (ADR-0010 §2.9 / §7.11)
+
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      rust-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      gha-minor-patch:
+        update-types: [minor, patch]
