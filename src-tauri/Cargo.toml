@@ -34,7 +34,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # エラー (ADR-0009: AppError / ModuleError)
-thiserror = "1"
+thiserror = "2"
 
 # 時刻 (ADR-0005: JST ISO8601 アプリ側生成)
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
