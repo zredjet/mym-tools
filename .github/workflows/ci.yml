@@ -33,6 +33,23 @@ jobs:
         working-directory: src-tauri
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # Linux 上で Tauri 依存を compile / lint するために必要な system パッケージ
+      # (https://v2.tauri.app/start/prerequisites/#linux)。Linux は要件 §3.2 で
+      # 配布対象外だが、cargo はホスト (Linux) 向けに依存を解決するため install が必要。
+      - name: Install Tauri Linux deps
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
       # dtolnay/rust-toolchain は `toolchain` input が必須 (rust-toolchain.toml は自動読みしない)。
       # `stable` を渡し、rust-toolchain.toml も `channel = "stable"` で揃える単一ソース運用にする。
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master HEAD pinned
@@ -71,6 +88,21 @@ jobs:
         working-directory: src-tauri
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # lint-rust と同じく Linux Tauri deps が必要 (cargo がホスト向けに依存解決するため)
+      - name: Install Tauri Linux deps
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master HEAD pinned
         with:
           toolchain: stable
