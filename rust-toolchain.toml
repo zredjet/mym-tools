@@ -1,6 +1,8 @@
 [toolchain]
-# Tauri 2 の MSRV に揃える。Phase 1 着手時点の最新公式値を確認して固定すること。
-# 現時点の参考値: 1.83 (ADR-0010 §2.3)。ローカル環境で 1.83 以降の stable があれば動く。
-channel = "1.83"
+# 最新 stable を追従。
+# 経緯: Tauri 2 系の依存 (hashbrown 0.17 等) が edition2024 (Rust 1.85+ で stable) を
+# 要求するようになったため、特定パッチでの pin はメンテ負荷が高い。
+# Cargo.toml の `rust-version` (MSRV) で実質下限を担保する (現状 "1.85")。
+channel = "stable"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
