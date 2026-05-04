@@ -692,6 +692,46 @@ Round 5 で識別したセキュリティ・運用障害リスクの要約。詳
 - **Phase 1 は単一 crate 前提** (ADR-0004 §7.3 の workspace 分割は将来検討事項のまま据え置く)。`--workspace` フラグは将来 crate 分割した際の no-op 保険として付けておく
 - `mym-tauri` 側の integration test (WebDriver 系) は §7.10 のテスト戦略 ADR で扱う。本 ADR では入れない
 
+### 7.15 Day 1 で発覚した実装上の罠 (実運用で確認した既知問題)
+
+ADR-0010 受理後に実際の CI を組んでみて発覚した 4 件の罠。本 ADR の **決定変更ではなく実装ノート** として残す。Phase 1 中に同じ罠を再発させないための備忘。
+
+#### 7.15.1 `dtolnay/rust-toolchain` action は `toolchain` input が必須
+
+- **発覚**: 初回 main push の workflow run で全 4 Rust 系ジョブが 0.4 秒で exit 1
+- **真因**: action は `toolchain` input が空だと最初の "parse toolchain version" step で `exit 1`。`rust-toolchain.toml` を**自動読みしない**
+- **対策**: `with: { toolchain: stable }` を明示。`rust-toolchain.toml` の `channel` も `stable` に揃え、両者を単一ソース運用にする
+- **本 ADR 反映**: §2.10 ワークフロースケルトンに反映済み。本 7.15.1 はあくまで「なぜ `toolchain: stable` を明示しているか」の根拠記録
+
+#### 7.15.2 Linux runner で Tauri を compile するには apt deps が必要
+
+- **発覚**: `dtolnay/rust-toolchain` 修正後の run で `lint-rust` / `test-rust` が `pkg-config exited with status code 1: gobject-2.0 not found` で失敗
+- **真因**: Linux は要件 §3.2 で配布対象外だが、cargo はホスト (= ubuntu runner = Linux) 向けに依存解決するため `webkit2gtk-sys` 等の Linux 専用 sys crate が compile path に乗る。これらは `libwebkit2gtk-4.1-dev` / `libxdo-dev` / `libssl-dev` / `libayatana-appindicator3-dev` / `librsvg2-dev` 等の system パッケージを要求する
+- **対策**: `lint-rust` / `test-rust` に `apt-get install` step を追加 (公式 https://v2.tauri.app/start/prerequisites/#linux に準拠)
+- **本 ADR 反映**: §2.10 ワークフロースケルトンに反映済み
+
+#### 7.15.3 dependabot は cross-language dep pair を同期 bump できない (Tauri 構造的限界)
+
+- **発覚**: Day 1 中に dependabot が `@tauri-apps/api` 2.10→2.11 を含む npm-minor-patch group PR (#11) を作成 → CI で `Found version mismatched Tauri packages: tauri (v2.10.3) : @tauri-apps/api (v2.11.0)` で失敗
+- **真因**: dependabot は cargo / npm を別 ecosystem として扱うため、Tauri のような **Rust crate と npm package を同一 minor に揃える必要がある cross-language pair** を同期 bump できない。`groups` 機能でも分離不能
+- **対策**:
+  - npm 側 `@tauri-apps/api` / `@tauri-apps/cli` / `@tauri-apps/plugin-*` の bump は **dependabot に任せず手動 PR** で Rust 側 `tauri` / `tauri-plugin-*` と一緒に上げる
+  - 将来的に `scripts/bump-tauri.sh` 等の lockstep 更新スクリプトを用意するかは Phase 1 後に検討
+  - 暫定: dependabot.yml の `ignore` で `@tauri-apps/*` を除外し誤った bump PR を抑制する選択肢もあるが、Phase 1 では「PR が出たら手動 close + 手動 lockstep PR」運用で対応する
+
+#### 7.15.4 dependabot の `update-types: [minor, patch]` は Rust pre-1.0 慣例を区別しない
+
+- **発覚**: rust-minor-patch group に `sha1` / `sha2` / `md-5` の 0.10→0.11 (semver 上は minor、Rust 慣例では breaking) が混入
+- **真因**: dependabot は厳密に semver で判定 (0.10→0.11 = minor)。Rust エコシステムの「pre-1.0 では minor=破壊的変更扱い」慣例を知らない
+- **対策**:
+  - Phase 1 では「pre-1.0 crate の minor bump も手動レビュー対象」として扱い、PR が出たら個別判断
+  - `dependabot.yml` の `ignore.update-types: [version-update:semver-minor]` を pre-1.0 crate にだけ適用するのは可能だが、適用対象を特定する仕組みが煩雑なため Phase 1 では採用しない
+  - Phase 2 以降に向けた検討: `versioning-strategy: increase-if-necessary` や bot ベースの分類スクリプト
+
+### 7.16 Day 2 設定値の運用ノート (branch protection)
+
+ADR-0010 §2.8 の branch protection は GitHub Web UI でしか設定できないため、設定値を Issue or Wiki にスクリーンショット付きで保管する運用を Phase 1 着手時に決める。`gh api repos/<owner>/<repo>/branches/main/protection` で JSON エクスポート可能だがバックアップ責任は人間側にある。`Do not allow bypassing the above settings` (= Include administrators 相当) を ON にしても、緊急 hotfix 時は §2.8 の手順で一時 OFF → 修正 → 24h 以内に再 ON、を Issue ログとして残す。
+
 ---
 
 ## 8. References
@@ -725,4 +765,5 @@ Round 5 で識別したセキュリティ・運用障害リスクの要約。詳
 | 2026-04-30 | 1.6 | レビュー round 6 反映 (内部整合・読みやすさ): §4.3 第 3 項目「`paths` フィルタなし」を「`paths-ignore` の運用 (§2.2 で doc-only PR skip / CI 設定ファイル除外の二段構え)」に修正 (M6-1: Round 2 反映時の取り残し) / §4.2 第 2 項目の Tauri ビルド時間を §1.2 と一致する数字 (cold macOS 10〜12 分 / Windows 8〜10 分、cache hit 5〜8 分) に更新 (M6-2) / §4.2.1 副節「セキュリティ・運用障害リスク」を新設し §5 の 6 件のセキュリティリスクと対称化 (M6-3) / §2.5 grep ベース fallback の対象集合を `clippy.toml` `disallowed-methods` と揃え `std::thread::Builder::spawn` / `tokio::runtime::Handle::block_on` を grep 対象に追加、`rayon::*` をワイルドカード禁止として grep のみで担保する非対称を明示する対応表を追加 (M6-4) / §2.10 ワークフロー内の grep step も同期更新 / §7.7 と §7.12 (self-hosted runner) を §7.7 に統合し「採用不可として固定」と一本化、後続節を §7.12 (`cargo test` スコープ) に繰り上げ (M6-5) |
 | 2026-04-30 | 1.7 | レビュー round 7 反映 (OSS ベストプラクティスとの比較): §3.7 セキュリティスキャン比較表に `actions/dependency-review-action` (PR マージ前の脆弱性ゲート、dependabot と直交) を追加 / §7.2 タイトルを「`cargo audit` / `npm audit` / `actions/dependency-review-action` の CI 組み込み」に変更し public 化後の追加検討を明記 (M-1) / §2.10 の `cargo clippy` / `cargo test` に **`--locked`** を追加し CI 内での `Cargo.lock` 改変を拒否 (Minor: lapce 等の OSS ベストプラクティス) / §6.1 checklist に `Cargo.lock` コミット必須と `cargo --locked` 付与の 2 項目を追加 (Minor) / §7.12 を新設し macOS Intel (`macos-13`) サポートの境界判断を `requirements.md` §3.2 / ADR-0008 への持ち越しとして明記 (M-2) / §7.13 を新設し `actionlint` 見送り (本 ADR §2.10 が複雑化したら再評価) と `npm ci --ignore-scripts` の Day 0 PoC 確認 (Minor) を追加 / §7.14 (旧 §7.12) `cargo test` スコープ |
 | 2026-04-30 | 1.8 | レビュー round 8 反映 (最終 sign-off): §2.3 `tauri-cli` 行を **事実訂正** — `taiki-e/install-action` の managed manifest に `tauri-cli` は無く、fallback は `cargo install` ではなく **`cargo-binstall`** が既定 (Critical C8-1 / 公式 README で確認) / §8 References の Tauri 公式 URL `/distribute/pipelines/` が 404 のため `/distribute/` (CI ページは Phase 1 着手時に再確認) と GitHub Actions 課金公式リンクに差し替え (Critical C8-2) / §1.2 の課金記述に「2024 年に multiplier 表記から per-minute rate 表記に変わったが Linux 換算比は実質変わらず」の鮮度注記を追加 (M8-1) / §6.1 Day 0 行から「Q-22 PoC を兼ねる」の二重決定を削除し「CI が前提とする最小実装の確保のみ、Q-22 PoC は §7.10 持ち越し」と一本化 (M8-2) / §2.11 の ADR-0009 §6.2 更新粒度を「末尾」から「**受入条件 checklist の最終項目を差し替え**」に詳細化 (M8-3) / §2.10 lint-rust の `cargo fmt --check` と test-frontend の `vitest run` にも `if: always()` を付与し集約失敗パターンを完全化 (Minor) / §7.14 の `cargo test --lib` の説明を「`main.rs` を含まない」から「**バイナリターゲット (`[[bin]]`) を除外**」に正確化 (Minor) |
+| 2026-05-02 | 2.0 | Day 1 実装で発覚した 4 件の罠を §7.15 として追記 (実装ノート、決定変更ではない): (1) `dtolnay/rust-toolchain` の `toolchain` input 必須化 / (2) Linux runner で Tauri compile に apt deps が必要 / (3) dependabot は Tauri のような cross-language dep pair を同期 bump できない / (4) dependabot は Rust pre-1.0 の minor=breaking 慣例を区別しない。§7.16 として branch protection 設定値の運用ノートも追加 (Web UI 設定の保管責任) |
 | 2026-04-30 | 1.9 | **Accepted 化**: §2.11 受理判定 checklist の 3 項目すべてを満たすコミットで Status を Proposed → Accepted に昇格。同コミットで `decisions/0008-distribution-no-autoupdate.md` §2.5 / §7.8 を「CI ADR (ADR-0010) + CD ADR (将来) の 2 本立て」に書き換え / `decisions/0009-cancellation-and-spawn-blocking.md` §6.2 受入条件 checklist 最終項目を ADR-0010 §2.4.1 / §2.5 / §6.2 ベースに差し替え / `architecture.md` §13 「未確定」を「CI 確定 (ADR-0010) / CD は将来」に分離、をすべて更新済み |
