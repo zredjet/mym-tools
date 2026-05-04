@@ -57,13 +57,15 @@ cargo test --workspace --lib --all-features --locked
 
 ## 開発状況
 
-**Phase 1 着手前のリポジトリ整備中**。
+**Phase 1 着手前のリポジトリ整備完了**。
 
 設計ドキュメントと ADR-0001〜0010 はすべて Accepted。雛形は `cargo create-tauri-app`
 ベースの React 19 + TypeScript + Tailwind v4 + shadcn/ui (init は Phase 1 着手時) +
 Zustand。Rust 側は rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing。
 
-CI / branch protection は ADR-0010 で確定済 (実装は Phase 1 着手後)。
+CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2)
+と main ブランチ保護を ADR-0010 §2.8 に従って GitHub 側で運用中。
+PR 経由マージのみ受付け、6 ジョブ全 green が必須。
 
 ## 関連
 
