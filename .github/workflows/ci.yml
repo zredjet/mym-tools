@@ -13,10 +13,12 @@ permissions:
 on:
   pull_request:
     branches: [main]
-    paths-ignore: ["docs/**", "**/*.md", ".github/ISSUE_TEMPLATE/**"]
+    # paths-ignore は撤廃 (ADR-0010 §7.15.5: GitHub の実挙動では skip された
+    # required check は「Expected」のまま BLOCKED になり mergeable にならない)。
+    # 課金は public 化 (§1.2 / §2.8) で Free tier 無制限のため doc-only PR でも
+    # 6 ジョブ走らせる方針に変更。
   push:
     branches: [main]
-    paths-ignore: ["docs/**", "**/*.md", ".github/ISSUE_TEMPLATE/**"]
   workflow_dispatch:
 
 # 同一 PR で連続 push したときの古い run を自動キャンセル (ADR-0010 §2.2 / Round 2 M-3)
