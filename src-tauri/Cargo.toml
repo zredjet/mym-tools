@@ -22,7 +22,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"   # ADR-0008 §2.7: 「最新版を確認」で OS 既定ブラウザ起動
 
 # DB (ADR-0003)
-rusqlite = { version = "0.32", features = ["bundled", "trace"] }
+rusqlite = { version = "0.39", features = ["bundled", "trace"] }
 # 注: FTS5 は bundled feature に含まれる。明示の `fts5` feature は rusqlite 0.32 では不要
 
 # 非同期 (Tauri 同梱、ADR-0009)
