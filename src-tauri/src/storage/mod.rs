@@ -1,25 +1,33 @@
 //! Storage 層 (`module-contract.md` §5.1 / `data-model.md` §6 / §13)。
 //!
-//! - `StorageService` trait: コア機能 (project CRUD / 後続で item CRUD など) の境界
+//! - `StorageService` trait: コア機能 (project / items / 検索) の境界
+//! - `ScopedStorage`: モジュールにスコープされた items CRUD (PR-E で追加)
 //! - `SqliteStorage`: rusqlite ベースの実装。writer mutex で書込みを直列化
 //!   (`data-model.md` §13.7)
 //! - `schema`: SQLite DDL の文字列定数 (CREATE TABLE / TRIGGER / INDEX)
-//! - `types`: `Project` / `ProjectId` 等のドメイン型
+//! - `types`: `Project` / `Item` / `SearchScope` 等のドメイン型
 //!
-//! ## ScopedStorage は別 PR で追加予定
+//! ## モジュール経由の items CRUD
 //!
-//! 永続データを持つモジュール (M-Color / M-LinkMemo / M-Prompt) の本実装に入る PR で、
-//! `module-contract.md` §5.1 の `ScopedStorage` (モジュール ID で自動絞り込み)
-//! を `StorageService::scoped_for(module)` として追加する。本 PR は project 部分のみ。
+//! `StorageService::scoped_for(module)` で `ScopedStorage` を取得し、その上で
+//! `create_item` / `update_item` / `delete_item` / `get_item` / `list_items` を呼ぶ。
+//! `ScopedStorage` 内で `module_id` を自動絞り込みするため、他モジュールの items に
+//! アクセス不能 (`module-contract.md` §6.2)。`get_item` は ADR-0006 の Eager-on-Read
+//! を発火する。
 
 pub mod schema;
+pub mod scoped;
 pub mod sqlite;
 pub mod types;
 
-use crate::error::AppError;
+use std::sync::Arc;
 
+use crate::error::AppError;
+use crate::module::ModuleBackend;
+
+pub use scoped::ScopedStorage;
 pub use sqlite::SqliteStorage;
-pub use types::{Project, ProjectId};
+pub use types::{Item, ItemId, Project, ProjectId, SearchScope};
 
 /// コアの永続化境界。`AppState.storage: Arc<dyn StorageService>` 経由で各 Tauri command が利用する。
 ///
@@ -56,6 +64,31 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
     /// `id` のプロジェクトを物理削除する。配下の items は `ON DELETE CASCADE` で自動削除
     /// される (`data-model.md` §9.1)。
     fn delete_project(&self, id: &ProjectId) -> Result<(), AppError>;
+
+    // -------- ScopedStorage 取得 --------
+
+    /// 指定モジュールにスコープされたストレージハンドルを返す
+    /// (`module-contract.md` §5.1 / scoped.rs)。
+    fn scoped_for(&self, module: Arc<dyn ModuleBackend>) -> ScopedStorage;
+
+    // -------- 検索 (`data-model.md` §8) --------
+
+    /// 検索 API。`scope` で範囲を、`module_filter` で対象モジュール ID を絞る。
+    ///
+    /// **3 文字未満は LIKE フォールバック** (`data-model.md` §8.1 制限事項):
+    /// trigram tokenizer は 3-gram のため 3 文字未満は MATCH しない。短い検索語は
+    /// `items` テーブル直接の `LIKE '%query%'` で代替する (`title` / `tags` /
+    /// `search_text` 対象、テーブル全スキャン)。
+    ///
+    /// `module_filter` が空 / None の場合は全モジュールが対象。
+    fn search(
+        &self,
+        scope: &SearchScope,
+        query: &str,
+        module_filter: Option<&[String]>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Item>, AppError>;
 
     // -------- Meta --------
 
