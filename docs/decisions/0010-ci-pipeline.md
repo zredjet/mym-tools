@@ -742,6 +742,26 @@ ADR-0010 受理後に実際の CI を組んでみて発覚した 4 件の罠。�
 
 ADR-0010 §2.8 の branch protection は GitHub Web UI でしか設定できないため、設定値を Issue or Wiki にスクリーンショット付きで保管する運用を Phase 1 着手時に決める。`gh api repos/<owner>/<repo>/branches/main/protection` で JSON エクスポート可能だがバックアップ責任は人間側にある。`Do not allow bypassing the above settings` (= Include administrators 相当) を ON にしても、緊急 hotfix 時は §2.8 の手順で一時 OFF → 修正 → 24h 以内に再 ON、を Issue ログとして残す。
 
+### 7.17 Day 2 で発覚した branch protection の追加罠 (solo project 運用)
+
+Day 2 完了直後の運用で実際に発覚した 2 件。本 ADR §2.8 の規定値そのものではなく、solo project でのインタラクション。
+
+#### 7.17.1 `require_code_owner_reviews: true` は solo project では自 PR を merge 不能に
+
+- **発覚**: PR #21 (cosmetic な README 修正) を `gh pr review --approve` しようとして `Can not approve your own pull request` エラー
+- **真因**: GitHub は **PR author の self-approve を禁止**。CODEOWNERS に唯一登録された `zredjet` が自分の PR を承認できない
+- **dependabot PR では問題が顕在化しない罠**: dependabot[bot] が author の場合、zredjet (CODEOWNER) が承認可能。Day 2 セットアップ直後の 4 dependabot PR (#15-#20) は承認できてしまったため、設定の不整合が見えにくかった
+- **対策**: solo project では `require_code_owner_reviews: false` に変更。CODEOWNERS file 自体は **自動レビュアー指名** として有効 (機能はする、required ブロックにはならない)。本 ADR §2.8 の checklist 項目 "Require review from Code Owners" は **solo project では OFF を推奨** に修正
+- **将来再評価**: 共同開発化したタイミングで `require_code_owner_reviews: true` に戻す。CODEOWNERS file はそのまま残せる
+
+#### 7.17.2 第三者 review bot のコメントが `required_conversation_resolution: true` で merge をブロック
+
+- **発覚**: PR #22 (Q-22 PoC) で `chatgpt-codex-connector` (リポジトリオーナーが導入した自動レビュー bot) が `state: COMMENTED` の review を投げ、未解決 thread が 1 件残ったまま `mergeStateStatus: BLOCKED`
+- **真因**: `required_conversation_resolution: true` はすべての review thread が `isResolved: true` になることを要求する。bot が投げたコメントも対象
+- **対策**: bot の指摘内容を確認して **(1) 妥当なら修正 commit を push** + **(2) 不要なら resolve のみ** で対応。GraphQL `resolveReviewThread` mutation で thread ID を resolve 可能 (`gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "..."}) { thread { isResolved } } }'`)
+- **PR #22 では指摘 (Tauri invoke の `Error` instance を `JSON.stringify` すると `{}` になる) が妥当だったため `formatInvokeError` ヘルパを追加して修正、その上で thread を resolve した
+- **運用ノート**: bot が PR ごとに自動レビューを投げる構成では、`required_conversation_resolution: true` を **維持しつつ「bot review は author が thread resolve」を運用ルール化**。OFF にすると意図したコメントの取りこぼしが起きるため offsetting しない
+
 ---
 
 ## 8. References
@@ -775,6 +795,7 @@ ADR-0010 §2.8 の branch protection は GitHub Web UI でしか設定できな�
 | 2026-04-30 | 1.6 | レビュー round 6 反映 (内部整合・読みやすさ): §4.3 第 3 項目「`paths` フィルタなし」を「`paths-ignore` の運用 (§2.2 で doc-only PR skip / CI 設定ファイル除外の二段構え)」に修正 (M6-1: Round 2 反映時の取り残し) / §4.2 第 2 項目の Tauri ビルド時間を §1.2 と一致する数字 (cold macOS 10〜12 分 / Windows 8〜10 分、cache hit 5〜8 分) に更新 (M6-2) / §4.2.1 副節「セキュリティ・運用障害リスク」を新設し §5 の 6 件のセキュリティリスクと対称化 (M6-3) / §2.5 grep ベース fallback の対象集合を `clippy.toml` `disallowed-methods` と揃え `std::thread::Builder::spawn` / `tokio::runtime::Handle::block_on` を grep 対象に追加、`rayon::*` をワイルドカード禁止として grep のみで担保する非対称を明示する対応表を追加 (M6-4) / §2.10 ワークフロー内の grep step も同期更新 / §7.7 と §7.12 (self-hosted runner) を §7.7 に統合し「採用不可として固定」と一本化、後続節を §7.12 (`cargo test` スコープ) に繰り上げ (M6-5) |
 | 2026-04-30 | 1.7 | レビュー round 7 反映 (OSS ベストプラクティスとの比較): §3.7 セキュリティスキャン比較表に `actions/dependency-review-action` (PR マージ前の脆弱性ゲート、dependabot と直交) を追加 / §7.2 タイトルを「`cargo audit` / `npm audit` / `actions/dependency-review-action` の CI 組み込み」に変更し public 化後の追加検討を明記 (M-1) / §2.10 の `cargo clippy` / `cargo test` に **`--locked`** を追加し CI 内での `Cargo.lock` 改変を拒否 (Minor: lapce 等の OSS ベストプラクティス) / §6.1 checklist に `Cargo.lock` コミット必須と `cargo --locked` 付与の 2 項目を追加 (Minor) / §7.12 を新設し macOS Intel (`macos-13`) サポートの境界判断を `requirements.md` §3.2 / ADR-0008 への持ち越しとして明記 (M-2) / §7.13 を新設し `actionlint` 見送り (本 ADR §2.10 が複雑化したら再評価) と `npm ci --ignore-scripts` の Day 0 PoC 確認 (Minor) を追加 / §7.14 (旧 §7.12) `cargo test` スコープ |
 | 2026-04-30 | 1.8 | レビュー round 8 反映 (最終 sign-off): §2.3 `tauri-cli` 行を **事実訂正** — `taiki-e/install-action` の managed manifest に `tauri-cli` は無く、fallback は `cargo install` ではなく **`cargo-binstall`** が既定 (Critical C8-1 / 公式 README で確認) / §8 References の Tauri 公式 URL `/distribute/pipelines/` が 404 のため `/distribute/` (CI ページは Phase 1 着手時に再確認) と GitHub Actions 課金公式リンクに差し替え (Critical C8-2) / §1.2 の課金記述に「2024 年に multiplier 表記から per-minute rate 表記に変わったが Linux 換算比は実質変わらず」の鮮度注記を追加 (M8-1) / §6.1 Day 0 行から「Q-22 PoC を兼ねる」の二重決定を削除し「CI が前提とする最小実装の確保のみ、Q-22 PoC は §7.10 持ち越し」と一本化 (M8-2) / §2.11 の ADR-0009 §6.2 更新粒度を「末尾」から「**受入条件 checklist の最終項目を差し替え**」に詳細化 (M8-3) / §2.10 lint-rust の `cargo fmt --check` と test-frontend の `vitest run` にも `if: always()` を付与し集約失敗パターンを完全化 (Minor) / §7.14 の `cargo test --lib` の説明を「`main.rs` を含まない」から「**バイナリターゲット (`[[bin]]`) を除外**」に正確化 (Minor) |
+| 2026-05-07 | 2.2 | Day 2 完了直後の運用で発覚した 2 件の追加罠を §7.17 として追記: (1) `require_code_owner_reviews: true` は solo project で自 PR を merge 不能にする (GitHub の self-approve 禁止仕様)。dependabot PR では別 author のため顕在化しなかった罠。`require_code_owner_reviews: false` に変更。(2) 第三者 review bot (chatgpt-codex-connector) のコメントが `required_conversation_resolution: true` で merge をブロック。bot 指摘の修正 commit + GraphQL `resolveReviewThread` で対応する運用を記録 |
 | 2026-05-05 | 2.1 | Day 2 で発覚した 5 件目の罠を §7.15.5 として追記: paths-ignore で skip された required check は GitHub 上で「Expected」のまま BLOCKED になり、§2.2 / Round 2 M-4 の「skip = success」前提は誤り。public 化済で課金懸念解消したため `.github/workflows/ci.yml` から paths-ignore を撤廃、全 PR で 6 ジョブ走らせる方針に変更 |
 | 2026-05-02 | 2.0 | Day 1 実装で発覚した 4 件の罠を §7.15 として追記 (実装ノート、決定変更ではない): (1) `dtolnay/rust-toolchain` の `toolchain` input 必須化 / (2) Linux runner で Tauri compile に apt deps が必要 / (3) dependabot は Tauri のような cross-language dep pair を同期 bump できない / (4) dependabot は Rust pre-1.0 の minor=breaking 慣例を区別しない。§7.16 として branch protection 設定値の運用ノートも追加 (Web UI 設定の保管責任) |
 | 2026-04-30 | 1.9 | **Accepted 化**: §2.11 受理判定 checklist の 3 項目すべてを満たすコミットで Status を Proposed → Accepted に昇格。同コミットで `decisions/0008-distribution-no-autoupdate.md` §2.5 / §7.8 を「CI ADR (ADR-0010) + CD ADR (将来) の 2 本立て」に書き換え / `decisions/0009-cancellation-and-spawn-blocking.md` §6.2 受入条件 checklist 最終項目を ADR-0010 §2.4.1 / §2.5 / §6.2 ベースに差し替え / `architecture.md` §13 「未確定」を「CI 確定 (ADR-0010) / CD は将来」に分離、をすべて更新済み |
