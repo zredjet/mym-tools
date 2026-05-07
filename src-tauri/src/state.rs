@@ -1,8 +1,8 @@
 //! `AppState` — Tauri コマンドが受け取る共有状態 (`module-contract.md` §5.1)。
 //!
 //! Phase 1 のレイヤ追加に応じて段階的に拡張する:
-//! - **PR-B (本 PR)**: `modules: HashMap<&'static str, Arc<dyn ModuleBackend>>` のみ
-//! - **PR-C**: `operations: Arc<OperationRegistry>` を追加 (ADR-0009 §2.2)
+//! - **PR-B**: `modules: HashMap<&'static str, Arc<dyn ModuleBackend>>` のみ
+//! - **PR-C (本 PR)**: `operations: Arc<OperationRegistry>` を追加 (ADR-0009 §2.2)
 //! - **PR-D**: `storage: Arc<dyn StorageService>` を追加 (`module-contract.md` §5.1)
 //!
 //! `AppState` 自体は `Send + Sync` (中身が `Arc` で包まれているため)。`tauri::State<'_, AppState>`
@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::module::ModuleBackend;
+use crate::operations::OperationRegistry;
 
 /// アプリケーション全体の共有状態。
 pub struct AppState {
@@ -19,6 +20,11 @@ pub struct AppState {
     /// `modules::registry::module_backends()` を `id()` をキーに詰め直して構築する
     /// (`build()` 関数参照)。
     pub modules: HashMap<&'static str, Arc<dyn ModuleBackend>>,
+
+    /// 進行中の操作のキャンセルレジストリ (ADR-0009 §2.2)。
+    /// 全アプリで 1 つだけ持ち、`#[tauri::command]` から
+    /// `state.operations.register(operation_id)` 等で利用する。
+    pub operations: Arc<OperationRegistry>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -26,7 +32,10 @@ impl std::fmt::Debug for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut ids: Vec<&str> = self.modules.keys().copied().collect();
         ids.sort();
-        f.debug_struct("AppState").field("modules", &ids).finish()
+        f.debug_struct("AppState")
+            .field("modules", &ids)
+            .field("operations", &self.operations)
+            .finish()
     }
 }
 
@@ -34,6 +43,7 @@ impl AppState {
     /// `Arc<dyn ModuleBackend>` の Vec から `AppState` を構築する。
     /// 同 id が複数あったら起動を停止する (`module-contract.md` §2: 「不一致や重複があれば
     /// アプリは起動を停止する」)。
+    /// `operations` は新規 `OperationRegistry` で初期化される。
     pub fn build(backends: Vec<Arc<dyn ModuleBackend>>) -> Result<Self, BuildError> {
         let mut modules = HashMap::new();
         for backend in backends {
@@ -43,7 +53,10 @@ impl AppState {
                 return Err(BuildError::DuplicateId(id.to_string()));
             }
         }
-        Ok(AppState { modules })
+        Ok(AppState {
+            modules,
+            operations: Arc::new(OperationRegistry::new()),
+        })
     }
 
     /// `module_id` で ModuleBackend を引く。見つからなければ None。

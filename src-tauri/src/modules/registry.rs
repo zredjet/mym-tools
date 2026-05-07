@@ -31,8 +31,12 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
 /// `tauri::generate_handler!` の制約で、すべてのコマンドを 1 か所に列挙する必要がある
 /// (`module-contract.md` §5.3)。新モジュール追加時はこの `generate_handler!` リストに
 /// 固有コマンドを追記する。
+///
+/// `core_*` コマンドもここで登録する (Tauri 制約: invoke_handler は 1 度しか呼べない)。
 pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder.invoke_handler(tauri::generate_handler![
+        // Core (ADR-0009 §2 / `module-contract.md` §6.2)
+        crate::commands::cancel::core_cancel_operation,
         // M-Hash
         crate::modules::hash::commands::hash_compute_text,
         // 新モジュールの固有コマンドはここに追加する
