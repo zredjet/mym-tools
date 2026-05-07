@@ -343,24 +343,78 @@ impl StorageService for SqliteStorage {
         })
     }
 
-    fn scoped_for(&self, module: Arc<dyn ModuleBackend>) -> ScopedStorage {
-        // self は通常 `Arc<SqliteStorage>` として AppState に保持されている。
-        // このメソッドは `&self` から `Arc<SqliteStorage>` を作るために clone が必要だが、
-        // 直接 Arc を取り出す方法は trait レベルでは難しい。代わりに、Tauri command 側で
-        // `state.storage.scoped_for(...)` の呼び出し前に `Arc::clone(&state.inner_arc)` を
-        // 取り、`SqliteStorage::scoped_for_arc` 経由で渡す経路にする。
-        //
-        // ここではダミー実装ではなく、Tauri コマンドからの呼び出しで使われる `Arc<dyn StorageService>`
-        // 経由のラッパー想定 ─ ただし dyn trait では Arc 形式に変換できないため、
-        // **PR-E では `SqliteStorage::scoped_for_arc(&Arc<Self>, module)` のヘルパを別途用意し、
-        // この trait メソッドは `unimplemented!()` で fallback** する設計にする。
-        //
-        // 呼び出し側: `let scoped = SqliteStorage::scoped_for_arc(arc_self, module);`
-        let _ = module;
-        unimplemented!(
-            "use SqliteStorage::scoped_for_arc(&Arc<Self>, module) instead — \
-             trait method cannot construct Arc<Self> from &self"
+    fn scoped_for(self: Arc<Self>, module: Arc<dyn ModuleBackend>) -> ScopedStorage {
+        // `Arc<SqliteStorage>` は CoerceUnsized で `Arc<dyn StorageService>` に
+        // 自動的に coerce される (Arc は CoerceUnsized 対応)。
+        ScopedStorage {
+            module,
+            inner: self,
+        }
+    }
+
+    fn create_item(
+        &self,
+        module_id: &str,
+        project_id: &ProjectId,
+        title: &str,
+        tags: &[String],
+        payload_schema_version: u32,
+        payload: &JsonValue,
+        search_text: &str,
+    ) -> Result<ItemId, AppError> {
+        self.create_item_internal(
+            module_id,
+            project_id,
+            title,
+            tags,
+            payload_schema_version,
+            payload,
+            search_text,
         )
+    }
+
+    fn update_item(
+        &self,
+        module_id: &str,
+        id: &ItemId,
+        title: &str,
+        tags: &[String],
+        payload_schema_version: u32,
+        payload: &JsonValue,
+        search_text: &str,
+    ) -> Result<(), AppError> {
+        self.update_item_internal(
+            module_id,
+            id,
+            title,
+            tags,
+            payload_schema_version,
+            payload,
+            search_text,
+        )
+    }
+
+    fn delete_item(&self, module_id: &str, id: &ItemId) -> Result<(), AppError> {
+        self.delete_item_internal(module_id, id)
+    }
+
+    fn get_item_eager(
+        &self,
+        module_id: &str,
+        id: &ItemId,
+        module: &dyn ModuleBackend,
+    ) -> Result<Item, AppError> {
+        self.get_item_with_eager_on_read(module_id, id, module)
+    }
+
+    fn list_items(
+        &self,
+        module_id: &str,
+        project_id: &ProjectId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Item>, AppError> {
+        self.list_items_internal(module_id, project_id, limit, offset)
     }
 
     fn search(
@@ -387,19 +441,10 @@ impl StorageService for SqliteStorage {
 // -------- items CRUD / Eager-on-Read / search --------
 
 impl SqliteStorage {
-    /// `Arc<SqliteStorage>` から `ScopedStorage` を構築する (trait メソッドの代替経路)。
-    /// Tauri コマンド側は `state.storage_arc` (内部 `Arc<SqliteStorage>` を保持) から呼ぶ。
-    pub fn scoped_for_arc(self_arc: &Arc<Self>, module: Arc<dyn ModuleBackend>) -> ScopedStorage {
-        ScopedStorage {
-            module,
-            inner: Arc::clone(self_arc),
-        }
-    }
-
-    /// items の新規作成 (`ScopedStorage::create_item` 内部実装)。
+    /// items の新規作成 (`StorageService::create_item` の実装本体)。
     /// 引数が多いのは items テーブルのカラム数に対応するため意図的。
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn create_item_internal(
+    fn create_item_internal(
         &self,
         module_id: &str,
         project_id: &ProjectId,
@@ -451,7 +496,7 @@ impl SqliteStorage {
     /// `payload` / `search_text` / `updated_at` を更新、`data_revision` を **+1**。
     /// 引数が多いのは items テーブルのカラム数に対応するため意図的。
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn update_item_internal(
+    fn update_item_internal(
         &self,
         module_id: &str,
         id: &ItemId,
@@ -503,11 +548,7 @@ impl SqliteStorage {
         })
     }
 
-    pub(crate) fn delete_item_internal(
-        &self,
-        module_id: &str,
-        id: &ItemId,
-    ) -> Result<(), AppError> {
+    fn delete_item_internal(&self, module_id: &str, id: &ItemId) -> Result<(), AppError> {
         self.with_conn(|conn| {
             let tx = conn.transaction().map_err(AppError::from)?;
             let rows_affected = tx
@@ -532,7 +573,7 @@ impl SqliteStorage {
     /// - version > current → `UnsupportedFuturePayloadVersion`
     /// - version < current → `module.upgrade_payload` を順次適用 → 楽観的並行制御で UPDATE
     /// - version == current → そのまま返す
-    pub(crate) fn get_item_with_eager_on_read(
+    fn get_item_with_eager_on_read(
         &self,
         module_id: &str,
         id: &ItemId,
@@ -602,7 +643,7 @@ impl SqliteStorage {
     /// **`data_revision` も +0** (ユーザー編集ではないため)。
     /// 楽観的並行制御: `WHERE payload_schema_version = ?` (元バージョン)。
     /// 戻り値: `true` = 自分が UPDATE 成功 / `false` = 他プロセスが先に upgrade 済 (再読み込み必要)。
-    pub(crate) fn upgrade_item_inplace(
+    fn upgrade_item_inplace(
         &self,
         id: &ItemId,
         payload: &JsonValue,
@@ -703,7 +744,7 @@ impl SqliteStorage {
     }
 
     /// プロジェクト内の items 一覧 (Eager-on-Read 発火しない、`data-model.md` §7.2 注)。
-    pub(crate) fn list_items_internal(
+    fn list_items_internal(
         &self,
         module_id: &str,
         project_id: &ProjectId,
@@ -1441,17 +1482,28 @@ mod tests {
     }
 
     fn make_color_scoped(storage: &Arc<SqliteStorage>, version: u32) -> ScopedStorage {
-        SqliteStorage::scoped_for_arc(
-            storage,
-            Arc::new(TestColorModule { version }) as Arc<dyn ModuleBackend>,
-        )
+        Arc::clone(storage)
+            .scoped_for(Arc::new(TestColorModule { version }) as Arc<dyn ModuleBackend>)
     }
 
     fn make_stateless_scoped(storage: &Arc<SqliteStorage>) -> ScopedStorage {
-        SqliteStorage::scoped_for_arc(
-            storage,
-            Arc::new(TestStatelessModule) as Arc<dyn ModuleBackend>,
-        )
+        Arc::clone(storage).scoped_for(Arc::new(TestStatelessModule) as Arc<dyn ModuleBackend>)
+    }
+
+    /// `Arc<dyn StorageService>` 経由で `scoped_for` を呼べることを保証する回帰テスト
+    /// (`AppState.storage: Arc<dyn StorageService>` から呼べる必要がある)。
+    #[test]
+    fn scoped_for_works_via_dyn_storage_service() {
+        let storage_arc: Arc<SqliteStorage> = Arc::new(in_memory_storage());
+        let p = storage_arc.create_project("Project", None).unwrap();
+        // `Arc<SqliteStorage>` を `Arc<dyn StorageService>` に coerce してから呼ぶ。
+        let dyn_storage: Arc<dyn StorageService> = storage_arc;
+        let scoped = dyn_storage.scoped_for(Arc::new(TestColorModule { version: 1 }));
+        let id = scoped
+            .create_item(&p.id, "Blue", &[], serde_json::json!({"hex": "#0000ff"}))
+            .unwrap();
+        let fetched = scoped.get_item(&id).unwrap();
+        assert_eq!(fetched.title, "Blue");
     }
 
     #[test]

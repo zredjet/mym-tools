@@ -22,6 +22,8 @@ pub mod types;
 
 use std::sync::Arc;
 
+use serde_json::Value as JsonValue;
+
 use crate::error::AppError;
 use crate::module::ModuleBackend;
 
@@ -69,7 +71,67 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
 
     /// 指定モジュールにスコープされたストレージハンドルを返す
     /// (`module-contract.md` §5.1 / scoped.rs)。
-    fn scoped_for(&self, module: Arc<dyn ModuleBackend>) -> ScopedStorage;
+    ///
+    /// **`Arc<Self>` レシーバ**: `ScopedStorage` 内部で `Arc<dyn StorageService>` を
+    /// clone 保持するため、`Arc<dyn StorageService>` または `Arc<SqliteStorage>` に
+    /// 直接生やす形にしてある。`AppState.storage: Arc<dyn StorageService>` から呼べる。
+    fn scoped_for(self: Arc<Self>, module: Arc<dyn ModuleBackend>) -> ScopedStorage;
+
+    // -------- items CRUD (低レベル、`ScopedStorage` 経由で呼ぶ) --------
+    //
+    // これらは `ScopedStorage` から `module_id` 等を渡して呼ぶ低レベル API。
+    // 通常は `ScopedStorage::create_item` などの上位 API を使う。
+
+    /// items の新規作成。`data_revision` を **+1**。
+    /// 引数が多いのは items テーブルのカラム数に対応するため意図的。
+    #[allow(clippy::too_many_arguments)]
+    fn create_item(
+        &self,
+        module_id: &str,
+        project_id: &ProjectId,
+        title: &str,
+        tags: &[String],
+        payload_schema_version: u32,
+        payload: &JsonValue,
+        search_text: &str,
+    ) -> Result<ItemId, AppError>;
+
+    /// items のユーザー編集更新。`data_revision` を **+1** (`data-model.md` §7.2)。
+    /// 引数が多いのは items テーブルのカラム数に対応するため意図的。
+    #[allow(clippy::too_many_arguments)]
+    fn update_item(
+        &self,
+        module_id: &str,
+        id: &ItemId,
+        title: &str,
+        tags: &[String],
+        payload_schema_version: u32,
+        payload: &JsonValue,
+        search_text: &str,
+    ) -> Result<(), AppError>;
+
+    /// items の物理削除。`data_revision` を **+1**。
+    fn delete_item(&self, module_id: &str, id: &ItemId) -> Result<(), AppError>;
+
+    /// item を 1 件取得し、必要なら Eager-on-Read (ADR-0006 / `data-model.md` §7.2)
+    /// で payload をアップグレードして返す。アップグレード時の UPDATE では
+    /// `data_revision` を **増やさない** (ADR-0006 §2.2)。
+    fn get_item_eager(
+        &self,
+        module_id: &str,
+        id: &ItemId,
+        module: &dyn ModuleBackend,
+    ) -> Result<Item, AppError>;
+
+    /// プロジェクト内のモジュール item を一覧取得 (Eager-on-Read を**発火させない**、
+    /// `data-model.md` §7.2 注)。`updated_at DESC, id DESC` 順。
+    fn list_items(
+        &self,
+        module_id: &str,
+        project_id: &ProjectId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Item>, AppError>;
 
     // -------- 検索 (`data-model.md` §8) --------
 

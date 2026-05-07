@@ -21,17 +21,17 @@ use serde_json::Value as JsonValue;
 
 use crate::error::AppError;
 use crate::module::ModuleBackend;
-use crate::storage::sqlite::SqliteStorage;
 use crate::storage::types::{Item, ItemId, ProjectId};
+use crate::storage::StorageService;
 
 /// モジュールにスコープされたストレージハンドル。
 ///
-/// `Arc<dyn ModuleBackend>` を保持するためライフタイムパラメータは持たず、async /
-/// `spawn_blocking` をまたいで扱える。
+/// `Arc<dyn ModuleBackend>` と `Arc<dyn StorageService>` を保持するためライフタイム
+/// パラメータは持たず、async / `spawn_blocking` をまたいで扱える。
 #[derive(Clone)]
 pub struct ScopedStorage {
     pub(crate) module: Arc<dyn ModuleBackend>,
-    pub(crate) inner: Arc<SqliteStorage>,
+    pub(crate) inner: Arc<dyn StorageService>,
 }
 
 impl std::fmt::Debug for ScopedStorage {
@@ -63,7 +63,7 @@ impl ScopedStorage {
         let module_id = self.module.id().to_string();
         let payload_schema_version = self.module.current_payload_version();
         let search_text = build_search_text(title, tags, &self.module.index_text(&payload));
-        self.inner.create_item_internal(
+        self.inner.create_item(
             &module_id,
             project_id,
             title,
@@ -89,7 +89,7 @@ impl ScopedStorage {
         let module_id = self.module.id().to_string();
         let payload_schema_version = self.module.current_payload_version();
         let search_text = build_search_text(title, tags, &self.module.index_text(&payload));
-        self.inner.update_item_internal(
+        self.inner.update_item(
             &module_id,
             id,
             title,
@@ -104,7 +104,7 @@ impl ScopedStorage {
     pub fn delete_item(&self, id: &ItemId) -> Result<(), AppError> {
         self.guard_stateless()?;
         let module_id = self.module.id().to_string();
-        self.inner.delete_item_internal(&module_id, id)
+        self.inner.delete_item(&module_id, id)
     }
 
     /// item を 1 件取得する。
@@ -117,7 +117,7 @@ impl ScopedStorage {
         self.guard_stateless()?;
         let module_id = self.module.id().to_string();
         self.inner
-            .get_item_with_eager_on_read(&module_id, id, self.module.as_ref())
+            .get_item_eager(&module_id, id, self.module.as_ref())
     }
 
     /// プロジェクト内のモジュール item を一覧取得する。
@@ -133,8 +133,7 @@ impl ScopedStorage {
     ) -> Result<Vec<Item>, AppError> {
         self.guard_stateless()?;
         let module_id = self.module.id().to_string();
-        self.inner
-            .list_items_internal(&module_id, project_id, limit, offset)
+        self.inner.list_items(&module_id, project_id, limit, offset)
     }
 
     fn guard_stateless(&self) -> Result<(), AppError> {
