@@ -687,11 +687,11 @@ src/modules/<id>/
 | ID | 論点 | 決着先 |
 |----|------|--------|
 | Q-20 | `validate_payload()` 失敗時のエラーメッセージを多言語化する仕組み (Phase 1 は日本語固定だが将来用に検討) | 必要顕在化時 |
-| Q-22 | `generate_handler!` 集中登録方式と本書 §5.3 の整合性 PoC (Phase 1 着手の最初期に検証必須) | 実装時 / 失敗時に ADR |
 | Q-23 | モジュール無効化機能の本格対応時、無効化中の items / 検索 / export / routing / IPC の扱い | 機能追加時に ADR |
 
 > Q-15 (重い処理のキャンセル機構) は ADR-0009 で **Tauri Channel + `CancellationToken` + `core_cancel_operation`** として解決済み。
 > Q-16 (Shiki vs rehype-highlight) は ADR-0002 で **rehype-highlight 採用** として解決済み。
+> Q-22 (`generate_handler!` 集中登録方式の PoC) は **PR #22 (Q-22 PoC: M-Hash 最小モジュール)** で本書 §5.3 通り動作することを確認済として解決。`hash_compute_text` 1 つを `modules/registry.rs` に集約登録 → CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2) green / unit test 3 件 PASS で検証完了。
 
 ---
 
@@ -703,3 +703,4 @@ src/modules/<id>/
 | 2026-04-26 | 0.2 | レビュー反映: `CoreContext` から `spawn_blocking` / `logger` を削除しトレイトオブジェクト互換に / Tauri コマンド登録方式を `registry.rs` での集中 `generate_handler!` 列挙に変更し PoC 必須事項として明記 §5.3 / コマンド命名を `<id>_<action>` (snake_case) に統一し論理名と実装名を一致させた / `ScopedStorage` の保持戦略 (コマンド毎に都度生成、長期保持しない) を明記 §5.1 / `list_items` の `project_id` を必須化 (横断はコア SearchService の責務) §5.1 / ステートレスモジュールでの `list_items` をエラー返却に変更 §9.2 / `validate_payload` のログ規定を「reason に詳細を含めて呼び出し側でログ集約」に修正 §3.2 / `searchAdapter` を optional 化し古い payload のフォールバックを最低基準 (title のみ) に弱めた §4.1 / §4.2 / `enabledByDefault` を Phase 1 では将来用メタとして扱う旨を明記 §4.1 / フロント `core:*` 禁止文言を「モジュール配下 UI からの直接呼び出し」に限定 §6.2 / 「コアコードは編集しない」を「コアロジックは編集しない」に修正 §11 / Q-15 をキャンセル機構特化に整理し Q-22 / Q-23 を新規起票 (Q-21 はオープン論点に残さず §4.2 で fallback 規約を確定したため取り下げ) / data-model.md §13.7 の参照を最新ナンバリングで確認済み |
 | 2026-04-26 | 0.3 | レビュー反映: §6.1 の `CoreContext::spawn_blocking` 残存を `tauri::async_runtime::spawn_blocking` 直接呼び出しに修正 / §6.1 の `<id>:*` 残存を `<id>_*` に修正 / §3.4 の logger 記述を「tracing マクロ直接利用」に修正 / §12 の Phase 1 モジュールサマリのコマンド名・イベント名を全て underscore 形式に統一 / `ScopedStorage` を `&dyn ModuleBackend` から `Arc<dyn ModuleBackend>` ベースに変更しライフタイムパラメータを廃止 §5.1 / `CoreContext` トレイト自体を Phase 1 では持たない方針に変更し §5.2 を「共有コンテキストオブジェクトは持たない」に書き換え / `id()` の制約からハイフンを除外し英小文字 + 数字のみに §3.2 / 未来バージョン検出時の `AppError::UnsupportedFuturePayloadVersion` を §7.3 に明文化 / SearchAdapter「両バージョン対応」表現を §4.2 のフォールバック方針に揃えた §7.1 / §11 の registry 1 行追加表現を「ModuleBackend 1 行 + コマンド関数複数行を generate_handler! に列挙」と正確化 / M-Hash の current_payload_version 表記を「1 (呼ばれない)」に修正 §12.4 |
 | 2026-04-30 | 0.4 | ADR-0009 受理反映: §5.2 のキャンセル機構行を Q-15 から ADR-0009 ベースに更新 / §6.1 の spawn_blocking 行から「Q-15 で別途決定」を削除し ADR-0009 §2.3 規約参照に置換 / §12.4 の M-Hash 進捗を Tauri Channel `HashFileProgress` ベースに更新 (`hash_file_progress` Event 表記を撤去) / §14 から Q-15 を削除 (ADR-0009 で決着) |
+| 2026-05-07 | 0.5 | PR #22 (Q-22 PoC: M-Hash 最小モジュール) 完了反映: §14 から Q-22 を削除し脚注に「PR #22 で動作確認済」を追記。`generate_handler!` 集中登録方式が本書 §5.3 通り機能することを CI 6 ジョブ green / unit test 3 件 PASS で検証完了 |
