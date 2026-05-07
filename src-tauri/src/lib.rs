@@ -11,9 +11,11 @@
 //! - `AppState` に `OperationRegistry` (ADR-0009) を追加 (PR-C)
 //! - `AppState` に `StorageService` (data-model.md §13) を追加 (PR-D)
 
+pub mod commands;
 pub mod error;
 pub mod module;
 pub mod modules;
+pub mod operations;
 pub mod state;
 pub mod time;
 
