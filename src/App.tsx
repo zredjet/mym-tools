@@ -12,6 +12,30 @@ import { modules } from "@/modules/registry";
 
 type Algorithm = "md5" | "sha1" | "sha256" | "sha512";
 
+/**
+ * `invoke` の reject 値を表示用文字列に整形する。
+ *
+ * Tauri 2 の `invoke` は以下のどれかで reject する:
+ *  - 文字列 (Rust 側で `Result<_, String>` を返した場合)
+ *  - `Error` instance (frontend 側でネットワーク等の異常)
+ *  - シリアライズされたオブジェクト (`AppError` のように `{code, message}` 形)
+ *
+ * `JSON.stringify(Error instance)` は `message` フィールドが non-enumerable のため
+ * `{}` になってしまう。各形を個別に処理して、ユーザーに有用な情報を渡す。
+ */
+function formatInvokeError(e: unknown): string {
+  if (typeof e === "string") return e;
+  if (e instanceof Error) return e.message;
+  if (typeof e === "object" && e !== null) {
+    const obj = e as { message?: unknown; code?: unknown };
+    if (typeof obj.message === "string") {
+      return typeof obj.code === "string" ? `[${obj.code}] ${obj.message}` : obj.message;
+    }
+    return JSON.stringify(e);
+  }
+  return String(e);
+}
+
 function App() {
   const [text, setText] = useState("");
   const [algorithm, setAlgorithm] = useState<Algorithm>("sha256");
@@ -27,7 +51,7 @@ function App() {
       const hash = await invoke<string>("hash_compute_text", { text, algorithm });
       setResult(hash);
     } catch (e) {
-      setError(typeof e === "string" ? e : JSON.stringify(e));
+      setError(formatInvokeError(e));
     } finally {
       setPending(false);
     }
