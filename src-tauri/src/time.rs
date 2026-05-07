@@ -53,9 +53,38 @@ pub fn format_jst_filename_timestamp(dt: &DateTime<FixedOffset>) -> String {
     in_jst.format("%Y-%m-%dT%H-%M-%S-%3f").to_string()
 }
 
-/// `JST_ISO8601` 文字列をパースする。形式が完全一致しないと `Err` を返す。
-pub fn parse_jst_iso8601(s: &str) -> Result<DateTime<FixedOffset>, chrono::ParseError> {
-    DateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.3f%:z")
+/// `JST_ISO8601` 形式 (固定 29 文字 / `+09:00` 終端) のパースエラー。
+#[derive(Debug, thiserror::Error)]
+pub enum ParseJstError {
+    #[error("invalid length: expected 29 chars (canonical JST_ISO8601), got {actual}")]
+    InvalidLength { actual: usize },
+
+    #[error("non-JST offset: input must end with '+09:00', got: {input:?}")]
+    NonJstOffset { input: String },
+
+    #[error("chrono parse failed: {0}")]
+    Chrono(#[from] chrono::ParseError),
+}
+
+/// `JST_ISO8601` 文字列を **strict** にパースする。
+///
+/// canonical 形式 (固定 29 文字、`YYYY-MM-DDTHH:MM:SS.sss+09:00`) のみを受理し、以下を拒否する:
+/// - 文字数が 29 でない (例: ms 部分省略 → 25 文字)
+/// - 末尾が `+09:00` でない (例: `+00:00` を受け取って黙って JST に変換するのを防ぐ)
+///
+/// `data-model.md` §6.4 / ADR-0005 の「**JST 固定 29 文字**」前提を gate として実装している
+/// 入力検証の役割を果たす。DB から読んだ値や export/import で外部から来た値の妥当性確認に使う。
+pub fn parse_jst_iso8601(s: &str) -> Result<DateTime<FixedOffset>, ParseJstError> {
+    if s.len() != 29 {
+        return Err(ParseJstError::InvalidLength { actual: s.len() });
+    }
+    if !s.ends_with("+09:00") {
+        return Err(ParseJstError::NonJstOffset {
+            input: s.to_string(),
+        });
+    }
+    let dt = DateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.3f%:z")?;
+    Ok(dt)
 }
 
 /// テスト・デバッグ用: 任意の Y/M/D/h/m/s/ms (JST 想定) から `JST_ISO8601` を作る。
@@ -117,20 +146,41 @@ mod tests {
     }
 
     #[test]
-    fn parse_accepts_missing_milliseconds_as_zero() {
-        // chrono の `%.3f` 指定子は parse 時 lenient で、ms 部分省略を 0 扱いする。
-        // `format_jst_iso8601` 側は常に 3 桁出力 (29 文字固定) するので、書込みの一意性は
-        // 保たれる。読込み時の互換性として ms 省略を許容するのは実用上問題なし。
-        let parsed = parse_jst_iso8601("2026-04-30T15:23:45+09:00").unwrap();
-        assert_eq!(format_jst_iso8601(&parsed), "2026-04-30T15:23:45.000+09:00");
+    fn parse_rejects_missing_milliseconds() {
+        // 25 文字 (ms 省略) → InvalidLength
+        let err = parse_jst_iso8601("2026-04-30T15:23:45+09:00").unwrap_err();
+        match err {
+            ParseJstError::InvalidLength { actual } => assert_eq!(actual, 25),
+            other => panic!("expected InvalidLength, got: {other:?}"),
+        }
     }
 
     #[test]
     fn parse_rejects_utc_offset() {
-        // JST 想定なので +00:00 は受け付けるけど元の +09:00 と等しくない
-        let parsed = parse_jst_iso8601("2026-04-30T15:23:45.123+00:00").unwrap();
-        // 同じ瞬間として扱われるが offset 文字列は変わる
-        assert_eq!(format_jst_iso8601(&parsed), "2026-05-01T00:23:45.123+09:00");
+        // 29 文字だが末尾 +00:00 → NonJstOffset (黙って JST 変換しない)
+        let err = parse_jst_iso8601("2026-04-30T15:23:45.123+00:00").unwrap_err();
+        match err {
+            ParseJstError::NonJstOffset { input } => {
+                assert!(input.ends_with("+00:00"));
+            }
+            other => panic!("expected NonJstOffset, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_too_long_string() {
+        let err = parse_jst_iso8601("2026-04-30T15:23:45.123+09:00 trailing").unwrap_err();
+        assert!(matches!(err, ParseJstError::InvalidLength { .. }));
+    }
+
+    #[test]
+    fn parse_rejects_non_iso8601_garbage_with_correct_length() {
+        // 29 文字で末尾 +09:00 だが、形式自体は壊れている
+        let bogus = "2026-13-99T99:99:99.999+09:00"; // 29 chars, ends with +09:00, invalid date
+        assert_eq!(bogus.len(), 29);
+        assert!(bogus.ends_with("+09:00"));
+        let err = parse_jst_iso8601(bogus).unwrap_err();
+        assert!(matches!(err, ParseJstError::Chrono(_)));
     }
 
     #[test]
