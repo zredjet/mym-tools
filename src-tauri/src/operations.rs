@@ -9,16 +9,15 @@
 //! `spawn_blocking` 内のチャンクループが `token.is_cancelled()` を見て早期 return する
 //! (ADR-0009 §2.3 規約 R-5 / R-10)。
 //!
-//! ## 規約 (ADR-0009 §2.3 R-1〜R-10)
+//! ## 規約サマリ (ADR-0009 §2.3 R-1〜R-10 の正典は ADR を参照)
 //!
-//! - R-1: 重い処理は `tauri::async_runtime::spawn_blocking` 経由のみ
-//! - R-2: `std::thread::spawn` / `tokio::task::spawn_blocking` 直接 / 自前 `rayon` 禁止
-//! - R-3: `spawn_blocking` 内で `block_on` / `Handle::block_on` を呼ばない
-//! - R-4: `spawn_blocking` をネストしない
+//! - R-1〜R-2: 重い処理は `tauri::async_runtime::spawn_blocking` 経由のみ。
+//!   その他のスレッド生成 API (OS thread / 別 runtime / rayon 等) は禁止
+//! - R-3〜R-4: blocking 内のネスト spawn / block_on 系は禁止
 //! - R-5: I/O はチャンク (1 MB) ごと、CPU は最大 100 ms ごとに `token.is_cancelled()` 確認
 //! - R-6: 進捗は `tauri::ipc::Channel<T>` で送る
 //! - R-7: 戻り値型は `Result<T, AppError>`、`tauri::Error` は `?` で AppError::JoinError に集約
-//! - R-8: `spawn_blocking` 内から ScopedStorage を呼んでよいが writer mutex は短時間で
+//! - R-8: ScopedStorage を呼んでよいが writer mutex は短時間で
 //! - R-9: 完了 / キャンセル直前に最終状態を 1 件 send (send 失敗は warn ログのみ)
 //! - R-10: `Ok(...)` 返却直前にも最終 `is_cancelled()` 確認
 
