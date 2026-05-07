@@ -48,7 +48,7 @@ impl SqliteStorage {
 
     /// 既存の `Connection` から `SqliteStorage` を構築する (主にテスト用)。
     /// schema 未投入の場合は `initialize_schema` で投入する (idempotent)。
-    pub(crate) fn from_connection(conn: Connection) -> Result<Self, AppError> {
+    pub(crate) fn from_connection(mut conn: Connection) -> Result<Self, AppError> {
         // PRAGMA を発行 (foreign_keys / WAL / synchronous)
         for pragma in PRAGMAS {
             conn.execute_batch(pragma).map_err(AppError::from)?;
@@ -66,7 +66,7 @@ impl SqliteStorage {
             .is_some();
 
         if !already_initialized {
-            initialize_schema(&conn)?;
+            initialize_schema(&mut conn)?;
         } else {
             verify_schema_version(&conn)?;
         }
@@ -111,43 +111,58 @@ impl SqliteStorage {
 }
 
 /// 新規 DB に schema を投入し、`meta` の初期値を埋める。
-fn initialize_schema(conn: &Connection) -> Result<(), AppError> {
-    // DDL 一括投入
-    conn.execute_batch(SCHEMA_DDL).map_err(AppError::from)?;
+///
+/// **単一トランザクションで実行**する: 中断 (プロセスクラッシュ / 電源断 / disk full)
+/// で部分初期化された DB が「既存」と誤認識される (= meta テーブルだけ存在して
+/// `db_schema_version` 行が無い) のを防ぐ。トランザクション全体が commit されない限り、
+/// 次回起動時は schema 未投入として再試行される。
+fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
+    let tx = conn.transaction().map_err(AppError::from)?;
+
+    // DDL 一括投入 (CREATE TABLE / INDEX / TRIGGER / VIRTUAL TABLE)
+    tx.execute_batch(SCHEMA_DDL).map_err(AppError::from)?;
 
     // meta 初期値 (data-model.md §4)
     let now = now_jst_iso8601();
-    conn.execute(
+    tx.execute(
         "INSERT INTO meta (key, value) VALUES ('db_schema_version', ?)",
         params![CURRENT_DB_SCHEMA_VERSION.to_string()],
     )
     .map_err(AppError::from)?;
-    conn.execute(
+    tx.execute(
         "INSERT INTO meta (key, value) VALUES ('app_initialized_at', ?)",
         params![now],
     )
     .map_err(AppError::from)?;
-    conn.execute(
+    tx.execute(
         "INSERT INTO meta (key, value) VALUES ('data_revision', '0')",
         [],
     )
     .map_err(AppError::from)?;
-    conn.execute(
+    tx.execute(
         "INSERT INTO meta (key, value) VALUES ('last_backup_revision', '0')",
         [],
     )
     .map_err(AppError::from)?;
-    conn.execute(
+    tx.execute(
         "INSERT INTO meta (key, value) VALUES ('last_auto_backup_at', '')",
         [],
     )
     .map_err(AppError::from)?;
+
+    tx.commit().map_err(AppError::from)?;
     Ok(())
 }
 
-/// 既存 DB の `meta.db_schema_version` を読み、`CURRENT_DB_SCHEMA_VERSION` と整合するか検証する。
-/// 新版アプリで作った DB を旧版アプリで開いた場合は `UnsupportedDbSchemaVersion` を返す
-/// (`data-model.md` §4 / `architecture.md` §9: 起動を停止しエラー画面)。
+/// 既存 DB の `meta.db_schema_version` を読み、`CURRENT_DB_SCHEMA_VERSION` と一致するか検証する。
+///
+/// 一致しない場合は **両方向 (より新しい / より古い) で** `UnsupportedDbSchemaVersion` を
+/// 返す (`data-model.md` §4 / `architecture.md` §9: 起動を停止しエラー画面):
+/// - **より新しい**: 新版アプリで作った DB を旧版アプリで開いたケース
+/// - **より古い**: 旧版 DB のまま新版アプリを起動したが migration path が未実装のケース
+///
+/// Phase 1 では migration path 自体が未実装なので、いずれの場合も fail-fast する。
+/// 将来 ADR でマイグレーション機構を追加する際、より古い側の処理経路に分岐を入れる。
 fn verify_schema_version(conn: &Connection) -> Result<(), AppError> {
     let db_version: i64 = conn
         .query_row(
@@ -156,14 +171,12 @@ fn verify_schema_version(conn: &Connection) -> Result<(), AppError> {
             |row| row.get(0),
         )
         .map_err(AppError::from)?;
-    if db_version > CURRENT_DB_SCHEMA_VERSION {
+    if db_version != CURRENT_DB_SCHEMA_VERSION {
         return Err(AppError::UnsupportedDbSchemaVersion {
             db_version,
             app_version: CURRENT_DB_SCHEMA_VERSION,
         });
     }
-    // db_version < CURRENT のケース: 本来はマイグレーションシーケンス。Phase 1 では
-    // schema_version = 1 のみ存在するためここに来ない。将来 ADR で追加される。
     Ok(())
 }
 
@@ -442,6 +455,59 @@ mod tests {
             }
             other => panic!("unexpected variant: {other:?}"),
         }
+    }
+
+    #[test]
+    fn unsupported_older_db_schema_version_is_detected() {
+        // codex review (PR #26 P2 #2) 反映: db_version < CURRENT も明示的にエラー化
+        // (Phase 1 では migration path 未実装 / 将来 ADR で対応)
+        let conn = Connection::open(":memory:").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); \
+             INSERT INTO meta (key, value) VALUES ('db_schema_version', '0');",
+        )
+        .unwrap();
+        let err = SqliteStorage::from_connection(conn).unwrap_err();
+        match err {
+            AppError::UnsupportedDbSchemaVersion {
+                db_version,
+                app_version,
+            } => {
+                assert_eq!(db_version, 0);
+                assert_eq!(app_version, CURRENT_DB_SCHEMA_VERSION);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn schema_initialization_is_atomic() {
+        // codex review (PR #26 P2 #1) 反映: schema 初期化を transaction でラップしている。
+        // 中断シミュレーションは難しいが、initialize 完了後に meta が完全に揃っている
+        // (5 件の初期値 + DDL 全部) ことを確認することで「全 or なし」の挙動を保証する代理にする。
+        let storage = in_memory_storage();
+        storage
+            .with_conn(|conn| {
+                let meta_keys: Vec<String> = conn
+                    .prepare("SELECT key FROM meta ORDER BY key")
+                    .unwrap()
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+                assert_eq!(
+                    meta_keys,
+                    vec![
+                        "app_initialized_at",
+                        "data_revision",
+                        "db_schema_version",
+                        "last_auto_backup_at",
+                        "last_backup_revision",
+                    ]
+                );
+                Ok(())
+            })
+            .unwrap();
     }
 
     // -------- project CRUD --------
