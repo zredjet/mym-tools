@@ -63,9 +63,24 @@ pub enum AppError {
     #[error("I/O error: {0}")]
     Io(String),
 
+    /// SQLite / StorageService 由来のエラー (`data-model.md` §13)。
+    #[error("storage error: {0}")]
+    Storage(String),
+
+    /// 起動時の DB schema 検証で発覚した不整合 (将来バージョンの DB を旧アプリで開いた等)。
+    /// `architecture.md` §9 / `data-model.md` §4 に従い、起動を停止しエラー画面を出す経路。
+    #[error("unsupported db_schema_version: db has {db_version}, app expects {app_version}")]
+    UnsupportedDbSchemaVersion { db_version: i64, app_version: i64 },
+
     /// それ以外の想定外エラー。これに分類されるものを増やしすぎないこと。
     #[error("internal error: {0}")]
     Internal(String),
+}
+
+impl From<rusqlite::Error> for AppError {
+    fn from(value: rusqlite::Error) -> Self {
+        AppError::Storage(value.to_string())
+    }
 }
 
 impl From<std::io::Error> for AppError {

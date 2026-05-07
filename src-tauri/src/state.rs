@@ -1,9 +1,9 @@
 //! `AppState` — Tauri コマンドが受け取る共有状態 (`module-contract.md` §5.1)。
 //!
-//! Phase 1 のレイヤ追加に応じて段階的に拡張する:
-//! - **PR-B**: `modules: HashMap<&'static str, Arc<dyn ModuleBackend>>` のみ
-//! - **PR-C (本 PR)**: `operations: Arc<OperationRegistry>` を追加 (ADR-0009 §2.2)
-//! - **PR-D**: `storage: Arc<dyn StorageService>` を追加 (`module-contract.md` §5.1)
+//! Phase 1 のレイヤ追加に応じて段階的に拡張してきた:
+//! - **PR-B**: `modules: HashMap<&'static str, Arc<dyn ModuleBackend>>`
+//! - **PR-C**: `operations: Arc<OperationRegistry>` (ADR-0009 §2.2)
+//! - **PR-D (本 PR)**: `storage: Arc<dyn StorageService>` (`module-contract.md` §5.1 / `data-model.md` §13)
 //!
 //! `AppState` 自体は `Send + Sync` (中身が `Arc` で包まれているため)。`tauri::State<'_, AppState>`
 //! を `#[tauri::command]` の引数に取る形でアクセスする。
@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use crate::module::ModuleBackend;
 use crate::operations::OperationRegistry;
+use crate::storage::StorageService;
 
 /// アプリケーション全体の共有状態。
 pub struct AppState {
@@ -25,6 +26,11 @@ pub struct AppState {
     /// 全アプリで 1 つだけ持ち、`#[tauri::command]` から
     /// `state.operations.register(operation_id)` 等で利用する。
     pub operations: Arc<OperationRegistry>,
+
+    /// SQLite ベースの永続化境界 (`module-contract.md` §5.1 / `data-model.md` §13)。
+    /// rusqlite 同期 API のため、長時間処理は `tauri::async_runtime::spawn_blocking` で逃がす
+    /// (ADR-0009 §2.3 R-1 / R-8)。
+    pub storage: Arc<dyn StorageService>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -35,16 +41,20 @@ impl std::fmt::Debug for AppState {
         f.debug_struct("AppState")
             .field("modules", &ids)
             .field("operations", &self.operations)
+            .field("storage", &self.storage)
             .finish()
     }
 }
 
 impl AppState {
-    /// `Arc<dyn ModuleBackend>` の Vec から `AppState` を構築する。
+    /// `Arc<dyn ModuleBackend>` の Vec と StorageService から `AppState` を構築する。
     /// 同 id が複数あったら起動を停止する (`module-contract.md` §2: 「不一致や重複があれば
     /// アプリは起動を停止する」)。
     /// `operations` は新規 `OperationRegistry` で初期化される。
-    pub fn build(backends: Vec<Arc<dyn ModuleBackend>>) -> Result<Self, BuildError> {
+    pub fn build(
+        backends: Vec<Arc<dyn ModuleBackend>>,
+        storage: Arc<dyn StorageService>,
+    ) -> Result<Self, BuildError> {
         let mut modules = HashMap::new();
         for backend in backends {
             let id = backend.id();
@@ -56,6 +66,7 @@ impl AppState {
         Ok(AppState {
             modules,
             operations: Arc::new(OperationRegistry::new()),
+            storage,
         })
     }
 
@@ -109,9 +120,17 @@ mod tests {
         Arc::new(StubModule(id))
     }
 
+    fn stub_storage() -> Arc<dyn StorageService> {
+        Arc::new(crate::storage::SqliteStorage::open(":memory:").expect("in-memory storage"))
+    }
+
     #[test]
     fn build_with_unique_ids_succeeds() {
-        let state = AppState::build(vec![stub("hash"), stub("prompt"), stub("color")]).unwrap();
+        let state = AppState::build(
+            vec![stub("hash"), stub("prompt"), stub("color")],
+            stub_storage(),
+        )
+        .unwrap();
         assert_eq!(state.modules.len(), 3);
         assert!(state.module("hash").is_some());
         assert!(state.module("prompt").is_some());
@@ -121,7 +140,7 @@ mod tests {
 
     #[test]
     fn build_rejects_duplicate_ids() {
-        let err = AppState::build(vec![stub("hash"), stub("hash")]).unwrap_err();
+        let err = AppState::build(vec![stub("hash"), stub("hash")], stub_storage()).unwrap_err();
         match err {
             BuildError::DuplicateId(id) => assert_eq!(id, "hash"),
             other => panic!("unexpected variant: {other:?}"),
@@ -130,25 +149,32 @@ mod tests {
 
     #[test]
     fn build_rejects_too_short_id() {
-        let err = AppState::build(vec![stub("hi")]).unwrap_err();
+        let err = AppState::build(vec![stub("hi")], stub_storage()).unwrap_err();
         assert!(matches!(err, BuildError::InvalidId(_)));
     }
 
     #[test]
     fn build_rejects_uppercase_id() {
-        let err = AppState::build(vec![stub("Hash")]).unwrap_err();
+        let err = AppState::build(vec![stub("Hash")], stub_storage()).unwrap_err();
         assert!(matches!(err, BuildError::InvalidId(_)));
     }
 
     #[test]
     fn build_rejects_id_with_hyphen() {
-        let err = AppState::build(vec![stub("link-memo")]).unwrap_err();
+        let err = AppState::build(vec![stub("link-memo")], stub_storage()).unwrap_err();
         assert!(matches!(err, BuildError::InvalidId(_)));
     }
 
     #[test]
     fn build_rejects_id_with_underscore() {
-        let err = AppState::build(vec![stub("link_memo")]).unwrap_err();
+        let err = AppState::build(vec![stub("link_memo")], stub_storage()).unwrap_err();
         assert!(matches!(err, BuildError::InvalidId(_)));
+    }
+
+    #[test]
+    fn build_includes_storage_with_data_revision_zero() {
+        let state = AppState::build(vec![stub("hash")], stub_storage()).unwrap();
+        // 新規 :memory: storage は data_revision=0 (`data-model.md` §4)
+        assert_eq!(state.storage.data_revision().unwrap(), 0);
     }
 }
