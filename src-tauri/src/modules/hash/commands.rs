@@ -92,6 +92,7 @@ mod tests {
         let err = hash_text_inner("abc", "blake3").unwrap_err();
         match err {
             AppError::Internal(msg) => assert!(msg.contains("blake3")),
+            other => panic!("expected Internal, got: {other:?}"),
         }
     }
 }
