@@ -14,7 +14,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde_json::Value as JsonValue;
 
 use crate::error::AppError;
@@ -420,7 +420,21 @@ impl StorageService for SqliteStorage {
     fn restore_online_backup_from(&self, src_path: &Path) -> Result<(), AppError> {
         // 整合性検証 (`PRAGMA integrity_check`) は本メソッドの呼び出し側 (BackupService)
         // が事前に済ませる。ここでは src を読み込み、現在 DB に上書きするだけ。
-        let src_conn = Connection::open(src_path).map_err(AppError::from)?;
+        //
+        // **PR #30 codex P1 関連の二重防御**: 既定の `Connection::open` は不在 path で
+        // 空 DB を新規作成するため、不在ファイルでの restore = アクティブ DB を空で
+        // 上書きする壊滅的事故になる。read-only オープン + 事前 exists チェックで防ぐ。
+        if !src_path.exists() {
+            return Err(AppError::NotFound {
+                entity: "backup file".into(),
+                key: src_path.display().to_string(),
+            });
+        }
+        let src_conn = Connection::open_with_flags(
+            src_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(AppError::from)?;
         self.with_conn(|dst_conn| {
             let backup =
                 rusqlite::backup::Backup::new(&src_conn, dst_conn).map_err(AppError::from)?;

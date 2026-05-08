@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 
 use crate::backup::{BackupKind, BackupRecord, BackupService};
 use crate::error::AppError;
@@ -52,8 +52,14 @@ impl LocalBackupService {
         format!("{}-{ts}-r{revision}.sqlite", kind.file_prefix())
     }
 
-    /// `<dir>` のバックアップファイル群 (`*.sqlite`) を mtime DESC 順で集める。
-    /// ファイル名解析できないものは除外。
+    /// `<dir>` の `*.sqlite` ファイル群を、ファイル名から抽出した
+    /// `JST_FILENAME_TIMESTAMP` の **昇順** (古い順) で返す。
+    ///
+    /// pre-op ディレクトリには複数 prefix (`pre-import-...` / `pre-delete-project-...`
+    /// 等) が混在し、フルファイル名の辞書順では prefix が支配的になり時系列とずれる
+    /// (PR #30 codex P2 指摘)。そのため必ず timestamp 部分でソートする。
+    /// timestamp 解析に失敗したファイルは末尾 (= 「最も古い」扱い) に置き、ローテーション
+    /// で先に削除されるようにする。
     fn collect_files_in_dir(&self, dir: &Path) -> Result<Vec<PathBuf>, AppError> {
         if !dir.exists() {
             return Ok(Vec::new());
@@ -63,12 +69,18 @@ impl LocalBackupService {
             .filter_map(|entry| entry.ok().map(|e| e.path()))
             .filter(|p| p.extension().is_some_and(|ext| ext == "sqlite"))
             .collect();
-        // ファイル名のタイムスタンプ部分は辞書順で時系列 = ASC、最古は先頭
-        paths.sort();
+        // タイムスタンプ抽出。`Option<String>` は `None < Some(...)` の Ord を持つため、
+        // パース不可は最古扱い (rotation で先に削除される) になるよう逆転させる
+        paths.sort_by_cached_key(|p| {
+            extract_filename_timestamp(p)
+                .map(|ts| (1, ts))
+                .unwrap_or((0, String::new()))
+            // (0, _) は (1, _) より小 → ASC ソートで先頭 (= 最古扱い)
+        });
         Ok(paths)
     }
 
-    /// `<dir>` を `limit` 件まで保ち、超過分は古い順から削除する。
+    /// `<dir>` を `limit` 件まで保ち、超過分は古い順 (= timestamp 昇順の先頭側) から削除する。
     fn rotate(&self, dir: &Path, limit: usize) -> Result<(), AppError> {
         let files = self.collect_files_in_dir(dir)?;
         if files.len() <= limit {
@@ -137,6 +149,43 @@ impl LocalBackupService {
             size_bytes,
         })
     }
+}
+
+/// `<prefix>-<JST_FILENAME_TIMESTAMP>-r<N>.sqlite` 形式のパスから
+/// `JST_FILENAME_TIMESTAMP` 部分の **文字列** (23 文字) を抽出する。ローテーション用の
+/// ソートキーで、パース不要で済むよう生文字列で返す (JST_FILENAME_TIMESTAMP の辞書順は
+/// 時系列と一致するため、文字列比較で十分)。
+fn extract_filename_timestamp(path: &Path) -> Option<String> {
+    let file_name = path.file_name()?.to_str()?;
+    let stem = file_name.strip_suffix(".sqlite")?;
+    let r_idx = stem.rfind("-r")?;
+    // `-r` の後がすべて数字であることを軽く確認 (`-rev` 等の文字列誤マッチ防止)
+    let revision_str = &stem[r_idx + 2..];
+    if revision_str.is_empty() || !revision_str.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let before_revision = &stem[..r_idx];
+    if before_revision.len() < 24 {
+        return None;
+    }
+    let ts_start = before_revision.len() - 23;
+    if ts_start == 0 || before_revision.as_bytes().get(ts_start - 1) != Some(&b'-') {
+        return None;
+    }
+    let ts = &before_revision[ts_start..];
+    // 区切り文字を軽く検証 (4 / 7 / 13 / 16 / 19 = '-'、10 = 'T')
+    let bytes = ts.as_bytes();
+    if bytes.len() != 23
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b'-'
+        || bytes[16] != b'-'
+        || bytes[19] != b'-'
+    {
+        return None;
+    }
+    Some(ts.to_string())
 }
 
 /// `JST_FILENAME_TIMESTAMP` (`YYYY-MM-DDTHH-MM-SS-sss`) を `DateTime<FixedOffset>` にパースする。
@@ -292,7 +341,24 @@ impl BackupService for LocalBackupService {
 
     fn verify_integrity(&self, path: &Path) -> Result<(), AppError> {
         // ADR-0007 §2.4.1 / `data-model.md` §13.6: `PRAGMA integrity_check` を 1 回実行
-        let conn = Connection::open(path).map_err(AppError::from)?;
+        //
+        // **PR #30 codex P1 対策**: 既定の `Connection::open` は対象ファイルが無い場合に
+        // 空 DB を新規作成してしまい、`integrity_check` が "ok" を返して missing/typo の
+        // ソースが「健全」と誤判定される。restore に進むと空 DB 上書き = データ消失。
+        // (a) 事前に `path.exists()` を確認し
+        // (b) `OpenFlags::SQLITE_OPEN_READ_ONLY` のみで開く (新規作成・書き込み禁止)
+        // の二段で防御する
+        if !path.exists() {
+            return Err(AppError::NotFound {
+                entity: "backup file".into(),
+                key: path.display().to_string(),
+            });
+        }
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(AppError::from)?;
         let result: String = conn
             .query_row("PRAGMA integrity_check;", [], |row| row.get(0))
             .map_err(AppError::from)?;
@@ -605,6 +671,117 @@ mod tests {
             AppError::Storage(_) => {}
             other => panic!("expected Storage error, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn verify_integrity_rejects_nonexistent_path() {
+        // PR #30 codex P1 回帰: 不在 path に対して `Connection::open` が空 DB を作らないこと。
+        // 結果は `AppError::NotFound`、ファイルは作られない (read-only flag + exists 二段)。
+        let (temp, _storage, svc) = make_service();
+        let bogus = temp
+            .path()
+            .join("backups")
+            .join("manual")
+            .join("does-not-exist-2026-01-01T00-00-00-000-r1.sqlite");
+        let err = svc.verify_integrity(&bogus).unwrap_err();
+        match err {
+            AppError::NotFound { entity, .. } => assert_eq!(entity, "backup file"),
+            other => panic!("expected NotFound, got: {other:?}"),
+        }
+        assert!(!bogus.exists(), "verify_integrity must not create the file");
+    }
+
+    #[test]
+    fn restore_from_rejects_nonexistent_source() {
+        // PR #30 codex P1 関連の二重防御: restore でも空 DB を作らない
+        let (_temp, storage, svc) = make_service();
+        storage.create_project("p", None).unwrap();
+        let bogus = svc
+            .backups_root
+            .join("manual")
+            .join("missing-2026-01-01T00-00-00-000-r1.sqlite");
+        let err = svc.restore_from(&bogus).unwrap_err();
+        match err {
+            AppError::NotFound { entity, .. } => assert_eq!(entity, "backup file"),
+            other => panic!("expected NotFound, got: {other:?}"),
+        }
+        // アクティブ DB が壊れていない (project は残っている)
+        assert_eq!(storage.list_projects().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn rotate_pre_op_sorts_by_timestamp_not_full_filename() {
+        // PR #30 codex P2 回帰: pre-op ディレクトリは複数 prefix が混在するため、フルファイル名の
+        // 辞書順だと prefix が支配的でローテーションが時系列とずれる。timestamp で比較すべき。
+        //
+        // 仕掛け: prefix 文字列の辞書順は `pre-aaa < pre-import < pre-zzz`、timestamp 順は
+        // **逆方向**: aaa が最新 / zzz が最古 になるよう手動配置する。
+        // limit=2 で残るべきは「最新の 2 つ」(`aaa` と `import`) であり、
+        // フルファイル名ソートだと `aaa < import < zzz` なので最古とみなされる zzz が削除されて
+        // **誤って通る**。timestamp ソートだと最古は zzz の timestamp が最も小さいべきとなる。
+        let (temp, _storage, svc) = make_service();
+        let dir = temp.path().join("backups").join("pre-op");
+        std::fs::create_dir_all(&dir).unwrap();
+        // タイムスタンプ降順 (新しい→古い): aaa(2026-03), import(2026-02), zzz(2026-01)
+        let entries = [
+            ("pre-zzz", "2026-01-01T00-00-00-000"),    // 最古
+            ("pre-import", "2026-02-01T00-00-00-000"), // 中
+            ("pre-aaa", "2026-03-01T00-00-00-000"),    // 最新
+        ];
+        for (prefix, ts) in entries.iter() {
+            let path = dir.join(format!("{prefix}-{ts}-r1.sqlite"));
+            File::create(&path).unwrap();
+        }
+        // limit=2 で削除されるのは「最古」= 2026-01 の zzz のみのはず
+        svc.rotate(&dir, 2).unwrap();
+        let remaining = svc.collect_files_in_dir(&dir).unwrap();
+        assert_eq!(remaining.len(), 2);
+        let names: std::collections::HashSet<&str> = remaining
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap())
+            .collect();
+        // aaa (2026-03) と import (2026-02) が残る、zzz (2026-01) が削除される
+        assert!(names.iter().any(|n| n.starts_with("pre-aaa-2026-03-01")));
+        assert!(names.iter().any(|n| n.starts_with("pre-import-2026-02-01")));
+        assert!(!names.iter().any(|n| n.starts_with("pre-zzz-")));
+    }
+
+    #[test]
+    fn extract_filename_timestamp_works_for_valid_names() {
+        let p = std::path::Path::new("/tmp/auto-2026-04-30T15-23-45-123-r142.sqlite");
+        assert_eq!(
+            extract_filename_timestamp(p).as_deref(),
+            Some("2026-04-30T15-23-45-123")
+        );
+        let p2 =
+            std::path::Path::new("/tmp/pre-delete-project-uuid-2026-04-30T15-23-45-123-r1.sqlite");
+        assert_eq!(
+            extract_filename_timestamp(p2).as_deref(),
+            Some("2026-04-30T15-23-45-123")
+        );
+    }
+
+    #[test]
+    fn extract_filename_timestamp_rejects_invalid() {
+        // `-r` の後が非数字
+        assert_eq!(
+            extract_filename_timestamp(std::path::Path::new(
+                "auto-2026-04-30T15-23-45-123-rev.sqlite"
+            )),
+            None
+        );
+        // ts 区切りが `:` (canonical JST_ISO8601 形式)
+        assert_eq!(
+            extract_filename_timestamp(std::path::Path::new(
+                "auto-2026-04-30T15:23:45.123-r1.sqlite"
+            )),
+            None
+        );
+        // 拡張子違い
+        assert_eq!(
+            extract_filename_timestamp(std::path::Path::new("auto-2026-04-30T15-23-45-123-r1.bak")),
+            None
+        );
     }
 
     // -------- restore --------
