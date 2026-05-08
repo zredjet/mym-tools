@@ -343,6 +343,97 @@ impl StorageService for SqliteStorage {
         })
     }
 
+    fn last_backup_revision(&self) -> Result<i64, AppError> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'last_backup_revision'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(AppError::from)
+        })
+    }
+
+    fn set_last_backup_revision(&self, revision: i64) -> Result<(), AppError> {
+        // meta 自身への書き込みは `data_revision` を増分しない (ADR-0007 §2.2 / ADR-0006 §2.2)
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE meta SET value = ? WHERE key = 'last_backup_revision'",
+                params![revision.to_string()],
+            )
+            .map_err(AppError::from)?;
+            Ok(())
+        })
+    }
+
+    fn last_auto_backup_at(&self) -> Result<Option<String>, AppError> {
+        self.with_conn(|conn| {
+            let value: String = conn
+                .query_row(
+                    "SELECT value FROM meta WHERE key = 'last_auto_backup_at'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(AppError::from)?;
+            Ok(if value.is_empty() { None } else { Some(value) })
+        })
+    }
+
+    fn set_last_auto_backup_at(&self, ts: &str) -> Result<(), AppError> {
+        // auto 取得時のみ呼ばれる (`data-model.md` §13.2 設計意図 / ADR-0007 §2.2)
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE meta SET value = ? WHERE key = 'last_auto_backup_at'",
+                params![ts],
+            )
+            .map_err(AppError::from)?;
+            Ok(())
+        })
+    }
+
+    fn take_online_backup_to(&self, dst_path: &Path) -> Result<(), AppError> {
+        // 親ディレクトリを確保 (UI からの初回呼び出しで <userdata>/backups/<kind>/ が
+        // 未作成のことがある)
+        if let Some(parent) = dst_path.parent() {
+            std::fs::create_dir_all(parent).map_err(AppError::from)?;
+        }
+        // dst Connection は新規作成 (上書き or 新規)。WAL を残さないよう、宛先は
+        // バックアップ専用なので default journal mode のままで良い (PRAGMA は src と
+        // 独立)
+        let mut dst_conn = Connection::open(dst_path).map_err(AppError::from)?;
+        self.with_conn(|src_conn| {
+            // ADR-0007 §2.1 / `data-model.md` §13.1: rusqlite::backup::Backup を使用
+            let backup =
+                rusqlite::backup::Backup::new(src_conn, &mut dst_conn).map_err(AppError::from)?;
+            // pages = -1 で 1 step で全部コピー (個人ツール規模の DB は数百 ms で済む)。
+            // pause = 0、progress callback も無し
+            // pages_per_step は正の値必須 (rusqlite::backup::Backup::run_to_completion)。
+            // 個人ツール規模の DB は 1024 ページ × 4 KB = 4 MB / step で 1 step 完了が
+            // 通常 (`docs/decisions/0007-local-backup.md` §2.1 の例コードと同値)
+            backup
+                .run_to_completion(1024, std::time::Duration::from_millis(0), None)
+                .map_err(AppError::from)?;
+            Ok(())
+        })
+    }
+
+    fn restore_online_backup_from(&self, src_path: &Path) -> Result<(), AppError> {
+        // 整合性検証 (`PRAGMA integrity_check`) は本メソッドの呼び出し側 (BackupService)
+        // が事前に済ませる。ここでは src を読み込み、現在 DB に上書きするだけ。
+        let src_conn = Connection::open(src_path).map_err(AppError::from)?;
+        self.with_conn(|dst_conn| {
+            let backup =
+                rusqlite::backup::Backup::new(&src_conn, dst_conn).map_err(AppError::from)?;
+            // pages_per_step は正の値必須 (rusqlite::backup::Backup::run_to_completion)。
+            // 個人ツール規模の DB は 1024 ページ × 4 KB = 4 MB / step で 1 step 完了が
+            // 通常 (`docs/decisions/0007-local-backup.md` §2.1 の例コードと同値)
+            backup
+                .run_to_completion(1024, std::time::Duration::from_millis(0), None)
+                .map_err(AppError::from)?;
+            Ok(())
+        })
+    }
+
     fn scoped_for(self: Arc<Self>, module: Arc<dyn ModuleBackend>) -> ScopedStorage {
         // `Arc<SqliteStorage>` は CoerceUnsized で `Arc<dyn StorageService>` に
         // 自動的に coerce される (Arc は CoerceUnsized 対応)。

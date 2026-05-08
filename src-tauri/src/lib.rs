@@ -12,6 +12,7 @@
 //! - Backup 3 系統 (ADR-0007)
 //! - 各モジュール本実装 (M-Hash file hash / M-Color / M-LinkMemo / M-Prompt)
 
+pub mod backup;
 pub mod commands;
 pub mod error;
 pub mod module;

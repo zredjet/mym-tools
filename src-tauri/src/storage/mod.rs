@@ -20,6 +20,7 @@ pub mod scoped;
 pub mod sqlite;
 pub mod types;
 
+use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
@@ -156,4 +157,45 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
 
     /// `meta.data_revision` を返す (`data-model.md` §13.2)。バックアップ判定で使う。
     fn data_revision(&self) -> Result<i64, AppError>;
+
+    /// `meta.last_backup_revision` を返す (`data-model.md` §13.2 / ADR-0007 §2.2)。
+    /// 種別を問わず最後に成功したバックアップ時点の `data_revision`。
+    /// 未取得時は `0` を返す (初期値、`schema.rs` で INSERT 済み)。
+    fn last_backup_revision(&self) -> Result<i64, AppError>;
+
+    /// `meta.last_backup_revision` を更新する。バックアップ取得成功時に呼ぶ。
+    /// **`data_revision` は増分しない** (`data-model.md` §13.2 / ADR-0007 §2.2)。
+    fn set_last_backup_revision(&self, revision: i64) -> Result<(), AppError>;
+
+    /// `meta.last_auto_backup_at` を返す (`data-model.md` §13.2 / ADR-0007 §2.2)。
+    /// 直近の **auto** バックアップ取得時刻 (`JST_ISO8601`)。
+    /// 未取得時は `None` を返す (内部の空文字 `""` は `None` に変換)。
+    fn last_auto_backup_at(&self) -> Result<Option<String>, AppError>;
+
+    /// `meta.last_auto_backup_at` を更新する。**auto バックアップ取得時のみ**呼ぶ
+    /// (`data-model.md` §13.2 設計意図: pre-op / manual で 24 時間ゲートを巻き戻さない)。
+    /// **`data_revision` は増分しない**。
+    fn set_last_auto_backup_at(&self, ts: &str) -> Result<(), AppError>;
+
+    // -------- バックアップ I/O (ADR-0007 §2.1 / `data-model.md` §13.1) --------
+
+    /// SQLite Online Backup API (`rusqlite::backup`) を使い、現在の DB 内容を
+    /// `dst_path` の SQLite ファイルに書き出す。WAL を含めた整合性のあるスナップショットが
+    /// 得られる (単純なファイルコピー禁止 — `data-model.md` §2)。
+    ///
+    /// 取得中もアプリの読み書きは継続可能だが、本実装では writer mutex を握ったまま
+    /// `Backup::run_to_completion` を回すため短時間 (~数百 ms〜数秒) のロックが入る。
+    fn take_online_backup_to(&self, dst_path: &Path) -> Result<(), AppError>;
+
+    /// SQLite Online Backup API でバックアップファイル `src_path` の内容を **現在の DB
+    /// に書き戻す** (`data-model.md` §13.6 / ADR-0007 §2.4.2 ステップ 4)。
+    ///
+    /// 呼び出し前提:
+    /// - `src_path` の整合性検証 (`PRAGMA integrity_check`) は呼び出し側で完了している
+    /// - リストアの全体オーケストレーション (pre-restore 取得 / アプリ再起動) は
+    ///   呼び出し側 (Tauri command / UI) の責務。本メソッドは Online Backup API の
+    ///   **「読み書き」コア部分のみ**を担当
+    ///
+    /// 完了後の再起動はメソッド外で実施する (`data-model.md` §13.6 step 7)。
+    fn restore_online_backup_from(&self, src_path: &Path) -> Result<(), AppError>;
 }
