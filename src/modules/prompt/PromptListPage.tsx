@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import { PromptCreateDialog } from "@/modules/prompt/PromptCreateDialog";
 import { Button } from "@/components/ui/Button";
@@ -116,7 +116,12 @@ export function PromptListPage() {
       ) : (
         <ul className="divide-y divide-[var(--border)] rounded-[var(--radius)] border border-[var(--border)]">
           {items.map((item) => (
-            <PromptRow key={item.id} item={item} onDelete={() => void handleDelete(item.id)} />
+            <PromptRow
+              key={item.id}
+              item={item}
+              projectId={projectId}
+              onDelete={() => void handleDelete(item.id)}
+            />
           ))}
         </ul>
       )}
@@ -131,7 +136,16 @@ export function PromptListPage() {
   );
 }
 
-function PromptRow({ item, onDelete }: { item: Item; onDelete: () => void }) {
+function PromptRow({
+  item,
+  projectId,
+  onDelete,
+}: {
+  item: Item;
+  projectId: string;
+  onDelete: () => void;
+}) {
+  const navigate = useNavigate();
   const body = useMemo(() => {
     const p = item.payload as PromptPayloadV1 | undefined;
     return typeof p?.body === "string" ? p.body : "";
@@ -140,9 +154,13 @@ function PromptRow({ item, onDelete }: { item: Item; onDelete: () => void }) {
 
   return (
     <li className="flex h-[var(--row-h)] items-center gap-3 px-3 hover:bg-[var(--bg-muted)]">
-      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[var(--fg)]">
+      <button
+        type="button"
+        onClick={() => navigate(`/projects/${projectId}/m/prompt/${item.id}`)}
+        className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-[var(--fg)] hover:text-[var(--accent)]"
+      >
         {item.title}
-      </span>
+      </button>
       {item.tags.length > 0 && (
         <span className="hidden shrink-0 truncate text-[12px] text-[var(--fg-muted)] md:inline">
           {item.tags.map((t) => `#${t}`).join(" ")}

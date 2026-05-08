@@ -15,6 +15,7 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/shell/AppShell";
 import { useThemeAttribute } from "@/hooks/useThemeAttribute";
 import { HashPage } from "@/modules/hash/HashPage";
+import { PromptDetailPage } from "@/modules/prompt/PromptDetailPage";
 import { ModulePage } from "@/pages/ModulePage";
 import { WelcomePage } from "@/pages/WelcomePage";
 
@@ -28,6 +29,8 @@ function App() {
         <Route element={<AppShell />}>
           <Route path="/" element={<Navigate to="/welcome" replace />} />
           <Route path="/welcome" element={<WelcomePage />} />
+          {/* 個別 prompt の詳細 (より具体的なパス) を先に登録 */}
+          <Route path="/projects/:projectId/m/prompt/:itemId" element={<PromptDetailPage />} />
           <Route path="/projects/:projectId/m/:moduleId" element={<ModulePage />} />
           <Route path="/modules/hash" element={<HashPage />} />
           <Route path="*" element={<Navigate to="/welcome" replace />} />
