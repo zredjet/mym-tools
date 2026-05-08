@@ -1,25 +1,35 @@
 //! Storage 層 (`module-contract.md` §5.1 / `data-model.md` §6 / §13)。
 //!
-//! - `StorageService` trait: コア機能 (project CRUD / 後続で item CRUD など) の境界
+//! - `StorageService` trait: コア機能 (project / items / 検索) の境界
+//! - `ScopedStorage`: モジュールにスコープされた items CRUD (PR-E で追加)
 //! - `SqliteStorage`: rusqlite ベースの実装。writer mutex で書込みを直列化
 //!   (`data-model.md` §13.7)
 //! - `schema`: SQLite DDL の文字列定数 (CREATE TABLE / TRIGGER / INDEX)
-//! - `types`: `Project` / `ProjectId` 等のドメイン型
+//! - `types`: `Project` / `Item` / `SearchScope` 等のドメイン型
 //!
-//! ## ScopedStorage は別 PR で追加予定
+//! ## モジュール経由の items CRUD
 //!
-//! 永続データを持つモジュール (M-Color / M-LinkMemo / M-Prompt) の本実装に入る PR で、
-//! `module-contract.md` §5.1 の `ScopedStorage` (モジュール ID で自動絞り込み)
-//! を `StorageService::scoped_for(module)` として追加する。本 PR は project 部分のみ。
+//! `StorageService::scoped_for(module)` で `ScopedStorage` を取得し、その上で
+//! `create_item` / `update_item` / `delete_item` / `get_item` / `list_items` を呼ぶ。
+//! `ScopedStorage` 内で `module_id` を自動絞り込みするため、他モジュールの items に
+//! アクセス不能 (`module-contract.md` §6.2)。`get_item` は ADR-0006 の Eager-on-Read
+//! を発火する。
 
 pub mod schema;
+pub mod scoped;
 pub mod sqlite;
 pub mod types;
 
-use crate::error::AppError;
+use std::sync::Arc;
 
+use serde_json::Value as JsonValue;
+
+use crate::error::AppError;
+use crate::module::ModuleBackend;
+
+pub use scoped::ScopedStorage;
 pub use sqlite::SqliteStorage;
-pub use types::{Project, ProjectId};
+pub use types::{Item, ItemId, Project, ProjectId, SearchScope};
 
 /// コアの永続化境界。`AppState.storage: Arc<dyn StorageService>` 経由で各 Tauri command が利用する。
 ///
@@ -56,6 +66,91 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
     /// `id` のプロジェクトを物理削除する。配下の items は `ON DELETE CASCADE` で自動削除
     /// される (`data-model.md` §9.1)。
     fn delete_project(&self, id: &ProjectId) -> Result<(), AppError>;
+
+    // -------- ScopedStorage 取得 --------
+
+    /// 指定モジュールにスコープされたストレージハンドルを返す
+    /// (`module-contract.md` §5.1 / scoped.rs)。
+    ///
+    /// **`Arc<Self>` レシーバ**: `ScopedStorage` 内部で `Arc<dyn StorageService>` を
+    /// clone 保持するため、`Arc<dyn StorageService>` または `Arc<SqliteStorage>` に
+    /// 直接生やす形にしてある。`AppState.storage: Arc<dyn StorageService>` から呼べる。
+    fn scoped_for(self: Arc<Self>, module: Arc<dyn ModuleBackend>) -> ScopedStorage;
+
+    // -------- items CRUD (低レベル、`ScopedStorage` 経由で呼ぶ) --------
+    //
+    // これらは `ScopedStorage` から `module_id` 等を渡して呼ぶ低レベル API。
+    // 通常は `ScopedStorage::create_item` などの上位 API を使う。
+
+    /// items の新規作成。`data_revision` を **+1**。
+    /// 引数が多いのは items テーブルのカラム数に対応するため意図的。
+    #[allow(clippy::too_many_arguments)]
+    fn create_item(
+        &self,
+        module_id: &str,
+        project_id: &ProjectId,
+        title: &str,
+        tags: &[String],
+        payload_schema_version: u32,
+        payload: &JsonValue,
+        search_text: &str,
+    ) -> Result<ItemId, AppError>;
+
+    /// items のユーザー編集更新。`data_revision` を **+1** (`data-model.md` §7.2)。
+    /// 引数が多いのは items テーブルのカラム数に対応するため意図的。
+    #[allow(clippy::too_many_arguments)]
+    fn update_item(
+        &self,
+        module_id: &str,
+        id: &ItemId,
+        title: &str,
+        tags: &[String],
+        payload_schema_version: u32,
+        payload: &JsonValue,
+        search_text: &str,
+    ) -> Result<(), AppError>;
+
+    /// items の物理削除。`data_revision` を **+1**。
+    fn delete_item(&self, module_id: &str, id: &ItemId) -> Result<(), AppError>;
+
+    /// item を 1 件取得し、必要なら Eager-on-Read (ADR-0006 / `data-model.md` §7.2)
+    /// で payload をアップグレードして返す。アップグレード時の UPDATE では
+    /// `data_revision` を **増やさない** (ADR-0006 §2.2)。
+    fn get_item_eager(
+        &self,
+        module_id: &str,
+        id: &ItemId,
+        module: &dyn ModuleBackend,
+    ) -> Result<Item, AppError>;
+
+    /// プロジェクト内のモジュール item を一覧取得 (Eager-on-Read を**発火させない**、
+    /// `data-model.md` §7.2 注)。`updated_at DESC, id DESC` 順。
+    fn list_items(
+        &self,
+        module_id: &str,
+        project_id: &ProjectId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Item>, AppError>;
+
+    // -------- 検索 (`data-model.md` §8) --------
+
+    /// 検索 API。`scope` で範囲を、`module_filter` で対象モジュール ID を絞る。
+    ///
+    /// **3 文字未満は LIKE フォールバック** (`data-model.md` §8.1 制限事項):
+    /// trigram tokenizer は 3-gram のため 3 文字未満は MATCH しない。短い検索語は
+    /// `items` テーブル直接の `LIKE '%query%'` で代替する (`title` / `tags` /
+    /// `search_text` 対象、テーブル全スキャン)。
+    ///
+    /// `module_filter` が空 / None の場合は全モジュールが対象。
+    fn search(
+        &self,
+        scope: &SearchScope,
+        query: &str,
+        module_filter: Option<&[String]>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Item>, AppError>;
 
     // -------- Meta --------
 
