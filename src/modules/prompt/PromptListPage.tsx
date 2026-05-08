@@ -44,7 +44,6 @@ export function PromptListPage() {
     let cancelled = false;
     void (async () => {
       try {
-        setLoading(true);
         const list = await listItems({ moduleId: "prompt", projectId });
         if (!cancelled) {
           setItems(list);
