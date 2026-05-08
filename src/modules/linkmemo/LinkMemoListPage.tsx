@@ -1,23 +1,26 @@
 /**
  * M-LinkMemo 一覧 (`docs/ui-design.md` §6.4 / §9.2)。
  *
- * Phase 1 PR-L (本 PR): 実 items 一覧 + 新規作成ダイアログ + 削除 + 「開く」 (URL/path)。
- * - 行高 32px
- * - type 別アイコン (URL: 🌐 / Path: 📄 / Memo: 📝)
+ * Phase 1 PR-M (本 PR): create + edit + C-15 タイプ・トゥ・コンファーム削除 + open。
+ * - 行高 32px / type 別アイコン (URL: 🌐 / Path: 📄 / Memo: 📝)
  * - クリックで OS 既定アプリで開く (memo は body をモーダル等で見せる UI 未実装)
- * - 編集 (L-3 full editor) は次 PR
+ * - 編集ボタン → `LinkMemoItemDialog` (mode=edit)
+ * - 削除は `ConfirmDeleteDialog`
+ * - `mod+n` で新規
  */
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, FileText, Globe, Plus, StickyNote, Trash2 } from "lucide-react";
+import { ExternalLink, FileText, Globe, Pencil, Plus, StickyNote, Trash2 } from "lucide-react";
+import { useHotkeys } from "react-hotkeys-hook";
 import { useParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/Button";
+import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { deleteItem, listItems } from "@/ipc/items";
 import { linkmemoOpen } from "@/ipc/linkmemo";
 import { formatInvokeError } from "@/lib/error";
 import type { Item, LinkMemoPayloadV1 } from "@/lib/types";
-import { LinkMemoCreateDialog } from "@/modules/linkmemo/LinkMemoCreateDialog";
+import { LinkMemoItemDialog } from "@/modules/linkmemo/LinkMemoItemDialog";
 
 export function LinkMemoListPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -25,6 +28,8 @@ export function LinkMemoListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [deletingItem, setDeletingItem] = useState<Item | null>(null);
 
   const refresh = useCallback(async (pid: string) => {
     try {
@@ -60,21 +65,19 @@ export function LinkMemoListPage() {
     };
   }, [projectId]);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("この Link/Memo を削除しますか? (元に戻せません)")) return;
-    try {
-      await deleteItem({ moduleId: "linkmemo", itemId: id });
-      if (projectId != null) await refresh(projectId);
-    } catch (e) {
-      setError(formatInvokeError(e));
-    }
-  };
+  useHotkeys("mod+n", (e) => {
+    e.preventDefault();
+    setCreateOpen(true);
+  });
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (deletingItem == null) return;
+    await deleteItem({ moduleId: "linkmemo", itemId: deletingItem.id });
+    if (projectId != null) await refresh(projectId);
+  }, [deletingItem, projectId, refresh]);
 
   const handleOpen = async (payload: LinkMemoPayloadV1) => {
-    if (payload.type === "memo" || payload.target == null || payload.target === "") {
-      // Phase 1 PR-L では memo の表示 UI は未実装 (編集 PR で詳細モーダル化)
-      return;
-    }
+    if (payload.type === "memo" || payload.target == null || payload.target === "") return;
     try {
       await linkmemoOpen({ itemType: payload.type, target: payload.target });
     } catch (e) {
@@ -98,6 +101,7 @@ export function LinkMemoListPage() {
         </h1>
         <Button variant="primary" onClick={() => setCreateOpen(true)}>
           <Plus size={14} aria-hidden /> 新規 Link/Memo
+          <span className="ml-1 text-[10px] opacity-70">⌘N</span>
         </Button>
       </header>
 
@@ -132,17 +136,35 @@ export function LinkMemoListPage() {
               key={item.id}
               item={item}
               onOpen={() => void handleOpen(asPayload(item))}
-              onDelete={() => void handleDelete(item.id)}
+              onEdit={() => setEditingItem(item)}
+              onDelete={() => setDeletingItem(item)}
             />
           ))}
         </ul>
       )}
 
-      <LinkMemoCreateDialog
-        open={createOpen}
+      <LinkMemoItemDialog
+        mode="create"
         projectId={projectId}
+        open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreated={() => void refresh(projectId)}
+        onSaved={() => void refresh(projectId)}
+      />
+      {editingItem != null && (
+        <LinkMemoItemDialog
+          mode="edit"
+          item={editingItem}
+          open={editingItem != null}
+          onClose={() => setEditingItem(null)}
+          onSaved={() => void refresh(projectId)}
+        />
+      )}
+      <ConfirmDeleteDialog
+        open={deletingItem != null}
+        entityLabel="Link / Memo"
+        name={deletingItem?.title ?? ""}
+        onClose={() => setDeletingItem(null)}
+        onConfirm={handleConfirmDelete}
       />
     </div>
   );
@@ -156,14 +178,17 @@ function asPayload(item: Item): LinkMemoPayloadV1 {
 function LinkMemoRow({
   item,
   onOpen,
+  onEdit,
   onDelete,
 }: {
   item: Item;
   onOpen: () => void;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   const payload = asPayload(item);
-  const Icon = payload.type === "url" ? Globe : payload.type === "path" ? FileText : StickyNote;
+  const Icon =
+    payload.type === "url" ? Globe : payload.type === "path" ? FileText : StickyNote;
   const openable = payload.type !== "memo" && payload.target != null && payload.target !== "";
 
   return (
@@ -181,10 +206,9 @@ function LinkMemoRow({
       />
       <button
         type="button"
-        onClick={openable ? onOpen : undefined}
-        disabled={!openable}
+        onClick={openable ? onOpen : onEdit}
         title={payload.target ?? ""}
-        className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-[var(--fg)] hover:text-[var(--accent)] disabled:cursor-default disabled:hover:text-[var(--fg)]"
+        className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-[var(--fg)] hover:text-[var(--accent)]"
       >
         {item.title}
       </button>
@@ -204,6 +228,15 @@ function LinkMemoRow({
           <ExternalLink size={13} aria-hidden />
         </button>
       )}
+      <button
+        type="button"
+        aria-label="編集"
+        title="編集"
+        onClick={onEdit}
+        className="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--fg-subtle)] hover:bg-[var(--bg)] hover:text-[var(--accent)]"
+      >
+        <Pencil size={13} aria-hidden />
+      </button>
       <button
         type="button"
         aria-label="削除"

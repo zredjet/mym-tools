@@ -1,72 +1,93 @@
 /**
- * LinkMemo 新規作成ダイアログ (`docs/ui-design.md` §6.4 L-3 の最小版)。
+ * LinkMemo 新規作成 / 編集ダイアログ (`docs/ui-design.md` §6.4 L-3)。
  *
- * - type は segmented control (URL / Path / Memo) で切替
- * - URL タブで `file://` 入力 → 保存時に `linkmemo_normalize_target` で path に
- *   自動振替 (`docs/ui-design.md` §6.4 v0.4 / `data-model.md` §10.2)
+ * `mode` で create / edit を切替。type は segmented control (URL / Path / Memo)。
+ *
+ * 仕様:
+ * - URL タブで `file://` 入力時は保存時に `linkmemo_normalize_target` で path に振替
+ *   (`docs/ui-design.md` §6.4 v0.4 / `data-model.md` §10.2)
+ * - type 切替で 2 番目の入力欄のラベル / プレースホルダが変化 (§6.4 v0.2)
+ *
+ * ## ショートカット (`docs/ui-design.md` §8.4)
+ * - `Cmd/Ctrl + S` / `Cmd/Ctrl + Enter`: 保存
  */
 import { useState } from "react";
 import { FileText, Globe, StickyNote } from "lucide-react";
+import { useHotkeys } from "react-hotkeys-hook";
 
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
-import { createItem } from "@/ipc/items";
+import { createItem, updateItem } from "@/ipc/items";
 import { linkmemoNormalizeTarget } from "@/ipc/linkmemo";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
+import type { Item, LinkMemoPayloadV1 } from "@/lib/types";
 
 type LinkType = "url" | "path" | "memo";
 
-interface Props {
-  open: boolean;
-  projectId: string;
-  onClose: () => void;
-  onCreated: () => void;
-}
+type DialogMode =
+  | { mode: "create"; projectId: string }
+  | { mode: "edit"; item: Item };
 
-export function LinkMemoCreateDialog({ open, projectId, onClose, onCreated }: Props) {
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+} & DialogMode;
+
+export function LinkMemoItemDialog(props: Props) {
+  const title = props.mode === "create" ? "新規 Link / Memo" : "Link / Memo を編集";
   return (
-    <Modal open={open} onClose={onClose} title="新規 Link / Memo" widthClassName="w-full max-w-xl">
-      {open && (
-        <LinkMemoCreateContent projectId={projectId} onClose={onClose} onCreated={onCreated} />
-      )}
+    <Modal
+      open={props.open}
+      onClose={props.onClose}
+      title={title}
+      widthClassName="w-full max-w-xl"
+    >
+      {props.open && <Content {...props} />}
     </Modal>
   );
 }
 
-function LinkMemoCreateContent({
-  projectId,
-  onClose,
-  onCreated,
-}: {
-  projectId: string;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const [type, setType] = useState<LinkType>("url");
-  const [title, setTitle] = useState("");
-  const [target, setTarget] = useState("");
-  const [body, setBody] = useState("");
-  const [tagsInput, setTagsInput] = useState("");
+function Content(props: Props) {
+  const initial: LinkMemoPayloadV1 | null =
+    props.mode === "edit" ? (props.item.payload as LinkMemoPayloadV1) : null;
+  const [type, setType] = useState<LinkType>(initial?.type ?? "url");
+  const [title, setTitle] = useState(props.mode === "edit" ? props.item.title : "");
+  const [target, setTarget] = useState(initial?.target ?? "");
+  const [body, setBody] = useState(initial?.body ?? "");
+  const [tagsInput, setTagsInput] = useState(
+    props.mode === "edit" ? props.item.tags.join(", ") : "",
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [normalizationHint, setNormalizationHint] = useState<string | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
+  const targetLabel = type === "url" ? "URL" : type === "path" ? "ローカルパス" : "本文";
+  const targetPlaceholder =
+    type === "url" ? "https://example.com" : type === "path" ? "/Users/redjet/folder" : "";
+
+  const canSubmit =
+    !submitting &&
+    title.trim().length > 0 &&
+    ((type !== "memo" && target.trim().length > 0) ||
+      (type === "memo" && body.trim().length > 0));
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
-    setNormalizationHint(null);
+    setHint(null);
     try {
-      // type=url で `file://` を入力していたら path に自動振替 (`linkmemo_normalize_target`)
       let actualType: LinkType = type;
       let actualTarget: string | null = target.trim() === "" ? null : target.trim();
+
+      // URL タブで `file://` を入れた場合は path に自動振替
       if (type === "url" && actualTarget != null && actualTarget.startsWith("file://")) {
         const normalized = await linkmemoNormalizeTarget(actualTarget);
         actualType = normalized.type;
         actualTarget = normalized.target;
-        setNormalizationHint(
+        setHint(
           `file:// URL を ${normalized.type} (${normalized.target}) に正規化しました`,
         );
       }
@@ -75,36 +96,54 @@ function LinkMemoCreateContent({
         .split(",")
         .map((t) => t.trim().replace(/^#/, ""))
         .filter((t) => t.length > 0);
-      const payload =
+      const payload: LinkMemoPayloadV1 =
         actualType === "memo"
-          ? { type: "memo" as const, target: null, body: body.trim() }
-          : {
-              type: actualType,
-              target: actualTarget ?? "",
-              body: body.trim(),
-            };
-      await createItem({
-        moduleId: "linkmemo",
-        projectId,
-        title: title.trim(),
-        tags,
-        payload,
-      });
-      onCreated();
-      onClose();
+          ? { type: "memo", target: null, body: body.trim() }
+          : { type: actualType, target: actualTarget ?? "", body: body.trim() };
+
+      if (props.mode === "create") {
+        await createItem({
+          moduleId: "linkmemo",
+          projectId: props.projectId,
+          title: title.trim(),
+          tags,
+          payload,
+        });
+      } else {
+        await updateItem({
+          moduleId: "linkmemo",
+          itemId: props.item.id,
+          title: title.trim(),
+          tags,
+          payload,
+        });
+      }
+      props.onSaved();
+      props.onClose();
     } catch (err) {
       setError(formatInvokeError(err));
       setSubmitting(false);
     }
   };
 
-  // type 切替時に target / body の入力ラベル + プレースホルダが変わる (ui-design §6.4 v0.2)
-  const targetLabel = type === "url" ? "URL" : type === "path" ? "ローカルパス" : "本文";
-  const targetPlaceholder =
-    type === "url" ? "https://example.com" : type === "path" ? "/Users/redjet/folder" : "";
+  useHotkeys(
+    "mod+s, mod+enter",
+    (e) => {
+      e.preventDefault();
+      void handleSubmit();
+    },
+    { enableOnFormTags: true, enableOnContentEditable: true },
+    [type, title, target, body, tagsInput, props, canSubmit],
+  );
 
   return (
-    <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-3">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void handleSubmit();
+      }}
+      className="flex flex-col gap-3"
+    >
       <div className="flex flex-col gap-1.5">
         <span className="text-[13px] font-medium text-[var(--fg)]">タイプ</span>
         <div className="flex w-fit overflow-hidden rounded-[var(--radius)] border border-[var(--border)]">
@@ -186,9 +225,9 @@ function LinkMemoCreateContent({
         />
       </Field>
 
-      {normalizationHint != null && (
+      {hint != null && (
         <p className="rounded-[var(--radius)] bg-[var(--bg-accent-soft)] p-2 text-[12px] text-[var(--accent)]">
-          {normalizationHint}
+          {hint}
         </p>
       )}
       {error != null && (
@@ -198,20 +237,12 @@ function LinkMemoCreateContent({
       )}
 
       <div className="mt-1 flex items-center justify-end gap-2">
-        <Button variant="ghost" onClick={onClose} disabled={submitting}>
-          キャンセル
+        <Button variant="ghost" onClick={props.onClose} disabled={submitting}>
+          キャンセル <span className="ml-1 text-[10px] text-[var(--fg-subtle)]">Esc</span>
         </Button>
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={
-            submitting ||
-            !title.trim() ||
-            (type !== "memo" && target.trim() === "") ||
-            (type === "memo" && body.trim() === "")
-          }
-        >
+        <Button type="submit" variant="primary" disabled={!canSubmit}>
           {submitting ? "保存中..." : "保存"}
+          <span className="ml-1 text-[10px] opacity-70">⌘S</span>
         </Button>
       </div>
     </form>

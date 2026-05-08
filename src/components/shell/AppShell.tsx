@@ -76,6 +76,38 @@ export function AppShell() {
 
   const navigate = useNavigate();
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
+  const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
+
+  // Cmd/Ctrl+1〜4 でサイドバーのモジュール切替 (`docs/ui-design.md` §8.1)
+  // 1=Prompts, 2=Links, 3=Colors, 4=Hash。プロジェクト未選択時は Hash のみ可
+  const goToModule = useCallback(
+    (mod: ModuleId) => {
+      setLastModule(mod);
+      if (mod === "hash") {
+        navigate("/modules/hash");
+        return;
+      }
+      if (currentProject == null) return;
+      navigate(`/projects/${currentProject.id}/m/${mod}`);
+    },
+    [navigate, currentProject, setLastModule],
+  );
+  useHotkeys("mod+1", (e) => {
+    e.preventDefault();
+    goToModule("prompt");
+  });
+  useHotkeys("mod+2", (e) => {
+    e.preventDefault();
+    goToModule("linkmemo");
+  });
+  useHotkeys("mod+3", (e) => {
+    e.preventDefault();
+    goToModule("color");
+  });
+  useHotkeys("mod+4", (e) => {
+    e.preventDefault();
+    goToModule("hash");
+  });
 
   const handleProjectCreated = useCallback(
     (project: Project) => {
