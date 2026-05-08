@@ -9,7 +9,7 @@
  */
 import { useState } from "react";
 import { Plus, Hash, Link as LinkIcon, Palette, FileText } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { ProjectCreateDialog } from "@/components/projects/ProjectCreateDialog";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
@@ -40,10 +40,19 @@ const MODULES: readonly ModuleEntry[] = [
 export function Sidebar({ projects, onProjectCreated }: SidebarProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const { projectId, moduleId } = useParams<{ projectId?: string; moduleId?: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
+
+  // Hash は stateless で `/modules/hash` 単独ルート → URL に `:moduleId` が無いため
+  // `useParams` の `moduleId` は undefined になる。pathname から専用判定する
+  // (PR #31 codex P2 対応)
+  const onHashRoute = location.pathname === "/modules/hash";
+  const activeModuleId: ModuleId | null = onHashRoute
+    ? "hash"
+    : ((moduleId as ModuleId | undefined) ?? null);
 
   const goToProject = (pid: string) => {
     const m = (moduleId as ModuleId | undefined) ?? "prompt";
@@ -109,7 +118,7 @@ export function Sidebar({ projects, onProjectCreated }: SidebarProps) {
               <SidebarRow
                 label={m.label}
                 icon={<Icon size={14} aria-hidden />}
-                selected={moduleId === m.id || (m.id === "hash" && moduleId === "hash")}
+                selected={activeModuleId === m.id}
                 disabled={disabled}
                 onClick={() => !disabled && goToModule(m.id)}
               />
