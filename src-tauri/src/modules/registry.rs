@@ -43,6 +43,12 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
     builder.invoke_handler(tauri::generate_handler![
         // Core (ADR-0009 §2 / `module-contract.md` §6.2)
         crate::commands::cancel::core_cancel_operation,
+        // Core: Project CRUD (`module-contract.md` §6.2: モジュールからは呼ばない)
+        crate::commands::projects::core_list_projects,
+        crate::commands::projects::core_get_project,
+        crate::commands::projects::core_create_project,
+        crate::commands::projects::core_update_project,
+        crate::commands::projects::core_delete_project,
         // M-Hash
         crate::modules::hash::commands::hash_compute_text,
         crate::modules::hash::commands::hash_compute_file,
