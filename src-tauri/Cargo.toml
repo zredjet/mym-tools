@@ -24,7 +24,7 @@ tauri-plugin-opener = "2"   # ADR-0008 §2.7: 「最新版を確認」で OS 既
 # DB (ADR-0003)
 # 注: bundled feature が SQLite を `SQLITE_ENABLE_FTS5` 等を有効化してビルドするため、
 # 明示の `fts5` feature は不要 (rusqlite 0.32〜0.39 系で同じ挙動)。
-rusqlite = { version = "0.39", features = ["bundled", "trace"] }
+rusqlite = { version = "0.39", features = ["bundled", "trace", "backup"] }
 
 # 非同期 (Tauri 同梱、ADR-0009)
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
