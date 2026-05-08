@@ -1,11 +1,21 @@
 /**
  * M-Prompt 詳細 / 変数差し込みプレビュー (`docs/ui-design.md` §6.3 P-2 / §8.5)。
  *
- * Phase 1 PR-L (本 PR):
+ * Phase 1 PR-L:
  * - 変数フォーム (検出した `{{name}}` ごとに input)
- * - プレビュー (`prompt_render_template` 経由で差し込み後の本文)
+ * - プレビュー: `renderPromptTemplate` (TS pure function、Rust と仕様一致) で
+ *   同期計算。IPC round-trip を介さず、変数値変更で即時反映
  * - クリップボードコピー (`Cmd/Ctrl+C` でプレビュー、`Cmd/Ctrl+Shift+C` で raw 本文)
  * - 編集 (P-3 full editor) は次 PR
+ *
+ * ## 設計上の注意 (PR #33 codex 反映)
+ *
+ * 1. **プレビューは常に `renderPromptTemplate(body, variables)` を直接表示** する
+ *    (旧実装は `preview === "" ? body : preview` で fallback していたが、`{{name}}`
+ *    に空文字を差し込んだ場合に「rendered は空」「コピーは空」「画面は raw」と
+ *    ずれる不整合があった、PR #33 codex P2)
+ * 2. **load エラーと action (copy) エラーを分離** する。load 失敗のみ fatal panel に
+ *    遷移し、copy 失敗は inline alert で通知してページは生かす (PR #33 codex P2)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, Copy } from "lucide-react";
@@ -14,22 +24,22 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/Button";
 import { getItem } from "@/ipc/items";
-import { promptRenderTemplate } from "@/ipc/prompt";
 import { formatInvokeError } from "@/lib/error";
 import { extractPromptVariables } from "@/lib/promptVars";
+import { renderPromptTemplate } from "@/lib/promptRender";
 import type { Item, PromptPayloadV1 } from "@/lib/types";
 
 export function PromptDetailPage() {
   const { projectId, itemId } = useParams<{ projectId: string; itemId: string }>();
   const navigate = useNavigate();
   const [item, setItem] = useState<Item | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [variables, setVariables] = useState<Record<string, string>>({});
-  const [preview, setPreview] = useState("");
   const [copied, setCopied] = useState<"preview" | "raw" | null>(null);
 
-  // 1) item ロード
+  // item ロード
   useEffect(() => {
     if (itemId == null) return;
     let cancelled = false;
@@ -38,10 +48,10 @@ export function PromptDetailPage() {
         const fetched = await getItem({ moduleId: "prompt", itemId });
         if (!cancelled) {
           setItem(fetched);
-          setError(null);
+          setLoadError(null);
         }
       } catch (e) {
-        if (!cancelled) setError(formatInvokeError(e));
+        if (!cancelled) setLoadError(formatInvokeError(e));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -58,37 +68,23 @@ export function PromptDetailPage() {
 
   const detectedVars = useMemo(() => extractPromptVariables(body), [body]);
 
-  // 2) 変数値変更時にプレビュー再計算 (`prompt_render_template` 経由)
-  useEffect(() => {
-    if (body === "") {
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const rendered = await promptRenderTemplate({ body, variables });
-        if (!cancelled) setPreview(rendered);
-      } catch (e) {
-        if (!cancelled) setError(formatInvokeError(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [body, variables]);
+  // プレビューは pure function で同期計算 (codex P2 対応: 空文字差し込み時も
+  // 「コピー値 == 表示値」となる)
+  const preview = useMemo(() => renderPromptTemplate(body, variables), [body, variables]);
 
   const copy = useCallback(async (text: string, kind: "preview" | "raw") => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(kind);
-      // 2 秒後にバッジを消す
+      setActionError(null);
       window.setTimeout(() => setCopied(null), 2000);
     } catch (e) {
-      setError(formatInvokeError(e));
+      // copy 失敗は非 fatal、inline alert で通知 (codex P2 対応)
+      setActionError(formatInvokeError(e));
     }
   }, []);
 
-  // 3) ショートカット (`docs/ui-design.md` §8.5)
+  // ショートカット (`docs/ui-design.md` §8.5)
   useHotkeys(
     "mod+c",
     (e) => {
@@ -114,10 +110,11 @@ export function PromptDetailPage() {
     );
   }
 
-  if (item == null || error != null) {
+  // load 失敗 / item 不在は fatal panel
+  if (item == null || loadError != null) {
     return (
       <div className="m-6 rounded-[var(--radius)] border border-[var(--destructive)] bg-[var(--destructive)]/10 p-3 text-sm text-[var(--destructive)]">
-        {error ?? "プロンプトが見つかりません"}
+        {loadError ?? "プロンプトが見つかりません"}
       </div>
     );
   }
@@ -144,6 +141,23 @@ export function PromptDetailPage() {
           )}
         </div>
       </header>
+
+      {actionError != null && (
+        <div
+          role="alert"
+          className="rounded-[var(--radius)] border border-[var(--destructive)] bg-[var(--destructive)]/10 p-2 text-[12px] text-[var(--destructive)]"
+        >
+          {actionError}
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="ml-2 underline"
+            aria-label="エラーを閉じる"
+          >
+            閉じる
+          </button>
+        </div>
+      )}
 
       {detectedVars.length > 0 && (
         <section>
@@ -209,7 +223,7 @@ export function PromptDetailPage() {
           </div>
         </div>
         <pre className="min-h-0 flex-1 overflow-auto rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-muted)] p-3 font-mono text-[13px] whitespace-pre-wrap text-[var(--fg)]">
-          {preview === "" ? body : preview}
+          {preview}
         </pre>
       </section>
     </div>
