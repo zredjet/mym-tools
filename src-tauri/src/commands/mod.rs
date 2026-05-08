@@ -4,4 +4,6 @@
 //! 禁止されている。Shell や共通フックからのみ呼ばれる想定。
 
 pub mod cancel;
+pub mod items;
 pub mod projects;
+pub mod search;

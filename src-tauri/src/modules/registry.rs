@@ -49,6 +49,14 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         crate::commands::projects::core_create_project,
         crate::commands::projects::core_update_project,
         crate::commands::projects::core_delete_project,
+        // Core: Items CRUD (ScopedStorage 経由、Eager-on-Read は get_item で発火)
+        crate::commands::items::core_list_items,
+        crate::commands::items::core_get_item,
+        crate::commands::items::core_create_item,
+        crate::commands::items::core_update_item,
+        crate::commands::items::core_delete_item,
+        // Core: 横断検索 (FTS5 trigram + LIKE フォールバック、data-model.md §8)
+        crate::commands::search::core_search,
         // M-Hash
         crate::modules::hash::commands::hash_compute_text,
         crate::modules::hash::commands::hash_compute_file,

@@ -113,6 +113,7 @@ export function AppShell() {
       <SearchOverlay
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
+        currentProjectId={currentProject?.id ?? null}
         currentProjectName={currentProject?.name ?? null}
       />
     </div>
