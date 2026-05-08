@@ -39,6 +39,7 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         crate::commands::cancel::core_cancel_operation,
         // M-Hash
         crate::modules::hash::commands::hash_compute_text,
+        crate::modules::hash::commands::hash_compute_file,
         // 新モジュールの固有コマンドはここに追加する
     ])
 }

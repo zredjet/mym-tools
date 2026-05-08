@@ -2227,6 +2227,7 @@ name = "mym-tools"
 version = "0.0.1"
 dependencies = [
  "chrono",
+ "digest",
  "md-5",
  "rusqlite",
  "serde",
@@ -2236,6 +2237,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
