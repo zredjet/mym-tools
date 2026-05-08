@@ -1,10 +1,11 @@
 //! M-Hash: ハッシュ計算モジュール (`requirements.md` §2.2 M-Hash / D-06)。
 //!
-//! ステートレスモジュール (items テーブルに何も書かない)。Q-22 PoC では
-//! `hash_compute_text` のみを実装し、ファイルハッシュ + キャンセル機構 (ADR-0009) は
-//! 後続で追加する。
+//! ステートレスモジュール (items テーブルに何も書かない)。提供コマンドは:
+//! - `hash_compute_text`: テキストハッシュ (Q-22 PoC で導入)
+//! - `hash_compute_file`: ファイルハッシュ + キャンセル機構 (ADR-0009 §2 / PR-F)
 
 pub mod commands;
+pub mod progress;
 
 use crate::module::ModuleBackend;
 

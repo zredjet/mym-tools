@@ -48,7 +48,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # ハッシュ計算 (M-Hash)
+# digest 0.10 系は md-5 / sha1 / sha2 0.10 が既に間接依存しているバージョン。
+# `DynDigest` (object-safe) を使ってアルゴリズム別の dyn dispatch をする。
+digest = "0.10"
 md-5 = "0.10"
 sha1 = "0.10"
 sha2 = "0.10"
+
+[dev-dependencies]
+# 一時ファイル / 一時ディレクトリ (M-Hash ファイルハッシュテストで使う)。
+# 既に tauri 等の transitive dep として Cargo.lock に存在するため新規 dl は発生しない。
+tempfile = "3"
 
