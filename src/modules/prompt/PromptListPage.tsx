@@ -1,23 +1,25 @@
 /**
  * M-Prompt 一覧 (`docs/ui-design.md` §6.1 / §6.2 / §9.1)。
  *
- * Phase 1 PR-K (本 PR): 実 items の一覧表示 + 新規作成 + 削除のみ。
+ * Phase 1 PR-M (本 PR): create + edit + C-15 タイプ・トゥ・コンファーム削除。
  * - 行高 32px (compact、ui-design.md §2.3)
- * - 各行に title / 検出変数件数 / 相対 updated_at / 削除ボタン
- * - 検出変数件数はフロント側で `extractPromptVariables(body)` で算出 (Backend と同等)
- * - 詳細表示 (P-2) と編集 (P-3 full) は次 PR
+ * - 各行に title (クリックで詳細) / 検出変数件数 / 相対 updated_at / 編集 / 削除
+ * - 削除は `ConfirmDeleteDialog` で名前タイプ確認 (C-15)
+ * - `mod+n` (Cmd/Ctrl+N) で新規 (`docs/ui-design.md` §8.1)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
+import { useHotkeys } from "react-hotkeys-hook";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { PromptCreateDialog } from "@/modules/prompt/PromptCreateDialog";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { deleteItem, listItems } from "@/ipc/items";
 import { formatInvokeError } from "@/lib/error";
 import { extractPromptVariables } from "@/lib/promptVars";
 import type { Item, PromptPayloadV1 } from "@/lib/types";
+import { PromptItemDialog } from "@/modules/prompt/PromptItemDialog";
 
 export function PromptListPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -25,6 +27,8 @@ export function PromptListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [deletingItem, setDeletingItem] = useState<Item | null>(null);
 
   const refresh = useCallback(async (pid: string) => {
     try {
@@ -60,15 +64,17 @@ export function PromptListPage() {
     };
   }, [projectId]);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("このプロンプトを削除しますか? (元に戻せません)")) return;
-    try {
-      await deleteItem({ moduleId: "prompt", itemId: id });
-      if (projectId != null) await refresh(projectId);
-    } catch (e) {
-      setError(formatInvokeError(e));
-    }
-  };
+  // Cmd/Ctrl+N で新規 (`docs/ui-design.md` §8.1)
+  useHotkeys("mod+n", (e) => {
+    e.preventDefault();
+    setCreateOpen(true);
+  });
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (deletingItem == null) return;
+    await deleteItem({ moduleId: "prompt", itemId: deletingItem.id });
+    if (projectId != null) await refresh(projectId);
+  }, [deletingItem, projectId, refresh]);
 
   if (projectId == null) {
     return (
@@ -86,6 +92,7 @@ export function PromptListPage() {
         </h1>
         <Button variant="primary" onClick={() => setCreateOpen(true)}>
           <Plus size={14} aria-hidden /> 新規プロンプト
+          <span className="ml-1 text-[10px] opacity-70">⌘N</span>
         </Button>
       </header>
 
@@ -120,17 +127,35 @@ export function PromptListPage() {
               key={item.id}
               item={item}
               projectId={projectId}
-              onDelete={() => void handleDelete(item.id)}
+              onEdit={() => setEditingItem(item)}
+              onDelete={() => setDeletingItem(item)}
             />
           ))}
         </ul>
       )}
 
-      <PromptCreateDialog
-        open={createOpen}
+      <PromptItemDialog
+        mode="create"
         projectId={projectId}
+        open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreated={() => void refresh(projectId)}
+        onSaved={() => void refresh(projectId)}
+      />
+      {editingItem != null && (
+        <PromptItemDialog
+          mode="edit"
+          item={editingItem}
+          open={editingItem != null}
+          onClose={() => setEditingItem(null)}
+          onSaved={() => void refresh(projectId)}
+        />
+      )}
+      <ConfirmDeleteDialog
+        open={deletingItem != null}
+        entityLabel="プロンプト"
+        name={deletingItem?.title ?? ""}
+        onClose={() => setDeletingItem(null)}
+        onConfirm={handleConfirmDelete}
       />
     </div>
   );
@@ -139,10 +164,12 @@ export function PromptListPage() {
 function PromptRow({
   item,
   projectId,
+  onEdit,
   onDelete,
 }: {
   item: Item;
   projectId: string;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   const navigate = useNavigate();
@@ -177,6 +204,15 @@ function PromptRow({
       </span>
       <button
         type="button"
+        aria-label="編集"
+        title="編集"
+        onClick={onEdit}
+        className="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--fg-subtle)] hover:bg-[var(--bg)] hover:text-[var(--accent)]"
+      >
+        <Pencil size={13} aria-hidden />
+      </button>
+      <button
+        type="button"
         aria-label="削除"
         title="削除"
         onClick={onDelete}
@@ -190,7 +226,6 @@ function PromptRow({
 
 /**
  * `JST_ISO8601` (29 文字、ADR-0005) を相対表示にする。
- * `2h ago` / `昨日` / `2日前` / `1週間前` / それ以前は YYYY-MM-DD。
  */
 function formatRelative(jstIso: string): string {
   const ts = new Date(jstIso).getTime();
@@ -206,6 +241,5 @@ function formatRelative(jstIso: string): string {
   if (diffD === 1) return "昨日";
   if (diffD < 7) return `${diffD}日前`;
   if (diffD < 30) return `${Math.round(diffD / 7)}週間前`;
-  // それ以上は YYYY-MM-DD で
   return jstIso.slice(0, 10);
 }

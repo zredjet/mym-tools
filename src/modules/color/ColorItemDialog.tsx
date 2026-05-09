@@ -1,56 +1,60 @@
 /**
- * Color 新規作成ダイアログ (`docs/ui-design.md` §6.5 K-2 の最小版)。
+ * Color 新規作成 / 編集ダイアログ (`docs/ui-design.md` §6.5 K-2 の最小版)。
  *
- * Phase 1 PR-L: HEX 入力のみ (RGB/HSL/OKLCH 双方向バインドは次 PR で K-2 full editor に拡張)。
- * - HEX は `#RRGGBB` または `#RRGGBBAA`。バリデーションはバックエンドの
- *   `validate_payload` (大小文字どちらも許容) と整合させ、フロントは保存時に大文字化する
- *   (`docs/data-model.md` §10.3: 「正規化済み (大文字)」)
+ * `mode` で create / edit を切替。Phase 1 PR-M: HEX 入力のみ
+ * (RGB/HSL/OKLCH 双方向バインドは Phase 2 持ち越し、§10 オープン論点)。
+ *
+ * - HEX は `#RRGGBB` または `#RRGGBBAA`。フロントは保存時に大文字正規化
+ *   (`docs/data-model.md` §10.3「正規化済み (大文字)」)
+ *
+ * ## ショートカット
+ * - `Cmd/Ctrl + S` / `Cmd/Ctrl + Enter`: 保存
  */
 import { useMemo, useState } from "react";
+import { useHotkeys } from "react-hotkeys-hook";
 
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
-import { createItem } from "@/ipc/items";
+import { createItem, updateItem } from "@/ipc/items";
 import { formatInvokeError } from "@/lib/error";
-
-interface Props {
-  open: boolean;
-  projectId: string;
-  onClose: () => void;
-  onCreated: () => void;
-}
+import type { ColorPayloadV1, Item } from "@/lib/types";
 
 const HEX_REGEX = /^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$/;
 
-export function ColorCreateDialog({ open, projectId, onClose, onCreated }: Props) {
+type DialogMode = { mode: "create"; projectId: string } | { mode: "edit"; item: Item };
+
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+} & DialogMode;
+
+export function ColorItemDialog(props: Props) {
+  const title = props.mode === "create" ? "新規 Color" : "Color を編集";
   return (
-    <Modal open={open} onClose={onClose} title="新規 Color" widthClassName="w-full max-w-md">
-      {open && <ColorCreateContent projectId={projectId} onClose={onClose} onCreated={onCreated} />}
+    <Modal open={props.open} onClose={props.onClose} title={title} widthClassName="w-full max-w-md">
+      {props.open && <Content {...props} />}
     </Modal>
   );
 }
 
-function ColorCreateContent({
-  projectId,
-  onClose,
-  onCreated,
-}: {
-  projectId: string;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const [name, setName] = useState("");
-  const [hex, setHex] = useState("#");
-  const [tagsInput, setTagsInput] = useState("");
+function Content(props: Props) {
+  const initial: ColorPayloadV1 | null =
+    props.mode === "edit" ? (props.item.payload as ColorPayloadV1) : null;
+  const [name, setName] = useState(props.mode === "edit" ? props.item.title : "");
+  const [hex, setHex] = useState(initial?.hex ?? "#");
+  const [tagsInput, setTagsInput] = useState(
+    props.mode === "edit" ? props.item.tags.join(", ") : "",
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const trimmedHex = hex.trim();
   const isValidHex = useMemo(() => HEX_REGEX.test(trimmedHex), [trimmedHex]);
+  const canSubmit = !submitting && name.trim().length > 0 && isValidHex;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !isValidHex) return;
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -58,25 +62,50 @@ function ColorCreateContent({
         .split(",")
         .map((t) => t.trim().replace(/^#/, ""))
         .filter((t) => t.length > 0);
-      // `data-model.md` §10.3 通り保存は大文字に正規化
       const normalizedHex = trimmedHex.toUpperCase();
-      await createItem({
-        moduleId: "color",
-        projectId,
-        title: name.trim(),
-        tags,
-        payload: { hex: normalizedHex },
-      });
-      onCreated();
-      onClose();
+      if (props.mode === "create") {
+        await createItem({
+          moduleId: "color",
+          projectId: props.projectId,
+          title: name.trim(),
+          tags,
+          payload: { hex: normalizedHex },
+        });
+      } else {
+        await updateItem({
+          moduleId: "color",
+          itemId: props.item.id,
+          title: name.trim(),
+          tags,
+          payload: { hex: normalizedHex },
+        });
+      }
+      props.onSaved();
+      props.onClose();
     } catch (err) {
       setError(formatInvokeError(err));
       setSubmitting(false);
     }
   };
 
+  useHotkeys(
+    "mod+s, mod+enter",
+    (e) => {
+      e.preventDefault();
+      void handleSubmit();
+    },
+    { enableOnFormTags: true, enableOnContentEditable: true },
+    [name, hex, tagsInput, props, canSubmit],
+  );
+
   return (
-    <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-3">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void handleSubmit();
+      }}
+      className="flex flex-col gap-3"
+    >
       <div className="flex items-center gap-3">
         <div
           className="h-16 w-16 shrink-0 rounded-[var(--radius)] border border-[var(--border)]"
@@ -139,15 +168,12 @@ function ColorCreateContent({
       )}
 
       <div className="mt-1 flex items-center justify-end gap-2">
-        <Button variant="ghost" onClick={onClose} disabled={submitting}>
-          キャンセル
+        <Button variant="ghost" onClick={props.onClose} disabled={submitting}>
+          キャンセル <span className="ml-1 text-[10px] text-[var(--fg-subtle)]">Esc</span>
         </Button>
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={submitting || !name.trim() || !isValidHex}
-        >
+        <Button type="submit" variant="primary" disabled={!canSubmit}>
           {submitting ? "保存中..." : "保存"}
+          <span className="ml-1 text-[10px] opacity-70">⌘S</span>
         </Button>
       </div>
     </form>
