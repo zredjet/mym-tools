@@ -89,10 +89,42 @@ jobs:
           1. このページの Assets から自分の OS のファイルをダウンロード
           2. **macOS**: DMG を開いて `MyMyTools.app` を Applications にドラッグ
           3. **Windows**: NSIS exe (`MyMyTools_*-setup.exe`) を実行
-          4. 起動時に **「開発元未確認」「不明な発行元」の警告**が出ます (alpha のためコード署名なし):
-             - macOS: Finder で右クリック → 開く、または「システム設定 > プライバシーとセキュリティ」
-               からの許可
-             - Windows: SmartScreen の「詳細情報 > 実行」
+
+          ## OS 警告 / 起動エラー対処 (alpha のためコード署名なし)
+
+          ### Windows
+
+          SmartScreen の「不明な発行元」警告 → 「詳細情報 > 実行」 をクリック。
+
+          ### macOS
+
+          ⚠️ **「MyMyTools は壊れているため、起動できません」と表示される場合**
+
+          実際にバイナリは壊れていません。インターネット経由 DL したファイルに付与
+          される `com.apple.quarantine` 属性 + 未署名アプリの組合せで Gatekeeper が
+          ブロックしているだけです。ターミナルで以下を実行して quarantine 属性を
+          外せば起動できます (Apple Silicon Mac で確認済):
+
+          ```bash
+          xattr -dr com.apple.quarantine /Applications/MyMyTools.app
+          ```
+
+          実行後、通常通り `MyMyTools.app` をダブルクリックで起動。
+
+          ### より詳しい状態を見る (上記コマンドで起動しない場合)
+
+          ```bash
+          # Gatekeeper の判定詳細
+          spctl --assess --type execute --verbose=4 /Applications/MyMyTools.app
+
+          # 直近のシステムログ
+          log show --last 5m --predicate 'subsystem CONTAINS[c] "syspolicy"' --info
+
+          # 署名状態
+          codesign -dvv /Applications/MyMyTools.app
+          ```
+
+          恒久対応 (Apple Developer Program + notarization) は Phase 2 で検討予定。
 
           ## データの保存場所
 
