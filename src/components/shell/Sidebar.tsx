@@ -8,15 +8,42 @@
  * 行高 32px / padding 6px 12px / 選択行は `--bg-accent-soft` + `--accent` テキスト + 左 2px。
  */
 import { useCallback, useState } from "react";
-import { FileText, Hash, Link as LinkIcon, Palette, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  FileText,
+  GripVertical,
+  Hash,
+  Link as LinkIcon,
+  Palette,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import {
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import { ProjectCreateDialog } from "@/components/projects/ProjectCreateDialog";
 import { ProjectEditDialog } from "@/components/projects/ProjectEditDialog";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
-import { deleteProject } from "@/ipc/projects";
+import { deleteProject, reorderProjects } from "@/ipc/projects";
 import { cn } from "@/lib/cn";
+import { formatInvokeError } from "@/lib/error";
 import type { ModuleId, Project } from "@/lib/types";
 import { useAppStore } from "@/store/useAppStore";
 
@@ -46,6 +73,7 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
   const [createOpen, setCreateOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+  const [reorderError, setReorderError] = useState<string | null>(null);
   const { projectId, moduleId } = useParams<{ projectId?: string; moduleId?: string }>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -53,6 +81,32 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
   const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
   const lastOpenedProjectId = useAppStore((s) => s.lastOpenedProjectId);
+
+  // D&D sensors: PointerSensor は 4px 動かしてから drag 開始 (誤発動防止、クリック連動)
+  // KeyboardSensor は a11y 用 (Tab + Space で持ち上げ → Arrow で移動)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (over == null || active.id === over.id) return;
+      const oldIndex = projects.findIndex((p) => p.id === active.id);
+      const newIndex = projects.findIndex((p) => p.id === over.id);
+      if (oldIndex < 0 || newIndex < 0) return;
+      const reordered = arrayMove(projects, oldIndex, newIndex);
+      try {
+        await reorderProjects(reordered.map((p) => p.id));
+        onProjectChanged();
+        setReorderError(null);
+      } catch (e) {
+        setReorderError(formatInvokeError(e));
+      }
+    },
+    [projects, onProjectChanged],
+  );
 
   // PROJECTS ハイライト + module 遷移先のフォールバック (案3、メモリ参照):
   // `/modules/hash` (stateless) では URL に projectId が無いため `useParams` は
@@ -128,22 +182,34 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
           </button>
         }
       />
-      <ul className="flex flex-col px-1.5 pb-2" role="list">
-        {projects.length === 0 && (
-          <li className="px-3 py-1.5 text-[12px] text-[var(--fg-subtle)]">プロジェクトなし</li>
-        )}
-        {projects.map((p) => (
-          <li key={p.id}>
-            <ProjectRow
-              project={p}
-              selected={effectiveProjectId === p.id}
-              onSelect={() => goToProject(p.id)}
-              onEdit={() => setEditingProject(p)}
-              onDelete={() => setDeletingProject(p)}
-            />
-          </li>
-        ))}
-      </ul>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={projects.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+          <ul className="flex flex-col px-1.5 pb-2" role="list">
+            {projects.length === 0 && (
+              <li className="px-3 py-1.5 text-[12px] text-[var(--fg-subtle)]">プロジェクトなし</li>
+            )}
+            {projects.map((p) => (
+              <li key={p.id}>
+                <SortableProjectRow
+                  project={p}
+                  selected={effectiveProjectId === p.id}
+                  onSelect={() => goToProject(p.id)}
+                  onEdit={() => setEditingProject(p)}
+                  onDelete={() => setDeletingProject(p)}
+                />
+              </li>
+            ))}
+          </ul>
+        </SortableContext>
+      </DndContext>
+      {reorderError != null && (
+        <p
+          role="alert"
+          className="mx-3 mb-2 rounded-[var(--radius)] border border-[var(--destructive)] bg-[var(--destructive)]/10 p-1.5 text-[11px] text-[var(--destructive)]"
+        >
+          並び替え失敗: {reorderError}
+        </p>
+      )}
 
       {/* MODULES section */}
       <SectionHeader title="MODULES" action={<ThemeToggle />} />
@@ -245,25 +311,52 @@ interface ProjectRowProps {
 }
 
 /**
- * プロジェクト行 (`docs/ui-design.md` §3.2)。SidebarRow と異なり hover 時に編集/削除
- * のミニアイコンを表示する。クリック領域を分けるため、ボタンを横並びにして
- * `<li>` 全体は単一の `flex` コンテナに。
+ * プロジェクト行 (`docs/ui-design.md` §3.2 + PR-U D&D)。SidebarRow と異なり hover 時に
+ * 編集 / 削除 のミニアイコンと **ドラッグハンドル** を表示する。
+ *
+ * ## ドラッグハンドルの設計
+ * - `useSortable` の `listeners` (= drag を起動するハンドラ群) は **GripVertical
+ *   アイコンのみ**に付与する。プロジェクト名ボタンや編集 / 削除ボタンは通常クリック
+ *   できる必要があるため、行全体には付けない (誤発動防止)
+ * - `transform` / `transition` は `useSortable` の戻り値を CSS に反映
+ * - `isDragging` 中は半透明 + cursor 変更で視覚フィードバック
  */
-function ProjectRow({ project, selected, onSelect, onEdit, onDelete }: ProjectRowProps) {
+function SortableProjectRow({ project, selected, onSelect, onEdit, onDelete }: ProjectRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: project.id,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+    boxShadow: selected ? "inset 2px 0 0 0 var(--accent)" : undefined,
+  };
   return (
     <div
+      ref={setNodeRef}
+      style={style}
       className={cn(
         "group flex h-[var(--row-h)] items-center rounded-[var(--radius)]",
         selected ? "bg-[var(--bg-accent-soft)]" : "hover:bg-[var(--bg-muted)]",
       )}
-      style={selected ? { boxShadow: "inset 2px 0 0 0 var(--accent)" } : undefined}
     >
+      {/* ドラッグハンドル: hover で表示 */}
+      <button
+        type="button"
+        aria-label={`${project.name} を並び替え`}
+        title="ドラッグして並び替え"
+        {...attributes}
+        {...listeners}
+        className="inline-flex h-5 w-4 shrink-0 cursor-grab items-center justify-center text-[var(--fg-subtle)] opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing"
+      >
+        <GripVertical size={12} aria-hidden />
+      </button>
       <button
         type="button"
         onClick={onSelect}
         aria-current={selected ? "page" : undefined}
         className={cn(
-          "min-w-0 flex-1 truncate px-3 text-left text-[13px]",
+          "min-w-0 flex-1 truncate px-2 text-left text-[13px]",
           selected ? "font-medium text-[var(--accent)]" : "text-[var(--fg)]",
         )}
       >
