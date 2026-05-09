@@ -52,17 +52,29 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
+  const lastOpenedProjectId = useAppStore((s) => s.lastOpenedProjectId);
+
+  // PROJECTS ハイライト + module 遷移先のフォールバック (案3、メモリ参照):
+  // `/modules/hash` (stateless) では URL に projectId が無いため `useParams` は
+  // undefined を返すが、UI 上は前回開いていた project を選択中として表示し続けた方が
+  // ユーザビリティが高い。`lastOpenedProjectId` (Zustand persist) をフォールバックに使う。
+  // 該当 project が現在も存在することも確認 (削除済 ID の幽霊参照を弾く)
+  const effectiveProjectId =
+    projectId ??
+    (lastOpenedProjectId != null && projects.some((p) => p.id === lastOpenedProjectId)
+      ? lastOpenedProjectId
+      : null);
 
   const handleConfirmDelete = useCallback(async () => {
     if (deletingProject == null) return;
     await deleteProject(deletingProject.id);
     onProjectChanged();
-    // 削除されたプロジェクトを表示中なら welcome へ退避
-    if (projectId === deletingProject.id) {
+    // 削除されたプロジェクトを表示中なら welcome へ退避。lastOpened との一致でも消す
+    if (projectId === deletingProject.id || lastOpenedProjectId === deletingProject.id) {
       setLastProject(null);
       navigate("/welcome");
     }
-  }, [deletingProject, onProjectChanged, projectId, navigate, setLastProject]);
+  }, [deletingProject, onProjectChanged, projectId, lastOpenedProjectId, navigate, setLastProject]);
 
   // Hash は stateless で `/modules/hash` 単独ルート → URL に `:moduleId` が無いため
   // `useParams` の `moduleId` は undefined になる。pathname から専用判定する
@@ -85,8 +97,9 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
       navigate(`/modules/hash`);
       return;
     }
-    if (projectId == null) return; // モジュール固有データはプロジェクト必須
-    navigate(`/projects/${projectId}/m/${mid}`);
+    // 案3: URL に projectId が無くても (= Hash 表示中) `effectiveProjectId` で遷移可
+    if (effectiveProjectId == null) return;
+    navigate(`/projects/${effectiveProjectId}/m/${mid}`);
   };
 
   return (
@@ -118,7 +131,7 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
           <li key={p.id}>
             <ProjectRow
               project={p}
-              selected={projectId === p.id}
+              selected={effectiveProjectId === p.id}
               onSelect={() => goToProject(p.id)}
               onEdit={() => setEditingProject(p)}
               onDelete={() => setDeletingProject(p)}
@@ -132,7 +145,8 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
       <ul className="flex flex-col px-1.5 pb-2" role="list">
         {MODULES.map((m) => {
           const Icon = m.icon;
-          const disabled = m.id !== "hash" && projectId == null;
+          // 案3: hash 以外も effectiveProjectId (URL or lastOpened) があれば押せる
+          const disabled = m.id !== "hash" && effectiveProjectId == null;
           return (
             <li key={m.id}>
               <SidebarRow
