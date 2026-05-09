@@ -21,6 +21,7 @@ import { linkmemoOpen } from "@/ipc/linkmemo";
 import { formatInvokeError } from "@/lib/error";
 import type { Item, LinkMemoPayloadV1 } from "@/lib/types";
 import { LinkMemoItemDialog } from "@/modules/linkmemo/LinkMemoItemDialog";
+import { LinkMemoMemoDialog } from "@/modules/linkmemo/LinkMemoMemoDialog";
 
 export function LinkMemoListPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -30,6 +31,7 @@ export function LinkMemoListPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deletingItem, setDeletingItem] = useState<Item | null>(null);
+  const [viewingMemo, setViewingMemo] = useState<Item | null>(null);
 
   const refresh = useCallback(async (pid: string) => {
     try {
@@ -76,8 +78,14 @@ export function LinkMemoListPage() {
     if (projectId != null) await refresh(projectId);
   }, [deletingItem, projectId, refresh]);
 
-  const handleOpen = async (payload: LinkMemoPayloadV1) => {
-    if (payload.type === "memo" || payload.target == null || payload.target === "") return;
+  const handleOpen = async (item: Item) => {
+    const payload = asPayload(item);
+    // memo は OS で開けないので詳細モーダルを表示
+    if (payload.type === "memo") {
+      setViewingMemo(item);
+      return;
+    }
+    if (payload.target == null || payload.target === "") return;
     try {
       await linkmemoOpen({ itemType: payload.type, target: payload.target });
     } catch (e) {
@@ -135,7 +143,7 @@ export function LinkMemoListPage() {
             <LinkMemoRow
               key={item.id}
               item={item}
-              onOpen={() => void handleOpen(asPayload(item))}
+              onOpen={() => void handleOpen(item)}
               onEdit={() => setEditingItem(item)}
               onDelete={() => setDeletingItem(item)}
             />
@@ -165,6 +173,18 @@ export function LinkMemoListPage() {
         name={deletingItem?.title ?? ""}
         onClose={() => setDeletingItem(null)}
         onConfirm={handleConfirmDelete}
+      />
+      <LinkMemoMemoDialog
+        open={viewingMemo != null}
+        item={viewingMemo}
+        onClose={() => setViewingMemo(null)}
+        onEdit={() => {
+          // 詳細モーダルから編集に遷移
+          if (viewingMemo == null) return;
+          const item = viewingMemo;
+          setViewingMemo(null);
+          setEditingItem(item);
+        }}
       />
     </div>
   );
@@ -205,8 +225,8 @@ function LinkMemoRow({
       />
       <button
         type="button"
-        onClick={openable ? onOpen : onEdit}
-        title={payload.target ?? ""}
+        onClick={onOpen}
+        title={payload.type === "memo" ? "メモを表示" : (payload.target ?? "")}
         className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-[var(--fg)] hover:text-[var(--accent)]"
       >
         {item.title}

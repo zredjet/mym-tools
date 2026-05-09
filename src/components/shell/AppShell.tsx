@@ -69,14 +69,21 @@ export function AppShell() {
     { enableOnFormTags: true, enableOnContentEditable: true },
   );
 
-  const currentProject = useMemo(
-    () => projects.find((p) => p.id === projectId) ?? null,
-    [projects, projectId],
-  );
-
   const navigate = useNavigate();
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
   const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
+  const lastOpenedProjectId = useAppStore((s) => s.lastOpenedProjectId);
+
+  // 案3 (Sidebar と同じ思想): URL の :projectId が無い (= /modules/hash 等) でも
+  // `lastOpenedProjectId` を使って TopBar / Cmd+1〜4 ナビの基準にする
+  const currentProject = useMemo(() => {
+    const explicit = projects.find((p) => p.id === projectId);
+    if (explicit != null) return explicit;
+    if (lastOpenedProjectId != null) {
+      return projects.find((p) => p.id === lastOpenedProjectId) ?? null;
+    }
+    return null;
+  }, [projects, projectId, lastOpenedProjectId]);
 
   // Cmd/Ctrl+1〜4 でサイドバーのモジュール切替 (`docs/ui-design.md` §8.1)
   // 1=Prompts, 2=Links, 3=Colors, 4=Hash。プロジェクト未選択時は Hash のみ可
