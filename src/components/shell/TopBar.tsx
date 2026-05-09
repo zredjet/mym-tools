@@ -5,7 +5,7 @@
  * 中央: ⌘K Search トリガ
  * 右: テーマトグル + 設定ページへの遷移 (Cmd+, でも開く)
  */
-import { Search, Settings } from "lucide-react";
+import { Info, Search, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
@@ -56,6 +56,15 @@ export function TopBar({ currentProject, onOpenSearch }: Props) {
           className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius)] text-[var(--fg-muted)] hover:bg-[var(--bg-muted)] hover:text-[var(--fg)]"
         >
           <Settings size={16} aria-hidden />
+        </button>
+        <button
+          type="button"
+          aria-label="About"
+          title="About"
+          onClick={() => navigate("/about")}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius)] text-[var(--fg-muted)] hover:bg-[var(--bg-muted)] hover:text-[var(--fg)]"
+        >
+          <Info size={16} aria-hidden />
         </button>
       </div>
     </header>

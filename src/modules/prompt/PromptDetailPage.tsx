@@ -18,12 +18,14 @@
  *    遷移し、copy 失敗は inline alert で通知してページは生かす (PR #33 codex P2)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Check, Copy } from "lucide-react";
+import { ArrowLeft, Check, Code2, Copy, Eye } from "lucide-react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/Button";
+import { MarkdownView } from "@/components/ui/MarkdownView";
 import { getItem } from "@/ipc/items";
+import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import { extractPromptVariables } from "@/lib/promptVars";
 import { renderPromptTemplate } from "@/lib/promptRender";
@@ -38,6 +40,7 @@ export function PromptDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [variables, setVariables] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<"preview" | "raw" | null>(null);
+  const [viewMode, setViewMode] = useState<"rendered" | "raw">("rendered");
 
   // item ロード
   useEffect(() => {
@@ -185,10 +188,27 @@ export function PromptDetailPage() {
       )}
 
       <section className="flex min-h-0 flex-1 flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-[11px] font-semibold tracking-[0.05em] text-[var(--fg-subtle)] uppercase">
-            {detectedVars.length > 0 ? "プレビュー (差し込み後)" : "本文"}
-          </h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-3">
+            <h2 className="text-[11px] font-semibold tracking-[0.05em] text-[var(--fg-subtle)] uppercase">
+              {detectedVars.length > 0 ? "プレビュー (差し込み後)" : "本文"}
+            </h2>
+            {/* Markdown / Raw 表示トグル (`docs/ui-design.md` §6.3 P-2) */}
+            <div className="flex overflow-hidden rounded-[var(--radius)] border border-[var(--border)]">
+              <ViewTab
+                label="Markdown"
+                icon={<Eye size={12} aria-hidden />}
+                selected={viewMode === "rendered"}
+                onClick={() => setViewMode("rendered")}
+              />
+              <ViewTab
+                label="Raw"
+                icon={<Code2 size={12} aria-hidden />}
+                selected={viewMode === "raw"}
+                onClick={() => setViewMode("raw")}
+              />
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             <Button
               variant="secondary"
@@ -222,10 +242,44 @@ export function PromptDetailPage() {
             </Button>
           </div>
         </div>
-        <pre className="min-h-0 flex-1 overflow-auto rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-muted)] p-3 font-mono text-[13px] whitespace-pre-wrap text-[var(--fg)]">
-          {preview}
-        </pre>
+        {viewMode === "rendered" ? (
+          <div className="min-h-0 flex-1 overflow-auto rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg)] p-4">
+            <MarkdownView source={preview} />
+          </div>
+        ) : (
+          <pre className="min-h-0 flex-1 overflow-auto rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-muted)] p-3 font-mono text-[13px] whitespace-pre-wrap text-[var(--fg)]">
+            {preview}
+          </pre>
+        )}
       </section>
     </div>
+  );
+}
+
+function ViewTab({
+  label,
+  icon,
+  selected,
+  onClick,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-1 px-2 py-1 text-[12px] transition-colors",
+        selected
+          ? "bg-[var(--bg-accent-soft)] text-[var(--accent)]"
+          : "text-[var(--fg-muted)] hover:bg-[var(--bg-muted)] hover:text-[var(--fg)]",
+      )}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
