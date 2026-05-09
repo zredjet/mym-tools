@@ -57,6 +57,14 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         crate::commands::items::core_delete_item,
         // Core: 横断検索 (FTS5 trigram + LIKE フォールバック、data-model.md §8)
         crate::commands::search::core_search,
+        // Core: Backup (ADR-0007 / data-model.md §13)
+        crate::commands::backup::core_backup_should_take_auto,
+        crate::commands::backup::core_backup_list,
+        crate::commands::backup::core_backup_take_auto,
+        crate::commands::backup::core_backup_take_manual,
+        crate::commands::backup::core_backup_delete,
+        crate::commands::backup::core_backup_verify,
+        crate::commands::backup::core_backup_restore,
         // M-Hash
         crate::modules::hash::commands::hash_compute_text,
         crate::modules::hash::commands::hash_compute_file,
@@ -86,7 +94,11 @@ mod tests {
         let backends = module_backends();
         // Phase 1 では Hash / Color / LinkMemo / Prompt の 4 モジュール
         assert_eq!(backends.len(), 4);
-        let state = AppState::build(backends, storage).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let backup: Arc<dyn crate::backup::BackupService> = Arc::new(
+            crate::backup::LocalBackupService::new(dir.path().to_path_buf(), Arc::clone(&storage)),
+        );
+        let state = AppState::build(backends, storage, backup).unwrap();
         assert!(state.module("hash").is_some());
         assert!(state.module("color").is_some());
         assert!(state.module("linkmemo").is_some());

@@ -26,6 +26,7 @@ use std::sync::Arc;
 
 use tauri::Manager;
 
+use crate::backup::{BackupKind, BackupService, LocalBackupService};
 use crate::state::AppState;
 use crate::storage::{SqliteStorage, StorageService};
 
@@ -47,6 +48,7 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)
                 .map_err(|e| format!("failed to create data dir {}: {e}", data_dir.display()))?;
             let db_path = data_dir.join("data.sqlite");
+            let backups_root = data_dir.join("backups");
 
             // SQLite を開いて schema 整合性チェック (`data-model.md` §4 / §13)
             let storage: Arc<dyn StorageService> = Arc::new(
@@ -54,9 +56,18 @@ pub fn run() {
                     .map_err(|e| format!("failed to open SQLite at {}: {e}", db_path.display()))?,
             );
 
-            // モジュールレジストリ + storage → AppState (`module-contract.md` §2)
+            // バックアップサービス (ADR-0007)
+            let backup: Arc<dyn BackupService> =
+                Arc::new(LocalBackupService::new(backups_root, Arc::clone(&storage)));
+
+            // 起動時 auto バックアップ判定 (`data-model.md` §13.3): 24h 経過 + revision 変化
+            // 取得は短時間 (~数百 ms) のため起動 setup 内で同期実行。失敗してもアプリは
+            // 起動し、エラーは tracing で残す (UI には次回起動時に再判定で再試行される)
+            try_take_auto_backup(backup.as_ref());
+
+            // モジュールレジストリ + storage + backup → AppState (`module-contract.md` §2)
             let backends = modules::registry::module_backends();
-            let app_state = AppState::build(backends, storage)
+            let app_state = AppState::build(backends, storage, backup)
                 .map_err(|e| format!("AppState::build failed: {e}"))?;
             app.manage(app_state);
             Ok(())
@@ -65,4 +76,31 @@ pub fn run() {
     builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// 起動時の auto バックアップ判定 + 取得 (`data-model.md` §13.3 / ADR-0007 §2.3)。
+///
+/// ベストエフォート: いずれの段階で失敗してもアプリ起動は継続する (エラーは tracing
+/// に記録するのみ)。次回起動時の判定で `data_revision != last_backup_revision` がまだ
+/// 成り立つため自動的にリトライされる (ADR-0007 §4.2 「失敗時はトーストで通知 + ログ。
+/// 再試行は次回起動時に自然に行われる」)。
+fn try_take_auto_backup(backup: &dyn BackupService) {
+    match backup.should_take_auto() {
+        Ok(false) => {}
+        Ok(true) => match backup.take(BackupKind::Auto) {
+            Ok(record) => {
+                tracing::info!(
+                    path = %record.path.display(),
+                    revision = record.data_revision,
+                    "auto backup taken at startup"
+                );
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "startup auto backup failed; will retry next launch");
+            }
+        },
+        Err(e) => {
+            tracing::error!(error = %e, "should_take_auto check failed");
+        }
+    }
 }

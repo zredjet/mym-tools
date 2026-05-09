@@ -109,6 +109,16 @@ export function AppShell() {
     goToModule("hash");
   });
 
+  // Cmd/Ctrl+, で設定ページ (`docs/ui-design.md` §8.1)
+  useHotkeys(
+    "mod+comma",
+    (e) => {
+      e.preventDefault();
+      navigate("/settings");
+    },
+    { enableOnFormTags: true, enableOnContentEditable: true },
+  );
+
   const handleProjectCreated = useCallback(
     (project: Project) => {
       void refresh();

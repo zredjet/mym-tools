@@ -1,11 +1,12 @@
 /**
  * トップバー (`docs/ui-design.md` §3.4 / §6.1)。高さ 40px 固定。
  *
- * 左: 現在プロジェクトのドロップダウン (Phase 1 では表示のみ、ドロップダウンは Phase 1 中盤)
- * 中央: ⌘K Search トリガ (クリック / Cmd+K で SearchOverlay を開く)
- * 右: テーマトグル + About (About は Phase 1 終盤の C-9 で接続)
+ * 左: 現在プロジェクト名 (Phase 1 では表示のみ、ドロップダウンは Phase 1 中盤)
+ * 中央: ⌘K Search トリガ
+ * 右: テーマトグル + 設定ページへの遷移 (Cmd+, でも開く)
  */
-import { Info, Search } from "lucide-react";
+import { Search, Settings } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import type { Project } from "@/lib/types";
@@ -16,6 +17,7 @@ interface Props {
 }
 
 export function TopBar({ currentProject, onOpenSearch }: Props) {
+  const navigate = useNavigate();
   return (
     <header
       className="flex h-[var(--topbar-h)] shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--bg)] px-3"
@@ -23,11 +25,9 @@ export function TopBar({ currentProject, onOpenSearch }: Props) {
     >
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-[var(--fg)]">
         {currentProject != null ? (
-          <>
-            <span className="truncate" title={currentProject.name}>
-              {currentProject.name}
-            </span>
-          </>
+          <span className="truncate" title={currentProject.name}>
+            {currentProject.name}
+          </span>
         ) : (
           <span className="text-[var(--fg-muted)]">プロジェクト未選択</span>
         )}
@@ -50,11 +50,12 @@ export function TopBar({ currentProject, onOpenSearch }: Props) {
         <ThemeToggle />
         <button
           type="button"
-          aria-label="About"
-          title="About"
+          aria-label="設定"
+          title="設定 (⌘,)"
+          onClick={() => navigate("/settings")}
           className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius)] text-[var(--fg-muted)] hover:bg-[var(--bg-muted)] hover:text-[var(--fg)]"
         >
-          <Info size={16} aria-hidden />
+          <Settings size={16} aria-hidden />
         </button>
       </div>
     </header>
