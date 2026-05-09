@@ -21,9 +21,7 @@ import type { ColorPayloadV1, Item } from "@/lib/types";
 
 const HEX_REGEX = /^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$/;
 
-type DialogMode =
-  | { mode: "create"; projectId: string }
-  | { mode: "edit"; item: Item };
+type DialogMode = { mode: "create"; projectId: string } | { mode: "edit"; item: Item };
 
 type Props = {
   open: boolean;
@@ -34,12 +32,7 @@ type Props = {
 export function ColorItemDialog(props: Props) {
   const title = props.mode === "create" ? "新規 Color" : "Color を編集";
   return (
-    <Modal
-      open={props.open}
-      onClose={props.onClose}
-      title={title}
-      widthClassName="w-full max-w-md"
-    >
+    <Modal open={props.open} onClose={props.onClose} title={title} widthClassName="w-full max-w-md">
       {props.open && <Content {...props} />}
     </Modal>
   );

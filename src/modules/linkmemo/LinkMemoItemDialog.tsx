@@ -25,9 +25,7 @@ import type { Item, LinkMemoPayloadV1 } from "@/lib/types";
 
 type LinkType = "url" | "path" | "memo";
 
-type DialogMode =
-  | { mode: "create"; projectId: string }
-  | { mode: "edit"; item: Item };
+type DialogMode = { mode: "create"; projectId: string } | { mode: "edit"; item: Item };
 
 type Props = {
   open: boolean;
@@ -38,12 +36,7 @@ type Props = {
 export function LinkMemoItemDialog(props: Props) {
   const title = props.mode === "create" ? "新規 Link / Memo" : "Link / Memo を編集";
   return (
-    <Modal
-      open={props.open}
-      onClose={props.onClose}
-      title={title}
-      widthClassName="w-full max-w-xl"
-    >
+    <Modal open={props.open} onClose={props.onClose} title={title} widthClassName="w-full max-w-xl">
       {props.open && <Content {...props} />}
     </Modal>
   );
@@ -70,8 +63,7 @@ function Content(props: Props) {
   const canSubmit =
     !submitting &&
     title.trim().length > 0 &&
-    ((type !== "memo" && target.trim().length > 0) ||
-      (type === "memo" && body.trim().length > 0));
+    ((type !== "memo" && target.trim().length > 0) || (type === "memo" && body.trim().length > 0));
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -87,9 +79,7 @@ function Content(props: Props) {
         const normalized = await linkmemoNormalizeTarget(actualTarget);
         actualType = normalized.type;
         actualTarget = normalized.target;
-        setHint(
-          `file:// URL を ${normalized.type} (${normalized.target}) に正規化しました`,
-        );
+        setHint(`file:// URL を ${normalized.type} (${normalized.target}) に正規化しました`);
       }
 
       const tags = tagsInput

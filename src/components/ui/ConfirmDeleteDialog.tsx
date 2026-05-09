@@ -87,9 +87,7 @@ function ConfirmDeleteContent({
           className="mt-0.5 shrink-0 text-[var(--destructive)]"
         />
         <div className="flex-1">
-          <h2 className="text-base font-semibold text-[var(--fg)]">
-            {entityLabel}を削除しますか?
-          </h2>
+          <h2 className="text-base font-semibold text-[var(--fg)]">{entityLabel}を削除しますか?</h2>
           <p className="mt-1 text-[13px] text-[var(--fg-muted)]">
             この操作は取り消せません。
             {description != null && <> {description}</>}
@@ -98,9 +96,7 @@ function ConfirmDeleteContent({
       </div>
 
       <div className="flex flex-col gap-2 px-4 py-3">
-        <p className="text-[13px] text-[var(--fg)]">
-          確認のため、以下の名前を入力してください:
-        </p>
+        <p className="text-[13px] text-[var(--fg)]">確認のため、以下の名前を入力してください:</p>
         <code className="rounded-[var(--radius)] bg-[var(--bg-muted)] px-2 py-1 font-mono text-[13px] text-[var(--fg)] select-all">
           {name}
         </code>
@@ -125,11 +121,7 @@ function ConfirmDeleteContent({
         <Button variant="ghost" onClick={onClose} disabled={submitting}>
           キャンセル
         </Button>
-        <Button
-          type="submit"
-          variant="destructive"
-          disabled={!matches || submitting}
-        >
+        <Button type="submit" variant="destructive" disabled={!matches || submitting}>
           {submitting ? "削除中..." : `${entityLabel}を削除`}
         </Button>
       </div>

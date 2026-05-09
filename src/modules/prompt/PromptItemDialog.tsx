@@ -21,9 +21,7 @@ import { formatInvokeError } from "@/lib/error";
 import { extractPromptVariables } from "@/lib/promptVars";
 import type { Item, PromptPayloadV1 } from "@/lib/types";
 
-type DialogMode =
-  | { mode: "create"; projectId: string }
-  | { mode: "edit"; item: Item };
+type DialogMode = { mode: "create"; projectId: string } | { mode: "edit"; item: Item };
 
 type Props = {
   open: boolean;

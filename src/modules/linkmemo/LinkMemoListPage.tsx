@@ -187,8 +187,7 @@ function LinkMemoRow({
   onDelete: () => void;
 }) {
   const payload = asPayload(item);
-  const Icon =
-    payload.type === "url" ? Globe : payload.type === "path" ? FileText : StickyNote;
+  const Icon = payload.type === "url" ? Globe : payload.type === "path" ? FileText : StickyNote;
   const openable = payload.type !== "memo" && payload.target != null && payload.target !== "";
 
   return (
