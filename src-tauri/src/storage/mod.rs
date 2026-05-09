@@ -68,6 +68,16 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
     /// される (`data-model.md` §9.1)。
     fn delete_project(&self, id: &ProjectId) -> Result<(), AppError>;
 
+    /// プロジェクトの `position` 列を `ordered_ids` の順序で再付番する (D&D 並び替え)。
+    ///
+    /// **要件 (data-model.md §5)**:
+    /// - `ordered_ids` には **既存全プロジェクトの ID が過不足なく含まれていなければならない**
+    ///   (欠損 / 余分 / 未知 ID は `AppError::Validation` で reject)。これにより、
+    ///   同時編集や stale state による予期せぬ position 上書きを防ぐ
+    /// - 1 トランザクション内で全 UPDATE → コミット → `data_revision +1`
+    /// - `position` は `0..ordered_ids.len() as i64 - 1` の連番
+    fn reorder_projects(&self, ordered_ids: &[ProjectId]) -> Result<(), AppError>;
+
     // -------- ScopedStorage 取得 --------
 
     /// 指定モジュールにスコープされたストレージハンドルを返す

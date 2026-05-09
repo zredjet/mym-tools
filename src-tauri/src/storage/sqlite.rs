@@ -332,6 +332,66 @@ impl StorageService for SqliteStorage {
         })
     }
 
+    fn reorder_projects(&self, ordered_ids: &[ProjectId]) -> Result<(), AppError> {
+        // 0) ordered_ids 自体に重複が無いことを確認 (`ABA` 等は明確に reject)
+        let mut seen = std::collections::HashSet::new();
+        for id in ordered_ids {
+            if !seen.insert(id.as_str()) {
+                return Err(AppError::Validation {
+                    module_id: "core.projects".into(),
+                    reason: format!("ordered_ids contains duplicate id: {}", id.as_str()),
+                });
+            }
+        }
+
+        self.with_conn(|conn| {
+            let tx = conn.transaction().map_err(AppError::from)?;
+
+            // 1) 既存全プロジェクト ID を取得し、ordered_ids と完全一致を要求
+            //    (欠損 / 余分があれば stale state からの reorder と見なし弾く)
+            let mut stmt = tx
+                .prepare("SELECT id FROM projects")
+                .map_err(AppError::from)?;
+            let existing_ids: std::collections::HashSet<String> = stmt
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(AppError::from)?
+                .collect::<Result<_, _>>()
+                .map_err(AppError::from)?;
+            drop(stmt);
+
+            let provided_ids: std::collections::HashSet<&str> =
+                ordered_ids.iter().map(|i| i.as_str()).collect();
+            if existing_ids.len() != provided_ids.len()
+                || !existing_ids.iter().all(|e| provided_ids.contains(e.as_str()))
+            {
+                return Err(AppError::Validation {
+                    module_id: "core.projects".into(),
+                    reason: format!(
+                        "ordered_ids must match existing projects exactly (existing={}, provided={})",
+                        existing_ids.len(),
+                        provided_ids.len()
+                    ),
+                });
+            }
+
+            // 2) 連番 0..N-1 で UPDATE
+            let now = now_jst_iso8601();
+            for (idx, id) in ordered_ids.iter().enumerate() {
+                let position: i64 = idx as i64;
+                tx.execute(
+                    "UPDATE projects SET position = ?, updated_at = ? WHERE id = ?",
+                    params![position, now, id.as_str()],
+                )
+                .map_err(AppError::from)?;
+            }
+
+            // 3) data_revision +1 (D&D 並び替えはユーザー編集に該当、`data-model.md` §13.2)
+            Self::bump_data_revision(&tx)?;
+            tx.commit().map_err(AppError::from)?;
+            Ok(())
+        })
+    }
+
     fn data_revision(&self) -> Result<i64, AppError> {
         self.with_conn(|conn| {
             conn.query_row(
@@ -1394,6 +1454,90 @@ mod tests {
         let storage = in_memory_storage();
         let err = storage.delete_project(&ProjectId::new("nope")).unwrap_err();
         assert!(matches!(err, AppError::NotFound { .. }));
+    }
+
+    // -------- reorder_projects --------
+
+    #[test]
+    fn reorder_projects_swaps_positions() {
+        let storage = in_memory_storage();
+        let a = storage.create_project("A", None).unwrap();
+        let b = storage.create_project("B", None).unwrap();
+        let c = storage.create_project("C", None).unwrap();
+        // 初期は position 0,1,2 (作成順) → list は position ASC で A, B, C
+        assert_eq!(
+            storage
+                .list_projects()
+                .unwrap()
+                .iter()
+                .map(|p| p.name.clone())
+                .collect::<Vec<_>>(),
+            vec!["A".to_string(), "B".into(), "C".into()]
+        );
+        // 並び替え: C, A, B
+        storage
+            .reorder_projects(&[c.id.clone(), a.id.clone(), b.id.clone()])
+            .unwrap();
+        let listed: Vec<String> = storage
+            .list_projects()
+            .unwrap()
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        assert_eq!(listed, vec!["C".to_string(), "A".into(), "B".into()]);
+    }
+
+    #[test]
+    fn reorder_projects_increments_data_revision() {
+        let storage = in_memory_storage();
+        let a = storage.create_project("A", None).unwrap();
+        let b = storage.create_project("B", None).unwrap();
+        let before = storage.data_revision().unwrap();
+        storage.reorder_projects(&[b.id, a.id]).unwrap();
+        assert_eq!(storage.data_revision().unwrap(), before + 1);
+    }
+
+    #[test]
+    fn reorder_projects_rejects_missing_id() {
+        let storage = in_memory_storage();
+        let a = storage.create_project("A", None).unwrap();
+        let _b = storage.create_project("B", None).unwrap();
+        // a だけ渡す (b 欠損) → Validation
+        let err = storage.reorder_projects(&[a.id]).unwrap_err();
+        assert!(matches!(err, AppError::Validation { .. }));
+    }
+
+    #[test]
+    fn reorder_projects_rejects_unknown_id() {
+        let storage = in_memory_storage();
+        let a = storage.create_project("A", None).unwrap();
+        // 存在しない ID を含めて呼ぶ → Validation
+        let err = storage
+            .reorder_projects(&[a.id, ProjectId::new("ghost")])
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation { .. }));
+    }
+
+    #[test]
+    fn reorder_projects_rejects_duplicate_id() {
+        let storage = in_memory_storage();
+        let a = storage.create_project("A", None).unwrap();
+        let _b = storage.create_project("B", None).unwrap();
+        // 同 ID 2 回渡す → Validation (count は合うが内容が壊れる)
+        let err = storage.reorder_projects(&[a.id.clone(), a.id]).unwrap_err();
+        assert!(matches!(err, AppError::Validation { .. }));
+    }
+
+    #[test]
+    fn reorder_projects_no_op_with_same_order_still_bumps_revision() {
+        // 同順で渡しても data_revision は +1 する仕様 (UI からの user 操作なので)。
+        // 「変化が無いなら no-op」は現実装では取らない (実装複雑化を避ける)。
+        let storage = in_memory_storage();
+        let a = storage.create_project("A", None).unwrap();
+        let b = storage.create_project("B", None).unwrap();
+        let before = storage.data_revision().unwrap();
+        storage.reorder_projects(&[a.id, b.id]).unwrap();
+        assert_eq!(storage.data_revision().unwrap(), before + 1);
     }
 
     // -------- data_revision --------

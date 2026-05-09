@@ -53,3 +53,17 @@ pub fn core_update_project(
 pub fn core_delete_project(state: State<'_, AppState>, id: String) -> Result<(), AppError> {
     state.storage.delete_project(&ProjectId::new(id))
 }
+
+/// プロジェクトの表示順 (`position`) を `ordered_ids` の順序で再付番する (D&D 並び替え)。
+///
+/// `ordered_ids` には **既存全プロジェクトの ID が過不足なく含まれている** 必要がある
+/// (欠損 / 余分 / 未知 / 重複は `AppError::Validation`)。これにより stale state からの
+/// 偶発的 reorder を弾き、安全性を担保する (`StorageService::reorder_projects` 参照)。
+#[tauri::command]
+pub fn core_reorder_projects(
+    state: State<'_, AppState>,
+    ordered_ids: Vec<String>,
+) -> Result<(), AppError> {
+    let ids: Vec<ProjectId> = ordered_ids.into_iter().map(ProjectId::new).collect();
+    state.storage.reorder_projects(&ids)
+}

@@ -49,6 +49,7 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         crate::commands::projects::core_create_project,
         crate::commands::projects::core_update_project,
         crate::commands::projects::core_delete_project,
+        crate::commands::projects::core_reorder_projects,
         // Core: Items CRUD (ScopedStorage 経由、Eager-on-Read は get_item で発火)
         crate::commands::items::core_list_items,
         crate::commands::items::core_get_item,

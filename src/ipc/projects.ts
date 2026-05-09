@@ -42,3 +42,11 @@ export function updateProject(input: {
 export function deleteProject(id: string): Promise<void> {
   return invoke<void>("core_delete_project", { id });
 }
+
+/**
+ * プロジェクトの表示順を `orderedIds` の順序で再付番する (D&D 並び替え)。
+ * 既存全プロジェクト ID が過不足なく揃っている必要がある (バックエンドで検証)。
+ */
+export function reorderProjects(orderedIds: string[]): Promise<void> {
+  return invoke<void>("core_reorder_projects", { orderedIds });
+}
