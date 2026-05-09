@@ -1,0 +1,166 @@
+# ref: ADR-0008 (配布は portable 差し替え方式 / 自動更新なし) — 各 OS のバンドルを
+# GitHub Releases にアップロードして、ユーザーが手動 DL → 既存アプリと差し替える運用。
+#
+# 第三者 action はすべて commit SHA で pin (ADR-0010 §2.3 / §5)。
+#   `# vX.Y.Z` 形式のバージョンコメントを SHA の右に併記する。
+#   master / mutable tag 直参照は禁止。
+#
+# トリガー: `v*` パターンのタグ push (例: `v0.1.0-alpha.1`、`v0.1.0`)。
+# 各 OS で `cargo tauri build` (デフォルト bundle targets="all") を実行し、生成された
+# DMG (macOS) / MSI + NSIS exe (Windows) を gh release upload で添付する。
+
+name: "Release (ref: ADR-0008)"
+
+permissions:
+  contents: read
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "タグ名 (例: v0.1.0-alpha.1)。手動実行時は事前にタグを push しておくこと"
+        required: true
+        type: string
+
+# 同タグへの連続 push (typo 修正等) で古い run を自動キャンセル
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-upload:
+    name: Build & upload (${{ matrix.os }})
+    permissions:
+      contents: write # gh release create / upload に必要
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundle_glob: "src-tauri/target/release/bundle/dmg/*.dmg"
+          - os: windows-latest
+            # MSI と NSIS の両方を上げる (ユーザー環境次第でどちらか一方が動かないケースに備える)
+            bundle_glob: "src-tauri/target/release/bundle/msi/*.msi src-tauri/target/release/bundle/nsis/*.exe"
+    runs-on: ${{ matrix.os }}
+    env:
+      # tag は push トリガーは GITHUB_REF_NAME、手動実行は inputs.tag を採用
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master HEAD pinned
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: release-${{ matrix.os }}
+          workspaces: src-tauri
+          # Tag からのリリースビルドは main 上の tag commit から走る想定。
+          # キャッシュ書き込みは tag 文字列ベースで分離され、PR からは触れない
+          save-if: "true"
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # tauri-cli は taiki-e/install-action の managed manifest 外のため
+      # 既定 fallback の cargo-binstall で取得される (ADR-0010 §2.3 / Round 8 C-1)
+      - uses: taiki-e/install-action@7ea35f098a7369cd23488403f58be9c491a6c55f # v2.77.0
+        with:
+          tool: tauri-cli
+
+      # Release ビルド: bundle を生成 (--no-bundle を付けない)
+      - name: Tauri release build
+        working-directory: src-tauri
+        run: cargo tauri build
+
+      # 既存 Release が無ければ作成 (`gh release view` の exit code 判定で skip)。
+      # `--prerelease` は alpha / beta / rc を含むタグを自動判定して付与。
+      # NOTE: `bash` は GitHub Actions runner 上で macOS / Windows どちらでも利用可
+      #       (Windows runner の bash は Git Bash 経由)
+      - name: Ensure GitHub Release exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${RELEASE_TAG}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists, skipping create"
+            exit 0
+          fi
+          # alpha / beta / rc を含むタグは prerelease 扱い
+          PRE_FLAG=""
+          case "${TAG}" in
+            *alpha*|*beta*|*rc*) PRE_FLAG="--prerelease" ;;
+          esac
+          # 改行入りリリースノートを heredoc で渡す
+          NOTES_FILE="$(mktemp)"
+          cat > "${NOTES_FILE}" <<'EOF'
+          # MyMyTools
+
+          個人用ローカルツールの集合体 — プロンプト管理 / リンク・メモ / カラー / ハッシュ計算。
+
+          ## 含まれるバンドル
+
+          - **macOS**: `MyMyTools_*.dmg` (Apple Silicon / Intel)
+          - **Windows**: `MyMyTools_*.msi` (Windows Installer) / `MyMyTools_*-setup.exe` (NSIS)
+
+          ## インストール
+
+          1. このページの Assets から自分の OS のファイルをダウンロード
+          2. **macOS**: DMG を開いて `MyMyTools.app` を Applications にドラッグ
+          3. **Windows**: MSI または NSIS exe を実行
+          4. 起動時に **「開発元未確認」「不明な発行元」の警告**が出ます (alpha のためコード署名なし):
+             - macOS: Finder で右クリック → 開く、または「システム設定 > プライバシーとセキュリティ」
+               からの許可
+             - Windows: SmartScreen の「詳細情報 > 実行」
+
+          ## データの保存場所
+
+          - macOS: `~/Library/Application Support/com.zredjet.mymtools/`
+          - Windows: `%APPDATA%\com.zredjet.mymtools\`
+
+          バックアップは上記の `backups/` 配下に自動 (起動時 24h ゲート、最新 10 件) +
+          破壊操作直前 (最新 30 件) + 手動 (無制限) の 3 系統で保存されます。
+          設定画面 (⌘, / Settings) からリストア可能です。
+
+          ## 自動更新について
+
+          ADR-0008 通り **自動更新は提供しません**。新版は同じ Releases ページから手動
+          でダウンロードしてアプリを差し替えてください。データ (`data.sqlite`) は維持されます。
+
+          ## バグ報告 / フィードバック
+
+          [GitHub Issues](https://github.com/zredjet/mym-tools/issues) にお願いします。
+          EOF
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            ${PRE_FLAG} \
+            --notes-file "${NOTES_FILE}"
+
+      # bundle をアップロード (`--clobber` で再 run 時の上書きを許容)
+      - name: Upload bundles
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${RELEASE_TAG}"
+          # matrix.bundle_glob は空白区切りの複数 path / glob
+          # shellcheck disable=SC2086
+          for pattern in ${{ matrix.bundle_glob }}; do
+            for f in $pattern; do
+              if [ -f "$f" ]; then
+                echo "Uploading: $f"
+                gh release upload "${TAG}" "$f" --clobber
+              fi
+            done
+          done
