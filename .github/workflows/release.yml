@@ -81,14 +81,14 @@ jobs:
 
           ## 含まれるバンドル
 
-          - **macOS**: `MyMyTools_*.dmg` (Apple Silicon / Intel)
-          - **Windows**: `MyMyTools_*.msi` (Windows Installer) / `MyMyTools_*-setup.exe` (NSIS)
+          - **macOS**: `MyMyTools_*.dmg`
+          - **Windows**: `MyMyTools_*-setup.exe` (NSIS インストーラー)
 
           ## インストール
 
           1. このページの Assets から自分の OS のファイルをダウンロード
           2. **macOS**: DMG を開いて `MyMyTools.app` を Applications にドラッグ
-          3. **Windows**: MSI または NSIS exe を実行
+          3. **Windows**: NSIS exe (`MyMyTools_*-setup.exe`) を実行
           4. 起動時に **「開発元未確認」「不明な発行元」の警告**が出ます (alpha のためコード署名なし):
              - macOS: Finder で右クリック → 開く、または「システム設定 > プライバシーとセキュリティ」
                からの許可
@@ -132,8 +132,10 @@ jobs:
           - os: macos-latest
             bundle_glob: "src-tauri/target/release/bundle/dmg/*.dmg"
           - os: windows-latest
-            # MSI と NSIS の両方を上げる (ユーザー環境次第でどちらか一方が動かないケースに備える)
-            bundle_glob: "src-tauri/target/release/bundle/msi/*.msi src-tauri/target/release/bundle/nsis/*.exe"
+            # Windows は NSIS exe のみ。MSI は WiX が要求する 4-part Windows version
+            # 制約で pre-release 文字列 (alpha.1 等) を受理しないため `bundle.targets`
+            # から除外している (`tauri.conf.json` 参照)
+            bundle_glob: "src-tauri/target/release/bundle/nsis/*.exe"
     runs-on: ${{ matrix.os }}
     env:
       RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
