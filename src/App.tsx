@@ -17,6 +17,7 @@ import { useThemeAttribute } from "@/hooks/useThemeAttribute";
 import { HashPage } from "@/modules/hash/HashPage";
 import { PromptDetailPage } from "@/modules/prompt/PromptDetailPage";
 import { ModulePage } from "@/pages/ModulePage";
+import { SettingsPage } from "@/pages/SettingsPage";
 import { WelcomePage } from "@/pages/WelcomePage";
 
 function App() {
@@ -33,6 +34,7 @@ function App() {
           <Route path="/projects/:projectId/m/prompt/:itemId" element={<PromptDetailPage />} />
           <Route path="/projects/:projectId/m/:moduleId" element={<ModulePage />} />
           <Route path="/modules/hash" element={<HashPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/welcome" replace />} />
         </Route>
       </Routes>

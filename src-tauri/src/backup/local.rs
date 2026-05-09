@@ -303,38 +303,7 @@ impl BackupService for LocalBackupService {
     }
 
     fn delete(&self, path: &Path) -> Result<(), AppError> {
-        // 1) ファイル不在は NotFound。canonicalize より前に判定する (canonicalize は
-        //    対象が存在しないと失敗するため、エラー切り分けが曖昧になる)
-        if !path.exists() {
-            return Err(AppError::NotFound {
-                entity: "backup file".into(),
-                key: path.display().to_string(),
-            });
-        }
-        // 2) backups_root 配下であることを必須化 (path injection 防止、symlink 経路も
-        //    canonicalize で同一視)。backups_root が未作成の状態は通常起き得ないが、
-        //    安全側で Validation エラーにする
-        let canonical_root =
-            self.backups_root
-                .canonicalize()
-                .map_err(|e| AppError::Validation {
-                    module_id: "core.backup".into(),
-                    reason: format!(
-                        "backups_root canonicalize failed ({}): {e}",
-                        self.backups_root.display()
-                    ),
-                })?;
-        let canonical_path = path.canonicalize().map_err(AppError::from)?;
-        if !canonical_path.starts_with(&canonical_root) {
-            return Err(AppError::Validation {
-                module_id: "core.backup".into(),
-                reason: format!(
-                    "path is outside backups_root: {} not under {}",
-                    canonical_path.display(),
-                    canonical_root.display()
-                ),
-            });
-        }
+        let canonical_path = self.ensure_path_inside_root(path)?;
         std::fs::remove_file(&canonical_path).map_err(AppError::from)?;
         Ok(())
     }
@@ -373,9 +342,49 @@ impl BackupService for LocalBackupService {
     }
 
     fn restore_from(&self, src_path: &Path) -> Result<(), AppError> {
-        // 整合性検証 (本メソッド呼び出し前) と pre-restore バックアップ取得 (呼び出し側)
-        // を経て、Online Backup API でアクティブ DB に書き戻す
-        self.storage.restore_online_backup_from(src_path)
+        // PR #35 codex P1 対応: src_path も `backups_root` 配下に必須化する。
+        // `core_backup_restore` は IPC で任意の path を受け取れるため、含意のない
+        // 健全な SQLite ファイル (例えばユーザーが別途持っている DB) を間違って指定して
+        // アクティブ DB を上書きする事故を物理的に不可能にする。
+        let canonical_src = self.ensure_path_inside_root(src_path)?;
+        self.storage.restore_online_backup_from(&canonical_src)
+    }
+}
+
+impl LocalBackupService {
+    /// `path` が `backups_root` 配下に実在することを確認し、canonical パスを返す
+    /// (path injection 防止、symlink 経路も canonicalize で同一視)。
+    /// - 不在は `AppError::NotFound`
+    /// - root 外 / canonicalize 失敗は `AppError::Validation`
+    fn ensure_path_inside_root(&self, path: &Path) -> Result<PathBuf, AppError> {
+        if !path.exists() {
+            return Err(AppError::NotFound {
+                entity: "backup file".into(),
+                key: path.display().to_string(),
+            });
+        }
+        let canonical_root =
+            self.backups_root
+                .canonicalize()
+                .map_err(|e| AppError::Validation {
+                    module_id: "core.backup".into(),
+                    reason: format!(
+                        "backups_root canonicalize failed ({}): {e}",
+                        self.backups_root.display()
+                    ),
+                })?;
+        let canonical_path = path.canonicalize().map_err(AppError::from)?;
+        if !canonical_path.starts_with(&canonical_root) {
+            return Err(AppError::Validation {
+                module_id: "core.backup".into(),
+                reason: format!(
+                    "path is outside backups_root: {} not under {}",
+                    canonical_path.display(),
+                    canonical_root.display()
+                ),
+            });
+        }
+        Ok(canonical_path)
     }
 }
 
@@ -836,5 +845,26 @@ mod tests {
     fn parse_filename_timestamp_rejects_invalid_separators() {
         // `:` を含む (canonical JST_ISO8601 形式) → 拒否
         assert!(parse_filename_timestamp("2026-04-30T15:23:45.123").is_none());
+    }
+
+    // -------- restore: containment check (PR #35 codex P1 回帰) --------
+
+    #[test]
+    fn restore_from_rejects_path_outside_root() {
+        // `backups_root` 配下でない健全な SQLite ファイルを restore に渡しても拒否される
+        // (path injection 防止、PR #35 codex P1)
+        let (temp, storage, svc) = make_service();
+        // 状態 A → backup 取得 (root 内に存在)
+        storage.create_project("inside", None).unwrap();
+        let _r = svc.take(BackupKind::Manual).unwrap();
+        // root の **外** に有効な SQLite ファイルを別途作成 (攻撃シナリオ模倣)
+        let outside_db = temp.path().join("outside-malicious.sqlite");
+        let _ = SqliteStorage::open(&outside_db).unwrap();
+        // restore_from に渡しても Validation で拒否される
+        let err = svc.restore_from(&outside_db).unwrap_err();
+        assert!(matches!(err, AppError::Validation { .. }));
+        // アクティブ DB は影響を受けない (project は残っている)
+        assert_eq!(storage.list_projects().unwrap().len(), 1);
+        assert_eq!(storage.list_projects().unwrap()[0].name, "inside");
     }
 }

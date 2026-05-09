@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::backup::BackupService;
 use crate::module::ModuleBackend;
 use crate::operations::OperationRegistry;
 use crate::storage::StorageService;
@@ -31,6 +32,11 @@ pub struct AppState {
     /// rusqlite 同期 API のため、長時間処理は `tauri::async_runtime::spawn_blocking` で逃がす
     /// (ADR-0009 §2.3 R-1 / R-8)。
     pub storage: Arc<dyn StorageService>,
+
+    /// ローカルバックアップサービス (ADR-0007 / `data-model.md` §13)。
+    /// `<userdata>/backups/{auto,pre-op,manual}/` を管理し、Tauri command 経由で
+    /// auto/pre-op/manual の取得・一覧・削除・整合性検証・リストアを提供する。
+    pub backup: Arc<dyn BackupService>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -47,13 +53,15 @@ impl std::fmt::Debug for AppState {
 }
 
 impl AppState {
-    /// `Arc<dyn ModuleBackend>` の Vec と StorageService から `AppState` を構築する。
+    /// `Arc<dyn ModuleBackend>` の Vec と StorageService と BackupService から
+    /// `AppState` を構築する。
     /// 同 id が複数あったら起動を停止する (`module-contract.md` §2: 「不一致や重複があれば
     /// アプリは起動を停止する」)。
     /// `operations` は新規 `OperationRegistry` で初期化される。
     pub fn build(
         backends: Vec<Arc<dyn ModuleBackend>>,
         storage: Arc<dyn StorageService>,
+        backup: Arc<dyn BackupService>,
     ) -> Result<Self, BuildError> {
         let mut modules = HashMap::new();
         for backend in backends {
@@ -67,6 +75,7 @@ impl AppState {
             modules,
             operations: Arc::new(OperationRegistry::new()),
             storage,
+            backup,
         })
     }
 
@@ -124,11 +133,24 @@ mod tests {
         Arc::new(crate::storage::SqliteStorage::open(":memory:").expect("in-memory storage"))
     }
 
+    fn stub_backup(storage: &Arc<dyn StorageService>) -> Arc<dyn BackupService> {
+        // テスト用に `:memory:` storage と一時ディレクトリを使う。実際の取得テストは
+        // `backup::local::tests` で行うため、ここでは「AppState::build に渡せる」ことだけ確認
+        let dir = tempfile::tempdir().expect("tempdir");
+        Arc::new(crate::backup::LocalBackupService::new(
+            dir.path().to_path_buf(),
+            Arc::clone(storage),
+        ))
+    }
+
     #[test]
     fn build_with_unique_ids_succeeds() {
+        let storage = stub_storage();
+        let backup = stub_backup(&storage);
         let state = AppState::build(
             vec![stub("hash"), stub("prompt"), stub("color")],
-            stub_storage(),
+            storage,
+            backup,
         )
         .unwrap();
         assert_eq!(state.modules.len(), 3);
@@ -140,7 +162,9 @@ mod tests {
 
     #[test]
     fn build_rejects_duplicate_ids() {
-        let err = AppState::build(vec![stub("hash"), stub("hash")], stub_storage()).unwrap_err();
+        let storage = stub_storage();
+        let backup = stub_backup(&storage);
+        let err = AppState::build(vec![stub("hash"), stub("hash")], storage, backup).unwrap_err();
         match err {
             BuildError::DuplicateId(id) => assert_eq!(id, "hash"),
             other => panic!("unexpected variant: {other:?}"),
@@ -149,31 +173,41 @@ mod tests {
 
     #[test]
     fn build_rejects_too_short_id() {
-        let err = AppState::build(vec![stub("hi")], stub_storage()).unwrap_err();
+        let storage = stub_storage();
+        let backup = stub_backup(&storage);
+        let err = AppState::build(vec![stub("hi")], storage, backup).unwrap_err();
         assert!(matches!(err, BuildError::InvalidId(_)));
     }
 
     #[test]
     fn build_rejects_uppercase_id() {
-        let err = AppState::build(vec![stub("Hash")], stub_storage()).unwrap_err();
+        let storage = stub_storage();
+        let backup = stub_backup(&storage);
+        let err = AppState::build(vec![stub("Hash")], storage, backup).unwrap_err();
         assert!(matches!(err, BuildError::InvalidId(_)));
     }
 
     #[test]
     fn build_rejects_id_with_hyphen() {
-        let err = AppState::build(vec![stub("link-memo")], stub_storage()).unwrap_err();
+        let storage = stub_storage();
+        let backup = stub_backup(&storage);
+        let err = AppState::build(vec![stub("link-memo")], storage, backup).unwrap_err();
         assert!(matches!(err, BuildError::InvalidId(_)));
     }
 
     #[test]
     fn build_rejects_id_with_underscore() {
-        let err = AppState::build(vec![stub("link_memo")], stub_storage()).unwrap_err();
+        let storage = stub_storage();
+        let backup = stub_backup(&storage);
+        let err = AppState::build(vec![stub("link_memo")], storage, backup).unwrap_err();
         assert!(matches!(err, BuildError::InvalidId(_)));
     }
 
     #[test]
     fn build_includes_storage_with_data_revision_zero() {
-        let state = AppState::build(vec![stub("hash")], stub_storage()).unwrap();
+        let storage = stub_storage();
+        let backup = stub_backup(&storage);
+        let state = AppState::build(vec![stub("hash")], storage, backup).unwrap();
         // 新規 :memory: storage は data_revision=0 (`data-model.md` §4)
         assert_eq!(state.storage.data_revision().unwrap(), 0);
     }
