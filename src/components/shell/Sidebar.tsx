@@ -69,9 +69,14 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
     if (deletingProject == null) return;
     await deleteProject(deletingProject.id);
     onProjectChanged();
-    // 削除されたプロジェクトを表示中なら welcome へ退避。lastOpened との一致でも消す
-    if (projectId === deletingProject.id || lastOpenedProjectId === deletingProject.id) {
+    // PR #41 codex P2 対応: navigate("/welcome") は **URL の active project 削除時のみ**。
+    // lastOpenedProjectId 一致は store のクリアだけ行い navigate しない。
+    // (例: project A を表示中に sidebar から persist 由来 lastOpened=B を削除しても、
+    //  ユーザーが actively 見ている A から強制退去しない)
+    if (lastOpenedProjectId === deletingProject.id) {
       setLastProject(null);
+    }
+    if (projectId === deletingProject.id) {
       navigate("/welcome");
     }
   }, [deletingProject, onProjectChanged, projectId, lastOpenedProjectId, navigate, setLastProject]);
