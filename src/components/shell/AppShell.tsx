@@ -134,7 +134,11 @@ export function AppShell() {
     <div className="flex h-screen w-screen flex-col bg-[var(--bg)] text-[var(--fg)]">
       <TopBar currentProject={currentProject} onOpenSearch={() => setSearchOpen(true)} />
       <div className="flex min-h-0 flex-1">
-        <Sidebar projects={projects} onProjectCreated={handleProjectCreated} />
+        <Sidebar
+          projects={projects}
+          onProjectCreated={handleProjectCreated}
+          onProjectChanged={() => void refresh()}
+        />
         <main className="min-w-0 flex-1 overflow-auto">
           {error != null ? (
             <div className="m-6 rounded-[var(--radius)] border border-[var(--destructive)] bg-[var(--destructive)]/10 p-4 text-sm text-[var(--destructive)]">

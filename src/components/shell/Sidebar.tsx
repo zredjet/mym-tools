@@ -7,12 +7,15 @@
  *
  * 行高 32px / padding 6px 12px / 選択行は `--bg-accent-soft` + `--accent` テキスト + 左 2px。
  */
-import { useState } from "react";
-import { Plus, Hash, Link as LinkIcon, Palette, FileText } from "lucide-react";
+import { useCallback, useState } from "react";
+import { FileText, Hash, Link as LinkIcon, Palette, Pencil, Plus, Trash2 } from "lucide-react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { ProjectCreateDialog } from "@/components/projects/ProjectCreateDialog";
+import { ProjectEditDialog } from "@/components/projects/ProjectEditDialog";
+import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { deleteProject } from "@/ipc/projects";
 import { cn } from "@/lib/cn";
 import type { ModuleId, Project } from "@/lib/types";
 import { useAppStore } from "@/store/useAppStore";
@@ -21,6 +24,8 @@ interface SidebarProps {
   projects: Project[];
   /** 新規作成成功時に呼び出される (親が再取得する) */
   onProjectCreated: (project: Project) => void;
+  /** 編集 / 削除成功時に呼び出される (親が再取得する) */
+  onProjectChanged: () => void;
 }
 
 interface ModuleEntry {
@@ -37,14 +42,27 @@ const MODULES: readonly ModuleEntry[] = [
   { id: "hash", label: "Hash", icon: Hash },
 ];
 
-export function Sidebar({ projects, onProjectCreated }: SidebarProps) {
+export function Sidebar({ projects, onProjectCreated, onProjectChanged }: SidebarProps) {
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const { projectId, moduleId } = useParams<{ projectId?: string; moduleId?: string }>();
   const location = useLocation();
   const navigate = useNavigate();
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (deletingProject == null) return;
+    await deleteProject(deletingProject.id);
+    onProjectChanged();
+    // 削除されたプロジェクトを表示中なら welcome へ退避
+    if (projectId === deletingProject.id) {
+      setLastProject(null);
+      navigate("/welcome");
+    }
+  }, [deletingProject, onProjectChanged, projectId, navigate, setLastProject]);
 
   // Hash は stateless で `/modules/hash` 単独ルート → URL に `:moduleId` が無いため
   // `useParams` の `moduleId` は undefined になる。pathname から専用判定する
@@ -98,10 +116,12 @@ export function Sidebar({ projects, onProjectCreated }: SidebarProps) {
         )}
         {projects.map((p) => (
           <li key={p.id}>
-            <SidebarRow
-              label={p.name}
+            <ProjectRow
+              project={p}
               selected={projectId === p.id}
-              onClick={() => goToProject(p.id)}
+              onSelect={() => goToProject(p.id)}
+              onEdit={() => setEditingProject(p)}
+              onDelete={() => setDeletingProject(p)}
             />
           </li>
         ))}
@@ -131,6 +151,28 @@ export function Sidebar({ projects, onProjectCreated }: SidebarProps) {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreated={onProjectCreated}
+      />
+      {editingProject != null && (
+        <ProjectEditDialog
+          open={editingProject != null}
+          project={editingProject}
+          onClose={() => setEditingProject(null)}
+          onSaved={onProjectChanged}
+        />
+      )}
+      <ConfirmDeleteDialog
+        open={deletingProject != null}
+        entityLabel="プロジェクト"
+        name={deletingProject?.name ?? ""}
+        description={
+          <>
+            <strong>このプロジェクト配下のすべてのアイテム</strong>
+            (Prompts / Links / Colors) が連鎖削除されます。バックアップから戻すこと
+            は可能ですが、現在の状態へは戻れません。
+          </>
+        }
+        onClose={() => setDeletingProject(null)}
+        onConfirm={handleConfirmDelete}
       />
     </aside>
   );
@@ -172,5 +214,62 @@ function SidebarRow({ label, icon, selected, disabled, onClick }: RowProps) {
       {icon != null && <span className="shrink-0">{icon}</span>}
       <span className="truncate">{label}</span>
     </button>
+  );
+}
+
+interface ProjectRowProps {
+  project: Project;
+  selected: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}
+
+/**
+ * プロジェクト行 (`docs/ui-design.md` §3.2)。SidebarRow と異なり hover 時に編集/削除
+ * のミニアイコンを表示する。クリック領域を分けるため、ボタンを横並びにして
+ * `<li>` 全体は単一の `flex` コンテナに。
+ */
+function ProjectRow({ project, selected, onSelect, onEdit, onDelete }: ProjectRowProps) {
+  return (
+    <div
+      className={cn(
+        "group flex h-[var(--row-h)] items-center rounded-[var(--radius)]",
+        selected ? "bg-[var(--bg-accent-soft)]" : "hover:bg-[var(--bg-muted)]",
+      )}
+      style={selected ? { boxShadow: "inset 2px 0 0 0 var(--accent)" } : undefined}
+    >
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={selected ? "page" : undefined}
+        className={cn(
+          "min-w-0 flex-1 truncate px-3 text-left text-[13px]",
+          selected ? "font-medium text-[var(--accent)]" : "text-[var(--fg)]",
+        )}
+      >
+        {project.name}
+      </button>
+      <div className="mr-1 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <button
+          type="button"
+          aria-label={`${project.name} を編集`}
+          title="編集"
+          onClick={onEdit}
+          className="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--fg-subtle)] hover:bg-[var(--bg)] hover:text-[var(--accent)]"
+        >
+          <Pencil size={12} aria-hidden />
+        </button>
+        <button
+          type="button"
+          aria-label={`${project.name} を削除`}
+          title="削除"
+          onClick={onDelete}
+          className="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--fg-subtle)] hover:bg-[var(--bg)] hover:text-[var(--destructive)]"
+        >
+          <Trash2 size={12} aria-hidden />
+        </button>
+      </div>
+    </div>
   );
 }

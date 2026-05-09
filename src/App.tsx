@@ -16,6 +16,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { useThemeAttribute } from "@/hooks/useThemeAttribute";
 import { HashPage } from "@/modules/hash/HashPage";
 import { PromptDetailPage } from "@/modules/prompt/PromptDetailPage";
+import { AboutPage } from "@/pages/AboutPage";
 import { ModulePage } from "@/pages/ModulePage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { WelcomePage } from "@/pages/WelcomePage";
@@ -35,6 +36,7 @@ function App() {
           <Route path="/projects/:projectId/m/:moduleId" element={<ModulePage />} />
           <Route path="/modules/hash" element={<HashPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/about" element={<AboutPage />} />
           <Route path="*" element={<Navigate to="/welcome" replace />} />
         </Route>
       </Routes>
