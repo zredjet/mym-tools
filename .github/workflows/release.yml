@@ -81,8 +81,8 @@ jobs:
 
           ## 含まれるバンドル
 
-          - **macOS**: `MyMyTools_*.dmg`
-          - **Windows**: `MyMyTools_*-setup.exe` (NSIS インストーラー)
+          - **macOS**: `MyMyTools_*_aarch64.dmg` (Apple Silicon 専用 / Intel Mac 非対応)
+          - **Windows**: `MyMyTools_*-setup.exe` (NSIS インストーラー、x64)
 
           ## インストール
 
@@ -130,11 +130,21 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            bundle_glob: "src-tauri/target/release/bundle/dmg/*.dmg"
+            # macOS: Apple Silicon (arm64) 専用ビルド。alpha.1 は GitHub macos-latest
+            # runner の host architecture (現状 arm64) でビルドされたため、target を
+            # 明示しなくても arm64 dmg は出ていたが、本 PR で `--target
+            # aarch64-apple-darwin` を明示し、配布対象が Apple Silicon である事を
+            # workflow / 出力 path 双方ではっきりさせる。
+            # Intel Mac 対応 (universal binary) は Phase 1 では追わない方針 (alpha
+            # ユーザー想定が Apple Silicon)
+            rust_targets: "aarch64-apple-darwin"
+            tauri_target_arg: "--target aarch64-apple-darwin"
+            bundle_glob: "src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg"
           - os: windows-latest
-            # Windows は NSIS exe のみ。MSI は WiX が要求する 4-part Windows version
-            # 制約で pre-release 文字列 (alpha.1 等) を受理しないため `bundle.targets`
-            # から除外している (`tauri.conf.json` 参照)
+            # Windows は NSIS exe のみ (MSI は WiX が pre-release 文字列を受理しないため
+            # `bundle.targets` から除外、`tauri.conf.json` 参照)。host target でビルド
+            rust_targets: ""
+            tauri_target_arg: ""
             bundle_glob: "src-tauri/target/release/bundle/nsis/*.exe"
     runs-on: ${{ matrix.os }}
     env:
@@ -146,9 +156,11 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
+      # `targets:` は空白区切りで複数指定可。空文字なら host target のみ
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master HEAD pinned
         with:
           toolchain: stable
+          targets: ${{ matrix.rust_targets }}
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
@@ -170,10 +182,11 @@ jobs:
         with:
           tool: tauri-cli
 
-      # Release ビルド: bundle を生成 (--no-bundle を付けない)
+      # Release ビルド: bundle を生成 (--no-bundle を付けない)。macOS は
+      # `--target universal-apple-darwin` で Apple Silicon + Intel の universal binary
       - name: Tauri release build
         working-directory: src-tauri
-        run: cargo tauri build
+        run: cargo tauri build ${{ matrix.tauri_target_arg }}
 
       # bundle をアップロード (`--clobber` で再 run 時の上書きを許容)。
       # Release は `create-release` ジョブで作成済 (PR #37 codex P2: レース回避)
