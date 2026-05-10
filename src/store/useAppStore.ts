@@ -17,6 +17,13 @@ import type { ModuleId } from "@/lib/types";
 /** UI テーマ */
 export type Theme = "light" | "dark";
 
+/**
+ * 行高密度 (`docs/ui-design.md` §2.3)。
+ * - `compact` = 32px (default、Linear 寄り)
+ * - `comfortable` = 36px (タップ / 視認性優先)
+ */
+export type RowDensity = "compact" | "comfortable";
+
 interface AppState {
   /** 現在のテーマ (`<html data-theme>` に反映される) */
   theme: Theme;
@@ -29,6 +36,12 @@ interface AppState {
    * 設定項目を将来追加する余地)。
    */
   uiScale: number;
+  /**
+   * 行高密度 (`compact` = 32px / `comfortable` = 36px)。CSS 変数 `--row-h` に同期される。
+   * Sidebar の項目高さと、Prompt / LinkMemo のリスト行高に効く (Color はスウォッチ
+   * grid のため影響なし)。
+   */
+  rowDensity: RowDensity;
   /** 直近に開いていたモジュール ID (新セッション再開時の復元用) */
   lastOpenedModuleId: ModuleId | null;
   /** 直近に開いていたプロジェクト ID (再開時の復元用) */
@@ -38,6 +51,7 @@ interface AppState {
   toggleTheme: () => void;
   setSidebarWidth: (width: number) => void;
   setUiScale: (scale: number) => void;
+  setRowDensity: (density: RowDensity) => void;
   setLastOpenedModuleId: (id: ModuleId | null) => void;
   setLastOpenedProjectId: (id: string | null) => void;
 }
@@ -51,6 +65,13 @@ export const UI_SCALE_PRESETS = [0.8, 0.9, 1.0, 1.15, 1.3] as const;
 const UI_SCALE_MIN = 0.75;
 const UI_SCALE_MAX = 1.5;
 const UI_SCALE_DEFAULT = 1.0;
+
+/** 行高密度プリセットと px 値 (CSS `--row-h` に同期される) */
+export const ROW_DENSITY_PX: Record<RowDensity, number> = {
+  compact: 32,
+  comfortable: 36,
+};
+const ROW_DENSITY_DEFAULT: RowDensity = "compact";
 
 const clampWidth = (w: number): number =>
   Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(w)));
@@ -72,6 +93,7 @@ export const useAppStore = create<AppState>()(
       theme: detectInitialTheme(),
       sidebarWidth: SIDEBAR_DEFAULT,
       uiScale: UI_SCALE_DEFAULT,
+      rowDensity: ROW_DENSITY_DEFAULT,
       lastOpenedModuleId: null,
       lastOpenedProjectId: null,
 
@@ -79,6 +101,7 @@ export const useAppStore = create<AppState>()(
       toggleTheme: () => set((s) => ({ theme: s.theme === "light" ? "dark" : "light" })),
       setSidebarWidth: (width) => set({ sidebarWidth: clampWidth(width) }),
       setUiScale: (scale) => set({ uiScale: clampUiScale(scale) }),
+      setRowDensity: (density) => set({ rowDensity: density }),
       setLastOpenedModuleId: (id) => set({ lastOpenedModuleId: id }),
       setLastOpenedProjectId: (id) => set({ lastOpenedProjectId: id }),
     }),
@@ -90,6 +113,7 @@ export const useAppStore = create<AppState>()(
         theme: s.theme,
         sidebarWidth: s.sidebarWidth,
         uiScale: s.uiScale,
+        rowDensity: s.rowDensity,
         lastOpenedModuleId: s.lastOpenedModuleId,
         lastOpenedProjectId: s.lastOpenedProjectId,
       }),

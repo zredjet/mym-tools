@@ -7,7 +7,7 @@
  *
  * 行高 32px / padding 6px 12px / 選択行は `--bg-accent-soft` + `--accent` テキスト + 左 2px。
  */
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   FileText,
   GripVertical,
@@ -78,6 +78,7 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
   const location = useLocation();
   const navigate = useNavigate();
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
+  const setSidebarWidth = useAppStore((s) => s.setSidebarWidth);
   const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
   const lastOpenedProjectId = useAppStore((s) => s.lastOpenedProjectId);
@@ -163,10 +164,11 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
 
   return (
     <aside
-      className="flex h-full shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg-sidebar)] text-[13px] text-[var(--fg)]"
+      className="relative flex h-full shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg-sidebar)] text-[13px] text-[var(--fg)]"
       style={{ width: sidebarWidth }}
       aria-label="サイドバー"
     >
+      <SidebarResizeHandle width={sidebarWidth} onResize={setSidebarWidth} />
       {/* PROJECTS section */}
       <SectionHeader
         title="PROJECTS"
@@ -260,6 +262,85 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
         onConfirm={handleConfirmDelete}
       />
     </aside>
+  );
+}
+
+/**
+ * サイドバー右端の resize 用 separator (`docs/ui-design.md` §2.3 / U-10)。
+ *
+ * - PointerDown → setPointerCapture でドラッグ追従、PointerUp で release
+ * - 値は store の `setSidebarWidth` で 180-320 にクランプ済 (`useAppStore`)
+ * - ARIA: `role="separator"` + `aria-orientation="vertical"`、`aria-valuenow/min/max`
+ *   をスクリーンリーダーに伝える
+ * - キーボード: `←` / `→` で 8px ずつ、`Shift` 併用で 32px ずつ調整 (a11y 配慮)
+ */
+function SidebarResizeHandle({
+  width,
+  onResize,
+}: {
+  width: number;
+  onResize: (next: number) => void;
+}) {
+  const startX = useRef<number | null>(null);
+  const startWidth = useRef<number>(width);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    // 主ボタン以外 (右クリック等) は無視。複数ポインタ環境での誤動作を抑制
+    if (e.button !== 0) return;
+    e.preventDefault();
+    startX.current = e.clientX;
+    startWidth.current = width;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (startX.current == null) return;
+    const delta = e.clientX - startX.current;
+    onResize(startWidth.current + delta);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (startX.current == null) return;
+    startX.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    const step = e.shiftKey ? 32 : 8;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      onResize(width - step);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      onResize(width + step);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      onResize(180);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      onResize(320);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="サイドバー幅を変更"
+      aria-valuenow={width}
+      aria-valuemin={180}
+      aria-valuemax={320}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onKeyDown={handleKeyDown}
+      className="group absolute top-0 right-0 z-10 h-full w-1 cursor-col-resize touch-none bg-transparent hover:bg-[var(--accent)]/30 focus-visible:bg-[var(--accent)]/40"
+      tabIndex={0}
+    />
   );
 }
 

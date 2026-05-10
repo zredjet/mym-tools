@@ -26,7 +26,12 @@ import {
 } from "@/ipc/backup";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
-import { UI_SCALE_PRESETS, useAppStore } from "@/store/useAppStore";
+import {
+  ROW_DENSITY_PX,
+  type RowDensity,
+  UI_SCALE_PRESETS,
+  useAppStore,
+} from "@/store/useAppStore";
 
 export function SettingsPage() {
   const navigate = useNavigate();
@@ -110,6 +115,10 @@ export function SettingsPage() {
       </header>
 
       <UiScaleSection />
+
+      <RowDensitySection />
+
+      <SidebarWidthInfo />
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
@@ -259,6 +268,89 @@ function UiScaleSection() {
         <span className="ml-2 text-[11px] text-[var(--fg-subtle)] tabular-nums">
           現在: {Math.round(uiScale * 100)}%
         </span>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * 行高密度切替 (`docs/ui-design.md` §2.3、PR-AA)。
+ * `--row-h` を 32 / 36 px に切り替える。Sidebar 行高 + Prompt / LinkMemo の
+ * リスト行に効く (Color はスウォッチ grid なので影響なし)。
+ */
+function RowDensitySection() {
+  const rowDensity = useAppStore((s) => s.rowDensity);
+  const setRowDensity = useAppStore((s) => s.setRowDensity);
+  const options: { value: RowDensity; label: string; sub: string }[] = [
+    { value: "compact", label: "Compact", sub: `${ROW_DENSITY_PX.compact}px (default)` },
+    { value: "comfortable", label: "Comfortable", sub: `${ROW_DENSITY_PX.comfortable}px` },
+  ];
+  return (
+    <section className="flex flex-col gap-2">
+      <div>
+        <h2 className="text-base font-semibold text-[var(--fg)]">行高 (Density)</h2>
+        <p className="text-[12px] text-[var(--fg-muted)]">
+          Sidebar / リスト行の高さ。Compact = 32px (Linear 寄り)、Comfortable = 36px
+          (タップ・視認性優先)。
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {options.map((opt) => {
+          const selected = rowDensity === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setRowDensity(opt.value)}
+              aria-pressed={selected}
+              className={cn(
+                "flex h-8 items-center gap-1.5 rounded-[var(--radius)] border px-3 text-[12px] transition-colors",
+                selected
+                  ? "border-[var(--accent)] bg-[var(--bg-accent-soft)] text-[var(--accent)]"
+                  : "border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] hover:bg-[var(--bg-muted)]",
+              )}
+            >
+              <span className="font-medium">{opt.label}</span>
+              <span className="font-mono text-[var(--fg-subtle)]">{opt.sub}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * サイドバー幅の表示専用セクション (PR-AA)。
+ * 値はサイドバー右端を D&D してリアルタイム調整 (180-320px、`docs/ui-design.md`
+ * §2.3)。Settings 側にスライダーを置くより、結果を見ながら掴む方が直感的なので
+ * ここでは現在値の表示と「デフォルトに戻す」ボタンのみを提供する。
+ */
+function SidebarWidthInfo() {
+  const sidebarWidth = useAppStore((s) => s.sidebarWidth);
+  const setSidebarWidth = useAppStore((s) => s.setSidebarWidth);
+  const isDefault = sidebarWidth === 240;
+  return (
+    <section className="flex flex-col gap-2">
+      <div>
+        <h2 className="text-base font-semibold text-[var(--fg)]">サイドバー幅</h2>
+        <p className="text-[12px] text-[var(--fg-muted)]">
+          サイドバー右端をドラッグして調整できます (180-320px)。キーボード操作は ←/→ で
+          8px、Shift+←/→ で 32px、Home/End で最小/最大に。
+        </p>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="font-mono text-[12px] text-[var(--fg)] tabular-nums">
+          現在: {sidebarWidth}px
+        </span>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setSidebarWidth(240)}
+          disabled={isDefault}
+        >
+          デフォルト (240px) に戻す
+        </Button>
       </div>
     </section>
   );
