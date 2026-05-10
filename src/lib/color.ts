@@ -19,6 +19,26 @@ const toRgb = converter("rgb");
 
 /** HEX 6 桁 (`#RRGGBB`、大文字) の正規表現 */
 const HEX6_REGEX = /^#[0-9A-Fa-f]{6}$/;
+/** HEX 8 桁 (`#RRGGBBAA`、alpha 付き) の正規表現 */
+const HEX8_REGEX = /^#[0-9A-Fa-f]{8}$/;
+
+/**
+ * 表示用の hex 入力を扱う際、`#RRGGBBAA` (8 桁) を `#RRGGBB` に正規化する。
+ * format 関数で「保存値が 8 桁でも RGB / HSL / OKLCH 表示は alpha を無視して
+ * 計算する」ために使う。
+ */
+function strip6(hex: string): string {
+  if (HEX8_REGEX.test(hex)) return hex.slice(0, 7);
+  return hex;
+}
+
+/**
+ * `#RRGGBB` または `#RRGGBBAA` の妥当な hex 文字列か判定する。`data-model.md` §10.3
+ * で許容される backend 仕様と一致 (8 桁 alpha も valid 扱い)。
+ */
+export function isValidStorableHex(hex: string): boolean {
+  return HEX6_REGEX.test(hex) || HEX8_REGEX.test(hex);
+}
 
 /** culori の `Color` 型を完全な hex (6 桁) に正規化。alpha がある場合は drop */
 function colorToHex6(color: ReturnType<typeof parse>): string | null {
@@ -97,24 +117,27 @@ export function parseOklchInput(input: string): string | null {
 
 // -------- format: canonical HEX → 表示文字列 --------
 
-/** HEX を `#RRGGBB` (大文字) として返す。invalid なら入力をそのまま返す */
+/** HEX を `#RRGGBB` (大文字) として返す。8 桁 (`#RRGGBBAA`) はそのまま大文字化。
+ * invalid なら入力をそのまま返す (UI 側の error 表示は呼び出し側責務) */
 export function formatHexDisplay(hex: string): string {
-  if (HEX6_REGEX.test(hex)) return hex.toUpperCase();
+  if (HEX6_REGEX.test(hex) || HEX8_REGEX.test(hex)) return hex.toUpperCase();
   return hex;
 }
 
-/** HEX → `R, G, B` (各 0-255 整数) */
+/** HEX → `R, G, B` (各 0-255 整数)。8 桁 alpha は無視 (RGB 表示には影響しない) */
 export function formatRgbDisplay(hex: string): string {
-  if (!HEX6_REGEX.test(hex)) return "";
-  const c = toRgb(parse(hex));
+  const stripped = strip6(hex);
+  if (!HEX6_REGEX.test(stripped)) return "";
+  const c = toRgb(parse(stripped));
   if (c == null) return "";
   return `${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)}`;
 }
 
-/** HEX → `H, S%, L%` (H 0-360 整数、S/L 0-100 整数)。culori 出力を四捨五入で揃える */
+/** HEX → `H, S%, L%` (H 0-360 整数、S/L 0-100 整数)。8 桁 alpha は無視 */
 export function formatHslDisplay(hex: string): string {
-  if (!HEX6_REGEX.test(hex)) return "";
-  const c = toHsl(parse(hex));
+  const stripped = strip6(hex);
+  if (!HEX6_REGEX.test(stripped)) return "";
+  const c = toHsl(parse(stripped));
   if (c == null) return "";
   const h = Math.round(c.h ?? 0);
   const s = Math.round(c.s * 100);
@@ -122,10 +145,11 @@ export function formatHslDisplay(hex: string): string {
   return `${h}, ${s}%, ${l}%`;
 }
 
-/** HEX → `L C H` (L 0-1 を 3 桁、C 0-0.4 を 3 桁、H 0-360 整数) */
+/** HEX → `L C H` (L 0-1 を 3 桁、C 0-0.4 を 3 桁、H 0-360 整数)。8 桁 alpha は無視 */
 export function formatOklchDisplay(hex: string): string {
-  if (!HEX6_REGEX.test(hex)) return "";
-  const c = toOklch(parse(hex));
+  const stripped = strip6(hex);
+  if (!HEX6_REGEX.test(stripped)) return "";
+  const c = toOklch(parse(stripped));
   if (c == null) return "";
   const l = c.l.toFixed(3);
   const chr = c.c.toFixed(3);

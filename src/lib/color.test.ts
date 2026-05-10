@@ -11,6 +11,7 @@ import {
   formatHslDisplay,
   formatOklchDisplay,
   formatRgbDisplay,
+  isValidStorableHex,
   parseHexInput,
   parseHslInput,
   parseOklchInput,
@@ -127,6 +128,33 @@ describe("formatXxxDisplay", () => {
     expect(formatRgbDisplay("not-hex")).toBe("");
     expect(formatHslDisplay("#GGHHII")).toBe("");
     expect(formatOklchDisplay("#XYZ")).toBe("");
+  });
+
+  // PR #43 codex P1: 8 桁 alpha hex でも RGB / HSL / OKLCH 表示は alpha を無視して計算する
+  it("RGB/HSL/OKLCH displays accept 8-digit alpha hex (alpha ignored)", () => {
+    expect(formatRgbDisplay("#3B82F6FF")).toBe("59, 130, 246");
+    expect(formatHslDisplay("#3B82F6FF")).toMatch(/^\d+,\s+\d+%,\s+\d+%$/);
+    expect(formatOklchDisplay("#3B82F6FF")).toMatch(/^\d+\.\d{3}\s\d+\.\d{3}\s\d+$/);
+  });
+
+  it("HEX display preserves 8-digit (uppercase)", () => {
+    expect(formatHexDisplay("#3b82f6ff")).toBe("#3B82F6FF");
+  });
+});
+
+describe("isValidStorableHex", () => {
+  it("accepts 6-digit and 8-digit hex (both lowercase / uppercase)", () => {
+    expect(isValidStorableHex("#3B82F6")).toBe(true);
+    expect(isValidStorableHex("#3b82f6")).toBe(true);
+    expect(isValidStorableHex("#3B82F6FF")).toBe(true);
+    expect(isValidStorableHex("#3b82f6aa")).toBe(true);
+  });
+
+  it("rejects malformed hex", () => {
+    expect(isValidStorableHex("#3B82F")).toBe(false); // 5 桁
+    expect(isValidStorableHex("3B82F6")).toBe(false); // # 無し
+    expect(isValidStorableHex("#GGHHII")).toBe(false); // 非 hex
+    expect(isValidStorableHex("")).toBe(false);
   });
 });
 

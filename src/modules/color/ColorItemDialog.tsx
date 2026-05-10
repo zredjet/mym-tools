@@ -2,25 +2,30 @@
  * Color 新規作成 / 編集ダイアログ (`docs/ui-design.md` §6.5 K-2)。
  *
  * `mode` で create / edit を切替。**HEX/RGB/HSL/OKLCH の 4 色空間を同時表示** し、
- * いずれかを編集すると他の 3 つも自動同期する (canonical = HEX、6 桁)。
+ * いずれかを編集すると他の 3 つも自動同期する (canonical = HEX、6 桁または 8 桁)。
  *
- * - HEX は保存時に大文字正規化 (`docs/data-model.md` §10.3「正規化済み (大文字)」)
- * - alpha (`#RRGGBBAA`) は Phase 1 では drop (将来検討)
+ * - 保存値は大文字正規化 (`docs/data-model.md` §10.3)
+ * - **alpha (`#RRGGBBAA`) は保存時に drop しない** (PR #43 codex P1):
+ *   既存 8 桁データを開いて name / tags だけ編集 → 保存しても元の alpha を維持。
+ *   ユーザーが色 input を触ると 6 桁化 (RGB / HSL / OKLCH 入力からは alpha 復元不能)
  *
  * ## 双方向バインドの設計
  *
- * - canonical state: `hex: string` (常に `#RRGGBB` の妥当な値、初期値含む)
+ * - canonical state: `hex: string` (`#RRGGBB` または `#RRGGBBAA`、常に妥当な値)
  * - 各色空間 input は **`ColorChannelInput`** で個別に管理:
  *   - 通常時は canonical hex から `format` で表示文字列を導出
  *   - ユーザーが入力中は内部 draft で表示 (まだパース不能でも入力を保持)
  *   - 入力が valid (parse 成功) なら canonical hex を更新 → 他 input も追従
  *   - blur 時は draft をクリア → canonical 由来の表示に戻る
- * - これにより「3 つを表示・1 つを編集」を `useEffect` の setState 連鎖なしで実現
+ *   - **invalid draft 中は親に通知** (PR #43 codex P2): 任意の channel が
+ *     invalid 状態だと **保存ボタン / Cmd+S を disable** する (canonical hex は
+ *     妥当でも、ユーザーが見ている入力と保存値が乖離するのを防ぐ)
+ * - これにより `useEffect` の setState 連鎖なしで「3 つを表示・1 つを編集」を実現
  *
  * ## ショートカット
- * - `Cmd/Ctrl + S` / `Cmd/Ctrl + Enter`: 保存
+ * - `Cmd/Ctrl + S` / `Cmd/Ctrl + Enter`: 保存 (invalid channel 中は no-op)
  */
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 
 import { Button } from "@/components/ui/Button";
@@ -31,6 +36,7 @@ import {
   formatHslDisplay,
   formatOklchDisplay,
   formatRgbDisplay,
+  isValidStorableHex,
   parseHexInput,
   parseHslInput,
   parseOklchInput,
@@ -39,8 +45,6 @@ import {
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import type { ColorPayloadV1, Item } from "@/lib/types";
-
-const HEX6_REGEX = /^#[0-9A-Fa-f]{6}$/;
 
 type DialogMode = { mode: "create"; projectId: string } | { mode: "edit"; item: Item };
 
@@ -62,11 +66,10 @@ export function ColorItemDialog(props: Props) {
 function Content(props: Props) {
   const initial: ColorPayloadV1 | null =
     props.mode === "edit" ? (props.item.payload as ColorPayloadV1) : null;
-  // canonical: 常に妥当な #RRGGBB に保つ (alpha は drop)。create 初期値は #3B82F6 (blue-600)
+  // canonical: 既存 hex は **alpha 保持で開く** (PR #43 codex P1)。妥当でない値や
+  // create 時は blue-600 (#3B82F6) で初期化
   const initialHex =
-    initial?.hex != null && HEX6_REGEX.test(initial.hex.slice(0, 7))
-      ? initial.hex.slice(0, 7).toUpperCase()
-      : "#3B82F6";
+    initial?.hex != null && isValidStorableHex(initial.hex) ? initial.hex.toUpperCase() : "#3B82F6";
   const [name, setName] = useState(props.mode === "edit" ? props.item.title : "");
   const [hex, setHex] = useState(initialHex);
   const [tagsInput, setTagsInput] = useState(
@@ -74,8 +77,20 @@ function Content(props: Props) {
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // PR #43 codex P2: 各 channel input が invalid draft を持っていれば true。
+  // canSubmit / hotkey 保存実行時にチェック (invalid 中は保存できない)
+  const [invalidChannels, setInvalidChannels] = useState<Record<string, boolean>>({});
 
-  const canSubmit = !submitting && name.trim().length > 0 && HEX6_REGEX.test(hex);
+  const handleInvalidChange = useCallback((id: string, invalid: boolean) => {
+    setInvalidChannels((prev) => {
+      if (Boolean(prev[id]) === invalid) return prev; // 変化なし → re-render 抑止
+      return { ...prev, [id]: invalid };
+    });
+  }, []);
+
+  const anyChannelInvalid = Object.values(invalidChannels).some(Boolean);
+  const canSubmit =
+    !submitting && name.trim().length > 0 && isValidStorableHex(hex) && !anyChannelInvalid;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -166,6 +181,7 @@ function Content(props: Props) {
           format={formatHexDisplay}
           parse={parseHexInput}
           onCommit={setHex}
+          onInvalidChange={(v) => handleInvalidChange("hex", v)}
           disabled={submitting}
         />
         <ColorChannelInput
@@ -176,6 +192,7 @@ function Content(props: Props) {
           format={formatRgbDisplay}
           parse={parseRgbInput}
           onCommit={setHex}
+          onInvalidChange={(v) => handleInvalidChange("rgb", v)}
           disabled={submitting}
         />
         <ColorChannelInput
@@ -186,6 +203,7 @@ function Content(props: Props) {
           format={formatHslDisplay}
           parse={parseHslInput}
           onCommit={setHex}
+          onInvalidChange={(v) => handleInvalidChange("hsl", v)}
           disabled={submitting}
         />
         <ColorChannelInput
@@ -196,6 +214,7 @@ function Content(props: Props) {
           format={formatOklchDisplay}
           parse={parseOklchInput}
           onCommit={setHex}
+          onInvalidChange={(v) => handleInvalidChange("oklch", v)}
           disabled={submitting}
         />
       </div>
@@ -236,7 +255,7 @@ interface ColorChannelInputProps {
   id: string;
   label: string;
   placeholder: string;
-  /** canonical HEX (`#RRGGBB`、6 桁) */
+  /** canonical HEX (`#RRGGBB` または `#RRGGBBAA`) */
   hex: string;
   /** HEX → 表示文字列 */
   format: (hex: string) => string;
@@ -244,6 +263,8 @@ interface ColorChannelInputProps {
   parse: (input: string) => string | null;
   /** parse 成功時に canonical hex を更新 */
   onCommit: (hex: string) => void;
+  /** PR #43 codex P2: 親に invalid 状態を通知 (canSubmit / Cmd+S 抑止に使う) */
+  onInvalidChange: (invalid: boolean) => void;
   disabled?: boolean;
 }
 
@@ -253,7 +274,9 @@ interface ColorChannelInputProps {
  * - 通常時 (draft = null): canonical hex から `format` で導出した値を表示
  * - 編集中 (draft = string): ユーザーが入力した文字列を保持。parse 成功時のみ
  *   `onCommit` で canonical hex を更新する (失敗時は draft だけ更新、エラー表示)
- * - blur 時: draft を null に戻し、canonical 由来の表示に切替
+ * - 各操作の直後に **`onInvalidChange`** で親に invalid 状態を通知 → 親側で
+ *   保存ボタン / hotkey を抑止 (PR #43 codex P2)
+ * - blur 時: draft を null に戻し、canonical 由来の表示に切替 (= valid)
  */
 function ColorChannelInput({
   id,
@@ -263,6 +286,7 @@ function ColorChannelInput({
   format,
   parse,
   onCommit,
+  onInvalidChange,
   disabled,
 }: ColorChannelInputProps) {
   const [draft, setDraft] = useState<string | null>(null);
@@ -272,7 +296,17 @@ function ColorChannelInput({
   const handleChange = (val: string) => {
     setDraft(val);
     const parsed = parse(val);
-    if (parsed != null) onCommit(parsed);
+    if (parsed != null) {
+      onCommit(parsed);
+      onInvalidChange(false);
+    } else {
+      onInvalidChange(true);
+    }
+  };
+
+  const handleBlur = () => {
+    setDraft(null);
+    onInvalidChange(false); // canonical 由来の表示に戻る = valid
   };
 
   return (
@@ -293,7 +327,7 @@ function ColorChannelInput({
         )}
         value={display}
         onChange={(e) => handleChange(e.target.value)}
-        onBlur={() => setDraft(null)}
+        onBlur={handleBlur}
         disabled={disabled}
       />
     </div>
