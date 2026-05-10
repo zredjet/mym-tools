@@ -63,10 +63,12 @@ export function AppShell() {
   }, []);
 
   // Cmd/Ctrl+K で検索 (`docs/ui-design.md` §8.1)
+  // hotkey で別の overlay を起動する時は、相互に閉じてモーダル二重表示を防ぐ
   useHotkeys(
     "mod+k",
     (e) => {
       e.preventDefault();
+      setSwitcherOpen(false);
       setSearchOpen(true);
     },
     { enableOnFormTags: true, enableOnContentEditable: true },
@@ -77,6 +79,7 @@ export function AppShell() {
     "mod+shift+p",
     (e) => {
       e.preventDefault();
+      setSearchOpen(false);
       setSwitcherOpen(true);
     },
     { enableOnFormTags: true, enableOnContentEditable: true },

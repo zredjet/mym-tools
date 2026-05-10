@@ -48,27 +48,21 @@ function LocationProbe() {
 }
 
 function renderAt(initial: string, onClose = vi.fn()) {
+  // App.tsx と同じく、Prompt 詳細用の固定リテラル route を別途登録する。
+  // これにより `/projects/:projectId/m/prompt/:itemId` 上で `useParams()` に
+  // `moduleId` が乗らない実環境を再現できる (codex P2 の対象)。
+  const switcher = (
+    <>
+      <ProjectSwitcher open onClose={onClose} projects={projects} />
+      <LocationProbe />
+    </>
+  );
   return render(
     <MemoryRouter initialEntries={[initial]}>
       <Routes>
-        <Route
-          path="/projects/:projectId/m/:moduleId"
-          element={
-            <>
-              <ProjectSwitcher open onClose={onClose} projects={projects} />
-              <LocationProbe />
-            </>
-          }
-        />
-        <Route
-          path="/modules/hash"
-          element={
-            <>
-              <ProjectSwitcher open onClose={onClose} projects={projects} />
-              <LocationProbe />
-            </>
-          }
-        />
+        <Route path="/projects/:projectId/m/prompt/:itemId" element={switcher} />
+        <Route path="/projects/:projectId/m/:moduleId" element={switcher} />
+        <Route path="/modules/hash" element={switcher} />
         <Route path="*" element={<LocationProbe />} />
       </Routes>
     </MemoryRouter>,
@@ -127,6 +121,20 @@ describe("ProjectSwitcher", () => {
     // 初期 active = projects[0] = Apple。↓ で Banana に移動
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByTestId("loc").textContent).toBe("/projects/p2/m/prompt");
+  });
+
+  it("preserves 'prompt' module when opened from Prompt detail page (codex P2)", () => {
+    // PromptDetailPage は `/projects/:projectId/m/prompt/:itemId` という固定リテラル
+    // ルートに住んでいるため `useParams().moduleId` は得られない。`useLocation` から
+    // pathname を直接 parse することで、`lastOpenedModuleId` のフォールバックに頼らず
+    // 「現在 prompt にいる」ことを正確に検出する。
+    useAppStore.setState({ lastOpenedModuleId: "color" }); // 過去履歴がノイズになる状況
+    renderAt("/projects/p1/m/prompt/item-uuid-123");
+    const input = screen.getByLabelText("プロジェクト検索") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Banana" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    // lastOpenedModuleId="color" に引きずられず、現在の prompt に着地
     expect(screen.getByTestId("loc").textContent).toBe("/projects/p2/m/prompt");
   });
 

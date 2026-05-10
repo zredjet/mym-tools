@@ -21,12 +21,31 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/lib/cn";
 import type { ModuleId, Project } from "@/lib/types";
 import { useAppStore } from "@/store/useAppStore";
+
+/**
+ * 現在の URL pathname から module ID を派生する (`useParams` 不採用の理由は P2 修正)。
+ *
+ * 理由: `App.tsx` は Prompt 詳細用に `/projects/:projectId/m/prompt/:itemId`
+ * という固定リテラル `prompt` を含むルートを別途登録しているため、その画面で
+ * `useParams()` を呼んでも `moduleId` パラメータは取れない。`useParams` 経由だと
+ * Prompt 詳細から switcher を開いて Enter したときに `lastOpenedModuleId` (= 過去
+ * の別モジュール) に飛ぶ事故が起きる。pathname を正規表現で直接見ることで、
+ * ルート定義のリテラル化に依存せず常に現在のモジュールを取れる。
+ */
+function deriveModuleFromPath(pathname: string): ModuleId | null {
+  // `/projects/<pid>/m/<mod>` または `/projects/<pid>/m/<mod>/<...>` を許容
+  const match = pathname.match(/^\/projects\/[^/]+\/m\/([^/]+)/);
+  if (match == null) return null;
+  const mod = match[1];
+  if (mod === "prompt" || mod === "linkmemo" || mod === "color") return mod;
+  return null;
+}
 
 interface Props {
   open: boolean;
@@ -44,7 +63,8 @@ export function ProjectSwitcher({ open, onClose, projects }: Props) {
 
 function Content({ projects, onClose }: { projects: Project[]; onClose: () => void }) {
   const navigate = useNavigate();
-  const { moduleId } = useParams<{ moduleId?: string }>();
+  const { pathname } = useLocation();
+  const currentModule = deriveModuleFromPath(pathname);
   const lastOpenedModuleId = useAppStore((s) => s.lastOpenedModuleId);
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
   const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
@@ -65,8 +85,12 @@ function Content({ projects, onClose }: { projects: Project[]; onClose: () => vo
   const clampedIndex = Math.min(activeIndex, Math.max(0, filtered.length - 1));
 
   const goTo = (project: Project) => {
-    const m: ModuleId = (moduleId as ModuleId | undefined) ?? lastOpenedModuleId ?? "prompt";
-    // hash は project スコープではないので、それを引き継いだら prompt にフォールバック
+    // 優先順:
+    // 1. 現在の URL から派生した module (`/projects/.../m/<mod>` 系であれば確実に取れる)
+    // 2. `lastOpenedModuleId` (welcome / settings 等から開いた場合の復元)
+    // 3. "prompt" (デフォルト)
+    // hash は project スコープではないので、フォールバックチェーン上で出てきたら prompt に置換
+    const m: ModuleId = currentModule ?? lastOpenedModuleId ?? "prompt";
     const targetModule: ModuleId = m === "hash" ? "prompt" : m;
     setLastProject(project.id);
     setLastModule(targetModule);
