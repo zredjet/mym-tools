@@ -73,6 +73,13 @@ body {
   line-height: 1.5;
   color: var(--fg);
   background: var(--bg);
+  /*
+   * UI 全体スケール (PR-X、ユーザー要望「フォントサイズを可変に」案 B)。
+   * `useUiScaleAttribute` で `:root` に `--ui-scale` を設定し、ここで body 全体に
+   * `zoom` をかけることで文字 / spacing / swatch / モーダル幅を一括拡縮する。
+   * 既定値 1 は Settings 未設定時の fallback。
+   */
+  zoom: var(--ui-scale, 1);
 }
 
 /* スクロールバー (ダーク/ライト両対応) */
