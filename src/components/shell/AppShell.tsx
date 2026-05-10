@@ -3,12 +3,14 @@
  *
  * - TopBar (40px) + Sidebar (240px 可変) + Main の 2 カラム
  * - `Cmd/Ctrl + K` で SearchOverlay 起動 (§8.1)
+ * - `Cmd/Ctrl + Shift + P` で ProjectSwitcher 起動 (C-3、§8.1)
  * - プロジェクト一覧は React 内 state でキャッシュ。新規作成・削除でリフレッシュ
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { Outlet, useNavigate, useParams } from "react-router-dom";
 
+import { ProjectSwitcher } from "@/components/projects/ProjectSwitcher";
 import { SearchOverlay } from "@/components/shell/SearchOverlay";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { TopBar } from "@/components/shell/TopBar";
@@ -26,6 +28,7 @@ export function AppShell() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const { projectId } = useParams<{ projectId?: string }>();
 
   const refresh = useCallback(async () => {
@@ -65,6 +68,16 @@ export function AppShell() {
     (e) => {
       e.preventDefault();
       setSearchOpen(true);
+    },
+    { enableOnFormTags: true, enableOnContentEditable: true },
+  );
+
+  // Cmd/Ctrl+Shift+P でプロジェクト切替 (C-3、`docs/ui-design.md` §8.1)
+  useHotkeys(
+    "mod+shift+p",
+    (e) => {
+      e.preventDefault();
+      setSwitcherOpen(true);
     },
     { enableOnFormTags: true, enableOnContentEditable: true },
   );
@@ -168,6 +181,11 @@ export function AppShell() {
         onClose={() => setSearchOpen(false)}
         currentProjectId={currentProject?.id ?? null}
         currentProjectName={currentProject?.name ?? null}
+      />
+      <ProjectSwitcher
+        open={switcherOpen}
+        onClose={() => setSwitcherOpen(false)}
+        projects={projects}
       />
     </div>
   );
