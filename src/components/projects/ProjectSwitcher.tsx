@@ -86,6 +86,14 @@ function Content({ projects, onClose }: { projects: Project[]; onClose: () => vo
   }, [clampedIndex]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // IME 変換中の Enter は候補確定であり、本コマンドパレットの確定ではない。
+    // また `keyCode === 229` も古い Safari 等での composition 中シグナル。
+    // 両方を見て、composing 中はキーをそのまま IME に渡す (preventDefault しない)。
+    // ArrowDown/Up は composing 中でもこちらで処理してしまうと候補リストの操作が
+    // 奪われるため、同じく素通しする。
+    const composing = e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
+    if (composing) return;
+
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setActiveIndex((i) => Math.min(i + 1, filtered.length - 1));

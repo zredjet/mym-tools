@@ -129,4 +129,21 @@ describe("ProjectSwitcher", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByTestId("loc").textContent).toBe("/projects/p2/m/prompt");
   });
+
+  it("ignores Enter while IME composition is active (codex P1)", () => {
+    // 日本語 / 中国語 / 韓国語の IME 変換中、Enter は候補確定キーになる。
+    // この時にコマンドパレットが遷移してしまうと、絞り込み入力中にプロジェクト
+    // が勝手に切り替わって混乱する。`isComposing` で素通しさせる。
+    renderAt("/projects/p1/m/prompt");
+    const input = screen.getByLabelText("プロジェクト検索") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Banana" } });
+
+    // composition 中の Enter は無視される (URL 変化なし)
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(screen.getByTestId("loc").textContent).toBe("/projects/p1/m/prompt");
+
+    // composition 終了後の Enter は通常通り遷移する
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByTestId("loc").textContent).toBe("/projects/p2/m/prompt");
+  });
 });
