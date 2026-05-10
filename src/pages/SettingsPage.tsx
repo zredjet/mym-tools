@@ -24,7 +24,9 @@ import {
   restoreBackup,
   takeManualBackup,
 } from "@/ipc/backup";
+import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
+import { UI_SCALE_PRESETS, useAppStore } from "@/store/useAppStore";
 
 export function SettingsPage() {
   const navigate = useNavigate();
@@ -99,13 +101,15 @@ export function SettingsPage() {
   }, [restoringBackup]);
 
   return (
-    <div className="flex h-full flex-col px-[var(--page-pad)] py-6">
-      <header className="mb-4 flex items-center gap-2">
+    <div className="flex h-full flex-col gap-6 px-[var(--page-pad)] py-6">
+      <header className="flex items-center gap-2">
         <Button variant="ghost" size="sm" onClick={() => navigate(-1)} aria-label="戻る">
           <ArrowLeft size={14} aria-hidden /> 戻る
         </Button>
         <h1 className="text-lg font-semibold">設定</h1>
       </header>
+
+      <UiScaleSection />
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
@@ -211,6 +215,52 @@ export function SettingsPage() {
         )}
       </Modal>
     </div>
+  );
+}
+
+/**
+ * UI 全体スケール設定セクション (PR-X、案 B)。
+ * `body { zoom: var(--ui-scale) }` 経由で文字 / spacing / swatch / モーダル幅まで
+ * 一括拡縮。プリセットボタンで段階指定 + 「リセット」で 100% に戻す。
+ */
+function UiScaleSection() {
+  const uiScale = useAppStore((s) => s.uiScale);
+  const setUiScale = useAppStore((s) => s.setUiScale);
+  return (
+    <section className="flex flex-col gap-2">
+      <div>
+        <h2 className="text-base font-semibold text-[var(--fg)]">表示</h2>
+        <p className="text-[12px] text-[var(--fg-muted)]">
+          UI 全体のスケール (文字 / spacing / 色見本 / モーダル幅などすべて一緒に拡縮)。 値は
+          localStorage に保存され、再起動後も維持されます。
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[12px] text-[var(--fg-subtle)]">UI スケール:</span>
+        {UI_SCALE_PRESETS.map((preset) => {
+          const selected = Math.abs(uiScale - preset) < 0.001;
+          return (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => setUiScale(preset)}
+              className={cn(
+                "h-7 rounded-[var(--radius)] border px-2.5 font-mono text-[12px] transition-colors",
+                selected
+                  ? "border-[var(--accent)] bg-[var(--bg-accent-soft)] text-[var(--accent)]"
+                  : "border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] hover:bg-[var(--bg-muted)]",
+              )}
+              aria-pressed={selected}
+            >
+              {Math.round(preset * 100)}%
+            </button>
+          );
+        })}
+        <span className="ml-2 text-[11px] text-[var(--fg-subtle)] tabular-nums">
+          現在: {Math.round(uiScale * 100)}%
+        </span>
+      </div>
+    </section>
   );
 }
 

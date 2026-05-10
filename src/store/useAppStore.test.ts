@@ -14,6 +14,7 @@ describe("useAppStore", () => {
     useAppStore.setState({
       theme: "light",
       sidebarWidth: 240,
+      uiScale: 1.0,
       lastOpenedModuleId: null,
       lastOpenedProjectId: null,
     });
@@ -47,5 +48,24 @@ describe("useAppStore", () => {
 
     useAppStore.getState().setLastOpenedModuleId(null);
     expect(useAppStore.getState().lastOpenedModuleId).toBeNull();
+  });
+
+  it("setUiScale clamps to [0.75, 1.5] and rounds to 2 decimals", () => {
+    useAppStore.getState().setUiScale(0.5);
+    expect(useAppStore.getState().uiScale).toBe(0.75);
+
+    useAppStore.getState().setUiScale(2);
+    expect(useAppStore.getState().uiScale).toBe(1.5);
+
+    useAppStore.getState().setUiScale(1.234);
+    expect(useAppStore.getState().uiScale).toBe(1.23);
+  });
+
+  it("setUiScale falls back to 1.0 for non-finite input", () => {
+    useAppStore.getState().setUiScale(NaN);
+    expect(useAppStore.getState().uiScale).toBe(1.0);
+
+    useAppStore.getState().setUiScale(Infinity);
+    expect(useAppStore.getState().uiScale).toBe(1.0);
   });
 });

@@ -14,6 +14,7 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { useThemeAttribute } from "@/hooks/useThemeAttribute";
+import { useUiScaleAttribute } from "@/hooks/useUiScaleAttribute";
 import { HashPage } from "@/modules/hash/HashPage";
 import { PromptDetailPage } from "@/modules/prompt/PromptDetailPage";
 import { AboutPage } from "@/pages/AboutPage";
@@ -22,8 +23,9 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { WelcomePage } from "@/pages/WelcomePage";
 
 function App() {
-  // theme の `<html data-theme>` 属性を Zustand と同期
+  // theme / UI scale を Zustand と DOM 属性 / CSS 変数で同期
   useThemeAttribute();
+  useUiScaleAttribute();
 
   return (
     <HashRouter>
