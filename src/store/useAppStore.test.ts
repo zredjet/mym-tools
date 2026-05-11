@@ -15,6 +15,7 @@ describe("useAppStore", () => {
       theme: "light",
       sidebarWidth: 240,
       uiScale: 1.0,
+      rowDensity: "compact",
       lastOpenedModuleId: null,
       lastOpenedProjectId: null,
     });
@@ -67,5 +68,13 @@ describe("useAppStore", () => {
 
     useAppStore.getState().setUiScale(Infinity);
     expect(useAppStore.getState().uiScale).toBe(1.0);
+  });
+
+  it("setRowDensity persists between compact and comfortable", () => {
+    expect(useAppStore.getState().rowDensity).toBe("compact");
+    useAppStore.getState().setRowDensity("comfortable");
+    expect(useAppStore.getState().rowDensity).toBe("comfortable");
+    useAppStore.getState().setRowDensity("compact");
+    expect(useAppStore.getState().rowDensity).toBe("compact");
   });
 });
