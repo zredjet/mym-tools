@@ -15,6 +15,7 @@
 pub mod backup;
 pub mod commands;
 pub mod error;
+pub mod exchange;
 pub mod module;
 pub mod modules;
 pub mod operations;
@@ -39,6 +40,7 @@ use crate::storage::{SqliteStorage, StorageService};
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // ユーザーデータディレクトリ解決 (`architecture.md` §8 / `data-model.md` §2)
             let data_dir = app

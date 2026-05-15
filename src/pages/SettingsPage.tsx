@@ -11,7 +11,8 @@
  * About (C-9) / Markdown 表示 / 設定可変項目 (theme は Sidebar から既存) は別 PR。
  */
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/Button";
@@ -24,6 +25,13 @@ import {
   restoreBackup,
   takeManualBackup,
 } from "@/ipc/backup";
+import {
+  exportJson,
+  importJson,
+  type ExportDataMeta,
+  type ImportSummary,
+  suggestExportFileName,
+} from "@/ipc/transfer";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import {
@@ -119,6 +127,8 @@ export function SettingsPage() {
       <RowDensitySection />
 
       <SidebarWidthInfo />
+
+      <DataTransferSection />
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
@@ -353,6 +363,156 @@ function SidebarWidthInfo() {
         </Button>
       </div>
     </section>
+  );
+}
+
+/**
+ * Export / Import JSON セクション (`docs/data-model.md` §12、PR-Z)。
+ *
+ * - **Export**: save ダイアログ → `core_export_json(path)` → メタ表示
+ * - **Import**: open ダイアログ → `core_import_json(path)` → サマリ表示
+ *   (バックエンドが自動で pre-import バックアップを取る)
+ *
+ * 部分成功方式 (`data-model.md` §12.3) の結果は失敗件数 + 失敗内訳の畳んだリストで表示。
+ */
+function DataTransferSection() {
+  const [busy, setBusy] = useState<"export" | "import" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [exportMeta, setExportMeta] = useState<ExportDataMeta | null>(null);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+
+  const handleExport = async () => {
+    setError(null);
+    setExportMeta(null);
+    setImportSummary(null);
+    try {
+      const path = await saveDialog({
+        title: "MyMyTools エクスポート先",
+        defaultPath: suggestExportFileName(),
+        filters: [{ name: "MyMyTools JSON", extensions: ["mymtools.json", "json"] }],
+      });
+      if (path == null) return; // ユーザーキャンセル
+      setBusy("export");
+      const meta = await exportJson(path);
+      setExportMeta(meta);
+    } catch (e) {
+      setError(formatInvokeError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleImport = async () => {
+    setError(null);
+    setExportMeta(null);
+    setImportSummary(null);
+    try {
+      const path = await openDialog({
+        title: "MyMyTools インポート元",
+        multiple: false,
+        filters: [{ name: "MyMyTools JSON", extensions: ["mymtools.json", "json"] }],
+      });
+      if (path == null || Array.isArray(path)) return; // ユーザーキャンセル / 想定外
+      setBusy("import");
+      const summary = await importJson(path);
+      setImportSummary(summary);
+    } catch (e) {
+      setError(formatInvokeError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <h2 className="text-base font-semibold text-[var(--fg)]">データの可搬</h2>
+        <p className="text-[12px] text-[var(--fg-muted)]">
+          全プロジェクト + 全モジュールアイテム (Prompts / Links / Colors) を 1 つの JSON
+          ファイルに出し入れします (D-05 / <code className="font-mono">.mymtools.json</code>)。Hash
+          は stateless のため対象外。 インポートは <strong>部分成功方式</strong>:
+          衝突や個別失敗はスキップ + 集計に 記録し、残りは継続。実行前に{" "}
+          <code className="font-mono">pre-import</code> バックアップが自動取得されます。
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="secondary" onClick={() => void handleExport()} disabled={busy != null}>
+          <Download size={14} aria-hidden />
+          {busy === "export" ? "エクスポート中..." : "JSON にエクスポート"}
+        </Button>
+        <Button variant="secondary" onClick={() => void handleImport()} disabled={busy != null}>
+          <Upload size={14} aria-hidden />
+          {busy === "import" ? "インポート中..." : "JSON からインポート"}
+        </Button>
+      </div>
+
+      {error != null && (
+        <div
+          role="alert"
+          className="rounded-[var(--radius)] border border-[var(--destructive)] bg-[var(--destructive)]/10 p-2 text-[13px] text-[var(--destructive)]"
+        >
+          {error}
+        </div>
+      )}
+
+      {exportMeta != null && (
+        <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-muted)] p-3 text-[12px] text-[var(--fg)]">
+          <p className="font-medium">エクスポート完了</p>
+          <p className="text-[var(--fg-muted)] tabular-nums">
+            プロジェクト {exportMeta.projects.length} 件 / アイテム合計{" "}
+            {exportMeta.projects.reduce((n, p) => n + p.items.length, 0)} 件 (
+            {exportMeta.exported_at.slice(0, 19).replace("T", " ")} JST)
+          </p>
+        </div>
+      )}
+
+      {importSummary != null && <ImportSummaryView summary={importSummary} />}
+    </section>
+  );
+}
+
+function ImportSummaryView({ summary }: { summary: ImportSummary }) {
+  const [showFailures, setShowFailures] = useState(false);
+  const totalFailed = summary.projects_failed + summary.items_failed;
+  return (
+    <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-muted)] p-3 text-[12px] text-[var(--fg)]">
+      <p className="font-medium">インポート完了</p>
+      <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[var(--fg-muted)] tabular-nums">
+        <span>
+          プロジェクト: 投入 {summary.projects_inserted} / スキップ {summary.projects_skipped} /
+          失敗 {summary.projects_failed}
+        </span>
+        <span>
+          アイテム: 投入 {summary.items_inserted} / スキップ {summary.items_skipped} / 失敗{" "}
+          {summary.items_failed}
+        </span>
+      </div>
+      {totalFailed > 0 && summary.failures.length > 0 && (
+        <div className="mt-2">
+          <button
+            type="button"
+            className="text-[12px] text-[var(--accent)] underline"
+            onClick={() => setShowFailures((v) => !v)}
+          >
+            {showFailures ? "▼ 失敗内訳を隠す" : `▶ 失敗内訳を表示 (${summary.failures.length})`}
+          </button>
+          {showFailures && (
+            <ul className="mt-1 max-h-48 overflow-y-auto rounded border border-[var(--border)] bg-[var(--bg)] p-2 font-mono text-[11px] text-[var(--fg)]">
+              {summary.failures.map((f, idx) => (
+                <li
+                  key={`${f.entity}-${f.id}-${idx}`}
+                  className="border-b border-dashed border-[var(--border)] py-1 last:border-0"
+                >
+                  [{f.entity}
+                  {f.module_id != null && `/${f.module_id}`}] {f.id}: {f.reason}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

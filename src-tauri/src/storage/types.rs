@@ -113,6 +113,20 @@ pub struct Item {
     pub updated_at: String,
 }
 
+/// インポート 1 件の結果 (`data-model.md` §3.3 / §12.3)。
+///
+/// 部分成功方式のため、`StorageService::import_project` / `import_item` は
+/// 「衝突したから何もしなかった」(`Skipped`) と「新規 INSERT した」(`Inserted`) を
+/// `Result` の `Err` 化せずに区別する。バリデーション失敗等の真のエラーは引き続き
+/// `AppError` で返す。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportOutcome {
+    /// 新規 INSERT に成功した (`data_revision` +1 済み)。
+    Inserted,
+    /// 同一 ID が既に存在したためスキップした (`data_revision` は変化なし)。
+    Skipped,
+}
+
 /// 検索スコープ (`data-model.md` §11.1 / `architecture.md` §6.4)。
 ///
 /// **内部値は `"project" | "global"`** (CLAUDE.md 不変条件)。UI 表示文言の

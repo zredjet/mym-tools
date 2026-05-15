@@ -30,7 +30,7 @@ use crate::module::ModuleBackend;
 
 pub use scoped::ScopedStorage;
 pub use sqlite::SqliteStorage;
-pub use types::{Item, ItemId, Project, ProjectId, SearchScope};
+pub use types::{ImportOutcome, Item, ItemId, Project, ProjectId, SearchScope};
 
 /// コアの永続化境界。`AppState.storage: Arc<dyn StorageService>` 経由で各 Tauri command が利用する。
 ///
@@ -208,4 +208,42 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
     ///
     /// 完了後の再起動はメソッド外で実施する (`data-model.md` §13.6 step 7)。
     fn restore_online_backup_from(&self, src_path: &Path) -> Result<(), AppError>;
+
+    // -------- インポート (`data-model.md` §12) --------
+
+    /// プロジェクトを **ID 指定で** INSERT する (Import 用、`data-model.md` §12.4)。
+    ///
+    /// - `id` が既存と衝突する場合は `ImportOutcome::Skipped` を返し書き込みは行わない
+    /// - 新規 INSERT 成功時は `data_revision` を **+1**
+    /// - `created_at` / `updated_at` / `position` は引数の値をそのまま使う
+    ///   (時刻の再生成は行わない — エクスポート時の値を保存する意味があるため)
+    ///
+    /// 衝突は ID 単位の判定で、`name` の重複は許容する (`data-model.md` §3.3、§12.2)。
+    fn import_project(&self, project: &Project) -> Result<ImportOutcome, AppError>;
+
+    /// アイテムを **ID 指定で** INSERT する (Import 用、`data-model.md` §12.4)。
+    ///
+    /// - `id` が既存と衝突する場合は `ImportOutcome::Skipped` を返し書き込みは行わない
+    /// - 新規 INSERT 成功時は `data_revision` を **+1**
+    /// - `payload` は呼び出し前に **Eager-on-Read 相当のアップグレード + validate** を済ませた
+    ///   状態であること (`data-model.md` §12.4 step 4-5)
+    /// - `search_text` は同様にアップグレード後の payload で `index_text()` を実行した
+    ///   結果を渡すこと (step 6)
+    ///
+    /// `project_id` が存在しない場合は FK 制約で失敗する (呼び出し側で project の投入順を
+    /// 守る)。
+    #[allow(clippy::too_many_arguments)]
+    fn import_item(
+        &self,
+        id: &ItemId,
+        project_id: &ProjectId,
+        module_id: &str,
+        title: &str,
+        tags: &[String],
+        payload_schema_version: u32,
+        payload: &JsonValue,
+        search_text: &str,
+        created_at: &str,
+        updated_at: &str,
+    ) -> Result<ImportOutcome, AppError>;
 }

@@ -21,7 +21,7 @@ use crate::error::AppError;
 use crate::module::ModuleBackend;
 use crate::storage::schema::{CURRENT_DB_SCHEMA_VERSION, PRAGMAS, SCHEMA_DDL};
 use crate::storage::scoped::ScopedStorage;
-use crate::storage::types::{Item, ItemId, Project, ProjectId, SearchScope};
+use crate::storage::types::{ImportOutcome, Item, ItemId, Project, ProjectId, SearchScope};
 use crate::storage::StorageService;
 use crate::time::now_jst_iso8601;
 
@@ -505,6 +505,120 @@ impl StorageService for SqliteStorage {
                 .run_to_completion(1024, std::time::Duration::from_millis(0), None)
                 .map_err(AppError::from)?;
             Ok(())
+        })
+    }
+
+    fn import_project(&self, project: &Project) -> Result<ImportOutcome, AppError> {
+        if project.name.trim().is_empty() {
+            return Err(AppError::Validation {
+                module_id: "core.projects".into(),
+                reason: "project name must not be empty".into(),
+            });
+        }
+        self.with_conn(|conn| {
+            let tx = conn.transaction().map_err(AppError::from)?;
+
+            // ID 衝突は ON DELETE CASCADE が絡む id 一意制約に違反する形で発覚するが、
+            // 部分成功方式 (`data-model.md` §12.3) では「skip + 計上」が望ましいため、
+            // INSERT を試す前に存在チェックを挟む (1 トランザクション内なので race なし)。
+            let exists: bool = tx
+                .query_row(
+                    "SELECT 1 FROM projects WHERE id = ? LIMIT 1",
+                    [project.id.as_str()],
+                    |_| Ok(true),
+                )
+                .optional()
+                .map_err(AppError::from)?
+                .unwrap_or(false);
+            if exists {
+                // 衝突 → 何もせず skip (data_revision も変えない)
+                tx.commit().map_err(AppError::from)?;
+                return Ok(ImportOutcome::Skipped);
+            }
+
+            tx.execute(
+                "INSERT INTO projects (id, name, description, position, created_at, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                params![
+                    project.id.as_str(),
+                    project.name,
+                    project.description,
+                    project.position,
+                    project.created_at,
+                    project.updated_at,
+                ],
+            )
+            .map_err(AppError::from)?;
+
+            Self::bump_data_revision(&tx)?;
+            tx.commit().map_err(AppError::from)?;
+            Ok(ImportOutcome::Inserted)
+        })
+    }
+
+    fn import_item(
+        &self,
+        id: &ItemId,
+        project_id: &ProjectId,
+        module_id: &str,
+        title: &str,
+        tags: &[String],
+        payload_schema_version: u32,
+        payload: &JsonValue,
+        search_text: &str,
+        created_at: &str,
+        updated_at: &str,
+    ) -> Result<ImportOutcome, AppError> {
+        if title.trim().is_empty() {
+            return Err(AppError::Validation {
+                module_id: module_id.to_string(),
+                reason: "item title must not be empty".into(),
+            });
+        }
+        let tags_json =
+            serde_json::to_string(tags).map_err(|e| AppError::Storage(e.to_string()))?;
+        let payload_str =
+            serde_json::to_string(payload).map_err(|e| AppError::Storage(e.to_string()))?;
+
+        self.with_conn(|conn| {
+            let tx = conn.transaction().map_err(AppError::from)?;
+
+            let exists: bool = tx
+                .query_row(
+                    "SELECT 1 FROM items WHERE id = ? LIMIT 1",
+                    [id.as_str()],
+                    |_| Ok(true),
+                )
+                .optional()
+                .map_err(AppError::from)?
+                .unwrap_or(false);
+            if exists {
+                tx.commit().map_err(AppError::from)?;
+                return Ok(ImportOutcome::Skipped);
+            }
+
+            tx.execute(
+                "INSERT INTO items (id, project_id, module_id, title, tags, search_text, \
+                 payload_schema_version, payload, created_at, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    id.as_str(),
+                    project_id.as_str(),
+                    module_id,
+                    title,
+                    tags_json,
+                    search_text,
+                    payload_schema_version as i64,
+                    payload_str,
+                    created_at,
+                    updated_at,
+                ],
+            )
+            .map_err(AppError::from)?;
+
+            Self::bump_data_revision(&tx)?;
+            tx.commit().map_err(AppError::from)?;
+            Ok(ImportOutcome::Inserted)
         })
     }
 
