@@ -66,6 +66,9 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         crate::commands::backup::core_backup_delete,
         crate::commands::backup::core_backup_verify,
         crate::commands::backup::core_backup_restore,
+        // Core: Export / Import JSON (D-05 / data-model.md §12)
+        crate::commands::transfer::core_export_json,
+        crate::commands::transfer::core_import_json,
         // M-Hash
         crate::modules::hash::commands::hash_compute_text,
         crate::modules::hash::commands::hash_compute_file,
