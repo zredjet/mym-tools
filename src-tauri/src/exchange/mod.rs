@@ -201,6 +201,45 @@ impl Default for ImportSummary {
     }
 }
 
+/// エクスポート完了時にフロントへ返す軽量サマリ (`data-model.md` §12)。
+///
+/// **設計意図** (codex PR-Z P2): フル `ExportData` を IPC で返すと、ファイル
+/// 書き込み時の serialize に加えてフロントへ全アイテム payload を**もう一度**
+/// 転送することになり、大規模 DB で UI レイテンシ / メモリ使用が問題化する。
+/// フロントは件数とメタしか UI 表示しないため、ここでは集計値だけを返す。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportSummary {
+    pub schema_version: u32,
+    pub exported_at: String,
+    pub app_version: String,
+    pub scope: ExportScope,
+    pub module_versions: BTreeMap<String, u32>,
+    /// プロジェクト件数
+    pub projects_count: usize,
+    /// 全プロジェクト合計の item 件数
+    pub items_count: usize,
+    /// 書き出した JSON ファイルのバイト数
+    pub bytes_written: u64,
+}
+
+impl ExportSummary {
+    /// `ExportData` (フル) から件数を集計してサマリを作る。`bytes_written` は
+    /// ファイル書き込み後に呼び出し側で埋める想定 (本コンストラクタでは 0)。
+    pub fn summarize(data: &ExportData) -> Self {
+        let items_count = data.projects.iter().map(|p| p.items.len()).sum();
+        Self {
+            schema_version: data.schema_version,
+            exported_at: data.exported_at.clone(),
+            app_version: data.app_version.clone(),
+            scope: data.scope,
+            module_versions: data.module_versions.clone(),
+            projects_count: data.projects.len(),
+            items_count,
+            bytes_written: 0,
+        }
+    }
+}
+
 /// 失敗 1 件の記録 (`data-model.md` §12.3 のログ要件)。
 ///
 /// `entity` は `"project"` または `"item"`、`id` は失敗した行の元の ID

@@ -32,19 +32,27 @@ export interface ImportSummary {
   failures: ImportFailure[];
 }
 
-/** エクスポート出力の概要 (`exchange/mod.rs::ExportData`、UI には主要メタのみ表示) */
-export interface ExportDataMeta {
+/**
+ * エクスポート完了サマリ (`exchange/mod.rs::ExportSummary`)。
+ *
+ * フル `ExportData` ではなく集計値のみが IPC で返る (codex PR-Z P2 対応)。
+ * フロントは件数とメタしか表示しないため、全アイテム payload を再転送する
+ * コストを避ける。
+ */
+export interface ExportSummary {
   schema_version: number;
   exported_at: string;
   app_version: string;
   scope: ExportScope;
   module_versions: Record<string, number>;
-  /** projects 配下の件数は `projects.length` で取得 (UI 表示用) */
-  projects: { items: { id: string }[] }[];
+  projects_count: number;
+  items_count: number;
+  /** 書き出した JSON ファイルのバイト数 (ユーザーへサイズ感を表示) */
+  bytes_written: number;
 }
 
-export function exportJson(path: string): Promise<ExportDataMeta> {
-  return invoke<ExportDataMeta>("core_export_json", { path });
+export function exportJson(path: string): Promise<ExportSummary> {
+  return invoke<ExportSummary>("core_export_json", { path });
 }
 
 export function importJson(path: string): Promise<ImportSummary> {

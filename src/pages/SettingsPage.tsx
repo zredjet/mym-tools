@@ -28,7 +28,7 @@ import {
 import {
   exportJson,
   importJson,
-  type ExportDataMeta,
+  type ExportSummary,
   type ImportSummary,
   suggestExportFileName,
 } from "@/ipc/transfer";
@@ -378,12 +378,12 @@ function SidebarWidthInfo() {
 function DataTransferSection() {
   const [busy, setBusy] = useState<"export" | "import" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [exportMeta, setExportMeta] = useState<ExportDataMeta | null>(null);
+  const [exportSummary, setExportSummary] = useState<ExportSummary | null>(null);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
 
   const handleExport = async () => {
     setError(null);
-    setExportMeta(null);
+    setExportSummary(null);
     setImportSummary(null);
     try {
       const path = await saveDialog({
@@ -393,8 +393,8 @@ function DataTransferSection() {
       });
       if (path == null) return; // ユーザーキャンセル
       setBusy("export");
-      const meta = await exportJson(path);
-      setExportMeta(meta);
+      const summary = await exportJson(path);
+      setExportSummary(summary);
     } catch (e) {
       setError(formatInvokeError(e));
     } finally {
@@ -404,7 +404,7 @@ function DataTransferSection() {
 
   const handleImport = async () => {
     setError(null);
-    setExportMeta(null);
+    setExportSummary(null);
     setImportSummary(null);
     try {
       const path = await openDialog({
@@ -456,13 +456,13 @@ function DataTransferSection() {
         </div>
       )}
 
-      {exportMeta != null && (
+      {exportSummary != null && (
         <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-muted)] p-3 text-[12px] text-[var(--fg)]">
           <p className="font-medium">エクスポート完了</p>
           <p className="text-[var(--fg-muted)] tabular-nums">
-            プロジェクト {exportMeta.projects.length} 件 / アイテム合計{" "}
-            {exportMeta.projects.reduce((n, p) => n + p.items.length, 0)} 件 (
-            {exportMeta.exported_at.slice(0, 19).replace("T", " ")} JST)
+            プロジェクト {exportSummary.projects_count} 件 / アイテム合計{" "}
+            {exportSummary.items_count} 件 / {formatBytes(exportSummary.bytes_written)} (
+            {exportSummary.exported_at.slice(0, 19).replace("T", " ")} JST)
           </p>
         </div>
       )}

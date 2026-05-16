@@ -526,4 +526,73 @@ mod tests {
         assert_eq!(s.items_failed, 1);
         assert!(s.failures[0].reason.contains("validate"));
     }
+
+    /// codex PR-Z P2 回帰: 衝突 ID + 空 name のレコードが来ても、id 衝突を
+    /// 優先して **Skipped** として計上される。再インポート idempotency の根拠。
+    #[test]
+    fn project_with_duplicate_id_is_skipped_even_when_name_is_empty() {
+        let (storage, modules) = setup(1);
+        // 1 回目: 正常な name で投入
+        apply_import(
+            &storage,
+            &modules,
+            &data_with(vec![ProjectWithItems {
+                project: project("p1", "Original"),
+                items: vec![],
+            }]),
+        );
+
+        // 2 回目: 同 ID で空 name (ファイル改ざん等)。validation_failed ではなく Skipped
+        let bad_dup = ProjectExport {
+            name: "".into(),
+            ..project("p1", "ignored")
+        };
+        let s = apply_import(
+            &storage,
+            &modules,
+            &data_with(vec![ProjectWithItems {
+                project: bad_dup,
+                items: vec![],
+            }]),
+        );
+        assert_eq!(
+            s.projects_skipped, 1,
+            "duplicate id wins over empty-name validation"
+        );
+        assert_eq!(s.projects_failed, 0);
+    }
+
+    /// codex PR-Z P2 回帰 (item 版): 衝突 ID + 空 title でも Skipped で計上される。
+    #[test]
+    fn item_with_duplicate_id_is_skipped_even_when_title_is_empty() {
+        let (storage, modules) = setup(1);
+        // 1 回目: 正常な item を投入
+        apply_import(
+            &storage,
+            &modules,
+            &data_with(vec![ProjectWithItems {
+                project: project("p1", "P"),
+                items: vec![item("i1", 1, json!({"body": "ok"}))],
+            }]),
+        );
+
+        // 2 回目: 同 ID + 空 title。items_failed ではなく items_skipped に計上
+        let bad_dup = ItemExport {
+            title: "".into(),
+            ..item("i1", 1, json!({"body": "ok"}))
+        };
+        let s = apply_import(
+            &storage,
+            &modules,
+            &data_with(vec![ProjectWithItems {
+                project: project("p1", "P"),
+                items: vec![bad_dup],
+            }]),
+        );
+        assert_eq!(
+            s.items_skipped, 1,
+            "duplicate id wins over empty-title validation"
+        );
+        assert_eq!(s.items_failed, 0);
+    }
 }

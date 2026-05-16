@@ -24,7 +24,7 @@ use tauri::State;
 use crate::backup::BackupKind;
 use crate::error::AppError;
 use crate::exchange::{
-    apply_import, build_export_data, parse_export_json, ExportData, ImportSummary,
+    apply_import, build_export_data, parse_export_json, ExportSummary, ImportSummary,
 };
 use crate::module::ModuleBackend;
 use crate::state::AppState;
@@ -34,8 +34,16 @@ use crate::state::AppState;
 /// - 既存ファイルは上書き (ユーザー意図を信頼。フロント側でダイアログ確認済の想定)
 /// - `app_version` は `env!("CARGO_PKG_VERSION")` を埋める
 /// - pre-op バックアップは取らない (read-only のため、`data-model.md` §12.2 末尾)
+///
+/// 返却値は **集計値のみ** (`ExportSummary`)。フル `ExportData` は IPC で送り返さない
+/// (codex PR-Z P2 対応): フロントは件数 / メタデータしか UI 表示しないため、全アイテム
+/// payload を再シリアライズして転送するのは無駄。`bytes_written` を含めることでファイル
+/// サイズの感触もユーザーに伝える。
 #[tauri::command]
-pub fn core_export_json(state: State<'_, AppState>, path: String) -> Result<ExportData, AppError> {
+pub fn core_export_json(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<ExportSummary, AppError> {
     let path_buf = validate_output_path(&path)?;
 
     // module list は AppState の HashMap から取り出して順序を id ソートで安定化
@@ -46,10 +54,13 @@ pub fn core_export_json(state: State<'_, AppState>, path: String) -> Result<Expo
     // serde_json で書き出し (pretty 出力で diff しやすく)
     let json = serde_json::to_string_pretty(&data)
         .map_err(|e| AppError::Storage(format!("serialize export: {e}")))?;
+    let bytes_written = json.len() as u64;
     std::fs::write(&path_buf, json)
         .map_err(|e| AppError::Storage(format!("write {}: {e}", path_buf.display())))?;
 
-    Ok(data)
+    let mut summary = ExportSummary::summarize(&data);
+    summary.bytes_written = bytes_written;
+    Ok(summary)
 }
 
 /// `path` の JSON を読み取り、現在 DB に **取り込みを試みる** (`data-model.md` §12.3-12.5)。

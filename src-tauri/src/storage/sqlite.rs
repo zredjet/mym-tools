@@ -509,12 +509,10 @@ impl StorageService for SqliteStorage {
     }
 
     fn import_project(&self, project: &Project) -> Result<ImportOutcome, AppError> {
-        if project.name.trim().is_empty() {
-            return Err(AppError::Validation {
-                module_id: "core.projects".into(),
-                reason: "project name must not be empty".into(),
-            });
-        }
+        // ID 衝突チェックを field validation **より先に** 行う (codex PR-Z P2)。
+        // 同じ ID で空 name のレコードが来た場合、「衝突なので skip」(冪等性維持)
+        // を「validation failed」(誤検知) より優先する。これによりインポートの
+        // 再実行が常に安定して同じ集計値になる。
         self.with_conn(|conn| {
             let tx = conn.transaction().map_err(AppError::from)?;
 
@@ -534,6 +532,15 @@ impl StorageService for SqliteStorage {
                 // 衝突 → 何もせず skip (data_revision も変えない)
                 tx.commit().map_err(AppError::from)?;
                 return Ok(ImportOutcome::Skipped);
+            }
+
+            // 衝突無しが確定してから初めて field validation。失敗は failed として返す。
+            if project.name.trim().is_empty() {
+                // tx は drop で rollback (これまで INSERT していないので影響なし)
+                return Err(AppError::Validation {
+                    module_id: "core.projects".into(),
+                    reason: "project name must not be empty".into(),
+                });
             }
 
             tx.execute(
@@ -569,12 +576,10 @@ impl StorageService for SqliteStorage {
         created_at: &str,
         updated_at: &str,
     ) -> Result<ImportOutcome, AppError> {
-        if title.trim().is_empty() {
-            return Err(AppError::Validation {
-                module_id: module_id.to_string(),
-                reason: "item title must not be empty".into(),
-            });
-        }
+        // ID 衝突チェックを title validation より先に行う (codex PR-Z P2、
+        // import_project と同じ思想)。serialize は事前にやって失敗を早期に弾ける形を
+        // 維持しつつ、衝突 skip の冪等性を保つ。
+
         let tags_json =
             serde_json::to_string(tags).map_err(|e| AppError::Storage(e.to_string()))?;
         let payload_str =
@@ -595,6 +600,14 @@ impl StorageService for SqliteStorage {
             if exists {
                 tx.commit().map_err(AppError::from)?;
                 return Ok(ImportOutcome::Skipped);
+            }
+
+            // 衝突無しが確定してから field validation
+            if title.trim().is_empty() {
+                return Err(AppError::Validation {
+                    module_id: module_id.to_string(),
+                    reason: "item title must not be empty".into(),
+                });
             }
 
             tx.execute(
