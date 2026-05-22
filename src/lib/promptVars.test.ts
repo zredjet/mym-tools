@@ -55,4 +55,14 @@ describe("extractPromptVariables", () => {
     expect(result).toEqual(["topic1", "topic１"]);
     expect(result[0]).not.toBe(result[1]);
   });
+
+  // PR-AD codex P1: Rust `is_alphabetic` は Unicode "Alphabetic" 派生プロパティを使う
+  // ため、Hindi vowel signs (`ि` U+093F = Mc) や Arabic vowel marks など combining mark を
+  // 含む綴りも受け入れる。TS 側も `\p{Alphabetic}` で同じ挙動になることを検証する。
+  it("accepts Indic-script names with combining marks (codex PR-AD P1)", () => {
+    // किताब = क(U+0915 Lo) + ि(U+093F Mc, Other_Alphabetic) + त + ा + ब
+    expect(extractPromptVariables("{{किताब}}")).toEqual(["किताब"]);
+    // Arabic vowel marks も同様 (Other_Alphabetic 経由でアルファベット扱い)
+    expect(extractPromptVariables("{{مَرحَبا}}")).toEqual(["مَرحَبا"]);
+  });
 });

@@ -180,6 +180,17 @@ mod tests {
         assert_ne!(result[0], result[1]);
     }
 
+    /// PR-AD codex P1: Indic 等 combining marks (Mc / Mn) を含む綴りも受け入れる
+    /// (Rust `char::is_alphabetic` が Unicode "Alphabetic" 派生プロパティで Other_Alphabetic を
+    /// 含むため。TS 側 `\p{Alphabetic}` と完全一致)。
+    #[test]
+    fn extract_accepts_indic_script_with_combining_marks() {
+        // किताब = क(U+0915 Lo) + ि(U+093F Mc) + त + ा + ब
+        assert_eq!(extract_variables("{{किताब}}"), vec!["किताब"]);
+        // Arabic vowel marks (mark, nonspacing も Other_Alphabetic 経由で有効)
+        assert_eq!(extract_variables("{{مَرحَبا}}"), vec!["مَرحَبا"]);
+    }
+
     #[test]
     fn extract_handles_unclosed_brace() {
         // `{{` で始まり `}}` で閉じないケース: 抽出停止 (panic しない)
