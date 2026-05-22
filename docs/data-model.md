@@ -579,6 +579,13 @@ project 削除実行時、StorageService は**削除トランザクションの�
 - `body`: プロンプト本文 (Markdown)
 - 変数プレースホルダ (`{{name}}`) は**保存しない**。読み込み時に正規表現で抽出してフォーム生成
   - 理由: 変数は body から導出可能。冗長持ちするとずれる
+- 変数名の許容文字 (PR-AD で日本語対応):
+  - **Unicode letter / number + `_`** を許容 (1 文字以上)
+  - Rust `char::is_alphanumeric()` / TS `[\p{L}\p{N}_]` (`u` flag) で実装。Latin / CJK の範囲では完全一致
+  - ✅ `{{topic}}` / `{{lang_1}}` (ASCII) / `{{言語}}` / `{{トピック}}` / `{{ぷろんぷと}}` (CJK)
+  - ❌ 空白 (`{{ topic }}`) / ハイフン (`{{a-b}}`) / 記号 (`{{a.b}}`) は **silently 無視** (構文エラーは出さない)
+  - 半角 / 全角は別変数として区別 (例: `topic1` ≠ `topic１`)
+  - **未解決の発展余地** (U-13): Mustache / Handlebars / Jinja 慣例の `{{ name }}` 前後空白許容は Phase 2 候補
 
 **search_text 生成**: `title + " " + body`
 

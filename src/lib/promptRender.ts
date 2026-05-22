@@ -45,6 +45,9 @@ export function renderPromptTemplate(body: string, variables: Record<string, str
   return result;
 }
 
+// PR-AD で日本語対応: Unicode letter / number + `_`。詳細は `promptVars.ts` の同名関数 + 規約。
+const VALID_VAR_NAME = /^[\p{L}\p{N}_]+$/u;
+
 function isValidVarName(s: string): boolean {
-  return s.length > 0 && /^[A-Za-z0-9_]+$/.test(s);
+  return s.length > 0 && VALID_VAR_NAME.test(s);
 }

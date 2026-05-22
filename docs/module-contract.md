@@ -635,6 +635,7 @@ src/modules/<id>/
 | `current_payload_version` | 1 |
 | 固有 IPC コマンド | `prompt_render_template` (変数差し込み後の本文生成) |
 | `index_text` の対象 | `body` |
+| 変数名の許容文字 | **Unicode letter / number + `_`** (PR-AD / `data-model.md` §10.1)。ASCII (`topic` / `lang_1`) + CJK (`言語` / `トピック`) を許容、空白 / 記号は silently 無視 |
 
 ### 12.2 M-LinkMemo
 | 項目 | 値 |
