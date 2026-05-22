@@ -52,7 +52,16 @@ pub fn run() {
             let db_path = data_dir.join("data.sqlite");
             let backups_root = data_dir.join("backups");
 
+            // DB schema migration を **SqliteStorage::open の外** で実行する
+            // (ADR-0011 §2.4 bootstrap 経路 — `LocalBackupService` は完成済 storage を要求するため、
+            // 鶏卵問題を回避するために独立ヘルパで pre-migration backup を取得 + 適用)。
+            // 新規 DB / 既に最新版 / 未来版 (= unsupported) は no-op。失敗時は起動停止。
+            storage::bootstrap::migrate_if_needed(&db_path, &backups_root).map_err(|e| {
+                format!("DB schema migration failed for {}: {e}", db_path.display())
+            })?;
+
             // SQLite を開いて schema 整合性チェック (`data-model.md` §4 / §13)
+            // migration が走った後なので、`verify_schema_version` は CURRENT と一致する想定
             let storage: Arc<dyn StorageService> = Arc::new(
                 SqliteStorage::open(&db_path)
                     .map_err(|e| format!("failed to open SQLite at {}: {e}", db_path.display()))?,

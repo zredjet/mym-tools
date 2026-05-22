@@ -103,3 +103,28 @@ pub fn core_delete_item(
     let scoped = state.storage.clone().scoped_for(module);
     scoped.delete_item(&ItemId::new(item_id))
 }
+
+/// `(project_id, module_id)` スコープ内の items を `ordered_ids` の順序で並び替える
+/// (`StorageService::reorder_items`、PR-Y / `data-model.md` §6.5)。
+///
+/// - `ordered_ids` は当該スコープの **全 item ID が過不足なく** 含まれる必要がある
+/// - 1 トランザクションで全件 UPDATE → `data_revision +1`
+/// - `updated_at` は不変
+/// - `module_id` の存在は ModuleRegistry でチェック (未登録 module は `AppError::ModuleNotFound`)
+#[tauri::command]
+pub fn core_reorder_items(
+    state: State<'_, AppState>,
+    project_id: String,
+    module_id: String,
+    ordered_ids: Vec<String>,
+) -> Result<(), AppError> {
+    // module の存在チェック (登録されていない module への reorder は弾く)
+    if state.module(&module_id).is_none() {
+        return Err(AppError::ModuleNotFound {
+            module_id: module_id.clone(),
+        });
+    }
+    let pid = ProjectId::new(project_id);
+    let ids: Vec<ItemId> = ordered_ids.into_iter().map(ItemId::new).collect();
+    state.storage.reorder_items(&pid, &module_id, &ids)
+}

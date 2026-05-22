@@ -109,6 +109,10 @@ pub struct Item {
     pub tags: Vec<String>,
     pub payload_schema_version: u32,
     pub payload: serde_json::Value,
+    /// D&D 並び替え (`data-model.md` §6.5、PR-Y / ADR-0011)。`(project_id, module_id)`
+    /// スコープ内で 0..N-1 の連番。reorder されていないスコープでは全行 0 のまま
+    /// (タイブレーカーで updated_at DESC が効く)。
+    pub position: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -205,6 +209,7 @@ mod tests {
             tags: vec!["bold".into()],
             payload_schema_version: 1,
             payload: serde_json::json!({"hex": "#ff0000"}),
+            position: 0,
             created_at: "2026-04-30T15:23:45.123+09:00".into(),
             updated_at: "2026-04-30T15:23:45.123+09:00".into(),
         };

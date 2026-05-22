@@ -72,12 +72,18 @@ pub fn apply_import(
 ) -> ImportSummary {
     let mut summary = ImportSummary::new();
 
+    // step 1-8: project + item を順に投入する。step 9 (position 補正) のために
+    // 「投入を試みたスコープ」を記録しておく
+    let mut touched_scopes: std::collections::BTreeSet<(String, String)> =
+        std::collections::BTreeSet::new();
+
     for pw in &data.projects {
         match import_one_project(storage, &mut summary, pw) {
             Ok(parent_present) if parent_present => {
                 // 親が DB に存在する (新規 INSERT または既存) → 配下 items を試す
                 for item in &pw.items {
                     import_one_item(storage, modules_by_id, &mut summary, &pw.project.id.0, item);
+                    touched_scopes.insert((pw.project.id.0.clone(), item.module_id.clone()));
                 }
             }
             Ok(_) => {
@@ -101,6 +107,22 @@ pub fn apply_import(
             }
         }
     }
+
+    // step 9 (`data-model.md` §12.4): 投入された (project_id, module_id) スコープに対し
+    // ROW_NUMBER で position を 0..N-1 に詰め直す。元 position 順 → created_at 順 → id 順で
+    // タイブレーカー。エラーは ImportFailure に積むだけで止めない (部分成功方式)
+    for (pid, mid) in &touched_scopes {
+        let project_id = crate::storage::ProjectId::new(pid.clone());
+        if let Err(e) = storage.normalize_item_positions(&project_id, mid) {
+            summary.failures.push(ImportFailure {
+                entity: "item".into(),
+                id: format!("{pid}/{mid}"),
+                module_id: Some(mid.clone()),
+                reason: format!("normalize_item_positions failed: {e}"),
+            });
+        }
+    }
+
     summary
 }
 
@@ -232,6 +254,8 @@ fn import_one_item(
     let search_text = build_search_text(&item.title, &item.tags, &module_text);
 
     // INSERT
+    // position は JSON の値をそのまま入れる (data-model.md §6.5)。投入後の補正は
+    // `apply_import` 末尾の `normalize_item_positions` でスコープごとに ROW_NUMBER で詰め直す。
     let outcome = storage.import_item(
         &item.id,
         &crate::storage::ProjectId::new(parent_project_id.to_string()),
@@ -241,6 +265,7 @@ fn import_one_item(
         current,
         &payload,
         &search_text,
+        item.position,
         &item.created_at,
         &item.updated_at,
     );
@@ -384,6 +409,7 @@ mod tests {
             tags: vec!["t".into()],
             payload_schema_version,
             payload,
+            position: 0,
             created_at: "2026-05-02T00:00:00.000+09:00".into(),
             updated_at: "2026-05-02T00:00:00.000+09:00".into(),
         }

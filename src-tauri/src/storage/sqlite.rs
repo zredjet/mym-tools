@@ -573,6 +573,7 @@ impl StorageService for SqliteStorage {
         payload_schema_version: u32,
         payload: &JsonValue,
         search_text: &str,
+        position: i64,
         created_at: &str,
         updated_at: &str,
     ) -> Result<ImportOutcome, AppError> {
@@ -612,8 +613,8 @@ impl StorageService for SqliteStorage {
 
             tx.execute(
                 "INSERT INTO items (id, project_id, module_id, title, tags, search_text, \
-                 payload_schema_version, payload, created_at, updated_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 payload_schema_version, payload, position, created_at, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     id.as_str(),
                     project_id.as_str(),
@@ -623,6 +624,7 @@ impl StorageService for SqliteStorage {
                     search_text,
                     payload_schema_version as i64,
                     payload_str,
+                    position,
                     created_at,
                     updated_at,
                 ],
@@ -709,6 +711,80 @@ impl StorageService for SqliteStorage {
         self.list_items_internal(module_id, project_id, limit, offset)
     }
 
+    fn reorder_items(
+        &self,
+        project_id: &ProjectId,
+        module_id: &str,
+        ordered_ids: &[ItemId],
+    ) -> Result<(), AppError> {
+        // 0) ordered_ids 自体に重複が無いことを確認
+        let mut seen = std::collections::HashSet::new();
+        for id in ordered_ids {
+            if !seen.insert(id.as_str()) {
+                return Err(AppError::Validation {
+                    module_id: module_id.to_string(),
+                    reason: format!("ordered_ids contains duplicate id: {}", id.as_str()),
+                });
+            }
+        }
+
+        self.with_conn(|conn| {
+            let tx = conn.transaction().map_err(AppError::from)?;
+
+            // 1) 当該スコープの既存全 item ID を取得し、ordered_ids と完全一致を要求
+            //    (data-model.md §6.5 「実装規約: 二重ガード」その①)
+            let mut stmt = tx
+                .prepare("SELECT id FROM items WHERE project_id = ? AND module_id = ?")
+                .map_err(AppError::from)?;
+            let existing_ids: std::collections::HashSet<String> = stmt
+                .query_map([project_id.as_str(), module_id], |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(AppError::from)?
+                .collect::<Result<_, _>>()
+                .map_err(AppError::from)?;
+            drop(stmt);
+
+            let provided_ids: std::collections::HashSet<&str> =
+                ordered_ids.iter().map(|i| i.as_str()).collect();
+            if existing_ids.len() != provided_ids.len()
+                || !existing_ids
+                    .iter()
+                    .all(|e| provided_ids.contains(e.as_str()))
+            {
+                return Err(AppError::Validation {
+                    module_id: module_id.to_string(),
+                    reason: format!(
+                        "ordered_ids must match existing items in scope (project_id={}, module_id={}) exactly (existing={}, provided={})",
+                        project_id.as_str(),
+                        module_id,
+                        existing_ids.len(),
+                        provided_ids.len()
+                    ),
+                });
+            }
+
+            // 2) 連番 0..N-1 で UPDATE
+            //    data-model.md §6.5 「実装規約: 二重ガード」その②: WHERE に project_id / module_id
+            //    も含めて他スコープへの誤書き込みを物理的に防止する。
+            //    updated_at は **触らない** (§6.5 / ADR-0006 §2.2 整合: 並び替えは "内容変更" では無いため)
+            for (idx, id) in ordered_ids.iter().enumerate() {
+                let position: i64 = idx as i64;
+                tx.execute(
+                    "UPDATE items SET position = ? \
+                     WHERE id = ? AND project_id = ? AND module_id = ?",
+                    params![position, id.as_str(), project_id.as_str(), module_id],
+                )
+                .map_err(AppError::from)?;
+            }
+
+            // 3) data_revision +1 (D&D 並び替えはユーザー編集に該当、`data-model.md` §6.5 / §13.2)
+            Self::bump_data_revision(&tx)?;
+            tx.commit().map_err(AppError::from)?;
+            Ok(())
+        })
+    }
+
     fn search(
         &self,
         scope: &SearchScope,
@@ -727,6 +803,52 @@ impl StorageService for SqliteStorage {
         } else {
             self.search_fts(scope, query, module_filter, limit, offset)
         }
+    }
+
+    fn normalize_item_positions(
+        &self,
+        project_id: &ProjectId,
+        module_id: &str,
+    ) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            let tx = conn.transaction().map_err(AppError::from)?;
+
+            // スコープに 1 件も item が無ければ何もしない (revision も変えない)
+            let count: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM items WHERE project_id = ? AND module_id = ?",
+                    [project_id.as_str(), module_id],
+                    |row| row.get(0),
+                )
+                .map_err(AppError::from)?;
+            if count == 0 {
+                tx.commit().map_err(AppError::from)?;
+                return Ok(());
+            }
+
+            // `data-model.md` §6.5 の SQL: 現在の (position, created_at, id) 順を採用して
+            // 0..N-1 の連番に詰め直す (SQLite 3.33+ UPDATE-FROM 構文)。
+            tx.execute(
+                "UPDATE items SET position = sub.new_pos \
+                 FROM ( \
+                   SELECT id, \
+                          ROW_NUMBER() OVER ( \
+                            ORDER BY position, created_at, id \
+                          ) - 1 AS new_pos \
+                   FROM items \
+                   WHERE project_id = ?1 AND module_id = ?2 \
+                 ) AS sub \
+                 WHERE items.id = sub.id \
+                   AND items.project_id = ?1 \
+                   AND items.module_id = ?2",
+                [project_id.as_str(), module_id],
+            )
+            .map_err(AppError::from)?;
+
+            Self::bump_data_revision(&tx)?;
+            tx.commit().map_err(AppError::from)?;
+            Ok(())
+        })
     }
 }
 
@@ -760,10 +882,30 @@ impl SqliteStorage {
             let tx = conn.transaction().map_err(AppError::from)?;
             let id = ItemId::generate();
             let now = now_jst_iso8601();
+
+            // position 算出 (`data-model.md` §6.5 既定値ルール):
+            // - **未編集スコープ** (全行 position = 0) への追加 → 新規行も position = 0 のまま append
+            //   (ORDER BY タイブレーカーで updated_at DESC により新規が先頭に来る、
+            //   Sidebar projects と同挙動)
+            // - **reorder 済スコープ** (どこか 1 行でも position > 0) への追加 → MAX(position) + 1
+            //   で末尾追加
+            //
+            // 判定 SQL は writer mutex 内の同一 tx 内なので race なし。空スコープも
+            // `MAX(position)` が NULL → COALESCE で 0 扱いになり、全体として position = 0 に確定する。
+            let next_position: i64 = tx
+                .query_row(
+                    "SELECT CASE WHEN COALESCE(MAX(position), 0) = 0 THEN 0 \
+                     ELSE COALESCE(MAX(position), -1) + 1 END \
+                     FROM items WHERE project_id = ? AND module_id = ?",
+                    [project_id.as_str(), module_id],
+                    |row| row.get(0),
+                )
+                .map_err(AppError::from)?;
+
             tx.execute(
                 "INSERT INTO items (id, project_id, module_id, title, tags, search_text, \
-                 payload_schema_version, payload, created_at, updated_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 payload_schema_version, payload, position, created_at, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     id.as_str(),
                     project_id.as_str(),
@@ -773,6 +915,7 @@ impl SqliteStorage {
                     search_text,
                     payload_schema_version as i64,
                     payload_str,
+                    next_position,
                     now,
                     now,
                 ],
@@ -919,6 +1062,7 @@ impl SqliteStorage {
                     tags: row.tags,
                     payload_schema_version: current_version,
                     payload: current_payload,
+                    position: row.position,
                     created_at: row.created_at,
                     updated_at: row.updated_at,
                 });
@@ -966,7 +1110,7 @@ impl SqliteStorage {
     /// item を 1 行取得 (Eager-on-Read 判定用、JSON もパース済)。
     fn fetch_item_row(&self, module_id: &str, id: &ItemId) -> Result<ItemRowRaw, AppError> {
         // (id, project_id, module_id, title, tags_json, payload_schema_version,
-        //  payload_str, created_at, updated_at)
+        //  payload_str, position, created_at, updated_at)
         type RawTuple = (
             String,
             String,
@@ -975,6 +1119,7 @@ impl SqliteStorage {
             String,
             i64,
             String,
+            i64,
             String,
             String,
         );
@@ -984,7 +1129,7 @@ impl SqliteStorage {
             let raw_tuple: Option<RawTuple> = conn
                 .query_row(
                     "SELECT id, project_id, module_id, title, tags, payload_schema_version, \
-                     payload, created_at, updated_at \
+                     payload, position, created_at, updated_at \
                      FROM items WHERE id = ? AND module_id = ?",
                     params![id.as_str(), module_id],
                     |row| {
@@ -998,6 +1143,7 @@ impl SqliteStorage {
                             row.get(6)?,
                             row.get(7)?,
                             row.get(8)?,
+                            row.get(9)?,
                         ))
                     },
                 )
@@ -1011,6 +1157,7 @@ impl SqliteStorage {
                 row_tags,
                 row_version,
                 row_payload,
+                row_position,
                 row_created,
                 row_updated,
             ) = raw_tuple.ok_or_else(|| AppError::NotFound {
@@ -1029,6 +1176,7 @@ impl SqliteStorage {
                 tags,
                 payload_schema_version: row_version as u32,
                 payload_json,
+                position: row_position,
                 created_at: row_created,
                 updated_at: row_updated,
             })
@@ -1046,10 +1194,13 @@ impl SqliteStorage {
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
+                    // ORDER BY: position 優先、未編集スコープ (全行 position=0) は
+                    // タイブレーカーで updated_at DESC が効く (data-model.md §6.5)。
+                    // `idx_items_project_module_position` で index-only にカバーされる。
                     "SELECT id, project_id, module_id, title, tags, payload_schema_version, \
-                     payload, created_at, updated_at \
+                     payload, position, created_at, updated_at \
                      FROM items WHERE project_id = ? AND module_id = ? \
-                     ORDER BY updated_at DESC, id DESC \
+                     ORDER BY position ASC, updated_at DESC, id DESC \
                      LIMIT ? OFFSET ?",
                 )
                 .map_err(AppError::from)?;
@@ -1067,16 +1218,27 @@ impl SqliteStorage {
                             tags_json,
                             row.get::<_, i64>(5)? as u32,
                             payload_str,
-                            row.get::<_, String>(7)?,
+                            row.get::<_, i64>(7)?,
                             row.get::<_, String>(8)?,
+                            row.get::<_, String>(9)?,
                         ))
                     },
                 )
                 .map_err(AppError::from)?;
             let mut out = Vec::new();
             for r in rows {
-                let (id, pid, mid, title, tags_json, version, payload_str, created, updated) =
-                    r.map_err(AppError::from)?;
+                let (
+                    id,
+                    pid,
+                    mid,
+                    title,
+                    tags_json,
+                    version,
+                    payload_str,
+                    position,
+                    created,
+                    updated,
+                ) = r.map_err(AppError::from)?;
                 let tags: Vec<String> = serde_json::from_str(&tags_json)
                     .map_err(|e| AppError::Storage(format!("invalid tags JSON: {e}")))?;
                 let payload: JsonValue = serde_json::from_str(&payload_str)
@@ -1089,6 +1251,7 @@ impl SqliteStorage {
                     tags,
                     payload_schema_version: version,
                     payload,
+                    position,
                     created_at: created,
                     updated_at: updated,
                 });
@@ -1108,7 +1271,7 @@ impl SqliteStorage {
     ) -> Result<Vec<Item>, AppError> {
         let mut sql = String::from(
             "SELECT i.id, i.project_id, i.module_id, i.title, i.tags, i.payload_schema_version, \
-             i.payload, i.created_at, i.updated_at \
+             i.payload, i.position, i.created_at, i.updated_at \
              FROM items_fts f JOIN items i ON i.id = f.item_id \
              WHERE items_fts MATCH ?",
         );
@@ -1138,7 +1301,7 @@ impl SqliteStorage {
         );
         let mut sql = String::from(
             "SELECT i.id, i.project_id, i.module_id, i.title, i.tags, i.payload_schema_version, \
-             i.payload, i.created_at, i.updated_at \
+             i.payload, i.position, i.created_at, i.updated_at \
              FROM items i \
              WHERE (i.title LIKE ? ESCAPE '\\' OR i.tags LIKE ? ESCAPE '\\' \
                     OR i.search_text LIKE ? ESCAPE '\\')",
@@ -1178,15 +1341,26 @@ impl SqliteStorage {
                         tags_json,
                         row.get::<_, i64>(5)? as u32,
                         payload_str,
-                        row.get::<_, String>(7)?,
+                        row.get::<_, i64>(7)?,
                         row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
                     ))
                 })
                 .map_err(AppError::from)?;
             let mut out = Vec::new();
             for r in rows {
-                let (id, pid, mid, title, tags_json, version, payload_str, created, updated) =
-                    r.map_err(AppError::from)?;
+                let (
+                    id,
+                    pid,
+                    mid,
+                    title,
+                    tags_json,
+                    version,
+                    payload_str,
+                    position,
+                    created,
+                    updated,
+                ) = r.map_err(AppError::from)?;
                 let tags: Vec<String> = serde_json::from_str(&tags_json)
                     .map_err(|e| AppError::Storage(format!("invalid tags JSON: {e}")))?;
                 let payload: JsonValue = serde_json::from_str(&payload_str)
@@ -1199,6 +1373,7 @@ impl SqliteStorage {
                     tags,
                     payload_schema_version: version,
                     payload,
+                    position,
                     created_at: created,
                     updated_at: updated,
                 });
@@ -1218,6 +1393,7 @@ struct ItemRowRaw {
     tags: Vec<String>,
     payload_schema_version: u32,
     payload_json: JsonValue,
+    position: i64,
     created_at: String,
     updated_at: String,
 }
@@ -1232,6 +1408,7 @@ impl ItemRowRaw {
             tags: self.tags,
             payload_schema_version: self.payload_schema_version,
             payload: self.payload_json,
+            position: self.position,
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -1665,6 +1842,221 @@ mod tests {
         let before = storage.data_revision().unwrap();
         storage.reorder_projects(&[a.id, b.id]).unwrap();
         assert_eq!(storage.data_revision().unwrap(), before + 1);
+    }
+
+    // -------- reorder_items / list ordering / create position (PR-Y / ADR-0011) --------
+
+    /// (project_id, module_id) スコープの items を 3 件作るヘルパ。
+    fn create_three_items(
+        storage: &SqliteStorage,
+        project_id: &ProjectId,
+        module_id: &str,
+    ) -> [ItemId; 3] {
+        let i1 = storage
+            .create_item(
+                module_id,
+                project_id,
+                "i1",
+                &[],
+                1,
+                &serde_json::json!({}),
+                "i1",
+            )
+            .unwrap();
+        let i2 = storage
+            .create_item(
+                module_id,
+                project_id,
+                "i2",
+                &[],
+                1,
+                &serde_json::json!({}),
+                "i2",
+            )
+            .unwrap();
+        let i3 = storage
+            .create_item(
+                module_id,
+                project_id,
+                "i3",
+                &[],
+                1,
+                &serde_json::json!({}),
+                "i3",
+            )
+            .unwrap();
+        [i1, i2, i3]
+    }
+
+    /// T-40 相当: 未編集スコープ (全行 position=0) への新規 INSERT は position=0 で append される。
+    /// ORDER BY タイブレーカーで updated_at DESC により新規が **先頭** に来る (Sidebar projects と同挙動)。
+    #[test]
+    fn create_item_in_unedited_scope_uses_position_zero_so_newest_first() {
+        let storage = in_memory_storage();
+        let p = storage.create_project("P", None).unwrap();
+        let _ids = create_three_items(&storage, &p.id, "prompt");
+        // 全行 position = 0、最後に作った i3 が updated_at 最新 → 先頭
+        let listed: Vec<String> = storage
+            .list_items("prompt", &p.id, 100, 0)
+            .unwrap()
+            .iter()
+            .map(|i| i.title.clone())
+            .collect();
+        assert_eq!(listed, vec!["i3".to_string(), "i2".into(), "i1".into()]);
+    }
+
+    /// reorder_items 後は position 順で並ぶ (updated_at は無視される)。
+    #[test]
+    fn reorder_items_persists_order_and_overrides_updated_at_sort() {
+        let storage = in_memory_storage();
+        let p = storage.create_project("P", None).unwrap();
+        let [i1, i2, i3] = create_three_items(&storage, &p.id, "prompt");
+        // 並び替え: i1, i2, i3 (= 作成順 = updated_at とは逆)
+        storage
+            .reorder_items(&p.id, "prompt", &[i1.clone(), i2.clone(), i3.clone()])
+            .unwrap();
+        let listed: Vec<String> = storage
+            .list_items("prompt", &p.id, 100, 0)
+            .unwrap()
+            .iter()
+            .map(|i| i.title.clone())
+            .collect();
+        assert_eq!(listed, vec!["i1".to_string(), "i2".into(), "i3".into()]);
+    }
+
+    /// T-38 部分: reorder は data_revision +1、updated_at は不変。
+    #[test]
+    fn reorder_items_increments_data_revision_but_not_updated_at() {
+        let storage = in_memory_storage();
+        let p = storage.create_project("P", None).unwrap();
+        let [i1, i2, _i3] = create_three_items(&storage, &p.id, "prompt");
+        let before_revision = storage.data_revision().unwrap();
+        let listed_before = storage.list_items("prompt", &p.id, 100, 0).unwrap();
+        let updated_before: Vec<String> =
+            listed_before.iter().map(|i| i.updated_at.clone()).collect();
+
+        storage
+            .reorder_items(&p.id, "prompt", &[i2, i1, _i3])
+            .unwrap();
+
+        assert_eq!(
+            storage.data_revision().unwrap(),
+            before_revision + 1,
+            "data_revision must be +1 (D&D はユーザー編集に該当、§6.5)"
+        );
+        // updated_at は不変
+        let listed_after = storage.list_items("prompt", &p.id, 100, 0).unwrap();
+        let updated_after: std::collections::HashMap<String, String> = listed_after
+            .iter()
+            .map(|i| (i.title.clone(), i.updated_at.clone()))
+            .collect();
+        for it in &listed_before {
+            assert_eq!(
+                updated_after.get(&it.title),
+                Some(&it.updated_at),
+                "updated_at of {} must not change after reorder",
+                it.title
+            );
+        }
+        // updated_before の長さも参照しておく (未使用 warning 抑止)
+        assert_eq!(updated_before.len(), 3);
+    }
+
+    /// T-39 相当: 他スコープの item ID を ordered_ids に混入させても、スコープ二重ガード
+    /// (SELECT 検証 + UPDATE 句 WHERE 三条件) で reject される。
+    #[test]
+    fn reorder_items_rejects_other_scope_id() {
+        let storage = in_memory_storage();
+        let p = storage.create_project("P", None).unwrap();
+        let [i1, i2, _i3] = create_three_items(&storage, &p.id, "prompt");
+        // 別 module の item を追加
+        let other = storage
+            .create_item(
+                "linkmemo",
+                &p.id,
+                "other",
+                &[],
+                1,
+                &serde_json::json!({}),
+                "other",
+            )
+            .unwrap();
+        // prompt スコープの reorder に linkmemo の ID を混入 → Validation エラー
+        let err = storage
+            .reorder_items(&p.id, "prompt", &[i1, i2, other])
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation { .. }));
+    }
+
+    /// 別 project の item ID を混入させても同様に reject される。
+    #[test]
+    fn reorder_items_rejects_other_project_id() {
+        let storage = in_memory_storage();
+        let p1 = storage.create_project("P1", None).unwrap();
+        let p2 = storage.create_project("P2", None).unwrap();
+        let [i1, i2, _i3] = create_three_items(&storage, &p1.id, "prompt");
+        let foreign = storage
+            .create_item(
+                "prompt",
+                &p2.id,
+                "foreign",
+                &[],
+                1,
+                &serde_json::json!({}),
+                "foreign",
+            )
+            .unwrap();
+        let err = storage
+            .reorder_items(&p1.id, "prompt", &[i1, i2, foreign])
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation { .. }));
+    }
+
+    #[test]
+    fn reorder_items_rejects_missing_id() {
+        let storage = in_memory_storage();
+        let p = storage.create_project("P", None).unwrap();
+        let [i1, _i2, _i3] = create_three_items(&storage, &p.id, "prompt");
+        // 3 件あるスコープに 1 件だけ渡す → Validation
+        let err = storage.reorder_items(&p.id, "prompt", &[i1]).unwrap_err();
+        assert!(matches!(err, AppError::Validation { .. }));
+    }
+
+    #[test]
+    fn reorder_items_rejects_duplicate_id() {
+        let storage = in_memory_storage();
+        let p = storage.create_project("P", None).unwrap();
+        let [i1, _i2, _i3] = create_three_items(&storage, &p.id, "prompt");
+        // 同 ID を 3 回渡す → 重複でも数は合うが Validation
+        let err = storage
+            .reorder_items(&p.id, "prompt", &[i1.clone(), i1.clone(), i1])
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation { .. }));
+    }
+
+    /// reorder 済スコープへの新規追加は MAX(position)+1 で末尾に置かれる。
+    #[test]
+    fn create_item_in_reordered_scope_uses_max_plus_one() {
+        let storage = in_memory_storage();
+        let p = storage.create_project("P", None).unwrap();
+        let [i1, i2, i3] = create_three_items(&storage, &p.id, "prompt");
+        storage
+            .reorder_items(&p.id, "prompt", &[i1, i2, i3])
+            .unwrap();
+        // 新規 i4: 末尾に来るはず
+        let _i4 = storage
+            .create_item("prompt", &p.id, "i4", &[], 1, &serde_json::json!({}), "i4")
+            .unwrap();
+        let listed: Vec<String> = storage
+            .list_items("prompt", &p.id, 100, 0)
+            .unwrap()
+            .iter()
+            .map(|i| i.title.clone())
+            .collect();
+        assert_eq!(
+            listed,
+            vec!["i1".to_string(), "i2".into(), "i3".into(), "i4".into()]
+        );
     }
 
     // -------- data_revision --------
