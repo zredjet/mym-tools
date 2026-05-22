@@ -835,6 +835,8 @@ H-1 は stateless モジュールのため空状態は無し。代わりに「�
 | U-9 | フィルタ済件数の表示形式 (`27` vs `12 / 27`) | Phase 1 中盤で実データに当てて決定 |
 | U-10 | アクセント色のユーザー選択 (グローバル / per-project) | **Phase 2 持ち越し**。Phase 1 は blue 固定 (§2.1.1)。Phase 2 着手時に①グローバル 1 色 (`settings.json core.accent`) ②プロジェクト属性 (`projects.accent` カラム追加 + data-model 改訂) ③決定的割当 (id ハッシュ) のいずれかを実ユーザー (= 自分) のフィードバックで決定する |
 | U-11 | Items D&D の Phase 2 拡張 | Phase 1 (PR-Y / ADR-0011) は **基本機能のみ**。Phase 2 で検討する論点: ①「Sort: Updated ▾」セレクタを置いた時に手動 position と並びの主導権をどう調停するか (現状は手動最優先) / ②検索結果に手動順を反映するオプション (現状は検索順序のみ、`data-model.md §6.5` 検索結果での扱い) / ③export 時の reorder 履歴保全 (現状は import 時 ROW_NUMBER で詰め直すため厳密な原順序は保たれない、`data-model.md §6.5` export/import) / ④モジュール跨ぎ / プロジェクト跨ぎの D&D (現状はスコープ内のみ) |
+| U-12 | M-Hash の機能拡張 | Phase 1 (PR-AC) は **単一ファイル + 単一アルゴリズム** の D&D 計算のみ。Phase 2 候補: ①4 アルゴリズム同時計算 (`§6.6` 「Algo: All ▾」、バックエンドで file を 1 度開いて 4 hasher を並列更新) / ②複数ファイル同時計算 (タブ or リスト表示) / ③ファイル選択ダイアログ (D&D できない場面向け、`@tauri-apps/plugin-dialog` 流用) |
+| U-13 | M-Prompt 変数プレースホルダの構文拡張 | Phase 1 (PR-AD) で Unicode letter / number + `_` を許容済 (日本語 OK)。Phase 2 候補: ①Mustache / Handlebars / Jinja 慣例の `{{ name }}` 前後空白許容 (内側 trim 後の名前を採用、現状は空白入りは silently 無視) / ②デフォルト値構文 (`{{name|default}}`) / ③型ヒント (`{{name:multiline}}` で textarea 表示) — `data-model.md` §10.1 / `module-contract.md` §12.1 / `src/lib/promptVars.ts` |
 
 ---
 

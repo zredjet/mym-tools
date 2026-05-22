@@ -49,4 +49,29 @@ describe("renderPromptTemplate", () => {
   it("does not recurse into replaced value", () => {
     expect(renderPromptTemplate("{{a}}", { a: "{{b}}", b: "VALUE" })).toBe("{{b}}");
   });
+
+  // PR-AD: 日本語 (CJK) 対応
+  it("replaces Japanese variable names", () => {
+    expect(
+      renderPromptTemplate("{{言語}} で {{トピック}} について書いてください", {
+        言語: "日本語",
+        トピック: "猫",
+      }),
+    ).toBe("日本語 で 猫 について書いてください");
+  });
+
+  it("replaces mixed ASCII and Japanese placeholders", () => {
+    expect(
+      renderPromptTemplate("Translate {{topic}} into {{言語}}", {
+        topic: "hello",
+        言語: "日本語",
+      }),
+    ).toBe("Translate hello into 日本語");
+  });
+
+  it("leaves undefined Japanese variable as-is", () => {
+    expect(renderPromptTemplate("{{topic}} と {{言語}}", { topic: "hello" })).toBe(
+      "hello と {{言語}}",
+    );
+  });
 });

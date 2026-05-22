@@ -18,7 +18,10 @@ describe("extractPromptVariables", () => {
   it("ignores empty braces and invalid names", () => {
     expect(extractPromptVariables("{{}}")).toEqual([]);
     expect(extractPromptVariables("{{a-b}}")).toEqual([]);
-    expect(extractPromptVariables("{{こんにちは}}")).toEqual([]);
+    expect(extractPromptVariables("{{a.b}}")).toEqual([]);
+    // 空白入りは現状の Phase 1 では無視 (前後空白許容は U-13 候補)
+    expect(extractPromptVariables("{{ topic }}")).toEqual([]);
+    expect(extractPromptVariables("{{a b}}")).toEqual([]);
   });
 
   it("stops at unclosed braces (no infinite loop)", () => {
@@ -31,5 +34,35 @@ describe("extractPromptVariables", () => {
       "user_id_1",
       "topic42",
     ]);
+  });
+
+  // PR-AD: 日本語 (CJK) 対応
+  it("accepts Japanese (hiragana / katakana / kanji) variable names", () => {
+    expect(extractPromptVariables("{{こんにちは}}")).toEqual(["こんにちは"]);
+    expect(extractPromptVariables("{{トピック}}")).toEqual(["トピック"]);
+    expect(extractPromptVariables("{{言語}}")).toEqual(["言語"]);
+    expect(extractPromptVariables("{{ぷろんぷと}}")).toEqual(["ぷろんぷと"]);
+  });
+
+  it("preserves order with mixed ASCII and Japanese placeholders", () => {
+    expect(extractPromptVariables("Translate {{topic}} into {{言語}}")).toEqual(["topic", "言語"]);
+  });
+
+  it("treats fullwidth and halfwidth digits as distinct names", () => {
+    // `1` (U+0031) と `1` (U+FF11) は別 Unicode コードポイント
+    const body = "{{topic1}} と {{topic１}}";
+    const result = extractPromptVariables(body);
+    expect(result).toEqual(["topic1", "topic１"]);
+    expect(result[0]).not.toBe(result[1]);
+  });
+
+  // PR-AD codex P1: Rust `is_alphabetic` は Unicode "Alphabetic" 派生プロパティを使う
+  // ため、Hindi vowel signs (`ि` U+093F = Mc) や Arabic vowel marks など combining mark を
+  // 含む綴りも受け入れる。TS 側も `\p{Alphabetic}` で同じ挙動になることを検証する。
+  it("accepts Indic-script names with combining marks (codex PR-AD P1)", () => {
+    // किताब = क(U+0915 Lo) + ि(U+093F Mc, Other_Alphabetic) + त + ा + ब
+    expect(extractPromptVariables("{{किताब}}")).toEqual(["किताब"]);
+    // Arabic vowel marks も同様 (Other_Alphabetic 経由でアルファベット扱い)
+    expect(extractPromptVariables("{{مَرحَبا}}")).toEqual(["مَرحَبا"]);
   });
 });

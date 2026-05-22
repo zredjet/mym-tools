@@ -5,9 +5,21 @@
 //! - `render_template(body, variables)`: `{{name}}` を `variables[name]` で置換。
 //!   未定義変数は `{{name}}` のまま残す (部分レンダリング許容)
 //!
-//! ## 変数名の許容文字
-//! `[A-Za-z0-9_]+` (英数字 + アンダースコア、1 文字以上)。日本語を変数名にすると
-//! 識別子としての扱いが UI で煩雑になるためサポート外 (タイトル / body 本文では当然許容)。
+//! ## 変数名の許容文字 (PR-AD で日本語対応)
+//!
+//! Unicode の **letter / number + `_`** を許容 (1 文字以上)。具体的には Rust の
+//! `char::is_alphanumeric()` (= Unicode "Alphabetic" / "Numeric" 派生プロパティ) と
+//! アンダースコア。
+//!
+//! - ✅ `{{topic}}` / `{{lang_1}}` (ASCII)
+//! - ✅ `{{トピック}}` (カタカナ) / `{{言語}}` (漢字) / `{{ぷろんぷと}}` (ひらがな)
+//! - ✅ ASCII + CJK 混在 (`{{topic1}}` と `{{topic１}}` は **別変数** として扱う、全角/半角は区別)
+//! - ❌ 空白 (`{{ topic }}` / `{{a b}}`) — Phase 1 ではエラーではなく **silently 無視**。
+//!   Mustache 慣例の前後空白許容は U-13 候補 (別 PR)
+//! - ❌ ハイフン (`{{a-b}}`) / 記号類
+//!
+//! TS 側の `src/lib/promptVars.ts` / `src/lib/promptRender.ts` も同じ規則 (`\p{L}\p{N}_`)
+//! で実装する。
 
 use std::collections::HashMap;
 
@@ -74,9 +86,13 @@ pub fn render_template(body: &str, variables: &HashMap<String, String>) -> Strin
     result
 }
 
-/// 変数名として許容される文字列か (`[A-Za-z0-9_]+`)。
+/// 変数名として許容される文字列か (Unicode letter / number / `_`、1 文字以上)。
+///
+/// `char::is_alphanumeric()` は Unicode "Alphabetic" / "Numeric" 派生プロパティを使うため、
+/// ASCII (`a`-`z`, `A`-`Z`, `0`-`9`) に加えて CJK (漢字 / ひらがな / カタカナ) や
+/// 他言語の文字も許容される。詳細はファイル先頭ドキュメント参照。
 fn is_valid_var_name(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
 #[cfg(test)]
@@ -125,10 +141,54 @@ mod tests {
 
     #[test]
     fn extract_skips_invalid_chars_in_name() {
-        // 日本語変数名・スペース入り変数名は無効として無視
-        assert!(extract_variables("{{こんにちは}}").is_empty());
+        // 空白入り・ハイフン入りの変数名は無効として無視。
+        // (Phase 1: Mustache 慣例の `{{ name }}` 前後空白許容は U-13 候補で別 PR)
         assert!(extract_variables("{{a b}}").is_empty());
         assert!(extract_variables("{{a-b}}").is_empty());
+        assert!(extract_variables("{{a.b}}").is_empty());
+        assert!(extract_variables("{{a@b}}").is_empty());
+    }
+
+    /// PR-AD 回帰: 日本語 (ひらがな / カタカナ / 漢字) を変数名として許容する。
+    #[test]
+    fn extract_supports_japanese_variable_names() {
+        assert_eq!(extract_variables("{{こんにちは}}"), vec!["こんにちは"]);
+        assert_eq!(extract_variables("{{トピック}}"), vec!["トピック"]);
+        assert_eq!(extract_variables("{{言語}}"), vec!["言語"]);
+        assert_eq!(extract_variables("{{ぷろんぷと}}"), vec!["ぷろんぷと"]);
+    }
+
+    /// PR-AD 回帰: ASCII と CJK の混在 + 出現順保持。
+    #[test]
+    fn extract_mixed_ascii_and_japanese_in_order() {
+        assert_eq!(
+            extract_variables("Translate {{topic}} into {{言語}}"),
+            vec!["topic", "言語"]
+        );
+    }
+
+    /// PR-AD 回帰: 全角数字と半角数字は **別変数** として区別される
+    /// (Unicode コードポイントが違うため、文字列比較で一致しない)。
+    #[test]
+    fn extract_treats_fullwidth_and_halfwidth_digits_as_distinct() {
+        // Unicode エスケープで明示: `1` (U+0031) vs `1` (U+FF11)
+        let body = "{{topic1}} と {{topic\u{FF11}}}";
+        let result = extract_variables(body);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "topic1");
+        assert_eq!(result[1], "topic\u{FF11}");
+        assert_ne!(result[0], result[1]);
+    }
+
+    /// PR-AD codex P1: Indic 等 combining marks (Mc / Mn) を含む綴りも受け入れる
+    /// (Rust `char::is_alphabetic` が Unicode "Alphabetic" 派生プロパティで Other_Alphabetic を
+    /// 含むため。TS 側 `\p{Alphabetic}` と完全一致)。
+    #[test]
+    fn extract_accepts_indic_script_with_combining_marks() {
+        // किताब = क(U+0915 Lo) + ि(U+093F Mc) + त + ा + ब
+        assert_eq!(extract_variables("{{किताब}}"), vec!["किताब"]);
+        // Arabic vowel marks (mark, nonspacing も Other_Alphabetic 経由で有効)
+        assert_eq!(extract_variables("{{مَرحَبا}}"), vec!["مَرحَبا"]);
     }
 
     #[test]
@@ -206,5 +266,32 @@ mod tests {
         // 値に `{{x}}` が含まれていても再展開しない (無限ループ・置換順依存を避ける)
         let s = render_template("{{a}}", &vars(&[("a", "{{b}}"), ("b", "VALUE")]));
         assert_eq!(s, "{{b}}");
+    }
+
+    /// PR-AD 回帰: 日本語変数名の置換。
+    #[test]
+    fn render_replaces_japanese_variable_names() {
+        let s = render_template(
+            "{{言語}} で {{トピック}} について書いてください",
+            &vars(&[("言語", "日本語"), ("トピック", "猫")]),
+        );
+        assert_eq!(s, "日本語 で 猫 について書いてください");
+    }
+
+    /// PR-AD 回帰: ASCII と CJK 混在の placeholder と value の組合せ。
+    #[test]
+    fn render_mixed_ascii_and_japanese_placeholders() {
+        let s = render_template(
+            "Translate {{topic}} into {{言語}}",
+            &vars(&[("topic", "hello"), ("言語", "日本語")]),
+        );
+        assert_eq!(s, "Translate hello into 日本語");
+    }
+
+    /// PR-AD 回帰: 日本語の未定義変数も「そのまま残す」フォールバックが動く。
+    #[test]
+    fn render_leaves_undefined_japanese_variable_as_is() {
+        let s = render_template("{{topic}} と {{言語}}", &vars(&[("topic", "hello")]));
+        assert_eq!(s, "hello と {{言語}}");
     }
 }
