@@ -1847,6 +1847,12 @@ mod tests {
     // -------- reorder_items / list ordering / create position (PR-Y / ADR-0011) --------
 
     /// (project_id, module_id) スコープの items を 3 件作るヘルパ。
+    ///
+    /// **タイブレーカー安定化のため item 間に 2ms の sleep を入れる**: JST_ISO8601 は ms 3 桁
+    /// (`docs/decisions/0005-timestamp-jst.md`) なので、同一プロセス内で連続 INSERT すると
+    /// updated_at が衝突しうる。衝突すると `ORDER BY position ASC, updated_at DESC, id DESC` の
+    /// `id DESC` フォールバックが効いて UUID 順での並びになり、テストが flaky になる (Linux CI
+    /// 上で発覚)。ms を異ならせて updated_at 順で確定的に並ぶようにする。
     fn create_three_items(
         storage: &SqliteStorage,
         project_id: &ProjectId,
@@ -1863,6 +1869,7 @@ mod tests {
                 "i1",
             )
             .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
         let i2 = storage
             .create_item(
                 module_id,
@@ -1874,6 +1881,7 @@ mod tests {
                 "i2",
             )
             .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
         let i3 = storage
             .create_item(
                 module_id,

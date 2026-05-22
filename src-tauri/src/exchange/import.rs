@@ -82,8 +82,19 @@ pub fn apply_import(
             Ok(parent_present) if parent_present => {
                 // 親が DB に存在する (新規 INSERT または既存) → 配下 items を試す
                 for item in &pw.items {
-                    import_one_item(storage, modules_by_id, &mut summary, &pw.project.id.0, item);
-                    touched_scopes.insert((pw.project.id.0.clone(), item.module_id.clone()));
+                    let inserted = import_one_item(
+                        storage,
+                        modules_by_id,
+                        &mut summary,
+                        &pw.project.id.0,
+                        item,
+                    );
+                    // codex PR-Y P1: **新規 INSERT が実際に発生したスコープのみ** を追跡する。
+                    // skip / failed のみのスコープを normalize すると、無駄に position を書き換え
+                    // data_revision +1 が発生する (= 再 import を no-op として扱う冪等性が崩れる)。
+                    if inserted {
+                        touched_scopes.insert((pw.project.id.0.clone(), item.module_id.clone()));
+                    }
                 }
             }
             Ok(_) => {
@@ -163,13 +174,16 @@ fn import_one_project(
 /// - validate 失敗 → failed
 /// - import_item の真のエラー → failed
 /// - import_item の Skipped → skipped 計上
+///
+/// 戻り値: **新規 INSERT が成功した場合のみ** `true`。skip / failed は `false`。
+/// 呼び出し側は `true` のときだけ `touched_scopes` に追加する (codex PR-Y P1)。
 fn import_one_item(
     storage: &Arc<dyn StorageService>,
     modules_by_id: &HashMap<String, Arc<dyn ModuleBackend>>,
     summary: &mut ImportSummary,
     parent_project_id: &str,
     item: &ItemExport,
-) {
+) -> bool {
     let module = match modules_by_id.get(&item.module_id) {
         Some(m) => m,
         None => {
@@ -180,7 +194,7 @@ fn import_one_item(
                 module_id: Some(item.module_id.clone()),
                 reason: format!("unknown module_id: {}", item.module_id),
             });
-            return;
+            return false;
         }
     };
 
@@ -197,7 +211,7 @@ fn import_one_item(
                 item.module_id
             ),
         });
-        return;
+        return false;
     }
 
     // payload を現行版までアップグレード (`data-model.md` §12.4 step 4)
@@ -218,7 +232,7 @@ fn import_one_item(
                     module_id: Some(item.module_id.clone()),
                     reason: format!("payload upgrade {} -> {} failed: {}", from, from + 1, e),
                 });
-                return;
+                return false;
             }
         }
     }
@@ -234,7 +248,7 @@ fn import_one_item(
                 from, current
             ),
         });
-        return;
+        return false;
     }
 
     // validate (`data-model.md` §12.4 step 5)
@@ -246,7 +260,7 @@ fn import_one_item(
             module_id: Some(item.module_id.clone()),
             reason: format!("validate failed: {e}"),
         });
-        return;
+        return false;
     }
 
     // search_text 生成 (`data-model.md` §12.4 step 6)
@@ -270,8 +284,14 @@ fn import_one_item(
         &item.updated_at,
     );
     match outcome {
-        Ok(ImportOutcome::Inserted) => summary.items_inserted += 1,
-        Ok(ImportOutcome::Skipped) => summary.items_skipped += 1,
+        Ok(ImportOutcome::Inserted) => {
+            summary.items_inserted += 1;
+            true
+        }
+        Ok(ImportOutcome::Skipped) => {
+            summary.items_skipped += 1;
+            false
+        }
         Err(e) => {
             summary.items_failed += 1;
             summary.failures.push(ImportFailure {
@@ -280,6 +300,7 @@ fn import_one_item(
                 module_id: Some(item.module_id.clone()),
                 reason: format!("insert failed: {e}"),
             });
+            false
         }
     }
 }
@@ -620,5 +641,35 @@ mod tests {
             "duplicate id wins over empty-title validation"
         );
         assert_eq!(s.items_failed, 0);
+    }
+
+    /// codex PR-Y P1 回帰: 全件 skip / failed のみ (新規 INSERT 0 件) のスコープでは
+    /// `normalize_item_positions` が走らず、`data_revision` も増えない。再 import を
+    /// no-op として扱う冪等性の根拠。
+    #[test]
+    fn second_import_with_only_skipped_items_does_not_normalize_or_bump_revision() {
+        let (storage, modules) = setup(1);
+        let data = data_with(vec![ProjectWithItems {
+            project: project("p1", "P"),
+            items: vec![
+                item("i1", 1, json!({"body": "a"})),
+                item("i2", 1, json!({"body": "b"})),
+            ],
+        }]);
+
+        // 1 回目: 全件 INSERT (+ normalize で position を 0..1 に詰める)
+        apply_import(&storage, &modules, &data);
+        let revision_after_first = storage.data_revision().unwrap();
+
+        // 2 回目: 同じ JSON → 全件 skip。normalize が走らないので data_revision は変化しない
+        let summary2 = apply_import(&storage, &modules, &data);
+        assert_eq!(summary2.items_inserted, 0);
+        assert_eq!(summary2.items_skipped, 2);
+        assert_eq!(summary2.items_failed, 0);
+        assert_eq!(
+            storage.data_revision().unwrap(),
+            revision_after_first,
+            "no-op re-import must not bump data_revision (codex PR-Y P1 idempotency)"
+        );
     }
 }
