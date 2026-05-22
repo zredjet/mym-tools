@@ -8,14 +8,32 @@
  * - `mod+n` (Cmd/Ctrl+N) で新規 (`docs/ui-design.md` §8.1)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useNavigate, useParams } from "react-router-dom";
+import {
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { deleteItem, listItems } from "@/ipc/items";
+import { deleteItem, listItems, reorderItems } from "@/ipc/items";
+import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import { extractPromptVariables } from "@/lib/promptVars";
 import type { Item, PromptPayloadV1 } from "@/lib/types";
@@ -76,6 +94,37 @@ export function PromptListPage() {
     if (projectId != null) await refresh(projectId);
   }, [deletingItem, projectId, refresh]);
 
+  // D&D 並び替え (`docs/ui-design.md` §3.3.1、Sidebar D&D と同パターン)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (over == null || active.id === over.id || projectId == null) return;
+      const oldIndex = items.findIndex((i) => i.id === active.id);
+      const newIndex = items.findIndex((i) => i.id === over.id);
+      if (oldIndex < 0 || newIndex < 0) return;
+      // 楽観的更新: 先に local state を arrayMove で並び替え
+      const reordered = arrayMove(items, oldIndex, newIndex);
+      setItems(reordered);
+      try {
+        await reorderItems({
+          projectId,
+          moduleId: "prompt",
+          orderedIds: reordered.map((i) => i.id),
+        });
+        setError(null);
+      } catch (e) {
+        // 失敗 → refetch で旧順序に巻き戻し + エラー表示
+        setError(formatInvokeError(e));
+        await refresh(projectId);
+      }
+    },
+    [items, projectId, refresh],
+  );
+
   if (projectId == null) {
     return (
       <div className="m-6 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-muted)] p-4 text-sm text-[var(--fg-muted)]">
@@ -121,17 +170,21 @@ export function PromptListPage() {
           />
         </div>
       ) : (
-        <ul className="divide-y divide-[var(--border)] rounded-[var(--radius)] border border-[var(--border)]">
-          {items.map((item) => (
-            <PromptRow
-              key={item.id}
-              item={item}
-              projectId={projectId}
-              onEdit={() => setEditingItem(item)}
-              onDelete={() => setDeletingItem(item)}
-            />
-          ))}
-        </ul>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+            <ul className="divide-y divide-[var(--border)] rounded-[var(--radius)] border border-[var(--border)]">
+              {items.map((item) => (
+                <PromptRow
+                  key={item.id}
+                  item={item}
+                  projectId={projectId}
+                  onEdit={() => setEditingItem(item)}
+                  onDelete={() => setDeletingItem(item)}
+                />
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
       )}
 
       <PromptItemDialog
@@ -179,8 +232,35 @@ function PromptRow({
   }, [item.payload]);
   const varCount = useMemo(() => extractPromptVariables(body).length, [body]);
 
+  // D&D (`docs/ui-design.md` §3.3.1)。`listeners` は GripVertical handle のみに付ける
+  // ことで、行クリック (= 詳細遷移) と drag の競合を防ぐ (Sidebar projects と同パターン)
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.id,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
   return (
-    <li className="flex h-[var(--row-h)] items-center gap-3 px-3 hover:bg-[var(--bg-muted)]">
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex h-[var(--row-h)] items-center gap-3 px-3 hover:bg-[var(--bg-muted)]",
+        isDragging && "z-10 bg-[var(--bg-muted)] opacity-90 shadow",
+      )}
+    >
+      <button
+        type="button"
+        aria-label="ドラッグして並び替え"
+        title="ドラッグして並び替え"
+        className="inline-flex h-5 w-3 cursor-grab items-center justify-center text-[var(--fg-subtle)] hover:text-[var(--fg-muted)] active:cursor-grabbing"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={14} aria-hidden />
+      </button>
       <button
         type="button"
         onClick={() => navigate(`/projects/${projectId}/m/prompt/${item.id}`)}

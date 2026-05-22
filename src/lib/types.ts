@@ -31,6 +31,8 @@ export interface Item {
   tags: string[];
   payload_schema_version: number;
   payload: unknown;
+  /** D&D 並び順 (`data-model.md` §6.5)。(project_id, module_id) スコープ内で 0..N-1 */
+  position: number;
   created_at: string; // JST_ISO8601
   updated_at: string;
 }
