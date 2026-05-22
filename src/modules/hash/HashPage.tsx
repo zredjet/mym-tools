@@ -117,20 +117,24 @@ export function HashPage() {
           });
         },
       });
-      setFileResult({ path, algorithm: algo, hash, durationMs: 0 });
-      setFileJob((current) =>
-        current != null && current.operationId === operationId ? null : current,
-      );
+      // codex PR-AC P2: drop 連打などで古い job の Promise が新規 job 完了後に解決する
+      // ケースを防ぐ。fileJobRef.current は常に **最新の** job を指すため、自分が最新かを
+      // 確認してからのみ result を書き込む (setFileJob と同じガード)。
+      if (fileJobRef.current?.operationId === operationId) {
+        setFileResult({ path, algorithm: algo, hash, durationMs: 0 });
+        setFileJob(null);
+      }
     } catch (e) {
       // Cancelled / I/O error / Unsupported algo 等すべてここに来る
       const msg = formatInvokeError(e);
       // Cancelled エラーはエラー表示しない (ユーザー意図で止めたため)
-      if (!/cancel/i.test(msg)) {
-        setError(msg);
+      if (fileJobRef.current?.operationId === operationId) {
+        if (!/cancel/i.test(msg)) {
+          setError(msg);
+        }
+        setFileJob(null);
       }
-      setFileJob((current) =>
-        current != null && current.operationId === operationId ? null : current,
-      );
+      // 古い job の cancel エラーが来た場合は何もせず破棄する
     }
   }, []);
 
@@ -178,6 +182,20 @@ export function HashPage() {
     // algorithm 変更で listener を貼り替えるのは僅かな blip があるが、drop の瞬間に
     // 最新の algorithm が closure に入る方が単純 + 信頼性が高い。Phase 1 では UX 上問題なし
   }, [algorithm, startFileHash]);
+
+  // codex PR-AC P2: コンポーネント unmount 時 (= Hash ページから離れた時) に進行中の
+  // hash_compute_file を必ずキャンセルする。バックエンドの CPU / IO ヘビーな処理が
+  // UI からアクセスできない状態で走り続けるのを防ぐ。algorithm 変更で listener が
+  // 貼り替わる effect とは別出しにすることで、algorithm 切り替え時にキャンセルが
+  // 走らないようにする (deps = [])。
+  useEffect(() => {
+    return () => {
+      const active = fileJobRef.current;
+      if (active != null) {
+        void cancelOperation(active.operationId);
+      }
+    };
+  }, []);
 
   const copyToClipboard = async (s: string) => {
     try {
