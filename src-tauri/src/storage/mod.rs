@@ -15,6 +15,7 @@
 //! アクセス不能 (`module-contract.md` §6.2)。`get_item` は ADR-0006 の Eager-on-Read
 //! を発火する。
 
+pub mod bootstrap;
 pub mod schema;
 pub mod scoped;
 pub mod sqlite;
@@ -135,7 +136,10 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
     ) -> Result<Item, AppError>;
 
     /// プロジェクト内のモジュール item を一覧取得 (Eager-on-Read を**発火させない**、
-    /// `data-model.md` §7.2 注)。`updated_at DESC, id DESC` 順。
+    /// `data-model.md` §7.2 注)。`ORDER BY position ASC, updated_at DESC, id DESC` 順。
+    ///
+    /// **未編集スコープ (全行 `position = 0`) はタイブレーカーで updated_at DESC が効く**
+    /// (`data-model.md` §6.5)。reorder 後のスコープは 0..N-1 の連番により position が優先される。
     fn list_items(
         &self,
         module_id: &str,
@@ -143,6 +147,40 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Item>, AppError>;
+
+    /// `(project_id, module_id)` スコープ内の item を `ordered_ids` の順序で `position`
+    /// 列に再付番する (`data-model.md` §6.5、D&D 並び替えの永続化)。
+    ///
+    /// **要件**:
+    /// - `ordered_ids` は当該スコープの **全 item ID が過不足なく** 含まれていなければならない
+    ///   (欠損 / 余分 / 未知 ID は `AppError::Validation` で reject、`reorder_projects` と同じ厳格性)
+    /// - **二重ガード SQL**: ① SELECT で取得した集合と一致を検証、② UPDATE 句は
+    ///   `WHERE id=? AND project_id=? AND module_id=?` の三条件で他スコープへの誤書き込みを物理的に防止
+    /// - 1 トランザクション内で全 UPDATE → `data_revision +1`
+    /// - `updated_at` は **触らない** (並び替えは「内容」変更ではないため、§6.5)
+    fn reorder_items(
+        &self,
+        project_id: &ProjectId,
+        module_id: &str,
+        ordered_ids: &[ItemId],
+    ) -> Result<(), AppError>;
+
+    /// `(project_id, module_id)` スコープ内の `position` 列を **現在値順** で
+    /// `ROW_NUMBER() - 1` (= `0..N-1`) に詰め直す (`data-model.md` §6.5 / §12.4 step 9)。
+    ///
+    /// **import 後の補正専用**: 投入された JSON の position と既存 item の position が
+    /// 衝突する状況を解消するため、`apply_import` が末尾で呼ぶ。`reorder_items` と違い
+    /// ordered_ids を受け取らず、現在の `(position, created_at, id)` 順をそのまま採用する
+    /// (元 export の意図順序を可能な限り保つ)。
+    ///
+    /// - 1 トランザクション内で全 UPDATE → `data_revision +1`
+    /// - `updated_at` は **触らない** (reorder_items と同じ)
+    /// - スコープが空 (該当 item 無し) なら何もしない (data_revision も変えない)
+    fn normalize_item_positions(
+        &self,
+        project_id: &ProjectId,
+        module_id: &str,
+    ) -> Result<(), AppError>;
 
     // -------- 検索 (`data-model.md` §8) --------
 
@@ -243,6 +281,7 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
         payload_schema_version: u32,
         payload: &JsonValue,
         search_text: &str,
+        position: i64,
         created_at: &str,
         updated_at: &str,
     ) -> Result<ImportOutcome, AppError>;

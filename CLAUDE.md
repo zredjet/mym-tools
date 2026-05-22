@@ -34,12 +34,15 @@ Phase 1 の実装は **Tauri 2 のデスクトップアプリ** になる予定 
 | 0006 | モジュールデータは payload バージョニング + Eager-on-Read (DB マイグレーションはしない) |
 | 0007 | ローカルバックアップは 3 系統: `auto` / `pre-op` / `manual`。リストアはメンテナンスモード経由 |
 | 0008 | 自動更新なし。配布は portable 差し替え方式。About 画面は「最新版を確認」リンクのみ |
+| 0011 | コアスキーマの **additive** な DDL マイグレーション (新カラム+DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) は枠組み内で許可。`db_schema_version` を bump し pre-migration バックアップを自動取得 |
 
 ## 絶対に破ってはいけない不変条件
 
 D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユーザーデータを壊すか、配布が破綻する。
 
-- **コアスキーマのマイグレーションをしない**。モジュールデータ変更は payload バージョニング + Eager-on-Read (ADR-0006) で吸収する。本当に必要なら新 ADR + `db_schema_version` 上昇 + C-12 起動停止画面の追加が前提
+- **コアスキーマの破壊的マイグレーションをしない**。`DROP` / `RENAME` / 型変更 / 既存値書き換えは禁止 (ADR-0006 のまま)。本当に必要なら新 ADR + `db_schema_version` 上昇 + C-12 起動停止画面の追加が前提
+- **additive な DDL マイグレーション** (新カラム + DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) は **ADR-0011 の枠組みで許可**。`schema.rs::MIGRATIONS` にエントリを追加 + `db_schema_version` を bump + pre-migration バックアップが自動取得される。PR 説明で「additive か / バックアップ取得を確認したか」を必ず書く
+- **モジュールデータ変更は引き続き payload バージョニング + Eager-on-Read** (ADR-0006) で吸収する。コアスキーマには触らない
 - **フロントエンドから SQLite に直接アクセスしない**。`@tauri-apps/plugin-sql` も使わず、`tauri::command` のみを通す (module-contract §6.2)。フロントは `invoke(...)` で型付き結果を受ける
 - **タイムスタンプは必ずアプリ側で生成**。`CURRENT_TIMESTAMP` 等の DB 生成は禁止。JST `+09:00`、ms 3 桁、固定 29 文字 (ADR-0005)。文字列のまま辞書順ソート可
 - **Zustand 単一ストアを Day 1 から使う**。アプリ全体状態 (現在プロジェクト / 現在モジュール / テーマ / 設定) はここに集約。モジュール内のローカル状態は `useState` でよい。Context には逃さない (architecture.md §2.3)
@@ -68,4 +71,10 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - `docs/decisions/` の ADR は**追記専用**。受理済 ADR は書き換えず、覆すなら新 ADR で supersede する。軽微な誤字訂正は可、ただし決定そのものは原文を残す
 - `docs/ui-design.md` には末尾に改訂履歴テーブルがある。非自明な変更を入れたら 1 行追加し、冒頭の v0.X プレリュードと同期させる
 - `docs/MyMyTools Prototype.bundle.html` は 1.7MB の自己完結 HTML (Claude Design 出力)。オフライン参照のためにそのまま置いてある — 再生成・編集はしない
+- `src-tauri/src/storage/schema.rs::MIGRATIONS` を変更する PR は、PR 説明に以下を必ず書く (ADR-0011 §2.1 チェックリスト):
+  - additive (新カラム+定数 DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) のみで構成されているか
+  - 同 PR 内に non-additive (DROP / RENAME / 型変更 / 既存値書き換え) が混ざっていないか — 混ざる場合は別 ADR + C-12 起動停止画面の追加が必須 (ADR-0011 §2.2)
+  - 各 Migration エントリ末尾に `UPDATE meta SET value=? WHERE key='db_schema_version'` を含めているか (§2.3)
+  - `data-model.md §14.4` のマイグレーション一覧表を更新したか
+  - pre-migration バックアップ取得 (`pre-migration-v<N>` プレフィックス) が `schema::take_pre_migration_backup` で起動時に走ることを実装テストで確認したか
 - git user は `zredjet`、PR の base は `main` (現在の作業ブランチは `master` なので push 前に確認すること)

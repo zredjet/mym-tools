@@ -56,6 +56,7 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         crate::commands::items::core_create_item,
         crate::commands::items::core_update_item,
         crate::commands::items::core_delete_item,
+        crate::commands::items::core_reorder_items,
         // Core: 横断検索 (FTS5 trigram + LIKE フォールバック、data-model.md §8)
         crate::commands::search::core_search,
         // Core: Backup (ADR-0007 / data-model.md §13)

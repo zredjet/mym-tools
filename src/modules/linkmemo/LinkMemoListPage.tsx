@@ -9,15 +9,42 @@
  * - `mod+n` で新規
  */
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, FileText, Globe, Pencil, Plus, StickyNote, Trash2 } from "lucide-react";
+import {
+  ExternalLink,
+  FileText,
+  Globe,
+  GripVertical,
+  Pencil,
+  Plus,
+  StickyNote,
+  Trash2,
+} from "lucide-react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useParams } from "react-router-dom";
+import {
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { deleteItem, listItems } from "@/ipc/items";
+import { deleteItem, listItems, reorderItems } from "@/ipc/items";
 import { linkmemoOpen } from "@/ipc/linkmemo";
+import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import type { Item, LinkMemoPayloadV1 } from "@/lib/types";
 import { LinkMemoItemDialog } from "@/modules/linkmemo/LinkMemoItemDialog";
@@ -77,6 +104,35 @@ export function LinkMemoListPage() {
     await deleteItem({ moduleId: "linkmemo", itemId: deletingItem.id });
     if (projectId != null) await refresh(projectId);
   }, [deletingItem, projectId, refresh]);
+
+  // D&D 並び替え (`docs/ui-design.md` §3.3.1)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (over == null || active.id === over.id || projectId == null) return;
+      const oldIndex = items.findIndex((i) => i.id === active.id);
+      const newIndex = items.findIndex((i) => i.id === over.id);
+      if (oldIndex < 0 || newIndex < 0) return;
+      const reordered = arrayMove(items, oldIndex, newIndex);
+      setItems(reordered);
+      try {
+        await reorderItems({
+          projectId,
+          moduleId: "linkmemo",
+          orderedIds: reordered.map((i) => i.id),
+        });
+        setError(null);
+      } catch (e) {
+        setError(formatInvokeError(e));
+        await refresh(projectId);
+      }
+    },
+    [items, projectId, refresh],
+  );
 
   const handleOpen = async (item: Item) => {
     const payload = asPayload(item);
@@ -138,17 +194,21 @@ export function LinkMemoListPage() {
           />
         </div>
       ) : (
-        <ul className="divide-y divide-[var(--border)] rounded-[var(--radius)] border border-[var(--border)]">
-          {items.map((item) => (
-            <LinkMemoRow
-              key={item.id}
-              item={item}
-              onOpen={() => void handleOpen(item)}
-              onEdit={() => setEditingItem(item)}
-              onDelete={() => setDeletingItem(item)}
-            />
-          ))}
-        </ul>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+            <ul className="divide-y divide-[var(--border)] rounded-[var(--radius)] border border-[var(--border)]">
+              {items.map((item) => (
+                <LinkMemoRow
+                  key={item.id}
+                  item={item}
+                  onOpen={() => void handleOpen(item)}
+                  onEdit={() => setEditingItem(item)}
+                  onDelete={() => setDeletingItem(item)}
+                />
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
       )}
 
       <LinkMemoItemDialog
@@ -210,8 +270,34 @@ function LinkMemoRow({
   const Icon = payload.type === "url" ? Globe : payload.type === "path" ? FileText : StickyNote;
   const openable = payload.type !== "memo" && payload.target != null && payload.target !== "";
 
+  // D&D (`docs/ui-design.md` §3.3.1)、Sidebar / Prompt と同パターン
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.id,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
   return (
-    <li className="flex h-[var(--row-h)] items-center gap-3 px-3 hover:bg-[var(--bg-muted)]">
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex h-[var(--row-h)] items-center gap-3 px-3 hover:bg-[var(--bg-muted)]",
+        isDragging && "z-10 bg-[var(--bg-muted)] opacity-90 shadow",
+      )}
+    >
+      <button
+        type="button"
+        aria-label="ドラッグして並び替え"
+        title="ドラッグして並び替え"
+        className="inline-flex h-5 w-3 cursor-grab items-center justify-center text-[var(--fg-subtle)] hover:text-[var(--fg-muted)] active:cursor-grabbing"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={14} aria-hidden />
+      </button>
       <Icon
         size={14}
         aria-hidden

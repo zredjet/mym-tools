@@ -1,6 +1,6 @@
 # UI デザイン方針 (Phase 1)
 
-最終更新: 2026-04-30 / ステータス: Draft v0.4 (ADR 整合修正)
+最終更新: 2026-05-16 / ステータス: Draft v0.5 (Item D&D 並び替え追記)
 
 このドキュメントは「アプリの見た目と画面構成」を確定するためのもの。
 具体実装 (CSS / JSX) は別途。本書は方針 + テキスト・ベースのスケルトンに留める。
@@ -10,6 +10,8 @@
 > **v0.3 の主な変更**: トークン値・状態スタイル・キーボードショートカット・空状態を実装と整合する形で具体化。
 >
 > **v0.4 の主な変更**: 既存 ADR (0001-0008) / module-contract / data-model との整合チェック結果を反映。要点 4 つ — ①**アクセント色は Phase 1 = blue 固定**に確定 (per-project / グローバル選択は U-10 として Phase 2 持ち越し)、②未スケルトンだった C-8/C-9/C-10/C-11/C-12/C-13/C-14/C-16 を §6 に新規追記、③自動更新の言及削除、④`handoff.md` 廃止し独自設計部分のみ §12 付録に吸収 (実装スタック詳細は ADR-0002 を一次ソースとする)。詳細は §11 改訂履歴の v0.4 行を参照。
+>
+> **v0.5 の主な変更**: PR-Y (Item D&D 並び替え) の正典化。§3.3.1 を新規追加し、P-1 / L-1 / K-1 共通の D&D ルール (drag handle / 入力 / スコープ / 永続化 / 失敗時挙動 / ソート順 / 検索結果) を 1 か所にまとめた。実装は `items.position` カラム + `core_reorder_items` IPC (`data-model.md` §6.5 / ADR-0011)。
 
 ---
 
@@ -216,6 +218,19 @@ dark への切替は `[data-theme="dark"]` セレクタで `:root` トークン�
 **パターン C: 編集フォーム** (P-3, L-3, K-2) — `.form-page` を共通利用、`detail-header` をヘッダにキャンセル/保存ボタンを並べる。
 
 > **v0.2 変更 (重要)**: 編集フォーム (P-3 / L-3) から **「プロジェクト」フィールドを削除**。理由: プロジェクトはサイドバーで明示的に選択中であり、編集フォーム内で再選択させるのは冗長 + 操作の二重化につながる。アイテムは「現在選択中のプロジェクト」に自動で所属する。プロジェクト間移動が必要な場合は、別途「移動」コンテキストアクション (将来検討) で扱う。
+
+#### 3.3.1 リストの D&D 並び替え (パターン A 共通、PR-Y / ADR-0011)
+
+P-1 / L-1 / K-1 の一覧はユーザーが D&D で並び替えできる。Sidebar のプロジェクト並び替え (`docs/data-model.md` §5) と同じ思想を items に適用したもの。
+
+| 項目 | 仕様 |
+|---|---|
+| Drag handle | 行左端のアイコン (P-1: `≡`、L-1: link icon、K-1: swatch のドラッグ領域)。**handle 上の pointerdown のみ** drag を開始する (行クリック = 詳細遷移 / 開閉と競合させない) |
+| 入力 | Pointer + Keyboard 両対応。Sidebar と同じく `@dnd-kit` の `PointerSensor` (4px activation) + `KeyboardSensor` (Tab → Space → Arrow → Space) |
+| スコープ | `(project_id, module_id)` 内のみ。**プロジェクト跨ぎ / モジュール跨ぎは不可** (UI 設計でも drop zone を当該リスト内に限定) |
+| 永続化パターン | **Sidebar D&D と同パターン**: `arrayMove` で local state を即時更新 → `core_reorder_items(project_id, module_id, ordered_ids)` を発火 → 失敗時は `refetch` (`refreshItems`) で巻き戻し + トースト表示。確認モーダルは出さない (即時保存) |
+| ソート順 | 既定で `position ASC, updated_at DESC, id DESC` (data-model.md §6.5)。「Sort: Updated ▾」セレクタを置く場合でも本順序は手動並びを最優先する (Phase 2 で `§10 U-11` として再評価) |
+| 検索結果 | 横断検索 (C-6) は `position` を見ない (検索順序が優先) — 却下根拠は `data-model.md` §6.5 検索結果での扱い |
 
 ### 3.4 トップバー
 
@@ -819,6 +834,7 @@ H-1 は stateless モジュールのため空状態は無し。代わりに「�
 | U-8 | アイテムのプロジェクト間移動 UX | コンテキストメニューに「プロジェクトに移動…」を Phase 2 で追加 |
 | U-9 | フィルタ済件数の表示形式 (`27` vs `12 / 27`) | Phase 1 中盤で実データに当てて決定 |
 | U-10 | アクセント色のユーザー選択 (グローバル / per-project) | **Phase 2 持ち越し**。Phase 1 は blue 固定 (§2.1.1)。Phase 2 着手時に①グローバル 1 色 (`settings.json core.accent`) ②プロジェクト属性 (`projects.accent` カラム追加 + data-model 改訂) ③決定的割当 (id ハッシュ) のいずれかを実ユーザー (= 自分) のフィードバックで決定する |
+| U-11 | Items D&D の Phase 2 拡張 | Phase 1 (PR-Y / ADR-0011) は **基本機能のみ**。Phase 2 で検討する論点: ①「Sort: Updated ▾」セレクタを置いた時に手動 position と並びの主導権をどう調停するか (現状は手動最優先) / ②検索結果に手動順を反映するオプション (現状は検索順序のみ、`data-model.md §6.5` 検索結果での扱い) / ③export 時の reorder 履歴保全 (現状は import 時 ROW_NUMBER で詰め直すため厳密な原順序は保たれない、`data-model.md §6.5` export/import) / ④モジュール跨ぎ / プロジェクト跨ぎの D&D (現状はスコープ内のみ) |
 
 ---
 
@@ -830,6 +846,7 @@ H-1 は stateless モジュールのため空状態は無し。代わりに「�
 | 2026-04-30 | 0.2 | プロトタイプ (`MyMyTools Prototype.html`) で 25 画面相当を実装した結果をフィードバック。主な変更: ①編集フォーム (P-3 / L-3) から「プロジェクト」フィールドを削除 — サイドバーで選択中のプロジェクトに自動所属するため。②可動パラメータを Tweaks で検証し §2 / §7 に反映。③TypeTabs / FormField を共通コンポーネントに追加。④K-2 を 4 色空間同時表示に確定。⑤H-1 を 2 カラム (入力/結果同時) に確定。⑥トップバー右の Settings アイコンをテーマ切替 + About に整理。⑦ダークモード対応構造をプロトタイプで一次確認。 |
 | 2026-04-30 | 0.3 | Claude Code でのハンドオフを見据えて強化。①§2.1.1 アクセント色 4 種の OKLCH 値を実装と整合 (blue/green/purple/red)。②§2.1.2 状態スタイル (hover/selected/focus/disabled/destructive) を表で明示。③§2.1.3 ダークモード token 値を一次確定。④§7 の default 値を実装と整合 (行密度 36px / アクセント名)。⑤§8 キーボードショートカット (グローバル / 一覧 / ⌘K / 編集 / 詳細 / 確認モーダル) を新規追加。⑥§9 モジュール毎の空状態 (P-1 / L-1 / K-1 / H-1 / C-2) を新規追加。⑦サイドバー幅レンジを 180-320px に修正。⑧本書を `docs/ui-design.md` に統合し、実装移植の橋渡しは `docs/handoff.md` に分離。 |
 | 2026-04-30 | 0.4 | 既存 ADR (0001-0008) / `module-contract.md` / `data-model.md` との整合チェック結果を反映。**致命的な矛盾の修正**: ①行密度 default を 32px (compact, Linear 寄り) に統一 — §2.3 / §7 / §1.1 の食い違いを解消。②自動更新の言及を削除し C-9 を「最新版を確認リンク (OS ブラウザで Releases を開く)」に統一 (`decisions/0008-distribution-no-autoupdate.md §2.7`)。③**アクセント色を Phase 1 = blue 固定に確定** — 要件・ADR の裏付けがなく、`projects.accent` 追加は D-03 永劫互換に対する負担となるため、ユーザー選択 UI (グローバル / per-project の検討含む) は U-10 として Phase 2 持ち越し。§2.1.1 / §5.1 (C-4) / §7 / §10 を整合。**スケルトン追加**: §6 に C-8 / C-9 / C-10 / C-11 / C-12 / C-13 / C-14 / C-16 を新規追記。**注釈追加**: ④L-3 で `file://` を URL 欄に入力した時の Path 自動振替 (§6.4)。⑤⌘K Scope 初期値が `core.search.default_scope` を読む (§6.7)。⑥C-7 設定ページが Phase 1 で出すべき項目とモジュール enable/disable UI を提供しない旨 (§7)。⑦サイドバー幅 §1 を 180-320px に統一、§1.1 border 表記を `var(--border)` ベースに。**付録追加**: §12 にプロト → shadcn コンポーネント対応表を追加 (旧 `handoff.md` §3 を吸収)。**廃止**: `docs/handoff.md` (実装スタックは ADR-0002 を一次ソースとする方針へ)。**独立レビュー後の追加修正**: ⑧検索スコープの内部値を `project` / `global` に揃え (`data-model.md §11.1`)、§2.3 サイドバー幅を 180-320px に修正、§1.1 行高記述を 32px (default) / 36px に明確化、§6.13 C-12 の対処候補を 4 パターン分岐の補足注釈に更新、§6.10 から未要件記述 (OSS notices) を削除、§6.16 mock の選択不可を明示、§12.4 に react-hook-form 依存留保を追記。 |
+| 2026-05-16 | 0.5 | PR-Y の正典化。**§3.3.1 を新規追加**して P-1 / L-1 / K-1 共通の D&D 並び替えルールをまとめ、drag handle / 入力 / スコープ / 永続化 / 失敗時挙動 / ソート順 / 検索結果 (`position` は検索では使わない) を 1 か所に集約。実装根拠は `data-model.md §6.5` (items.position カラム) + `core_reorder_items` IPC + ADR-0011 (additive マイグレーション)。 |
 
 ---
 

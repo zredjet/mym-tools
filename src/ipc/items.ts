@@ -69,3 +69,23 @@ export function deleteItem(input: { moduleId: ModuleId; itemId: string }): Promi
     itemId: input.itemId,
   });
 }
+
+/**
+ * `(projectId, moduleId)` スコープ内の items を `orderedIds` の順序で並び替える
+ * (`docs/data-model.md` §6.5、PR-Y / ADR-0011)。
+ *
+ * 楽観的更新パターン: 呼び出し前にローカル state を `arrayMove` で更新済とし、
+ * 失敗時は refetch (list 再取得) で旧順序に巻き戻す (Sidebar D&D と同パターン、
+ * `docs/ui-design.md` §3.3.1)。
+ */
+export function reorderItems(input: {
+  projectId: string;
+  moduleId: ModuleId;
+  orderedIds: string[];
+}): Promise<void> {
+  return invoke<void>("core_reorder_items", {
+    projectId: input.projectId,
+    moduleId: input.moduleId,
+    orderedIds: input.orderedIds,
+  });
+}

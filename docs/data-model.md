@@ -147,6 +147,7 @@ CREATE TABLE items (
   payload_schema_version INTEGER NOT NULL DEFAULT 1,                    -- D-11
   payload                TEXT NOT NULL DEFAULT '{}'
                                 CHECK (json_valid(payload)),            -- モジュール固有 JSON
+  position               INTEGER NOT NULL DEFAULT 0,                    -- ユーザー手動 D&D 並び (§6.5)
   created_at             TEXT NOT NULL,                                 -- JST ISO8601 (D-14)
   updated_at             TEXT NOT NULL,                                 -- JST ISO8601 (D-14)
 
@@ -163,7 +164,13 @@ CREATE INDEX idx_items_module                     ON items (module_id);
 CREATE INDEX idx_items_project_updated            ON items (project_id, updated_at DESC, id DESC);
 CREATE INDEX idx_items_project_module_updated     ON items (project_id, module_id, updated_at DESC, id DESC);
 CREATE INDEX idx_items_module_updated             ON items (module_id, updated_at DESC, id DESC);
+
+-- D&D 並び表示用 (§6.5、PR-Y / ADR-0011 で導入)
+-- (project_id, module_id) スコープ内で position ASC を効かせる
+CREATE INDEX idx_items_project_module_position    ON items (project_id, module_id, position, updated_at DESC, id DESC);
 ```
+
+> `position` カラムは **ADR-0011 (additive マイグレーション)** に基づき DB schema v2 で追加された。新規 DB は本 DDL でそのまま立ち上がり、既存 DB は起動時に `ALTER TABLE items ADD COLUMN position INTEGER NOT NULL DEFAULT 0` が冪等に適用される。詳細は §14 を参照。
 
 `json_valid()` の CHECK は SQLite が標準で提供する関数で、パースに失敗する文字列を弾く。
 モジュールバグや手動編集による壊れた JSON が混入することを最低限防ぐ防御層として置く。
@@ -178,6 +185,7 @@ CREATE INDEX idx_items_module_updated             ON items (module_id, updated_a
 | `search_text` | モジュールが生成 | コアは中身を解釈せず、FTS5 に渡すのみ |
 | `payload` | モジュール | コアからは不透明な JSON 文字列 |
 | `payload_schema_version` | モジュール | コアは値を読み書きするのみ、解釈はモジュール |
+| `position` | コア | ユーザーの手動並び替え (D&D) 結果。`(project_id, module_id)` スコープ内で連番 (§6.5) |
 | `created_at` / `updated_at` | コア | 自動更新 |
 
 ### 6.3 制約上の注意
@@ -210,6 +218,74 @@ CREATE INDEX idx_items_module_updated             ON items (module_id, updated_a
 - Rust 側: `chrono::FixedOffset::east_opt(9 * 3600)` でオフセットを取り、`format("%Y-%m-%dT%H:%M:%S%.3f%:z")` で生成
 - StorageService は INSERT/UPDATE 直前に `created_at` (新規時のみ) / `updated_at` (常に) を上書き設定する
 - フロント側で時刻を生成してコマンドに渡すことは禁止 (端末時計のずれを Rust 側で吸収できなくなるため)
+
+### 6.5 `position` カラム — D&D 並び替え (PR-Y / ADR-0011)
+
+ユーザーがリストを D&D で並び替えた順序を永続化する。Sidebar の `projects.position` と同じ思想を items に適用したもの。
+
+#### スコープと連番ルール
+
+- **スコープは `(project_id, module_id)` のペア**。同じ project でも prompt / linkmemo / color は独立した並びを持つ
+- 同スコープ内で **`0..N-1` の密な整数**(欠番なし)。reorder API が常に全件再付番する形で運用する
+- スコープを跨いだ意味は無い (project A の prompt[3] と project B の prompt[3] は無関係)
+
+#### 既定値と「未編集状態」の扱い
+
+「未編集スコープ」とは **全行 `position = 0`** のスコープを指す。reorder API は必ず **`0..N-1` の連番** を書くため、全行 0 という状態は「**一度も reorder されていない**」と一意に判別できる (これがフォールバックの根拠)。
+
+- **未編集スコープへの新規追加**: `position = 0` のまま append (全行 0 を維持)。これにより `ORDER BY position ASC, updated_at DESC, id DESC` のタイブレーカーで **新規が先頭 (updated_at 最新)** に来る。Sidebar projects と挙動を揃える
+- **reorder 済スコープへの新規追加**: `position = MAX(position) + 1` で末尾追加
+- **判定の SQL**: 新規 INSERT 時、同 tx 内で `SELECT COUNT(*) = SUM(CASE WHEN position = 0 THEN 1 ELSE 0 END) FROM items WHERE project_id=? AND module_id=?` 相当 (全行 0 かどうか) を見て、上記 2 分岐を選ぶ
+- **削除時**: position の再詰めは **しない** (穴あきを許容)。次回 reorder API で 0..N-1 に正規化される。この方針なら delete 時に同スコープを scan しなくて済む
+- **DB schema v2 マイグレーション直後**: 既存全行が `position = 0` で並ぶ → 全スコープが「未編集」状態 → `ORDER BY position ASC, updated_at DESC, id DESC` のタイブレーカーで updated_at DESC が効く (= マイグレーション前と同じ表示順)
+- **表示クエリは常に同じ ORDER BY** (`position ASC, updated_at DESC, id DESC`)。「未編集なら updated_at」「編集済なら position」のような分岐はしない (`idx_items_project_module_position` 一本でカバーする)
+
+#### 書き込み API
+
+新規 Tauri command を 1 本追加する (`module-contract.md` §6.2 の `core_*` 規約):
+
+```
+core_reorder_items(project_id, module_id, ordered_ids: string[])
+```
+
+- `ordered_ids` には **`(project_id, module_id)` スコープ内の全 item ID が過不足なく** 含まれていなければならない (`projects.reorder` と同じ厳格性、§5)
+- **実装規約 (スコープ二重ガード)**: 1 トランザクション内で
+  1. `SELECT id FROM items WHERE project_id=? AND module_id=?` で取得した集合と `ordered_ids` の集合を比較し、**完全一致** を検証 (欠損 / 余分 / 未知 ID は `AppError::Validation` で reject)
+  2. UPDATE 句は `UPDATE items SET position = ? WHERE id = ? AND project_id = ? AND module_id = ?` の **三条件 WHERE** で他スコープへの誤書き込みを物理的に防止
+- 1 トランザクション内で全 UPDATE → `data_revision +1`
+- `updated_at` は **触らない** (並び替えはユーザー編集だが「内容」を変えないため、`updated_at` の意味論 = "本文最終更新" を守る)
+- **`data_revision +1` の根拠**: ADR-0006 §2.2 / CLAUDE.md は「アイテム内容を変える書込みでのみ +1」と書いているが、reorder は **ユーザー意図の永続化** であり、バックアップ判定の対象に含めるべき。Eager-on-Read の自動再構築 / FTS 再構築 (これらは +1 しない) とは別カテゴリとして整理する
+
+#### 検索結果での扱い
+
+横断検索 (`core_search`、§8) は FTS5 / LIKE のスコア順 / 検索順序を優先するため、`position` は **検索結果には反映しない**。`position` は「リスト画面でのユーザー意図順」専用のフィールド。
+
+却下根拠 (将来「検索結果も position 順で」要望が出た時の判断材料):
+
+- (a) スコープを跨ぐ検索結果に position の連番意味が無い (`(project_id, module_id)` ペアごとに 0 から振られているため、グローバル並びにすると衝突だらけになる)
+- (b) FTS5 ランキング情報を捨てるとヒット品質が悪化する
+- (c) ユーザーが意図する「並び順」と「関連度」は別の軸 (UI 設計 §10 U-11 で Phase 2 再評価予定)
+
+#### export / import (§12) での扱い
+
+- **export**: `position` を JSON にそのまま書き出す
+- **import**: 衝突しない item の投入時は `position` をそのまま保存。`apply_import` 完了後に **追補処理として** `(project_id, module_id)` 各スコープに対し **ROW_NUMBER による再付番** を 1 回かける (`data-model.md` §12.4 step 9 / `core_reorder_items` の内部発火相当):
+
+  ```sql
+  UPDATE items SET position = sub.new_pos
+    FROM (
+      SELECT id,
+             ROW_NUMBER() OVER (
+               PARTITION BY project_id, module_id
+               ORDER BY position, created_at, id
+             ) - 1 AS new_pos
+      FROM items
+      WHERE project_id = :pid AND module_id = :mid
+    ) AS sub
+    WHERE items.id = sub.id;
+  ```
+
+  これにより、JSON 内の元順序 (= position 昇順、同点は created_at 昇順、最終的に id) を保ったまま 0..N-1 の連番に詰める。インポート JSON が古くて全行 position=0 の場合は created_at 順になる。完璧な順序保全 (例: 元 DB の reorder 履歴) は Phase 1 では追跡しない (UI 設計 §10 U-11 で Phase 2 再評価)
 
 ---
 
@@ -681,6 +757,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
           "tags": ["..."],
           "payload_schema_version": 1,
           "payload": { /* モジュール固有 */ },
+          "position": 0,                            // §6.5、export 時の position をそのまま保存
           "created_at": "...",
           "updated_at": "..."
         }
@@ -743,6 +820,19 @@ project 削除実行時、StorageService は**削除トランザクションの�
 7. items に INSERT (1 トランザクション、FTS5 トリガが連動)
 8. 失敗時は当該行のトランザクションのみロールバックし、残りは継続
 ```
+
+#### 投入後の追補処理 (バッチ全体に対して 1 回)
+
+step 1-8 を全件回し終えた後、**`apply_import` の責務として** 以下を実行する:
+
+```
+9. 投入された (project_id, module_id) 各スコープに対し、position を ROW_NUMBER で再付番する
+   (§6.5 末尾の SQL を 1 回発行)。
+   - 既存 item と新規 item の position 衝突を解消し、0..N-1 の密な連番に正規化
+   - 1 トランザクションで実施、data_revision は +1 (= 並び替えの 1 操作とみなす、§6.5)
+```
+
+step 9 は「インポート完了後の補正」であり、`core_reorder_items` を内部発火するのではなく、`apply_import` 内で **直接 SQL を発行する**。理由: API 呼び出しコストを避け、ordered_ids を作る必要が無いため (現在の position 順をそのまま採用すればよい)。
 
 ### 12.5 インポート前バックアップ
 
@@ -916,9 +1006,14 @@ restore は他の操作と異なり「DB 接続を一度全閉鎖し、ファイ
 
 ---
 
-## 14. DB スキーマ進化方針 (D-03 の例外運用)
+## 14. DB スキーマ進化方針 (ADR-0006 + ADR-0011)
 
-原則 D-03 によりコア DB スキーマは変えない。やむを得ず変える例外時の手順を定めておく。
+> **本節の位置づけ**: 詳細仕様は **ADR-0011 §2 を一次ソース** とし、本節は data-model 視点でのダイジェスト + マイグレーション一覧表 (§14.4) を提供する。§14.4 のみは「ADR-0011 §5 (歴史記録)」を継承する **一覧の一次ソース** として独立運用する (ADR の追記専用ポリシーで一覧表更新ができないため)。
+
+コア DB スキーマの変更可否は **2 つのレイヤ** で運用する:
+
+- **ADR-0006 (原則)**: モジュールデータ変更は payload バージョニング + Eager-on-Read で吸収。コア DB スキーマには触らない
+- **ADR-0011 (例外)**: 機能拡張で本当に必要な **additive な DDL マイグレーション** に限り、別 ADR を切らずに `MIGRATIONS` 配列に追加してよい (詳細条件は ADR-0011 §2.1)。**破壊的な変更** (DROP / RENAME / 型変更 / 既存値書き換え) は引き続き別 ADR + C-12 起動停止画面が必要
 
 ### 14.1 何が「コア DB スキーマ変更」に当たるか
 
@@ -929,18 +1024,60 @@ restore は他の操作と異なり「DB 接続を一度全閉鎖し、ファイ
 
 これに該当しない変更 (各モジュールの payload 構造変更) は §7 の Eager-on-Read で吸収し、DB スキーマには触れない。
 
-### 14.2 マイグレーション手順
+### 14.2 additive マイグレーション運用 (ADR-0011)
 
-1. `db_schema_version` を +1 する
-2. `src-tauri/src/migrations/v<N>.sql` を追加(idempotent な ALTER / CREATE INDEX 等)
-3. 起動時、StorageService が `meta.db_schema_version` を読み、不足分を順次適用
-4. **適用前に pre-migration バックアップを取る** (§13.4)
-5. **必ず ADR (decisions/) に「なぜこの版でスキーマを変えなければならなかったか」を残す**
+#### 14.2.1 許可される変更
+
+ADR-0011 §2.1 のチェックリストを満たすものに限る:
+
+- **新カラム + NOT NULL DEFAULT `<定数>`** (既存全行に対して既定値が即時確定すること)
+- **新規 `CREATE TABLE IF NOT EXISTS`** (旧データは参照しない、新機能だけが使う)
+- **新規 `CREATE INDEX`** (既存クエリの意味論は不変)
+- **新規 `CREATE TRIGGER`** (既存行への遡及書き換えなし)
+- **`CREATE VIEW`** (read-only、既存テーブルへの書き戻し無し)
+
+#### 14.2.2 禁止される変更 (引き続き別 ADR が必須)
+
+`DROP` / `RENAME` / 型変更 / 既存カラムへの後付け NOT NULL / 既存データの値書き換え / FK 制約の変更 / インデックスの削除。
+
+#### 14.2.3 起動時の適用フロー
+
+```
+1. StorageService::open で `meta.db_schema_version` を読む
+   ├ CURRENT_DB_SCHEMA_VERSION と一致 → 通常起動
+   ├ 未来 (新版 DB を旧版アプリで開いた) → UnsupportedDbSchemaVersion → 起動停止
+   └ 古い (旧 DB を新版アプリで開いた) → 次のステップへ
+2. pre-migration バックアップ取得 (`pre-migration-v<N>` プレフィックス、§13.4 / ADR-0011 §2.4。`<N>` は適用後の `CURRENT_DB_SCHEMA_VERSION`)
+   ├ 失敗 → 起動停止 + エラー画面 (path / 容量を表示)
+   └ 成功 → 次へ
+3. MIGRATIONS[from..to] を順次適用 (1 マイグレーション = 1 トランザクション)
+   ├ いずれかが失敗 → 該当 tx をロールバック / db_schema_version は最後の成功値
+   │                  → 起動停止 + エラー画面 (失敗 SQL + 原因 + 「次回起動で再試行」案内)
+   └ 全成功 → db_schema_version を CURRENT_DB_SCHEMA_VERSION に書き換えて通常起動
+```
+
+#### 14.2.4 実装上の規約
+
+- `MIGRATIONS: &[Migration]` 配列 (`src-tauri/src/storage/schema.rs`) に追加する。**Phase 1 の Migration 構造体は `{ from_version: i64, to_version: i64, sql: &'static str }` の 3 フィールド固定** (ADR-0011 §2.3)。`fn(&Transaction)` 形式は Phase 1 では採用しない
+- **段階制約**: `to_version = from_version + 1` の 1 段ずつ。複数段ジャンプ (1→3 等) は不可
+- **各エントリの末尾で必ず `UPDATE meta SET value = '<to>' WHERE key = 'db_schema_version'` を含める** — DDL と bump を同一トランザクションに同居させ、途中失敗時に `db_schema_version` だけ進む / DDL だけ進む の片寄りを防ぐ
+- 新規 DB の DDL (`SCHEMA_DDL`) も同時に更新し、新規 DB は migration を **走らせずに** 最新版で立ち上がるようにする
+- **`SqliteStorage::open` の外で migration を実行する** (ADR-0011 §2.4 bootstrap 経路)。具体的には `schema::migrate_if_needed(&Path)` という独立関数を `open` の前に呼び、pre-migration バックアップは rusqlite Backup API を直接叩く独立ヘルパで取得する
+- マイグレーションテスト: `src-tauri/src/storage/migrations/v<N>.rs` 内に Migration 定義 + `#[cfg(test)] mod tests` で同居 (既存 storage テストと同じスタイル、別途 `tests/` ディレクトリは作らない)。in-memory `:memory:` SQLite で旧 schema を立てて migration を流し、行数 + 新カラム値 + 連続適用 idempotency を assert
 
 ### 14.3 不可逆な変更を避ける
 
 - カラム削除より「使わないカラムを残す」を優先 (古い版で動かす可能性は無視できるが、エクスポート JSON 側にも影響するため)
 - データの破壊的書き換えは避ける (特にユーザーデータの欠損方向)
+- 上記が必要になる場合は **ADR-0011 §2.2 の禁止枠** に該当 → 別 ADR を切る
+
+### 14.4 マイグレーション一覧 (一次ソース)
+
+本表は `MIGRATIONS` 配列の **唯一の一次ソース**。ADR-0011 §5 は受理時点の歴史記録であり、以後の追加は本表のみを更新する (ADR は追記専用ポリシーのため)。
+
+| from → to | 概要 | 導入 PR / ADR |
+|---|---|---|
+| 1 → 2 | `items.position` カラム追加 (`NOT NULL DEFAULT 0`) + `idx_items_project_module_position` 追加 | PR-Y / ADR-0011 |
 
 ---
 
@@ -963,7 +1100,7 @@ restore は他の操作と異なり「DB 接続を一度全閉鎖し、ファイ
 | T-10 | settings.json 書き込み中のプロセス強制終了 | 既存の `settings.json` は壊れず、変更は失われるだけ (atomic rename 経由) |
 | T-11 | `last_opened_project_id` が指す project が削除済み | 起動時に `null` に置換され、最初のプロジェクトが開かれる |
 | T-12 | 自動バックアップ取得後、`data_revision` 不変で再起動 | バックアップ取得がスキップされる |
-| T-13 | project 削除前 / import 前 / migration 前 / restore 前 | pre-op バックアップが対応するファイル名で保存されている |
+| T-13 | project 削除前 / import 前 / migration 前 / restore 前 | pre-op バックアップが対応するファイル名で保存されている (migration 前は `pre-migration-v<CURRENT_DB_SCHEMA_VERSION>-*` フォーマット、§13.4 / ADR-0011 §2.4) |
 | T-14 | バックアップ取得失敗 | 紐づく破壊的操作 (例: project 削除) が中止され、データが変更されない |
 | T-15 | restore 実行 | 実行前に pre-restore バックアップが残っており、復元後にアプリ再起動が促される |
 | T-16 | `tags` カラムに不正 JSON を直接 INSERT | CHECK 制約 (`json_valid`) でエラーになる |
@@ -985,6 +1122,12 @@ restore は他の操作と異なり「DB 接続を一度全閉鎖し、ファイ
 | T-32 | リストア対象に破損ファイルを選択 | `PRAGMA integrity_check` が失敗を返し、リストアが中止される。別ファイル選択を促すダイアログが出る (ADR-0007 §2.4.1) |
 | T-33 | pre-op バックアップ取得後に対象操作が失敗 | pre-op バックアップは削除されず `<userdata>/backups/pre-op/` に残る (§13.4) |
 | T-34 | pre-op / manual バックアップ取得 | `last_backup_revision` は更新されるが、`last_auto_backup_at` は変わらない (§13.2) |
+| T-35 | 旧 schema (v1) DB を含む状態でアプリ起動 | `schema::migrate_if_needed` が `MIGRATIONS[0]` を適用し、`items.position` 全行 `0`、`idx_items_project_module_position` が `EXPLAIN QUERY PLAN` で使用される、`meta.db_schema_version` が `2` に更新される (ADR-0011 §2.3 / §2.4) |
+| T-36 | T-35 の migration 完了後に再起動 | `db_schema_version` が CURRENT と一致するため migration は走らず通常起動。pre-migration バックアップは新規取得されない (冪等性) |
+| T-37 | pre-migration バックアップ取得失敗 (例: backups dir への書込み権限なし) | migration が中止され起動停止画面に遷移する (path / 容量を表示)。DB ファイルは元の v1 状態のまま (ADR-0011 §2.4 / §2.5) |
+| T-38 | `core_reorder_items` の引数検証 | `ordered_ids` 集合が `SELECT id FROM items WHERE project_id=? AND module_id=?` と完全一致しない (欠損 / 余分 / 他スコープ ID 混入) → `AppError::Validation` で reject。1 件成功時は全件 UPDATE → `data_revision +1`、`updated_at` 不変 (§6.5) |
+| T-39 | `core_reorder_items` で他スコープの item ID を ordered_ids に混入 | UPDATE 句の三条件 WHERE (`id=? AND project_id=? AND module_id=?`) で物理的に弾かれ、他スコープが silently 上書きされない (§6.5) |
+| T-40 | 未編集スコープ (全行 position=0) への新規 INSERT | 新規行も `position=0` で append され、全行 0 が維持される。ORDER BY タイブレーカーで updated_at DESC により先頭に表示される (§6.5) |
 
 ---
 

@@ -144,6 +144,12 @@ pub struct ItemExport {
     pub tags: Vec<String>,
     pub payload_schema_version: u32,
     pub payload: serde_json::Value,
+    /// `(project_id, module_id)` スコープ内での D&D 並び (`data-model.md` §6.5)。
+    /// import 時はこの値をそのまま保存し、`apply_import` 末尾の `normalize_item_positions`
+    /// で `(position, created_at, id)` 順にソートしてから 0..N-1 の連番に詰め直す。
+    /// 古い (PR-Y 以前の) export JSON に position フィールドが無い場合は `0` がデフォルト。
+    #[serde(default)]
+    pub position: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -158,6 +164,7 @@ impl ItemExport {
             tags: it.tags,
             payload_schema_version: it.payload_schema_version,
             payload: it.payload,
+            position: it.position,
             created_at: it.created_at,
             updated_at: it.updated_at,
         }

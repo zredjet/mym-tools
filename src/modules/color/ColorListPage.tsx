@@ -8,15 +8,33 @@
  * - `mod+n` で新規
  */
 import { useCallback, useEffect, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useParams } from "react-router-dom";
+import {
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ColorItemDialog } from "@/modules/color/ColorItemDialog";
-import { deleteItem, listItems } from "@/ipc/items";
+import { deleteItem, listItems, reorderItems } from "@/ipc/items";
+import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import type { ColorPayloadV1, Item } from "@/lib/types";
 
@@ -74,6 +92,36 @@ export function ColorListPage() {
     if (projectId != null) await refresh(projectId);
   }, [deletingItem, projectId, refresh]);
 
+  // D&D 並び替え (`docs/ui-design.md` §3.3.1)。Color は grid 配置のため `rectSortingStrategy`
+  // を使う (vertical でなく 2D 移動を扱える)。Sidebar / Prompt / LinkMemo と同じ楽観的更新パターン
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (over == null || active.id === over.id || projectId == null) return;
+      const oldIndex = items.findIndex((i) => i.id === active.id);
+      const newIndex = items.findIndex((i) => i.id === over.id);
+      if (oldIndex < 0 || newIndex < 0) return;
+      const reordered = arrayMove(items, oldIndex, newIndex);
+      setItems(reordered);
+      try {
+        await reorderItems({
+          projectId,
+          moduleId: "color",
+          orderedIds: reordered.map((i) => i.id),
+        });
+        setError(null);
+      } catch (e) {
+        setError(formatInvokeError(e));
+        await refresh(projectId);
+      }
+    },
+    [items, projectId, refresh],
+  );
+
   if (projectId == null) {
     return (
       <div className="m-6 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-muted)] p-4 text-sm text-[var(--fg-muted)]">
@@ -119,16 +167,20 @@ export function ColorListPage() {
           />
         </div>
       ) : (
-        <ul className="grid grid-cols-3 gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-          {items.map((item) => (
-            <ColorSwatch
-              key={item.id}
-              item={item}
-              onEdit={() => setEditingItem(item)}
-              onDelete={() => setDeletingItem(item)}
-            />
-          ))}
-        </ul>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={items.map((i) => i.id)} strategy={rectSortingStrategy}>
+            <ul className="grid grid-cols-3 gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+              {items.map((item) => (
+                <ColorSwatch
+                  key={item.id}
+                  item={item}
+                  onEdit={() => setEditingItem(item)}
+                  onDelete={() => setDeletingItem(item)}
+                />
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
       )}
 
       <ColorItemDialog
@@ -169,8 +221,26 @@ function ColorSwatch({
 }) {
   const payload = item.payload as ColorPayloadV1 | undefined;
   const hex = typeof payload?.hex === "string" ? payload.hex : "#000000";
+
+  // D&D (`docs/ui-design.md` §3.3.1)。grid 表示のため右上に GripVertical を絶対配置で
+  // 浮かべる (hover で表示)。swatch クリック (= 編集) と drag handle を物理的に分離する
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.id,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
   return (
-    <li className="group relative flex flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--border)]">
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "group relative flex flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--border)]",
+        isDragging && "z-10 opacity-90 shadow-lg",
+      )}
+    >
       <button
         type="button"
         onClick={onEdit}
@@ -178,6 +248,17 @@ function ColorSwatch({
         style={{ background: hex }}
         aria-label={`${item.title} を編集`}
       />
+      {/* drag handle: swatch の右上に絶対配置、hover で表示 */}
+      <button
+        type="button"
+        aria-label="ドラッグして並び替え"
+        title="ドラッグして並び替え"
+        className="absolute top-1 right-1 z-10 inline-flex h-6 w-6 cursor-grab items-center justify-center rounded bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={14} aria-hidden />
+      </button>
       <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
         <div className="min-w-0">
           <p className="truncate text-[13px] font-medium text-[var(--fg)]" title={item.title}>
