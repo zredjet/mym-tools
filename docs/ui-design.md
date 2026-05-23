@@ -1,6 +1,6 @@
 # UI デザイン方針 (Phase 1)
 
-最終更新: 2026-05-16 / ステータス: Draft v0.5 (Item D&D 並び替え追記)
+最終更新: 2026-05-22 / ステータス: Draft v0.6 (PR-Y 残: C-12 表示パターン⑤ 追記)
 
 このドキュメントは「アプリの見た目と画面構成」を確定するためのもの。
 具体実装 (CSS / JSX) は別途。本書は方針 + テキスト・ベースのスケルトンに留める。
@@ -12,6 +12,8 @@
 > **v0.4 の主な変更**: 既存 ADR (0001-0008) / module-contract / data-model との整合チェック結果を反映。要点 4 つ — ①**アクセント色は Phase 1 = blue 固定**に確定 (per-project / グローバル選択は U-10 として Phase 2 持ち越し)、②未スケルトンだった C-8/C-9/C-10/C-11/C-12/C-13/C-14/C-16 を §6 に新規追記、③自動更新の言及削除、④`handoff.md` 廃止し独自設計部分のみ §12 付録に吸収 (実装スタック詳細は ADR-0002 を一次ソースとする)。詳細は §11 改訂履歴の v0.4 行を参照。
 >
 > **v0.5 の主な変更**: PR-Y (Item D&D 並び替え) の正典化。§3.3.1 を新規追加し、P-1 / L-1 / K-1 共通の D&D ルール (drag handle / 入力 / スコープ / 永続化 / 失敗時挙動 / ソート順 / 検索結果) を 1 か所にまとめた。実装は `items.position` カラム + `core_reorder_items` IPC (`data-model.md` §6.5 / ADR-0011)。
+>
+> **v0.6 の主な変更**: PR-Y 残作業の docs 整理。§6.13 C-12 起動停止画面の **表示パターン⑤ migration 失敗** を追加 (ADR-0011 §2.5 と整合、pre-migration バックアップへの復元動線を主案として案内)。
 
 ---
 
@@ -572,7 +574,7 @@ shadcn/ui のコンポーネントを土台とし、本ツール固有の使い�
 - ID 衝突はスキップ (上書きしない)、CSV で原因を保存できる
 - payload version の上昇を検知した場合は完了後に C-16 を自動表示
 
-### 6.13 C-12 起動停止エラー (db_schema 不一致 / 未来 payload version)
+### 6.13 C-12 起動停止エラー (db_schema 不一致 / 未来 payload version / migration 失敗)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -595,10 +597,21 @@ shadcn/ui のコンポーネントを土台とし、本ツール固有の使い�
 └─────────────────────────────────────────────────────────────┘
 ```
 
-確定事項 (`architecture.md §9` / `data-model.md §4` / `module-contract.md §7.3` / `decisions/0008-distribution-no-autoupdate.md §2.6`):
+確定事項 (`architecture.md §9` / `data-model.md §4` / `module-contract.md §7.3` / `decisions/0008-distribution-no-autoupdate.md §2.6` / `decisions/0011-additive-schema-migrations.md §2.5`):
 - **シェルなし全画面**。サイドバー・トップバーは表示しない (=モジュールも初期化していない状態)
-- 表示パターン: ① `db_schema_version` 不一致 ② 未来 `payload_version` 検出 ③ DB 物理破損 (open 失敗) ④ data.sqlite が見つからない
-- 上のスケルトンは **パターン①** の例。原因テキストと対処候補の並び順はパターン毎に変える: ①② は「最新版に更新」を主案、③④ は「バックアップから復元」を主案、それ以外を副次案として下に並べる
+- 表示パターン:
+  - ① `db_schema_version` 不一致 (未来版 = アプリより新しい DB を開いた、`data-model.md §14.2.3` ステップ 1)
+  - ② 未来 `payload_version` 検出 (新版アプリで作った item を旧版アプリで読んだ)
+  - ③ DB 物理破損 (open 失敗 / PRAGMA integrity_check 失敗)
+  - ④ data.sqlite が見つからない (パス権限 / ファイル削除)
+  - ⑤a **migration 失敗 (pre-migration backup 取得失敗)** — additive マイグレーション開始前のバックアップが取れず停止した場合 (`ADR-0011 §2.5`、backup ファイル **未生成**)
+  - ⑤b **migration 失敗 (DDL 適用失敗)** — backup は取得成功した後、DDL 適用 tx で rollback した場合 (`ADR-0011 §2.5`、backup ファイル **生成済**)
+- 上のスケルトンは **パターン①** の例。原因テキストと対処候補の並び順はパターン毎に変える:
+  - ①② は「最新版に更新」を主案、③④ は「バックアップから復元」を主案
+  - **⑤a (backup 取得失敗)** は「**バックアップ先パス / 容量 / 書込み権限を確認**」を主案、副次案として「ログを開いて原因を確認」「容量を空けて次回起動で再試行」を案内する。**復元動線は出さない** (取得失敗 = 当該の pre-migration backup ファイルは存在しないため)
+  - **⑤b (DDL 失敗)** は「ログを開いて失敗 SQL と原因を確認」を主案、副次案として「pre-migration バックアップから復元」「次回起動で再試行」を案内する。pre-migration backup が `<backups_root>/pre-op/pre-migration-v<N>-*.sqlite` に **存在することが保証されている** (取得成功後の DDL 失敗のため) ので、復元動線を明示的に出す
+  - それ以外は副次案として下に並べる
+- 実装側は ⑤a / ⑤b を `AppError` の variant or `bootstrap` 層の return 値で区別し、エラー画面に正しい文言を渡すこと
 - **アプリ内のアクションは [アプリを終了] のみ**。Releases / ログ / バックアップへの導線は OS 既定アプリで開くだけ (アプリプロセスは終了しない)。続行ボタン (DB を無視して起動) は置かない
 
 ### 6.14 C-13 メンテナンスモード (リストア中・索引再構築中)
@@ -849,6 +862,7 @@ H-1 は stateless モジュールのため空状態は無し。代わりに「�
 | 2026-04-30 | 0.3 | Claude Code でのハンドオフを見据えて強化。①§2.1.1 アクセント色 4 種の OKLCH 値を実装と整合 (blue/green/purple/red)。②§2.1.2 状態スタイル (hover/selected/focus/disabled/destructive) を表で明示。③§2.1.3 ダークモード token 値を一次確定。④§7 の default 値を実装と整合 (行密度 36px / アクセント名)。⑤§8 キーボードショートカット (グローバル / 一覧 / ⌘K / 編集 / 詳細 / 確認モーダル) を新規追加。⑥§9 モジュール毎の空状態 (P-1 / L-1 / K-1 / H-1 / C-2) を新規追加。⑦サイドバー幅レンジを 180-320px に修正。⑧本書を `docs/ui-design.md` に統合し、実装移植の橋渡しは `docs/handoff.md` に分離。 |
 | 2026-04-30 | 0.4 | 既存 ADR (0001-0008) / `module-contract.md` / `data-model.md` との整合チェック結果を反映。**致命的な矛盾の修正**: ①行密度 default を 32px (compact, Linear 寄り) に統一 — §2.3 / §7 / §1.1 の食い違いを解消。②自動更新の言及を削除し C-9 を「最新版を確認リンク (OS ブラウザで Releases を開く)」に統一 (`decisions/0008-distribution-no-autoupdate.md §2.7`)。③**アクセント色を Phase 1 = blue 固定に確定** — 要件・ADR の裏付けがなく、`projects.accent` 追加は D-03 永劫互換に対する負担となるため、ユーザー選択 UI (グローバル / per-project の検討含む) は U-10 として Phase 2 持ち越し。§2.1.1 / §5.1 (C-4) / §7 / §10 を整合。**スケルトン追加**: §6 に C-8 / C-9 / C-10 / C-11 / C-12 / C-13 / C-14 / C-16 を新規追記。**注釈追加**: ④L-3 で `file://` を URL 欄に入力した時の Path 自動振替 (§6.4)。⑤⌘K Scope 初期値が `core.search.default_scope` を読む (§6.7)。⑥C-7 設定ページが Phase 1 で出すべき項目とモジュール enable/disable UI を提供しない旨 (§7)。⑦サイドバー幅 §1 を 180-320px に統一、§1.1 border 表記を `var(--border)` ベースに。**付録追加**: §12 にプロト → shadcn コンポーネント対応表を追加 (旧 `handoff.md` §3 を吸収)。**廃止**: `docs/handoff.md` (実装スタックは ADR-0002 を一次ソースとする方針へ)。**独立レビュー後の追加修正**: ⑧検索スコープの内部値を `project` / `global` に揃え (`data-model.md §11.1`)、§2.3 サイドバー幅を 180-320px に修正、§1.1 行高記述を 32px (default) / 36px に明確化、§6.13 C-12 の対処候補を 4 パターン分岐の補足注釈に更新、§6.10 から未要件記述 (OSS notices) を削除、§6.16 mock の選択不可を明示、§12.4 に react-hook-form 依存留保を追記。 |
 | 2026-05-16 | 0.5 | PR-Y の正典化。**§3.3.1 を新規追加**して P-1 / L-1 / K-1 共通の D&D 並び替えルールをまとめ、drag handle / 入力 / スコープ / 永続化 / 失敗時挙動 / ソート順 / 検索結果 (`position` は検索では使わない) を 1 か所に集約。実装根拠は `data-model.md §6.5` (items.position カラム) + `core_reorder_items` IPC + ADR-0011 (additive マイグレーション)。 |
+| 2026-05-22 | 0.6 | PR-Y 残作業の docs 整理 (PR-AE)。**§6.13 C-12 起動停止画面に表示パターン⑤ migration 失敗** を追加。ADR-0011 §2.5 と整合。codex 指摘 (PR #60 P2) を受けて ⑤ を ⑤a (backup 取得失敗、復元動線なし) / ⑤b (DDL 失敗、backup 取得済→復元動線あり) の 2 サブケースに分割し、復元動線の表示を backup 存在条件に応じて分岐させた。 |
 
 ---
 

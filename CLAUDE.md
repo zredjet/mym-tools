@@ -34,6 +34,8 @@ Phase 1 の実装は **Tauri 2 のデスクトップアプリ** になる予定 
 | 0006 | モジュールデータは payload バージョニング + Eager-on-Read (DB マイグレーションはしない) |
 | 0007 | ローカルバックアップは 3 系統: `auto` / `pre-op` / `manual`。リストアはメンテナンスモード経由 |
 | 0008 | 自動更新なし。配布は portable 差し替え方式。About 画面は「最新版を確認」リンクのみ |
+| 0009 | キャンセル機構: `OperationRegistry` + `tokio_util::sync::CancellationToken` + `core_cancel_operation` IPC。重い処理は `tauri::async_runtime::spawn_blocking` 経由、1 MB チャンク境界で `is_cancelled()` 確認 |
+| 0010 | CI パイプライン: GitHub Actions matrix (macOS + Windows) で build / test / lint / typecheck / fmt。`clippy.toml` の `disallowed-methods` で `spawn_blocking` の直接呼び出しを禁止。SHA pin で依存固定 |
 | 0011 | コアスキーマの **additive** な DDL マイグレーション (新カラム+DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) は枠組み内で許可。`db_schema_version` を bump し pre-migration バックアップを自動取得 |
 
 ## 絶対に破ってはいけない不変条件
