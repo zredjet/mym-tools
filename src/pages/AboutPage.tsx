@@ -196,7 +196,9 @@ export function AboutPage() {
             <ul className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[12px] text-[var(--fg)]">
               {moduleVersions.map((m) => (
                 <li key={m.module_id}>
-                  <span className="text-[var(--fg-muted)]">M-{capitalize(m.module_id)}</span>{" "}
+                  <span className="text-[var(--fg-muted)]">
+                    {canonicalModuleLabel(m.module_id)}
+                  </span>{" "}
                   <span className="text-[var(--accent)]">v{m.current_payload_version}</span>
                 </li>
               ))}
@@ -208,6 +210,19 @@ export function AboutPage() {
   );
 }
 
-function capitalize(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+/**
+ * payload schema 表示用の **正典モジュール名** (`docs/ui-design.md` §6.10 / docs 全般)。
+ *
+ * `module_id` (英小文字、`module-contract.md` §3.2) → 表示用ラベルへの写像。
+ * 単純な `capitalize` だと `linkmemo` → `Linkmemo` となり正典 `M-LinkMemo` と乖離する
+ * (codex PR-AF P3)。未知 ID は `M-<Id>` の generic ケースにフォールバックする。
+ */
+function canonicalModuleLabel(moduleId: string): string {
+  const canonical: Record<string, string> = {
+    prompt: "M-Prompt",
+    linkmemo: "M-LinkMemo",
+    color: "M-Color",
+    hash: "M-Hash",
+  };
+  return canonical[moduleId] ?? `M-${moduleId.charAt(0).toUpperCase()}${moduleId.slice(1)}`;
 }
