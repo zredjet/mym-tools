@@ -21,6 +21,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"   # ADR-0008 §2.7: 「最新版を確認」で OS 既定ブラウザ起動
 tauri-plugin-dialog = "2"   # PR-Z: Export/Import の save / open ファイルダイアログ (D-05)
+tauri-plugin-os = "2"       # PR-AF: About 画面の Platform 表示 (OS 名 / arch / version)
 
 # DB (ADR-0003)
 # 注: bundled feature が SQLite を `SQLITE_ENABLE_FTS5` 等を有効化してビルドするため、

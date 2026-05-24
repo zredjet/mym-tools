@@ -3,6 +3,7 @@
 //! `module-contract.md` §6.2 により、モジュール配下の UI から `core_*` を直接呼ぶことは
 //! 禁止されている。Shell や共通フックからのみ呼ばれる想定。
 
+pub mod about;
 pub mod backup;
 pub mod cancel;
 pub mod items;

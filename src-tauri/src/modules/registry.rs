@@ -70,6 +70,8 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         // Core: Export / Import JSON (D-05 / data-model.md §12)
         crate::commands::transfer::core_export_json,
         crate::commands::transfer::core_import_json,
+        // Core: About 画面補助 (`ui-design.md §6.10`)
+        crate::commands::about::core_module_versions,
         // M-Hash
         crate::modules::hash::commands::hash_compute_text,
         crate::modules::hash::commands::hash_compute_file,
