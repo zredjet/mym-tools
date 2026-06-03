@@ -51,7 +51,7 @@ jobs:
     steps:
       # 該当タグを明示的に checkout (workflow_dispatch で別ブランチから走らせても
       # tag commit でのみ動作することを保証、PR #37 codex P1)
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
@@ -184,7 +184,7 @@ jobs:
     steps:
       # tag commit を明示的に checkout (PR #37 codex P1: workflow_dispatch で別 ref
       # を選んでも、tag が指す commit でのみビルドする)
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
@@ -210,7 +210,7 @@ jobs:
 
       # tauri-cli は taiki-e/install-action の managed manifest 外のため
       # 既定 fallback の cargo-binstall で取得される (ADR-0010 §2.3 / Round 8 C-1)
-      - uses: taiki-e/install-action@7ea35f098a7369cd23488403f58be9c491a6c55f # v2.77.0
+      - uses: taiki-e/install-action@25435dc8dd3baed7417e0c96d3fe89013a5b2e09 # v2.81.3
         with:
           tool: tauri-cli
 
