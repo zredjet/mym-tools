@@ -17,6 +17,7 @@
 | [docs/data-model.md](docs/data-model.md) | SQLite スキーマ、payload バージョニング、エクスポート JSON |
 | [docs/module-contract.md](docs/module-contract.md) | モジュール / コア境界の API 契約 |
 | [docs/ui-design.md](docs/ui-design.md) | UI トークン、画面スケルトン、キーボードショートカット |
+| [docs/release-process.md](docs/release-process.md) | 担当者向けの手動リリース手順、公開後検証、失敗時対応 |
 | [docs/decisions/](docs/decisions/) | ADR-0001〜0013 (Tauri / FE スタック / rusqlite / モジュール統合 / JST タイムスタンプ / payload バージョニング / バックアップ / 配布 / キャンセル機構 / CI / additive migration / モジュール有効状態 / portable ZIPリリース) |
 | [CLAUDE.md](CLAUDE.md) | 作業時の不変条件と参照優先順位 |
 
@@ -58,6 +59,8 @@ cargo test --workspace --lib --all-features --locked
 ## 手動リリース
 
 リリースはGitHub Actionsの`Release (ref: ADR-0013)`を`main`から手動実行する。
+担当者向けの準備、PR、tag作成、実行、公開確認、失敗時対応は
+[docs/release-process.md](docs/release-process.md)にまとめている。
 
 1. `package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json`のversionを同じSemVerへ更新
 2. 変更を`main`へ反映し、`v<version>`タグをpush
