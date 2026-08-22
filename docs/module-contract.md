@@ -95,7 +95,7 @@ pub trait ModuleBackend: Send + Sync {
 
 #### `id()`
 - **戻り値の制約**: **英小文字 / 数字のみ**。3〜32 文字 (ハイフン・アンダースコアは禁止)
-  - 理由: コマンド名が `<id>_<action>` 形式 (§5.3) であり、id 内にアンダースコアやハイフンが入ると Rust 関数名やコマンド名のパース・正規化規約が必要になる。Phase 1 のモジュール ID (`prompt` / `linkmemo` / `color` / `hash`) はすべて条件を満たす
+  - 理由: コマンド名が `<id>_<action>` 形式 (§5.3) であり、id 内にアンダースコアやハイフンが入ると Rust 関数名やコマンド名のパース・正規化規約が必要になる。現在のモジュール ID (`prompt` / `linkmemo` / `color` / `hash` / `palette`) はすべて条件を満たす
 - **使われ方**: items.module_id / Tauri コマンド prefix `<id>_*` / settings.json の `modules.<id>.*` / バックアップファイル名 `pre-<op>` の `<op>`(該当時) / エクスポート JSON の `module_versions.<id>`
 - **変更不可**: モジュール公開後に id を変えると既存データが孤児になる。変えてはいけない (どうしても必要なら DB schema migration §14 扱いになる)
 
@@ -670,6 +670,16 @@ src/modules/<id>/
 | 固有 IPC コマンド | `hash_compute_text` / `hash_compute_file` (進捗は **Tauri Channel `HashFileProgress`** 経由 / キャンセルは `core_cancel_operation`、ADR-0009 §2.4) |
 | `index_text` | 呼ばれない (items を持たないため) |
 
+### 12.5 M-Palette
+
+| 項目 | 値 |
+|------|----|
+| `id` | `palette` |
+| `is_stateless` | false |
+| `current_payload_version` | 1 |
+| 固有 IPC コマンド | なし。配色生成と色変換はフロント JS 上で実行 |
+| `index_text` の対象 | 5 色の `hex` + `harmony` |
+
 ---
 
 ## 13. 契約自体のバージョニング
@@ -712,3 +722,4 @@ src/modules/<id>/
 | 2026-04-30 | 0.4 | ADR-0009 受理反映: §5.2 のキャンセル機構行を Q-15 から ADR-0009 ベースに更新 / §6.1 の spawn_blocking 行から「Q-15 で別途決定」を削除し ADR-0009 §2.3 規約参照に置換 / §12.4 の M-Hash 進捗を Tauri Channel `HashFileProgress` ベースに更新 (`hash_file_progress` Event 表記を撤去) / §14 から Q-15 を削除 (ADR-0009 で決着) |
 | 2026-05-07 | 0.5 | PR #22 (Q-22 PoC: M-Hash 最小モジュール) 完了反映: §14 から Q-22 を削除し脚注に「PR #22 で動作確認済」を追記。`generate_handler!` 集中登録方式が本書 §5.3 通り機能することを CI 6 ジョブ green / unit test 3 件 PASS で検証完了 |
 | 2026-08-22 | 0.6 | ADR-0012 を反映。`enabledByDefault` を `settings.json` の既定値として有効化し、無効時の search / routing / export / import 契約と全モジュール共通の project route を明記。残っていた colon 形式の invoke 例を underscore 形式へ修正し、Q-23 を解決済みに移動 |
+| 2026-08-22 | 0.7 | §12.5 に stateful な M-Palette 契約を追加。共通 items CRUD を使い、固有 IPC とコア DB スキーマ変更を持たないことを確定 |

@@ -56,7 +56,7 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 
 ## モジュール / データ規約 (間違いやすい)
 
-- `items` は全モジュール共通の単一テーブル (M-Prompt / M-LinkMemo / M-Color)。モジュール固有データは `payload` JSON カラムに入れ、`payload_schema_version` を整数で持つ。**M-Hash は何も書かない** — stateless (D-06)
+- `items` は全モジュール共通の単一テーブル (M-Prompt / M-LinkMemo / M-Color / M-Palette)。モジュール固有データは `payload` JSON カラムに入れ、`payload_schema_version` を整数で持つ。**M-Hash は何も書かない** — stateless (D-06)
 - `items.title` は全モジュール共通の表示名。M-Color も独自の `name` フィールドは持たず `title` を使う
 - M-LinkMemo は `target` 単一フィールド (`url` / `path` の分割なし)。type は `"url" | "path" | "memo"`。URL 欄に `file://...` を入れたら `path` に正規化する (`linkmemo_normalize_target` / module-contract §12.2)
 - M-Prompt の `variables` は**永続化しない**。読込み時に `body` から正規表現で抽出する

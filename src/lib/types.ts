@@ -61,3 +61,25 @@ export interface LinkMemoPayloadV1 {
 export interface ColorPayloadV1 {
   hex: string;
 }
+
+/** M-Palette の調和ルール (`data-model.md` §10.5) */
+export type HarmonyRule =
+  | "custom"
+  | "analogous"
+  | "complementary"
+  | "split_complementary"
+  | "triad"
+  | "square"
+  | "compound"
+  | "shades"
+  | "monochromatic";
+
+export type PaletteIndex = 0 | 1 | 2 | 3 | 4;
+export type PaletteColors = [string, string, string, string, string];
+
+/** M-Palette payload v1 (`data-model.md` §10.5) */
+export interface PalettePayloadV1 {
+  colors: PaletteColors;
+  harmony: HarmonyRule;
+  base_index: PaletteIndex;
+}

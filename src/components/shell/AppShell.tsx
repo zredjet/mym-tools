@@ -103,7 +103,7 @@ export function AppShell() {
     return null;
   }, [projects, projectId, lastOpenedProjectId]);
 
-  // Cmd/Ctrl+1〜4 で現在有効なモジュールを registry 順に切替 (`docs/ui-design.md` §8.1)
+  // Cmd/Ctrl+1〜5 で現在有効なモジュールを registry 順に切替 (`docs/ui-design.md` §8.1)
   const goToModule = useCallback(
     (mod: ModuleId) => {
       if (currentProject == null) return;
@@ -129,6 +129,10 @@ export function AppShell() {
   useHotkeys("mod+4", (e) => {
     e.preventDefault();
     if (visibleModules[3] != null) goToModule(visibleModules[3].id);
+  });
+  useHotkeys("mod+5", (e) => {
+    e.preventDefault();
+    if (visibleModules[4] != null) goToModule(visibleModules[4].id);
   });
 
   // Cmd/Ctrl+, で設定ページ (`docs/ui-design.md` §8.1)

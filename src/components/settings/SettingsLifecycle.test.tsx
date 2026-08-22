@@ -23,7 +23,13 @@ describe("SettingsLifecycle", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.mocked(getSettings).mockResolvedValue(document);
-    vi.mocked(getBackendModuleIds).mockResolvedValue(["color", "hash", "linkmemo", "prompt"]);
+    vi.mocked(getBackendModuleIds).mockResolvedValue([
+      "color",
+      "hash",
+      "linkmemo",
+      "palette",
+      "prompt",
+    ]);
     vi.mocked(updateSettings).mockResolvedValue(undefined);
     useAppStore.setState({
       settingsDocument: null,

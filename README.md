@@ -1,7 +1,7 @@
 # MyMyTools
 
 軽量なクロスプラットフォーム多目的 GUI ツール (個人用ローカルツール)。
-プロンプト管理 / リンク・メモ / カラー選択 / ハッシュ計算をモジュール統合。
+プロンプト管理 / リンク・メモ / カラー選択 / ハッシュ計算 / カラーパレット作成をモジュール統合。
 
 - **対象 OS**: macOS / Windows (Linux は対象外)
 - **配布形式**: portable 差し替え方式 (自動更新なし)
@@ -76,7 +76,7 @@ cargo test --workspace --lib --all-features --locked
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
 rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing の Rust バックエンドで構成。
-プロジェクト管理、4 モジュール、横断検索、`settings.json`、バックアップ、
+プロジェクト管理、5 モジュール、横断検索、`settings.json`、バックアップ、
 アプリ全体／プロジェクト単位の JSON export / import を備える。
 
 CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2)

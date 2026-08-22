@@ -234,8 +234,8 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
         description={
           <>
             <strong>このプロジェクト配下のすべてのアイテム</strong>
-            (Prompts / Links / Colors) が連鎖削除されます。バックアップから戻すこと
-            は可能ですが、現在の状態へは戻れません。
+            がモジュール種別を問わず連鎖削除されます。バックアップから戻すことは可能ですが、
+            現在の状態へは戻れません。
           </>
         }
         onClose={() => setDeletingProject(null)}

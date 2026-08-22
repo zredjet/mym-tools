@@ -651,6 +651,25 @@ project 削除実行時、StorageService は**削除トランザクションの�
 `items` テーブルには**何も保存しない**。
 モジュールは `is_stateless = true` を宣言する (詳細は `module-contract.md`)。
 
+### 10.5 M-Palette
+
+```jsonc
+// items.payload (version 1)
+{
+  "colors": ["#2563EB", "#3B82F6", "#60A5FA", "#818CF8", "#A78BFA"],
+  "harmony": "analogous",
+  "base_index": 2
+}
+```
+
+- `title`: パレット名。任意タグは共通 `items.tags` に保存する
+- `colors`: 順序付き 5 要素固定。各要素は alpha なしの `#RRGGBB` (保存時は大文字)
+- `harmony`: `custom` / `analogous` / `complementary` / `split_complementary` / `triad` / `square` / `compound` / `shades` / `monochromatic`
+- `base_index`: 調和生成の基準色位置 (0〜4)
+- ロック、選択色、Undo/Redo 履歴は編集セッション状態であり永続化しない
+
+**search_text 生成**: `title + " " + tags + " " + colors.join(" ") + " " + harmony`
+
 ---
 
 ## 11. 設定 JSON (`settings.json`, Q-13)
@@ -664,7 +683,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
     "theme": "system" | "light" | "dark",
     "default_project_id": "<uuid>" | null,
     "last_opened_project_id": "<uuid>" | null,
-    "last_opened_module_id": "prompt" | "linkmemo" | "color" | "hash" | null,
+    "last_opened_module_id": "prompt" | "linkmemo" | "color" | "hash" | "palette" | null,
     "search": {
       "default_scope": "project" | "global"
     },
@@ -676,7 +695,8 @@ project 削除実行時、StorageService は**削除トランザクションの�
       "prompt": true,
       "linkmemo": true,
       "color": true,
-      "hash": true
+      "hash": true,
+      "palette": true
     }
   },
   "modules": {
@@ -1198,3 +1218,4 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-04-30 | 0.7 | ADR-0006 反映: §7.2 に楽観的並行制御 (UPDATE WHERE 句にバージョン条件 + rows_affected==0 で再読み込み) と二系統の内部更新 API (通常更新 / Eager-on-Read 内部更新) を追記 / §13.4 の pre-op バックアップ対象に `core_rebuild_search_index` を追加 / §12.2 にエクスポート時の Eager-on-Read 自動発火 + 進捗表示を明記 / §11.1 / §11.2 に `modules.<id>.last_seen_payload_version` を導入 (コアが解釈する例外フィールド) / 整合性テストに T-27〜T-31 を追加 |
 | 2026-04-30 | 0.8 | ADR-0007 反映: §4 meta テーブルの `data_revision` に SQLite INTEGER / Rust `i64` 整合の注記を追加 / `last_backup_revision` を「最後に成功した任意種別の DB バックアップ時点 revision」、`last_auto_backup_at` を「auto 専用 24 時間ゲート」と責務を明確化 / §13.2 で同責務分離を再掲 / §13.4 に「pre-op 取得後に対象操作が失敗してもバックアップを削除しない」旨を追加 / §13.6 リストア手順に `PRAGMA integrity_check` 事前実行 + UI 進行中表示 + 失敗時別ファイル選択促しを追加 / 整合性テストに T-32〜T-34 を追加 |
 | 2026-04-30 | 0.9 | ADR-0009 受理反映: §17 から Q-15 を削除し ADR-0009 解決済みのフットノートを追加 (export / import / FTS 再構築 / リストアの進捗 Channel と writer mutex 中の挙動は ADR-0009 §1 表 / §7.2 を参照) |
+| 2026-08-22 | 1.0 | §10.5 に M-Palette payload v1 を追加。5 色、調和ルール、基準色位置を items.payload に保存し、コア DB スキーマは変更しない方針を確定 |
