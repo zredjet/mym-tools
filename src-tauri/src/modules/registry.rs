@@ -15,6 +15,7 @@ use crate::module::ModuleBackend;
 use crate::modules::color::ColorModule;
 use crate::modules::hash::HashModule;
 use crate::modules::linkmemo::LinkMemoModule;
+use crate::modules::palette::PaletteModule;
 use crate::modules::prompt::PromptModule;
 
 /// アプリで利用するすべての ModuleBackend を順序付きで返す。
@@ -27,6 +28,7 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
         Arc::new(ColorModule),
         Arc::new(LinkMemoModule),
         Arc::new(PromptModule),
+        Arc::new(PaletteModule),
         // 新モジュールはここに 1 行追加する
     ]
 }
@@ -84,7 +86,7 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         crate::modules::linkmemo::commands::linkmemo_open,
         // M-Prompt
         crate::modules::prompt::commands::prompt_render_template,
-        // M-Color はフロントだけで完結 (固有 IPC コマンドなし、`module-contract.md` §12.3)
+        // M-Color / M-Palette はフロントだけで完結 (固有 IPC コマンドなし)
         // 新モジュールの固有コマンドはここに追加する
     ])
 }
@@ -96,15 +98,14 @@ mod tests {
     use crate::storage::{SqliteStorage, StorageService};
     use serde_json::json;
 
-    /// 実モジュール (Color / LinkMemo / Prompt / Hash) を `AppState::build` に通せる
+    /// 実モジュール (Color / LinkMemo / Prompt / Hash / Palette) を `AppState::build` に通せる
     /// ことを保証する。`module-contract.md` §3.2 の id 規約 (英小文字 + 数字 / 3〜32 文字 /
     /// 重複なし) が全モジュールで満たされていることもこれで担保される。
     #[test]
     fn module_backends_build_into_app_state() {
         let storage: Arc<dyn StorageService> = Arc::new(SqliteStorage::open(":memory:").unwrap());
         let backends = module_backends();
-        // Phase 1 では Hash / Color / LinkMemo / Prompt の 4 モジュール
-        assert_eq!(backends.len(), 4);
+        assert_eq!(backends.len(), 5);
         let dir = tempfile::tempdir().unwrap();
         let backup: Arc<dyn crate::backup::BackupService> = Arc::new(
             crate::backup::LocalBackupService::new(dir.path().to_path_buf(), Arc::clone(&storage)),
@@ -114,6 +115,7 @@ mod tests {
         assert!(state.module("color").is_some());
         assert!(state.module("linkmemo").is_some());
         assert!(state.module("prompt").is_some());
+        assert!(state.module("palette").is_some());
     }
 
     /// 実モジュールを `ScopedStorage` 経由で CRUD できることを end-to-end で確認する
@@ -218,5 +220,48 @@ mod tests {
             .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Red");
+    }
+
+    #[test]
+    fn end_to_end_palette_crud_and_search_by_color() {
+        let storage: Arc<SqliteStorage> = Arc::new(SqliteStorage::open(":memory:").unwrap());
+        let project = storage.create_project("Project", None).unwrap();
+
+        let dyn_storage: Arc<dyn StorageService> = Arc::clone(&storage) as Arc<dyn StorageService>;
+        let scoped =
+            Arc::clone(&dyn_storage).scoped_for(Arc::new(crate::modules::palette::PaletteModule));
+        let id = scoped
+            .create_item(
+                &project.id,
+                "Ocean Theme",
+                &["brand".into()],
+                json!({
+                    "colors": ["#123ABC", "#2563EB", "#3B82F6", "#60A5FA", "#93C5FD"],
+                    "harmony": "analogous",
+                    "base_index": 2
+                }),
+            )
+            .unwrap();
+
+        let fetched = scoped.get_item(&id).unwrap();
+        assert_eq!(fetched.module_id, "palette");
+        assert_eq!(fetched.payload["colors"][0], "#123ABC");
+
+        let results = dyn_storage
+            .search(
+                &crate::storage::SearchScope::Project {
+                    project_id: project.id,
+                },
+                "123ABC",
+                Some(&["palette".to_string()]),
+                100,
+                0,
+            )
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, id);
+
+        scoped.delete_item(&id).unwrap();
+        assert!(scoped.get_item(&id).is_err());
     }
 }

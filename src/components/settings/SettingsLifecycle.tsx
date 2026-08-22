@@ -44,7 +44,7 @@ export function SettingsLifecycle({ children }: { children: ReactNode }) {
 
   if (!hydrated) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[var(--bg)] p-6 text-[var(--fg)]">
+      <div className="flex h-full items-center justify-center bg-[var(--bg)] p-6 text-[var(--fg)]">
         {error == null ? (
           <p className="text-sm text-[var(--fg-muted)]">設定を読み込んでいます...</p>
         ) : (

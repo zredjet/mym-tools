@@ -129,7 +129,7 @@ export function AboutPage() {
         <div>
           <h2 className="text-2xl font-bold text-[var(--fg)]">MyMyTools</h2>
           <p className="mt-1 text-[13px] text-[var(--fg-muted)]">
-            個人用ローカルツールの集合体 — プロンプト / リンク・メモ / カラー / ハッシュ
+            個人用ローカルツールの集合体 — プロンプト / リンク・メモ / カラー / ハッシュ / パレット
           </p>
         </div>
 

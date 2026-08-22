@@ -3,6 +3,7 @@ import type { ModuleId } from "@/lib/types";
 import { colorModule } from "@/modules/color";
 import { hashModule } from "@/modules/hash";
 import { linkMemoModule } from "@/modules/linkmemo";
+import { paletteModule } from "@/modules/palette";
 import { promptModule } from "@/modules/prompt";
 import type { ModuleDefinition } from "@/modules/types";
 
@@ -11,6 +12,7 @@ export const modules: readonly ModuleDefinition[] = [
   linkMemoModule,
   colorModule,
   hashModule,
+  paletteModule,
 ];
 
 export function validateModuleDefinitions(definitions: readonly ModuleDefinition[]): void {

@@ -17,10 +17,14 @@ describe("MarkdownView", () => {
     expect(screen.getByText(/Hello/)).toBeInTheDocument();
   });
 
-  it("renders code block with known language without throwing", () => {
-    render(<MarkdownView source={"```js\nconsole.log('hi')\n```"} />);
-    // テキストとして含まれることを確認 (highlight.js の span 包みは見ない)
-    expect(screen.getByText(/console/)).toBeInTheDocument();
+  it("highlights a TypeScript import while preserving punctuation and identifiers", () => {
+    const { container } = render(
+      <MarkdownView source={'```typescript\nimport { useEffect } from "react";\n```'} />,
+    );
+
+    const code = container.querySelector("code.hljs.language-typescript");
+    expect(code).toHaveTextContent('import { useEffect } from "react";');
+    expect(code?.querySelector(".hljs-string")).toHaveTextContent('"react"');
   });
 
   it("PR #36 codex P1 回帰: 未登録言語 fenced code block で例外を投げない", () => {

@@ -1,7 +1,7 @@
 # MyMyTools
 
 軽量なクロスプラットフォーム多目的 GUI ツール (個人用ローカルツール)。
-プロンプト管理 / リンク・メモ / カラー選択 / ハッシュ計算をモジュール統合。
+プロンプト管理 / リンク・メモ / カラー選択 / ハッシュ計算 / カラーパレット作成をモジュール統合。
 
 - **対象 OS**: macOS / Windows (Linux は対象外)
 - **配布形式**: portable 差し替え方式 (自動更新なし)
@@ -17,6 +17,7 @@
 | [docs/data-model.md](docs/data-model.md) | SQLite スキーマ、payload バージョニング、エクスポート JSON |
 | [docs/module-contract.md](docs/module-contract.md) | モジュール / コア境界の API 契約 |
 | [docs/ui-design.md](docs/ui-design.md) | UI トークン、画面スケルトン、キーボードショートカット |
+| [docs/release-process.md](docs/release-process.md) | 担当者向けの手動リリース手順、公開後検証、失敗時対応 |
 | [docs/decisions/](docs/decisions/) | ADR-0001〜0013 (Tauri / FE スタック / rusqlite / モジュール統合 / JST タイムスタンプ / payload バージョニング / バックアップ / 配布 / キャンセル機構 / CI / additive migration / モジュール有効状態 / portable ZIPリリース) |
 | [CLAUDE.md](CLAUDE.md) | 作業時の不変条件と参照優先順位 |
 
@@ -58,6 +59,8 @@ cargo test --workspace --lib --all-features --locked
 ## 手動リリース
 
 リリースはGitHub Actionsの`Release (ref: ADR-0013)`を`main`から手動実行する。
+担当者向けの準備、PR、tag作成、実行、公開確認、失敗時対応は
+[docs/release-process.md](docs/release-process.md)にまとめている。
 
 1. `package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json`のversionを同じSemVerへ更新
 2. 変更を`main`へ反映し、`v<version>`タグをpush
@@ -69,11 +72,11 @@ cargo test --workspace --lib --all-features --locked
 
 ## 開発状況
 
-**Phase 1 の主要機能を実装済み (`0.1.0-alpha.4`)**。
+**Phase 1 の主要機能を実装済み (`0.1.0-alpha.5`)**。
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
 rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing の Rust バックエンドで構成。
-プロジェクト管理、4 モジュール、横断検索、`settings.json`、バックアップ、
+プロジェクト管理、5 モジュール、横断検索、`settings.json`、バックアップ、
 アプリ全体／プロジェクト単位の JSON export / import を備える。
 
 CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2)

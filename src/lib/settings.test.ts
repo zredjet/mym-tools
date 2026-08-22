@@ -19,7 +19,7 @@ describe("settings document", () => {
         },
         modules: {},
       },
-      ["prompt", "linkmemo", "color", "hash"],
+      ["prompt", "linkmemo", "color", "hash", "palette"],
     );
 
     expect(parsed.theme).toBe("dark");

@@ -39,9 +39,10 @@
 |  |     ├─ M-Prompt UI      |    │                          |   |
 |  |     ├─ M-LinkMemo UI    |    Module Backends            |   |
 |  |     ├─ M-Color UI       |    ├─ M-Prompt commands       |   |
-|  |     └─ M-Hash UI        |    ├─ M-LinkMemo commands     |   |
-|  |                         |    ├─ M-Color commands        |   |
-|  |                         |    └─ M-Hash commands         |   |
+|  |     ├─ M-Hash UI        |    ├─ M-LinkMemo commands     |   |
+|  |     └─ M-Palette UI     |    ├─ M-Color backend         |   |
+|  |                         |    ├─ M-Hash commands         |   |
+|  |                         |    └─ M-Palette backend       |   |
 |  +-------------------------+    +-------------┬------------+   |
 |                                               │                |
 +-----------------------------------------------┼----------------+
@@ -186,6 +187,7 @@ export const modules: ModuleDefinition[] = [
   linkMemoModule,
   colorModule,
   hashModule,
+  paletteModule,
 ];
 ```
 
@@ -205,7 +207,7 @@ export const modules: ModuleDefinition[] = [
 ```typescript
 // 概念定義: 詳細は module-contract.md
 type ModuleDefinition = {
-  id: string;                     // "prompt" | "linkmemo" | "color" | "hash"
+  id: string;                     // "prompt" | "linkmemo" | "color" | "hash" | "palette"
   displayName: string;            // "プロンプト管理"
   icon: React.ComponentType;
   enabledByDefault: boolean;
@@ -499,3 +501,4 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-04-30 | 0.3 | ADR-0009 受理反映: §11 のファイルハッシュ行を Tauri Channel + `CancellationToken` + `spawn_blocking` 規約に更新 / §14 から Q-15 を削除 (ADR-0009 で決着) |
 | 2026-04-30 | 0.4 | ADR-0010 受理反映: §13 の「ビルド/配布パイプライン (CI、コード署名手順)」未確定項目を「CI 確定 (ADR-0010) / CD は将来 ADR」の形に分離。CI 範囲はジョブ構成・matrix・branch protection・lint 連携を ADR-0010 で固定済 |
 | 2026-08-22 | 0.5 | ADR-0013受理反映: §9をmacOS / Windows portable ZIPへ統一し、手動version入力から全OS成功後にReleaseを公開するPhase 1 CDを§13の確定事項へ追加 |
+| 2026-08-22 | 0.6 | 既存モジュールへ依存しない M-Palette を静的レジストリへ追加。共通 items + payload で永続化し、固有 IPC とコア DB スキーマ変更を持たない構成を追記 |

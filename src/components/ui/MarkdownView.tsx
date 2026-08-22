@@ -3,6 +3,7 @@
  *
  * - `react-markdown` を使い、GFM (`remark-gfm`) でテーブル / タスクリスト / 自動リンク対応
  * - `rehype-highlight` でコードブロックのシンタックスハイライト
+ * - light は highlight.js の GitHub theme、dark は `index.css` の高コントラスト上書き
  * - 安全性: `react-markdown` は既定で raw HTML を **無効化** する (XSS リスク回避)
  *   ユーザー入力の Markdown を直に出すため、Phase 1 では rehype-raw を入れない
  *

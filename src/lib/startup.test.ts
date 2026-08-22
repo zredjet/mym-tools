@@ -48,7 +48,13 @@ describe("resolveStartupTarget", () => {
         lastProjectId: null,
         defaultProjectId: null,
         lastModuleId: null,
-        moduleEnabled: { prompt: false, linkmemo: false, color: false, hash: false },
+        moduleEnabled: {
+          prompt: false,
+          linkmemo: false,
+          color: false,
+          hash: false,
+          palette: false,
+        },
       }),
     ).toBe("/settings");
   });

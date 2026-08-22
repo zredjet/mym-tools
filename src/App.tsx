@@ -1,6 +1,6 @@
 /** React Router v7 のアプリルート。モジュール画面は registry から動的に構成する。 */
 import { type ReactNode, useEffect } from "react";
-import { HashRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { Navigate, RouterProvider, createHashRouter, useParams } from "react-router-dom";
 
 import { SettingsLifecycle } from "@/components/settings/SettingsLifecycle";
 import { AppShell } from "@/components/shell/AppShell";
@@ -22,37 +22,37 @@ function App() {
 
   return (
     <SettingsLifecycle>
-      <HashRouter>
-        <Routes>
-          <Route element={<AppShell />}>
-            <Route path="/" element={<StartupPage />} />
-            <Route path="/welcome" element={<WelcomePage />} />
-            {modules.flatMap((module) =>
-              module.routes.map((route) => {
-                const Component = route.component;
-                const suffix = route.path === "/" ? "" : route.path;
-                return (
-                  <Route
-                    key={`${module.id}:${route.path}`}
-                    path={`/projects/:projectId/m/${module.id}${suffix}`}
-                    element={
-                      <ModuleAccess module={module}>
-                        <Component />
-                      </ModuleAccess>
-                    }
-                  />
-                );
-              }),
-            )}
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/about" element={<AboutPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
-      </HashRouter>
+      <RouterProvider router={router} />
     </SettingsLifecycle>
   );
 }
+
+const router = createHashRouter([
+  {
+    element: <AppShell />,
+    children: [
+      { path: "/", element: <StartupPage /> },
+      { path: "/welcome", element: <WelcomePage /> },
+      ...modules.flatMap((module) =>
+        module.routes.map((route) => {
+          const Component = route.component;
+          const suffix = route.path === "/" ? "" : route.path;
+          return {
+            path: `/projects/:projectId/m/${module.id}${suffix}`,
+            element: (
+              <ModuleAccess module={module}>
+                <Component />
+              </ModuleAccess>
+            ),
+          };
+        }),
+      ),
+      { path: "/settings", element: <SettingsPage /> },
+      { path: "/about", element: <AboutPage /> },
+      { path: "*", element: <Navigate to="/" replace /> },
+    ],
+  },
+]);
 
 export function ModuleAccess({
   module,

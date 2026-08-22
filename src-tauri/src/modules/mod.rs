@@ -7,5 +7,6 @@
 pub mod color;
 pub mod hash;
 pub mod linkmemo;
+pub mod palette;
 pub mod prompt;
 pub mod registry;
