@@ -6,7 +6,7 @@
 //!
 //! ## 1 item あたりの処理フロー (`data-model.md` §12.4)
 //!
-//! ```
+//! ```text
 //! 1. JSON ルートの schema_version を見てコンバータを通す  ← 本 PR では 1 のみ受理 (将来拡張点)
 //! 2. item の module_id をモジュールレジストリで解決
 //! 3. ID 衝突チェック (StorageService::import_item 内部)

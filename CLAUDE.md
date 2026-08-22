@@ -36,6 +36,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 0010 | CI パイプライン: GitHub Actions matrix (macOS + Windows) で build / test / lint / typecheck / fmt。`clippy.toml` の `disallowed-methods` で `spawn_blocking` の直接呼び出しを禁止。SHA pin で依存固定 |
 | 0011 | コアスキーマの **additive** な DDL マイグレーション (新カラム+DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) は枠組み内で許可。`db_schema_version` を bump し pre-migration バックアップを自動取得 |
 | 0012 | モジュール有効状態を `settings.json` に保存し、sidebar / routing / search / 起動復元を frontend registry から導出。全モジュールをプロジェクト配下に置き、無効化しても export/import でデータを保持 |
+| 0013 | リリースは `workflow_dispatch` の手動実行のみ。入力バージョンとtag commitの3設定を照合し、macOS / Windowsのportable ZIPを全ビルド成功後に公開。既存Releaseは上書きしない |
 
 ## 絶対に破ってはいけない不変条件
 

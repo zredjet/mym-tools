@@ -402,8 +402,10 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 ## 9. 更新機構 (D-04)
 
 - インストーラを必須としない
-  - macOS: `.app` バンドルを Applications に置くだけ / 上書きすれば更新完了
-  - Windows: ZIP 配布の portable を主、必要に応じて MSI を従とする
+  - macOS: Apple Silicon向け`.app`をportable ZIPに格納し、Applicationsへの移動 / 上書きで更新完了
+  - Windows: x64 `.exe`をportable ZIPに格納し、任意フォルダへの展開 / 上書きで更新完了
+- GitHub Releaseは`workflow_dispatch`からversionを入力して手動実行し、tag commitの3設定と一致する場合だけ作成する (ADR-0013)
+- macOS / Windowsの両portable ZIPが揃ってからdraft Releaseを作成し、アップロード成功後に公開する
 - アプリ起動時に DB の `schema_version` を読み、想定外なら**起動を停止しエラー画面**を出す (黙って壊さない)
 - 「新しいバージョンの取得」は OS のブラウザでリリースページを開くだけ。アプリ内ダウンローダは持たない
 
@@ -466,9 +468,10 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 
 **確定済**:
 - **CI パイプライン (検証)**: ADR-0010 で確定 — GitHub Actions / lint-rust / test-rust / lint-frontend / test-frontend / build-tauri matrix (macOS + Windows) / branch protection / `clippy.toml` `disallowed-methods` 連携
+- **Phase 1 CD パイプライン (無署名portable ZIP)**: ADR-0013で確定 — 手動version入力 / tag commit固定 / macOS + Windows全成功後のRelease作成 / 既存Release上書き禁止
 
 **まだ未確定**:
-- **CD パイプライン (リリース)**: 公開配布判断時に着手予定 (ADR-0008 §2.5 / §7.8)。署名・Notarization・signtool / Azure Trusted Signing 統合・SHA-256 リリース添付・secrets 管理が対象
+- **公開配布向けCD拡張**: 署名・Notarization・signtool / Azure Trusted Signing統合・SHA-256 / provenance添付・secrets管理
 
 ---
 
@@ -495,3 +498,4 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-04-25 | 0.2 | レビュー反映: §2.2 を「やらない」と「最初から入れる」に分離し Zustand を Day 1 採用 / Tokio が同梱前提であることを明示 / §6.1 に payload_schema_version カラム追加 / §6.2 で Lazy Migration on Read を規定 / §6.3 で FTS5 と items の同一トランザクション規約をトリガで実装と規定 / §6.6 で性能スケーリングの見通しと items 例外の逃げ道を明記 / §13 に Zustand 追加 / Q-06/07/09 (要件側で D 確定) と Q-10 (rusqlite 確定) を本書から削除 / Q-16 を新規起票 |
 | 2026-04-30 | 0.3 | ADR-0009 受理反映: §11 のファイルハッシュ行を Tauri Channel + `CancellationToken` + `spawn_blocking` 規約に更新 / §14 から Q-15 を削除 (ADR-0009 で決着) |
 | 2026-04-30 | 0.4 | ADR-0010 受理反映: §13 の「ビルド/配布パイプライン (CI、コード署名手順)」未確定項目を「CI 確定 (ADR-0010) / CD は将来 ADR」の形に分離。CI 範囲はジョブ構成・matrix・branch protection・lint 連携を ADR-0010 で固定済 |
+| 2026-08-22 | 0.5 | ADR-0013受理反映: §9をmacOS / Windows portable ZIPへ統一し、手動version入力から全OS成功後にReleaseを公開するPhase 1 CDを§13の確定事項へ追加 |
