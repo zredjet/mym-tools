@@ -1,7 +1,8 @@
 /**
  * ストアの `uiScale` を `<body>` の CSS `zoom` に同期させる。
  *
- * トークンは `body { zoom: var(--ui-scale) }` (`src/index.css` 参照) で参照されており、
+ * トークンは `body { zoom: var(--ui-scale) }` (`src/index.css` 参照) で参照される。
+ * ルートの containing block は percentage sizing でネイティブウィンドウ内に固定し、
  * ここでは `:root` に CSS 変数を書くだけ。Theme と同じ責務分離パターン
  * (`useThemeAttribute`)。
  *

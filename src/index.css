@@ -67,6 +67,19 @@
   --destructive: #f87171;
 }
 
+/*
+ * `zoom` は 100vw / 100vh のような viewport 単位も拡大するため、アプリの
+ * containing block は percentage でネイティブウィンドウに固定する。
+ * スクロールは AppShell の main など、明示した内側の領域だけが担当する。
+ */
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   font-size: 14px;
