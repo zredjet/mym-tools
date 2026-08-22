@@ -91,6 +91,26 @@ function SettingsSync() {
   const moduleEnabled = useAppStore((state) => state.moduleEnabled);
   const setError = useAppStore((state) => state.setSettingsError);
   const lastSaved = useRef<string | null>(null);
+  const pendingSave = useRef<{
+    settings: Parameters<typeof updateSettings>[0];
+    serialized: string;
+  } | null>(null);
+  const pendingTimeout = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (pendingTimeout.current != null) {
+        window.clearTimeout(pendingTimeout.current);
+        pendingTimeout.current = null;
+      }
+
+      const pending = pendingSave.current;
+      if (pending == null) return;
+      pendingSave.current = null;
+      void updateSettings(pending.settings).catch(() => undefined);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (document == null) return;
@@ -113,15 +133,27 @@ function SettingsSync() {
     }
     if (lastSaved.current === serialized) return;
 
+    pendingSave.current = { settings: next, serialized };
     const timeout = window.setTimeout(() => {
-      void updateSettings(next)
+      pendingTimeout.current = null;
+      const pending = pendingSave.current;
+      if (pending == null || pending.serialized !== serialized) return;
+
+      void updateSettings(pending.settings)
         .then(() => {
           lastSaved.current = serialized;
+          if (pendingSave.current?.serialized === serialized) {
+            pendingSave.current = null;
+          }
           setError(null);
         })
         .catch((saveError: unknown) => setError(formatInvokeError(saveError)));
     }, SAVE_DEBOUNCE_MS);
-    return () => window.clearTimeout(timeout);
+    pendingTimeout.current = timeout;
+    return () => {
+      window.clearTimeout(timeout);
+      if (pendingTimeout.current === timeout) pendingTimeout.current = null;
+    };
   }, [
     document,
     theme,

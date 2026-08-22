@@ -69,6 +69,27 @@ describe("SettingsLifecycle", () => {
     );
   });
 
+  it("flushes the latest state when unmounted during the debounce window", async () => {
+    const view = render(
+      <SettingsLifecycle>
+        <span>アプリ本体</span>
+      </SettingsLifecycle>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => useAppStore.getState().setTheme("dark"));
+    act(() => view.unmount());
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        core: expect.objectContaining({ theme: "dark", future_key: "keep" }),
+      }),
+    );
+  });
+
   it("stops startup when frontend and backend registries differ", async () => {
     vi.mocked(getBackendModuleIds).mockResolvedValue(["hash", "prompt"]);
 
