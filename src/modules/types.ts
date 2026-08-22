@@ -7,6 +7,13 @@ import type { ComponentType } from "react";
 
 import type { Item, ModuleId } from "@/lib/types";
 
+export type ModuleCategoryId = "manage" | "design" | "text" | "web" | "generate" | "time" | "other";
+
+export interface ModuleCategoryDefinition {
+  readonly id: ModuleCategoryId;
+  readonly displayName: string;
+}
+
 /** モジュール定義 (id がバックエンドの ModuleBackend と一致する必要がある) */
 export interface ModuleDefinition {
   /** ModuleBackend.id() と完全一致しなければならない */
@@ -17,6 +24,9 @@ export interface ModuleDefinition {
 
   /** サイドバー等のアイコン */
   readonly icon: ComponentType<{ className?: string }>;
+
+  /** サイドバー上の表示分類。省略時は other。機能境界には使わない。 */
+  readonly category?: ModuleCategoryId;
 
   /** 設定が未指定のときの有効状態 */
   readonly enabledByDefault: boolean;

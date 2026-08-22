@@ -1,5 +1,5 @@
 /** React Router v7 のアプリルート。モジュール画面は registry から動的に構成する。 */
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, Suspense, useEffect } from "react";
 import { Navigate, RouterProvider, createHashRouter, useParams } from "react-router-dom";
 
 import { SettingsLifecycle } from "@/components/settings/SettingsLifecycle";
@@ -41,7 +41,15 @@ const router = createHashRouter([
             path: `/projects/:projectId/m/${module.id}${suffix}`,
             element: (
               <ModuleAccess module={module}>
-                <Component />
+                <Suspense
+                  fallback={
+                    <div className="flex h-full items-center justify-center text-sm text-[var(--fg-muted)]">
+                      モジュールを読み込んでいます...
+                    </div>
+                  }
+                >
+                  <Component />
+                </Suspense>
               </ModuleAccess>
             ),
           };

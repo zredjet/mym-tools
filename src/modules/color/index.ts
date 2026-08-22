@@ -8,6 +8,7 @@ export const colorModule: ModuleDefinition = {
   id: "color",
   displayName: "カラー",
   icon: Palette,
+  category: "design",
   enabledByDefault: true,
   isStateless: false,
   routes: [{ path: "/", component: ColorListPage }],

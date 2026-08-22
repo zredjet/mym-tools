@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { modules } from "@/modules/registry";
+
 import { resolveStartupTarget } from "./startup";
 
 const projects = [
@@ -48,13 +50,7 @@ describe("resolveStartupTarget", () => {
         lastProjectId: null,
         defaultProjectId: null,
         lastModuleId: null,
-        moduleEnabled: {
-          prompt: false,
-          linkmemo: false,
-          color: false,
-          hash: false,
-          palette: false,
-        },
+        moduleEnabled: Object.fromEntries(modules.map((module) => [module.id, false])),
       }),
     ).toBe("/settings");
   });

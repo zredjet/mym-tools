@@ -27,8 +27,11 @@
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-os": "^2.3.2",
+    "cron-parser": "^5.10.0",
     "culori": "^4.0.2",
+    "diff": "^9.0.0",
     "lucide-react": "^1.14.0",
+    "nanoid": "^6.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-hotkeys-hook": "^5.3.2",
@@ -36,6 +39,9 @@
     "react-router-dom": "^7.15.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
+    "temporal-polyfill": "^1.0.4",
+    "ulid": "^3.0.2",
+    "uuid": "^14.0.2",
     "zustand": "^5.0.13"
   },
   "devDependencies": {

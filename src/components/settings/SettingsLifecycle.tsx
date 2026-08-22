@@ -89,6 +89,7 @@ function SettingsSync() {
   const uiScale = useAppStore((state) => state.uiScale);
   const rowDensity = useAppStore((state) => state.rowDensity);
   const moduleEnabled = useAppStore((state) => state.moduleEnabled);
+  const collapsedModuleCategories = useAppStore((state) => state.collapsedModuleCategories);
   const setError = useAppStore((state) => state.setSettingsError);
   const lastSaved = useRef<string | null>(null);
   const pendingSave = useRef<{
@@ -125,6 +126,7 @@ function SettingsSync() {
       uiScale,
       rowDensity,
       moduleEnabled,
+      collapsedModuleCategories,
     });
     const serialized = JSON.stringify(next);
     if (lastSaved.current == null) {
@@ -166,6 +168,7 @@ function SettingsSync() {
     uiScale,
     rowDensity,
     moduleEnabled,
+    collapsedModuleCategories,
     setError,
   ]);
 

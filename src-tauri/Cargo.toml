@@ -49,6 +49,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # UUID (ADR-0009: operation_id)
 uuid = { version = "1", features = ["v4", "serde"] }
 
+# M-HTTP: CORS に依存しない native HTTP client (ADR-0015)
+reqwest = { version = "0.13.3", default-features = false, features = ["native-tls", "charset", "http2"] }
+
 # ハッシュ計算 (M-Hash)
 # digest 0.10 系は md-5 / sha1 / sha2 0.10 が既に間接依存しているバージョン。
 # `DynDigest` (object-safe) を使ってアルゴリズム別の dyn dispatch をする。

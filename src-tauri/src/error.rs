@@ -63,6 +63,10 @@ pub enum AppError {
     #[error("I/O error: {0}")]
     Io(String),
 
+    /// HTTP module の URL / TLS / timeout / response read error。
+    #[error("network error: {0}")]
+    Network(String),
+
     /// SQLite / StorageService 由来のエラー (`data-model.md` §13)。
     #[error("storage error: {0}")]
     Storage(String),
@@ -86,6 +90,12 @@ impl From<rusqlite::Error> for AppError {
 impl From<std::io::Error> for AppError {
     fn from(value: std::io::Error) -> Self {
         AppError::Io(value.to_string())
+    }
+}
+
+impl From<reqwest::Error> for AppError {
+    fn from(value: reqwest::Error) -> Self {
+        AppError::Network(value.to_string())
     }
 }
 

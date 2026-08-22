@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   enabledModules,
   getModuleDefinition,
+  groupedModules,
   modulePath,
   modules,
   validateModuleDefinitions,
@@ -16,6 +17,17 @@ describe("frontend module registry", () => {
       "color",
       "hash",
       "palette",
+      "codec",
+      "urlquery",
+      "datetime",
+      "idgen",
+      "secretgen",
+      "regex",
+      "textdiff",
+      "jwt",
+      "cron",
+      "a11y",
+      "http",
     ]);
     expect(() => validateModuleDefinitions(modules)).not.toThrow();
     for (const module of modules) expect(module.routes.length).toBeGreaterThan(0);
@@ -55,12 +67,26 @@ describe("frontend module registry", () => {
   });
 
   it("applies settings overrides on top of enabledByDefault", () => {
-    expect(enabledModules({ color: false }).map((module) => module.id)).toEqual([
-      "prompt",
-      "linkmemo",
-      "hash",
-      "palette",
+    const enabled = enabledModules({ color: false }).map((module) => module.id);
+    expect(enabled).not.toContain("color");
+    expect(enabled).not.toContain("http");
+    expect(enabled).toContain("codec");
+    expect(enabledModules({ http: true }).map((module) => module.id)).toContain("http");
+  });
+
+  it("groups modules by the shared category registry", () => {
+    const groups = groupedModules(modules);
+    expect(groups.map((group) => group.category.id)).toEqual([
+      "manage",
+      "design",
+      "text",
+      "web",
+      "generate",
+      "time",
     ]);
+    expect(
+      groups.find((group) => group.category.id === "web")?.modules.map((module) => module.id),
+    ).toEqual(["urlquery", "jwt", "http"]);
   });
 
   it("rejects duplicate ids and missing stateful search adapters", () => {

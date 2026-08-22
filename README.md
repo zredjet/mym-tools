@@ -1,7 +1,7 @@
 # MyMyTools
 
 軽量なクロスプラットフォーム多目的 GUI ツール (個人用ローカルツール)。
-プロンプト管理 / リンク・メモ / カラー選択 / ハッシュ計算 / カラーパレット作成をモジュール統合。
+保存系ツール5種と、変換・解析・生成・通信の開発ツール11種を、一機能一モジュールで統合。
 
 - **対象 OS**: macOS / Windows (Linux は対象外)
 - **配布形式**: portable 差し替え方式 (自動更新なし)
@@ -17,8 +17,9 @@
 | [docs/data-model.md](docs/data-model.md) | SQLite スキーマ、payload バージョニング、エクスポート JSON |
 | [docs/module-contract.md](docs/module-contract.md) | モジュール / コア境界の API 契約 |
 | [docs/ui-design.md](docs/ui-design.md) | UI トークン、画面スケルトン、キーボードショートカット |
+| [docs/developer-tools-plan.md](docs/developer-tools-plan.md) | 開発ツール11モジュールの範囲、段階、品質条件 |
 | [docs/release-process.md](docs/release-process.md) | 担当者向けの手動リリース手順、公開後検証、失敗時対応 |
-| [docs/decisions/](docs/decisions/) | ADR-0001〜0013 (Tauri / FE スタック / rusqlite / モジュール統合 / JST タイムスタンプ / payload バージョニング / バックアップ / 配布 / キャンセル機構 / CI / additive migration / モジュール有効状態 / portable ZIPリリース) |
+| [docs/decisions/](docs/decisions/) | ADR-0001〜0015 (既存設計に加え、一機能一モジュール / HTTP通信境界) |
 | [CLAUDE.md](CLAUDE.md) | 作業時の不変条件と参照優先順位 |
 
 ## 開発
@@ -76,7 +77,7 @@ cargo test --workspace --lib --all-features --locked
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
 rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing の Rust バックエンドで構成。
-プロジェクト管理、5 モジュール、横断検索、`settings.json`、バックアップ、
+プロジェクト管理、カテゴリ表示付き16モジュール、横断検索、`settings.json`、バックアップ、
 アプリ全体／プロジェクト単位の JSON export / import を備える。
 
 CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2)

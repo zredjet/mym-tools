@@ -212,10 +212,13 @@ UI スケールと viewport:
 │ ▸ Research        11 │
 │                      │
 │ MODULES          🌗  │   ← セクション右にテーマ切替アイコン
-│ ▣ Prompts         27 │
-│ ⚭ Links           14 │
-│ ◐ Colors           9 │
-│ # Hash               │   ← Hash は count なし (stateless)
+│ ▾ 管理               │   ← 表示カテゴリ。ボタンで開閉
+│   ▣ Prompts        27 │
+│   ⚭ Links          14 │
+│ ▾ テキスト・解析      │
+│   # Hash              │   ← stateless は count なし
+│   .* 正規表現          │
+│ ▸ Web・通信           │   ← 閉じたカテゴリ
 └──────────────────────┘
 ```
 
@@ -223,6 +226,9 @@ UI スケールと viewport:
 - 各行の高さ 32px、padding 6px 12px
 - 選択中の行は `--bg-accent-soft` + `--accent` テキスト + 左 2px のアクセントバー
 - `件数` は 11px / `--fg-subtle` で右寄せ
+- モジュールは Frontend registry のカテゴリ順でグループ化し、カテゴリ見出しは `aria-expanded` を持つbuttonとする (ADR-0014)
+- 初回は全カテゴリを展開する。開閉状態は `core.collapsed_module_categories` へ保存し、active moduleを含むカテゴリは自動展開する
+- カテゴリは表示だけのまとまりであり、モジュール行・route・有効／無効は従来どおり個別に扱う
 
 ### 3.3 メインエリアのレイアウトパターン
 
@@ -729,6 +735,24 @@ shadcn/ui のコンポーネントを土台とし、本ツール固有の使い�
 - 新規ルートを既定とし、保存後は編集ルートへ置換遷移する。保存済み一覧は 5 色プレビュー、名前、タグ、調和ルール、編集、削除、D&D を提供する。
 - 永続化対象との差分がある内部遷移では「保存 / 破棄 / キャンセル」を提示する。ロックと Undo/Redo 履歴は永続化しない。
 
+### 6.18 Stateless 開発ツール
+
+全画面で共通シェル、ページ見出し、説明、入力panel、結果panelを使う。入力・結果・履歴・presetは画面を離れた時点で破棄し、保存・検索・件数表示を提供しない。
+
+| ID | 主要UI | 安全上の表示 |
+|---|---|---|
+| `regex` | pattern / flags / test text / match・capture・replace | 1秒timeout |
+| `textdiff` | before / after / line・word / ignore options | 各1 MiB、2秒timeout |
+| `codec` | format / encode・decode / input / output | 不正入力をinline error |
+| `jwt` | token / header / payload /時刻claim | 「署名未検証」を常時表示 |
+| `urlquery` | URL構成要素 / query行編集 / rebuilt URL | 重複keyと順序を保持 |
+| `datetime` | 入力形式 / IANA zone /複数形式出力 | DST gap・overlapを拒否 |
+| `idgen` | UUID v4・v7 / ULID / NanoID /件数 | 一括100件まで |
+| `secretgen` | password / Hex / Base64URL /長さ | Web Cryptoのみ使用 |
+| `cron` | 5・6 field / IANA zone /次回10件 | Quartz固有構文は対象外 |
+| `a11y` | foreground / background / contrast / simulation | WCAG 2.2閾値を明記 |
+| `http` | method / URL / headers / body / response | 既定無効、非永続、停止、5 MiB上限 |
+
 ---
 
 ## 7. 可動パラメータ (Tweaks) — プロトタイプで検証
@@ -918,6 +942,7 @@ H-1 は stateless モジュールのため空状態は無し。代わりに「�
 | 2026-08-22 | 0.8 | UI スケールが100%を超えてもアプリシェルとモーダルをネイティブウィンドウ内に収める viewport 契約を §3.1 に追加。ルートは percentage sizing とし、外側スクロールを禁止して内側の明示領域へスクロール責務を限定。 |
 | 2026-08-22 | 0.9 | Markdownコードブロックをテーマ連動配色へ変更。ダークモードでは通常文字・記号・文字列を含む全シンタックストークンの前景色がコード背景に対してWCAG AAの4.5:1以上となる契約を §2.2 に追加。 |
 | 2026-08-22 | 1.0 | 独立 M-Palette の PL-1 / PL-2 を追加。Adobe Color 型の左右分割、5 色固定、9 調和ルール、詳細 4 色空間、ロック、Random、Undo/Redo、保存済み一覧、未保存確認、Cmd/Ctrl+5 を確定。 |
+| 2026-08-23 | 1.1 | ADR-0014 / ADR-0015を反映。サイドバーのカテゴリ別折りたたみ、active category自動展開、stateless開発ツール11画面の共通構造と安全表示を追加。 |
 
 ---
 
