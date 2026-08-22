@@ -144,7 +144,12 @@ export function updateHarmonyColor(
     v: clamp01(changed.v - entry.value),
   };
   const generated = generateHarmony(hsvToHex(inferredBase), harmony, baseIndex);
-  return generated.map((color, index) => (locked[index] ? colors[index]! : color)) as PaletteColors;
+  const next = generated.map((color, index) =>
+    locked[index] ? colors[index]! : color,
+  ) as PaletteColors;
+  // 相対差分を逆算した基準色が HSV の範囲外になる場合でも、操作した色自体は保持する。
+  if (!locked[changedIndex]) next[changedIndex] = normalized;
+  return next;
 }
 
 export function randomizePalette(

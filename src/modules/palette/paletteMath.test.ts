@@ -46,6 +46,19 @@ describe("palette harmony engine", () => {
     expect(next[2]).toBe("#FF0000");
   });
 
+  it("preserves a requested non-base color when the inverse harmony exceeds its range", () => {
+    const initial = generateHarmony("#808080", "shades", 2);
+    const next = updateHarmonyColor(initial, 0, "#FFFFFF", "shades", 2, [
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+
+    expect(next[0]).toBe("#FFFFFF");
+  });
+
   it("randomizes only unlocked custom colors", () => {
     const values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
     let index = 0;

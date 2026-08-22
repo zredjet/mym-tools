@@ -23,7 +23,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { deleteItem, listItems, reorderItems } from "@/ipc/items";
+import { deleteItem, listAllItems, reorderItems } from "@/ipc/items";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import type { Item, PalettePayloadV1 } from "@/lib/types";
@@ -43,7 +43,7 @@ export function PaletteListPage() {
   const refresh = useCallback(async (pid: string) => {
     try {
       setLoading(true);
-      setItems(await listItems({ moduleId: "palette", projectId: pid }));
+      setItems(await listAllItems({ moduleId: "palette", projectId: pid }));
       setError(null);
     } catch (cause) {
       setError(formatInvokeError(cause));
@@ -57,7 +57,7 @@ export function PaletteListPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const list = await listItems({ moduleId: "palette", projectId });
+        const list = await listAllItems({ moduleId: "palette", projectId });
         if (!cancelled) {
           setItems(list);
           setError(null);

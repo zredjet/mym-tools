@@ -24,6 +24,25 @@ export function listItems(input: {
   });
 }
 
+/**
+ * 並び替えなどスコープ内の全 ID が必要な画面向けに、100 件ずつ全ページを取得する。
+ */
+export async function listAllItems(input: {
+  moduleId: ModuleId;
+  projectId: string;
+}): Promise<Item[]> {
+  const pageSize = 100;
+  const items: Item[] = [];
+  let offset = 0;
+
+  while (true) {
+    const page = await listItems({ ...input, limit: pageSize, offset });
+    items.push(...page);
+    if (page.length < pageSize) return items;
+    offset += page.length;
+  }
+}
+
 export function getItem(input: { moduleId: ModuleId; itemId: string }): Promise<Item> {
   return invoke<Item>("core_get_item", {
     moduleId: input.moduleId,
