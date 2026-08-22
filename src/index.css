@@ -65,6 +65,22 @@
   --fg-muted: #a1a1aa;
   --fg-subtle: #71717a;
   --destructive: #f87171;
+
+  /* Markdown コードブロック: GitHub Dark ベース、13px本文で WCAG AA を満たす色 */
+  --hljs-fg: #c9d1d9;
+  --hljs-keyword: #ff7b72;
+  --hljs-entity: #d2a8ff;
+  --hljs-constant: #79c0ff;
+  --hljs-string: #a5d6ff;
+  --hljs-variable: #ffa657;
+  --hljs-comment: #8b949e;
+  --hljs-tag: #7ee787;
+  --hljs-section: #58a6ff;
+  --hljs-bullet: #f2cc60;
+  --hljs-addition-fg: #aff5b4;
+  --hljs-addition-bg: #033a16;
+  --hljs-deletion-fg: #ffdcd7;
+  --hljs-deletion-bg: #67060c;
 }
 
 /*
@@ -186,6 +202,86 @@ body {
   padding: 0;
   font-size: 13px;
   line-height: 1.5;
+}
+
+/*
+ * highlight.js の GitHub light theme は MarkdownView から読み込む。
+ * ダークモードでは同じ token 分類を高コントラスト配色へ上書きする。
+ * `.hljs-punctuation` など色指定のない token は `.hljs` の前景色を継承する。
+ */
+[data-theme="dark"] .prose-mymtools .hljs {
+  color: var(--hljs-fg);
+  background: transparent;
+}
+[data-theme="dark"] .prose-mymtools .hljs-doctag,
+[data-theme="dark"] .prose-mymtools .hljs-keyword,
+[data-theme="dark"] .prose-mymtools .hljs-meta .hljs-keyword,
+[data-theme="dark"] .prose-mymtools .hljs-template-tag,
+[data-theme="dark"] .prose-mymtools .hljs-template-variable,
+[data-theme="dark"] .prose-mymtools .hljs-type,
+[data-theme="dark"] .prose-mymtools .hljs-variable.language_ {
+  color: var(--hljs-keyword);
+}
+[data-theme="dark"] .prose-mymtools .hljs-title,
+[data-theme="dark"] .prose-mymtools .hljs-title.class_,
+[data-theme="dark"] .prose-mymtools .hljs-title.class_.inherited__,
+[data-theme="dark"] .prose-mymtools .hljs-title.function_ {
+  color: var(--hljs-entity);
+}
+[data-theme="dark"] .prose-mymtools .hljs-attr,
+[data-theme="dark"] .prose-mymtools .hljs-attribute,
+[data-theme="dark"] .prose-mymtools .hljs-literal,
+[data-theme="dark"] .prose-mymtools .hljs-meta,
+[data-theme="dark"] .prose-mymtools .hljs-number,
+[data-theme="dark"] .prose-mymtools .hljs-operator,
+[data-theme="dark"] .prose-mymtools .hljs-variable,
+[data-theme="dark"] .prose-mymtools .hljs-selector-attr,
+[data-theme="dark"] .prose-mymtools .hljs-selector-class,
+[data-theme="dark"] .prose-mymtools .hljs-selector-id {
+  color: var(--hljs-constant);
+}
+[data-theme="dark"] .prose-mymtools .hljs-regexp,
+[data-theme="dark"] .prose-mymtools .hljs-string,
+[data-theme="dark"] .prose-mymtools .hljs-meta .hljs-string {
+  color: var(--hljs-string);
+}
+[data-theme="dark"] .prose-mymtools .hljs-built_in,
+[data-theme="dark"] .prose-mymtools .hljs-symbol {
+  color: var(--hljs-variable);
+}
+[data-theme="dark"] .prose-mymtools .hljs-comment,
+[data-theme="dark"] .prose-mymtools .hljs-code,
+[data-theme="dark"] .prose-mymtools .hljs-formula {
+  color: var(--hljs-comment);
+}
+[data-theme="dark"] .prose-mymtools .hljs-name,
+[data-theme="dark"] .prose-mymtools .hljs-quote,
+[data-theme="dark"] .prose-mymtools .hljs-selector-tag,
+[data-theme="dark"] .prose-mymtools .hljs-selector-pseudo {
+  color: var(--hljs-tag);
+}
+[data-theme="dark"] .prose-mymtools .hljs-subst {
+  color: var(--hljs-fg);
+}
+[data-theme="dark"] .prose-mymtools .hljs-section {
+  color: var(--hljs-section);
+}
+[data-theme="dark"] .prose-mymtools .hljs-bullet {
+  color: var(--hljs-bullet);
+}
+[data-theme="dark"] .prose-mymtools .hljs-emphasis {
+  color: var(--hljs-fg);
+}
+[data-theme="dark"] .prose-mymtools .hljs-strong {
+  color: var(--hljs-fg);
+}
+[data-theme="dark"] .prose-mymtools .hljs-addition {
+  color: var(--hljs-addition-fg);
+  background-color: var(--hljs-addition-bg);
+}
+[data-theme="dark"] .prose-mymtools .hljs-deletion {
+  color: var(--hljs-deletion-fg);
+  background-color: var(--hljs-deletion-bg);
 }
 .prose-mymtools blockquote {
   border-left: 3px solid var(--border-strong);
