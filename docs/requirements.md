@@ -1,6 +1,6 @@
 # 要件定義 (Requirements)
 
-最終更新: 2026-04-25 / ステータス: Draft (Phase 1)
+最終更新: 2026-08-22 / ステータス: Draft (Phase 1)
 
 このドキュメントは「何を作るか / 作らないか」「なぜそう決めたか」を残すためのものです。
 実装方法 (どう作るか) は `architecture.md` 以降に分離します。
@@ -133,7 +133,8 @@
 - コード署名は**実施を前提とする**(macOS Gatekeeper / Windows SmartScreen 対策)
 - **自動更新は実装しない**
 - ユーザーが新バージョンのアプリ実行ファイル / フォルダを **エクスプローラー (Finder) 上で差し替えるだけで更新が完結する** 配布構成にすること
-  - インストーラを必須としない portable 構成を視野に入れる
+  - macOS / Windowsともにportable ZIPを配布し、インストーラは生成しない (ADR-0013)
+  - macOS ZIPにはApple Silicon向け`.app`、Windows ZIPにはx64 `.exe`を格納する
   - ユーザーデータ (SQLite ファイル等) はアプリ実行ファイルと**同じディレクトリに置かない**(差し替え時に消えないように、OS 標準のユーザーデータディレクトリへ配置する)
 
 ---
@@ -217,3 +218,4 @@
 | 2026-04-25 | 0.3 | architecture.md レビュー結果を反映: Q-06/07/09 を D-06/07/09 として確定 (D-08 は Q-08 用に欠番予約) / rusqlite 採用を D-10 として確定 / payload_schema_version + Lazy Migration on Read 方針を D-11 として確定 / items と FTS5 の同一トランザクション規約を D-12 として確定 / Zustand を Day 1 採用する方針を D-13 として確定 |
 | 2026-04-26 | 0.4 | data-model.md レビュー結果を反映: Q-08 を D-08 として確定 (M-LinkMemo は単一テーブル+type、`file://` は path 正規化) / D-11 を Lazy Migration → Eager-on-Read に改訂 (search_text 整合性確保) / JST ISO8601 タイムスタンプ規約を D-14 として確定 |
 | 2026-04-29 | 0.5 | ADR-0002 反映: D-09 のシンタックスハイライトを **rehype-highlight** に確定 (旧 Q-16 解決) |
+| 2026-08-22 | 0.6 | ADR-0013 反映: macOS / Windowsの配布形式をportable ZIPに統一し、インストーラを生成しない要件を§3.8へ明記 |

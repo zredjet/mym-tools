@@ -19,9 +19,8 @@ use crate::modules::prompt::PromptModule;
 
 /// アプリで利用するすべての ModuleBackend を順序付きで返す。
 ///
-/// 順序は AppState 構築時にこの配列をそのまま `HashMap<&'static str, Arc<dyn ModuleBackend>>`
-/// に詰め直す前提なので意味を持たないが、UI のサイドバー表示順を制御したい場合に
-/// 利用できる (Phase 1 後の検討)。
+/// AppState 構築時に `HashMap<&'static str, Arc<dyn ModuleBackend>>` へ詰め直すため、
+/// この順序は UI 表示順を表さない。Frontend の表示順は `src/modules/registry.ts` が正典。
 pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
     vec![
         Arc::new(HashModule),
@@ -59,6 +58,9 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         crate::commands::items::core_reorder_items,
         // Core: 横断検索 (FTS5 trigram + LIKE フォールバック、data-model.md §8)
         crate::commands::search::core_search,
+        // Core: settings.json (data-model.md §11)
+        crate::commands::settings::core_get_settings,
+        crate::commands::settings::core_update_settings,
         // Core: Backup (ADR-0007 / data-model.md §13)
         crate::commands::backup::core_backup_should_take_auto,
         crate::commands::backup::core_backup_list,
@@ -72,6 +74,8 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         crate::commands::transfer::core_import_json,
         // Core: About 画面補助 (`ui-design.md §6.10`)
         crate::commands::about::core_module_versions,
+        // Core: frontend/backend registry の起動時照合 (`module-contract.md` §2)
+        crate::commands::about::core_module_ids,
         // M-Hash
         crate::modules::hash::commands::hash_compute_text,
         crate::modules::hash::commands::hash_compute_file,

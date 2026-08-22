@@ -24,7 +24,8 @@ use tauri::State;
 use crate::backup::BackupKind;
 use crate::error::AppError;
 use crate::exchange::{
-    apply_import, build_export_data, parse_export_json, ExportSummary, ImportSummary,
+    apply_import, build_export_data, build_project_export_data, parse_export_json, ExportScope,
+    ExportSummary, ImportSummary,
 };
 use crate::module::ModuleBackend;
 use crate::state::AppState;
@@ -43,13 +44,39 @@ use crate::state::AppState;
 pub fn core_export_json(
     state: State<'_, AppState>,
     path: String,
+    scope: ExportScope,
+    project_id: Option<String>,
 ) -> Result<ExportSummary, AppError> {
     let path_buf = validate_output_path(&path)?;
 
     // module list は AppState の HashMap から取り出して順序を id ソートで安定化
     let modules = collect_modules_sorted(&state);
 
-    let data = build_export_data(&state.storage, &modules, env!("CARGO_PKG_VERSION"))?;
+    let data = match scope {
+        ExportScope::App => {
+            if project_id.is_some() {
+                return Err(AppError::Validation {
+                    module_id: "core.export".into(),
+                    reason: "project_id must be omitted for app scope".into(),
+                });
+            }
+            build_export_data(&state.storage, &modules, env!("CARGO_PKG_VERSION"))?
+        }
+        ExportScope::Project => {
+            let id = project_id
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| AppError::Validation {
+                    module_id: "core.export".into(),
+                    reason: "project_id is required for project scope".into(),
+                })?;
+            build_project_export_data(
+                &state.storage,
+                &modules,
+                env!("CARGO_PKG_VERSION"),
+                &crate::storage::ProjectId::new(id),
+            )?
+        }
+    };
 
     // serde_json で書き出し (pretty 出力で diff しやすく)
     let json = serde_json::to_string_pretty(&data)

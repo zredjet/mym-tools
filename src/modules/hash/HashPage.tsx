@@ -6,8 +6,8 @@
  * - ファイル: Tauri webview の `onDragDropEvent` で path を取得 → `hash_compute_file`
  *   + 進捗 Channel + `core_cancel_operation` (ADR-0009 §2)
  *
- * stateless モジュール (`is_stateless = true`) のため、プロジェクト選択不要で動作する。
- * 永続化はゼロ。
+ * stateless モジュール (`is_stateless = true`) のため永続化はしない。
+ * route は D-01 に従ってプロジェクト配下に置くが、計算結果は project ID に依存しない。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Copy, FileText, Loader2, X } from "lucide-react";

@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-04-25 / ステータス: Draft (Phase 1)
+最終更新: 2026-08-22 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -106,21 +106,21 @@
 
 ### 4.2 IPC 境界 (Tauri Commands / Events)
 
-- フロント→Rust: `invoke("module:action", payload)` 形式の **名前空間化されたコマンド**
+- フロント→Rust: `invoke("module_action", payload)` 形式の **名前空間化されたコマンド**
 - Rust→フロント: `emit` で発火する **イベント** (進捗・通知)
-- すべてのコマンド名は `<module-id>:<action>` で一意化する。コア機能は `core:*`
+- すべてのコマンド名は `<module_id>_<action>` (snake_case) で一意化する。コア機能は `core_*`
 
 例:
 | コマンド | 意味 |
 |---------|------|
-| `core:list_projects` | プロジェクト一覧取得 |
-| `core:search` | プロジェクト内 / 横断検索 |
-| `core:export` | エクスポート (全体 or プロジェクト単位) |
-| `prompt:list` | プロンプト一覧取得 |
-| `prompt:render_template` | 変数差し込み後の完成プロンプト生成 |
-| `linkmemo:open_path` | OS 既定ファイラーでパスを開く |
-| `hash:compute_text` | テキストハッシュ計算 |
-| `hash:compute_file` | ファイルハッシュ計算 (Tokio に逃がす) |
+| `core_list_projects` | プロジェクト一覧取得 |
+| `core_search` | プロジェクト内 / 横断検索 |
+| `core_export_json` | エクスポート (全体 or プロジェクト単位) |
+| `prompt_list` | プロンプト一覧取得 |
+| `prompt_render_template` | 変数差し込み後の完成プロンプト生成 |
+| `linkmemo_open` | OS 既定アプリで URL / path を開く |
+| `hash_compute_text` | テキストハッシュ計算 |
+| `hash_compute_file` | ファイルハッシュ計算 (Tokio に逃がす) |
 
 **コマンドの粒度ルール**: 1コマンド = 1ユースケース (1画面の1操作)。
 小さな CRUD を細切れに作らない (フロント・バック往復が増えると軽量性が損なわれる)。
@@ -147,7 +147,7 @@
 各モジュールは Rust 内で独立した crate (またはモジュール) として実装される。
 
 **モジュールが提供するもの**
-- 自身の Tauri コマンド (`<id>:*`)
+- 自身の Tauri コマンド (`<id>_*`)
 - コアの `StorageService` を使った永続化 (直接 SQLite を触らない)
 - 検索対応のための「インデックス対象テキスト」生成関数 (詳細は `module-contract.md`)
 - エクスポート時の payload シリアライズ / インポート時の検証
@@ -197,6 +197,8 @@ export const modules: ModuleDefinition[] = [
 5. **コアサービス・既存モジュールのコードは編集しない**
 
 モジュール追加で編集されるコア側ファイルは **`registry.rs` / `registry.ts` の 2 つに限定**される。registry 内の編集行数は問わない (固有コマンド数で変動)。コアサービスや既存モジュールに新モジュール固有の分岐が入るなら設計のアラートとして扱う (詳細は ADR-0004)。
+
+フロントエンドでは `registry.ts` を Shell / router / search / settings / 起動復元の唯一の列挙元とする。ユーザーが無効化したモジュールはこれらの通常 UI 経路から除外するが、静的登録済み backend と既存データは維持する (ADR-0012)。全モジュールの route は stateless を含め `/projects/:projectId/m/:moduleId/*` 配下に置く (D-01)。
 
 ### 5.2 モジュールの形 (フロントエンド側)
 
@@ -324,7 +326,9 @@ D-01 により Hash もプロジェクト配下に置かれる。Phase 1 では 
 
 - アプリ全体設定は **JSON ファイル** (`settings.json`) として保存
   - 理由: SQLite に置く必然性が低く、ユーザーが手動編集できる利点を取る
-- モジュール固有設定は将来必要になったら同 JSON 内に namespace で持つ
+- Rust の SettingsService が起動時読込みと原子的なファイル置換を担い、フロントは Zustand に同期する
+- Zustand `persist` / `localStorage` は使わず、変更は 500 ms debounce で `settings.json` へ保存する
+- モジュール有効状態は `core.module_enabled`、モジュール固有設定は `modules.<id>` namespace に置く (data-model.md §11 / ADR-0012)
 
 ### 7.4 エクスポート / インポート (C-06 / D-05)
 
@@ -398,8 +402,10 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 ## 9. 更新機構 (D-04)
 
 - インストーラを必須としない
-  - macOS: `.app` バンドルを Applications に置くだけ / 上書きすれば更新完了
-  - Windows: ZIP 配布の portable を主、必要に応じて MSI を従とする
+  - macOS: Apple Silicon向け`.app`をportable ZIPに格納し、Applicationsへの移動 / 上書きで更新完了
+  - Windows: x64 `.exe`をportable ZIPに格納し、任意フォルダへの展開 / 上書きで更新完了
+- GitHub Releaseは`workflow_dispatch`からversionを入力して手動実行し、tag commitの3設定と一致する場合だけ作成する (ADR-0013)
+- macOS / Windowsの両portable ZIPが揃ってからdraft Releaseを作成し、アップロード成功後に公開する
 - アプリ起動時に DB の `schema_version` を読み、想定外なら**起動を停止しエラー画面**を出す (黙って壊さない)
 - 「新しいバージョンの取得」は OS のブラウザでリリースページを開くだけ。アプリ内ダウンローダは持たない
 
@@ -426,7 +432,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | ファイルハッシュ (大ファイル) | Rust の `tauri::async_runtime::spawn_blocking` で非同期実行、進捗は **Tauri Channel** で通知、キャンセルは `tokio_util::sync::CancellationToken` + `core_cancel_operation`。詳細は ADR-0009 |
 | 全文検索 | SQLite FTS5 (インメモリインデックス不要) |
 | Markdown レンダリング | フロント側で同期実行。長文時の体感劣化が出たら Web Worker 化を検討 |
-| エクスポート | 件数が多いとフリーズし得るので Rust 側で生成し進捗 Event |
+| エクスポート | Rust 側で生成し、UI は処理中の二重送信を防ぐ。実測で必要になった時点で件数進捗 Event / Channel を追加 |
 
 ---
 
@@ -462,9 +468,10 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 
 **確定済**:
 - **CI パイプライン (検証)**: ADR-0010 で確定 — GitHub Actions / lint-rust / test-rust / lint-frontend / test-frontend / build-tauri matrix (macOS + Windows) / branch protection / `clippy.toml` `disallowed-methods` 連携
+- **Phase 1 CD パイプライン (無署名portable ZIP)**: ADR-0013で確定 — 手動version入力 / tag commit固定 / macOS + Windows全成功後のRelease作成 / 既存Release上書き禁止
 
 **まだ未確定**:
-- **CD パイプライン (リリース)**: 公開配布判断時に着手予定 (ADR-0008 §2.5 / §7.8)。署名・Notarization・signtool / Azure Trusted Signing 統合・SHA-256 リリース添付・secrets 管理が対象
+- **公開配布向けCD拡張**: 署名・Notarization・signtool / Azure Trusted Signing統合・SHA-256 / provenance添付・secrets管理
 
 ---
 
@@ -491,3 +498,4 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-04-25 | 0.2 | レビュー反映: §2.2 を「やらない」と「最初から入れる」に分離し Zustand を Day 1 採用 / Tokio が同梱前提であることを明示 / §6.1 に payload_schema_version カラム追加 / §6.2 で Lazy Migration on Read を規定 / §6.3 で FTS5 と items の同一トランザクション規約をトリガで実装と規定 / §6.6 で性能スケーリングの見通しと items 例外の逃げ道を明記 / §13 に Zustand 追加 / Q-06/07/09 (要件側で D 確定) と Q-10 (rusqlite 確定) を本書から削除 / Q-16 を新規起票 |
 | 2026-04-30 | 0.3 | ADR-0009 受理反映: §11 のファイルハッシュ行を Tauri Channel + `CancellationToken` + `spawn_blocking` 規約に更新 / §14 から Q-15 を削除 (ADR-0009 で決着) |
 | 2026-04-30 | 0.4 | ADR-0010 受理反映: §13 の「ビルド/配布パイプライン (CI、コード署名手順)」未確定項目を「CI 確定 (ADR-0010) / CD は将来 ADR」の形に分離。CI 範囲はジョブ構成・matrix・branch protection・lint 連携を ADR-0010 で固定済 |
+| 2026-08-22 | 0.5 | ADR-0013受理反映: §9をmacOS / Windows portable ZIPへ統一し、手動version入力から全OS成功後にReleaseを公開するPhase 1 CDを§13の確定事項へ追加 |

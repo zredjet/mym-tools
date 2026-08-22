@@ -17,7 +17,7 @@
 | [docs/data-model.md](docs/data-model.md) | SQLite スキーマ、payload バージョニング、エクスポート JSON |
 | [docs/module-contract.md](docs/module-contract.md) | モジュール / コア境界の API 契約 |
 | [docs/ui-design.md](docs/ui-design.md) | UI トークン、画面スケルトン、キーボードショートカット |
-| [docs/decisions/](docs/decisions/) | ADR-0001〜0010 (Tauri / FE スタック / rusqlite / モジュール統合 / JST タイムスタンプ / payload バージョニング / バックアップ / 配布 / キャンセル機構 / CI) |
+| [docs/decisions/](docs/decisions/) | ADR-0001〜0013 (Tauri / FE スタック / rusqlite / モジュール統合 / JST タイムスタンプ / payload バージョニング / バックアップ / 配布 / キャンセル機構 / CI / additive migration / モジュール有効状態 / portable ZIPリリース) |
 | [CLAUDE.md](CLAUDE.md) | 作業時の不変条件と参照優先順位 |
 
 ## 開発
@@ -25,7 +25,7 @@
 ### 必要環境
 
 - Node.js **22 系** LTS (`.nvmrc` 参照)
-- Rust **1.83+** stable (`rust-toolchain.toml` 参照)
+- Rust **1.85+** stable (`rust-toolchain.toml` / `src-tauri/Cargo.toml` 参照)
 - macOS は Xcode CLT、Windows は MSVC build tools
 
 ### セットアップ
@@ -55,13 +55,26 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --lib --all-features --locked
 ```
 
+## 手動リリース
+
+リリースはGitHub Actionsの`Release (ref: ADR-0013)`を`main`から手動実行する。
+
+1. `package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json`のversionを同じSemVerへ更新
+2. 変更を`main`へ反映し、`v<version>`タグをpush
+3. Actions画面でversionを入力してworkflowを実行 (`v`は省略可)
+
+入力・タグ・3設定のversionが一致し、macOS / Windowsの両ビルドが成功した場合だけ、
+`MyMyTools_<version>_macos_aarch64.zip`と`MyMyTools_<version>_windows_x64.zip`を公開する。
+既存のGitHub Releaseは上書きしない。
+
 ## 開発状況
 
-**Phase 1 着手前のリポジトリ整備完了**。
+**Phase 1 の主要機能を実装済み (`0.1.0-alpha.4`)**。
 
-設計ドキュメントと ADR-0001〜0010 はすべて Accepted。雛形は `cargo create-tauri-app`
-ベースの React 19 + TypeScript + Tailwind v4 + shadcn/ui (init は Phase 1 着手時) +
-Zustand。Rust 側は rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing。
+Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
+rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing の Rust バックエンドで構成。
+プロジェクト管理、4 モジュール、横断検索、`settings.json`、バックアップ、
+アプリ全体／プロジェクト単位の JSON export / import を備える。
 
 CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2)
 と main ブランチ保護を ADR-0010 §2.8 に従って GitHub 側で運用中。
@@ -70,4 +83,4 @@ PR 経由マージのみ受付け、6 ジョブ全 green が必須。
 ## 関連
 
 - [Tauri 2 公式](https://v2.tauri.app/)
-- リリース告知: GitHub Releases (公開配布判断後に運用開始)
+- リリース告知・配布: GitHub Releases (portable ZIP / 手動更新)

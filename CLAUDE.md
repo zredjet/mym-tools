@@ -4,9 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## リポジトリの状態
 
-**現時点ではドキュメントだけのリポジトリ**。実装コード・`package.json` / `Cargo.toml` ・ビルド / テスト / lint コマンドはまだ存在しない。「ビルドして」「テストして」と言われたら、コマンドを捏造せず**まだ実装されていない旨を伝えること**。
-
-Phase 1 の実装は **Tauri 2 のデスクトップアプリ** になる予定 (WebView 側: React 18 + TypeScript + Tailwind v4 + shadcn/ui / ネイティブ側: Rust + rusqlite)。詳細は `docs/`。
+**Phase 1 の主要機能を実装済みの Tauri 2 デスクトップアプリ**。WebView 側は React 19 + TypeScript + Tailwind v4 + Zustand、ネイティブ側は Rust + rusqlite。実行可能なコマンドは `README.md` と `package.json` / `src-tauri/Cargo.toml` を確認すること。
 
 ## 何を読むか (優先順)
 
@@ -37,6 +35,8 @@ Phase 1 の実装は **Tauri 2 のデスクトップアプリ** になる予定 
 | 0009 | キャンセル機構: `OperationRegistry` + `tokio_util::sync::CancellationToken` + `core_cancel_operation` IPC。重い処理は `tauri::async_runtime::spawn_blocking` 経由、1 MB チャンク境界で `is_cancelled()` 確認 |
 | 0010 | CI パイプライン: GitHub Actions matrix (macOS + Windows) で build / test / lint / typecheck / fmt。`clippy.toml` の `disallowed-methods` で `spawn_blocking` の直接呼び出しを禁止。SHA pin で依存固定 |
 | 0011 | コアスキーマの **additive** な DDL マイグレーション (新カラム+DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) は枠組み内で許可。`db_schema_version` を bump し pre-migration バックアップを自動取得 |
+| 0012 | モジュール有効状態を `settings.json` に保存し、sidebar / routing / search / 起動復元を frontend registry から導出。全モジュールをプロジェクト配下に置き、無効化しても export/import でデータを保持 |
+| 0013 | リリースは `workflow_dispatch` の手動実行のみ。入力バージョンとtag commitの3設定を照合し、macOS / Windowsのportable ZIPを全ビルド成功後に公開。既存Releaseは上書きしない |
 
 ## 絶対に破ってはいけない不変条件
 
@@ -48,6 +48,8 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - **フロントエンドから SQLite に直接アクセスしない**。`@tauri-apps/plugin-sql` も使わず、`tauri::command` のみを通す (module-contract §6.2)。フロントは `invoke(...)` で型付き結果を受ける
 - **タイムスタンプは必ずアプリ側で生成**。`CURRENT_TIMESTAMP` 等の DB 生成は禁止。JST `+09:00`、ms 3 桁、固定 29 文字 (ADR-0005)。文字列のまま辞書順ソート可
 - **Zustand 単一ストアを Day 1 から使う**。アプリ全体状態 (現在プロジェクト / 現在モジュール / テーマ / 設定) はここに集約。モジュール内のローカル状態は `useState` でよい。Context には逃さない (architecture.md §2.3)
+- **設定の永続化は `settings.json` だけを使う**。Zustand `persist` / `localStorage` を使わず、Rust の SettingsService 経由で未知キーを保持しながら原子的に保存する (ADR-0002 §4.4.3 / ADR-0012)
+- **フロントエンドのモジュール列挙は `src/modules/registry.ts` を唯一の正典にする**。Shell / router / search / settings / 起動復元へモジュール ID の分岐を重ねない。無効化の詳細は ADR-0012 に従う
 - **自動更新なし、起動時の version-check 通信もしない** (ADR-0008)。「最新版を確認」は OS ブラウザで GitHub Releases を開くだけ (`plugin-shell`)
 - **`data_revision` の意味**: アイテム内容を変える書込みでのみ増やす。Eager-on-Read による再構築や FTS 再構築では**増やさない** (ADR-0007 §2.2)
 - **検索スコープの内部値は `"project" | "global"`** (data-model §11.1)。UI 表示文言は「Current project / All projects」だが内部値は別物
@@ -79,4 +81,4 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
   - 各 Migration エントリ末尾に `UPDATE meta SET value=? WHERE key='db_schema_version'` を含めているか (§2.3)
   - `data-model.md §14.4` のマイグレーション一覧表を更新したか
   - pre-migration バックアップ取得 (`pre-migration-v<N>` プレフィックス) が `schema::take_pre_migration_backup` で起動時に走ることを実装テストで確認したか
-- git user は `zredjet`、PR の base は `main` (現在の作業ブランチは `master` なので push 前に確認すること)
+- git user は `zredjet`、PR の base は `main`。作業開始時と push 前に現在ブランチを確認すること

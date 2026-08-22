@@ -9,4 +9,5 @@ pub mod cancel;
 pub mod items;
 pub mod projects;
 pub mod search;
+pub mod settings;
 pub mod transfer;

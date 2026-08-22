@@ -2240,7 +2240,7 @@ dependencies = [
 
 [[package]]
 name = "mym-tools"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "chrono",
  "digest",
@@ -2262,6 +2262,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

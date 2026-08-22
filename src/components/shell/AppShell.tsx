@@ -17,6 +17,7 @@ import { TopBar } from "@/components/shell/TopBar";
 import { listProjects } from "@/ipc/projects";
 import { formatInvokeError } from "@/lib/error";
 import type { ModuleId, Project } from "@/lib/types";
+import { enabledModules, getModuleDefinition, modulePath } from "@/modules/registry";
 import { useAppStore } from "@/store/useAppStore";
 
 export interface AppShellOutletContext {
@@ -89,9 +90,10 @@ export function AppShell() {
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
   const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
   const lastOpenedProjectId = useAppStore((s) => s.lastOpenedProjectId);
+  const moduleEnabled = useAppStore((s) => s.moduleEnabled);
+  const visibleModules = enabledModules(moduleEnabled);
 
-  // 案3 (Sidebar と同じ思想): URL の :projectId が無い (= /modules/hash 等) でも
-  // `lastOpenedProjectId` を使って TopBar / Cmd+1〜4 ナビの基準にする
+  // Settings / About では lastOpenedProjectId を TopBar / ショートカットの基準にする。
   const currentProject = useMemo(() => {
     const explicit = projects.find((p) => p.id === projectId);
     if (explicit != null) return explicit;
@@ -101,35 +103,32 @@ export function AppShell() {
     return null;
   }, [projects, projectId, lastOpenedProjectId]);
 
-  // Cmd/Ctrl+1〜4 でサイドバーのモジュール切替 (`docs/ui-design.md` §8.1)
-  // 1=Prompts, 2=Links, 3=Colors, 4=Hash。プロジェクト未選択時は Hash のみ可
+  // Cmd/Ctrl+1〜4 で現在有効なモジュールを registry 順に切替 (`docs/ui-design.md` §8.1)
   const goToModule = useCallback(
     (mod: ModuleId) => {
-      setLastModule(mod);
-      if (mod === "hash") {
-        navigate("/modules/hash");
-        return;
-      }
       if (currentProject == null) return;
-      navigate(`/projects/${currentProject.id}/m/${mod}`);
+      const definition = getModuleDefinition(mod);
+      if (definition == null || !visibleModules.some((module) => module.id === mod)) return;
+      setLastModule(mod);
+      navigate(modulePath(currentProject.id, mod, definition.defaultRoute));
     },
-    [navigate, currentProject, setLastModule],
+    [navigate, currentProject, setLastModule, visibleModules],
   );
   useHotkeys("mod+1", (e) => {
     e.preventDefault();
-    goToModule("prompt");
+    if (visibleModules[0] != null) goToModule(visibleModules[0].id);
   });
   useHotkeys("mod+2", (e) => {
     e.preventDefault();
-    goToModule("linkmemo");
+    if (visibleModules[1] != null) goToModule(visibleModules[1].id);
   });
   useHotkeys("mod+3", (e) => {
     e.preventDefault();
-    goToModule("color");
+    if (visibleModules[2] != null) goToModule(visibleModules[2].id);
   });
   useHotkeys("mod+4", (e) => {
     e.preventDefault();
-    goToModule("hash");
+    if (visibleModules[3] != null) goToModule(visibleModules[3].id);
   });
 
   // Cmd/Ctrl+, で設定ページ (`docs/ui-design.md` §8.1)
@@ -145,12 +144,15 @@ export function AppShell() {
   const handleProjectCreated = useCallback(
     (project: Project) => {
       void refresh();
-      // 作成したばかりのプロジェクトに自動遷移 (デフォルトモジュール = Prompts)
-      const defaultModule: ModuleId = "prompt";
+      const defaultModule = visibleModules[0];
       setLastProject(project.id);
-      navigate(`/projects/${project.id}/m/${defaultModule}`);
+      if (defaultModule == null) navigate("/settings");
+      else {
+        setLastModule(defaultModule.id);
+        navigate(modulePath(project.id, defaultModule.id, defaultModule.defaultRoute));
+      }
     },
-    [refresh, navigate, setLastProject],
+    [refresh, navigate, setLastProject, setLastModule, visibleModules],
   );
 
   return (

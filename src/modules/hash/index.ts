@@ -1,12 +1,12 @@
 /**
  * M-Hash モジュール定義 (`docs/module-contract.md` §4 / §12.4)。
  *
- * Q-22 PoC: ModuleDefinition の最小実装。`isStateless: true` のため
- * `searchAdapter` は省略 (検索結果に出ない)。
+ * `isStateless: true` のため `searchAdapter` は省略し、横断検索の対象外とする。
  */
 import { Hash } from "lucide-react";
 
 import type { ModuleDefinition } from "@/modules/types";
+import { HashPage } from "@/modules/hash/HashPage";
 
 export const hashModule: ModuleDefinition = {
   id: "hash",
@@ -14,7 +14,7 @@ export const hashModule: ModuleDefinition = {
   icon: Hash,
   enabledByDefault: true,
   isStateless: true,
-  routes: [], // Phase 1 の Shell 実装時に追加
+  routes: [{ path: "/", component: HashPage }],
   defaultRoute: "/",
   // searchAdapter: 省略 (isStateless = true のため、検索対象外)
 };

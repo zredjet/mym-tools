@@ -2,7 +2,7 @@
  * Export / Import JSON の型付き Tauri ラッパー
  * (`src-tauri/src/commands/transfer.rs` / `docs/data-model.md` §12)。
  *
- * - **Export**: 全 stateful モジュール × 全プロジェクトを `path` に書き出す
+ * - **Export**: アプリ全体または指定プロジェクトを `path` に書き出す
  * - **Import**: `path` の JSON を読み取り、現在 DB に取り込む (部分成功方式)
  *
  * 真のエラー (ファイル読めない / schema_version 未対応) は Promise reject、
@@ -10,7 +10,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-/** `.mymtools.json` の `scope` フィールド (`data-model.md` §12.1)。Phase 1 では `app` のみ */
+/** `.mymtools.json` の `scope` フィールド (`data-model.md` §12.1)。 */
 export type ExportScope = "app" | "project";
 
 /** インポート 1 件あたりの失敗内訳 (`exchange/mod.rs::ImportFailure`) */
@@ -51,8 +51,16 @@ export interface ExportSummary {
   bytes_written: number;
 }
 
-export function exportJson(path: string): Promise<ExportSummary> {
-  return invoke<ExportSummary>("core_export_json", { path });
+export function exportJson(input: {
+  path: string;
+  scope: ExportScope;
+  projectId?: string | null;
+}): Promise<ExportSummary> {
+  return invoke<ExportSummary>("core_export_json", {
+    path: input.path,
+    scope: input.scope,
+    projectId: input.scope === "project" ? (input.projectId ?? null) : null,
+  });
 }
 
 export function importJson(path: string): Promise<ImportSummary> {

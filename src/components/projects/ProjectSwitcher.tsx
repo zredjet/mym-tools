@@ -26,6 +26,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/lib/cn";
 import type { ModuleId, Project } from "@/lib/types";
+import { enabledModules, getModuleDefinition, modulePath } from "@/modules/registry";
 import { useAppStore } from "@/store/useAppStore";
 
 /**
@@ -43,8 +44,7 @@ function deriveModuleFromPath(pathname: string): ModuleId | null {
   const match = pathname.match(/^\/projects\/[^/]+\/m\/([^/]+)/);
   if (match == null) return null;
   const mod = match[1];
-  if (mod === "prompt" || mod === "linkmemo" || mod === "color") return mod;
-  return null;
+  return mod != null && getModuleDefinition(mod) != null ? mod : null;
 }
 
 interface Props {
@@ -68,6 +68,7 @@ function Content({ projects, onClose }: { projects: Project[]; onClose: () => vo
   const lastOpenedModuleId = useAppStore((s) => s.lastOpenedModuleId);
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
   const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
+  const moduleEnabled = useAppStore((s) => s.moduleEnabled);
 
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -88,13 +89,18 @@ function Content({ projects, onClose }: { projects: Project[]; onClose: () => vo
     // 優先順:
     // 1. 現在の URL から派生した module (`/projects/.../m/<mod>` 系であれば確実に取れる)
     // 2. `lastOpenedModuleId` (welcome / settings 等から開いた場合の復元)
-    // 3. "prompt" (デフォルト)
-    // hash は project スコープではないので、フォールバックチェーン上で出てきたら prompt に置換
-    const m: ModuleId = currentModule ?? lastOpenedModuleId ?? "prompt";
-    const targetModule: ModuleId = m === "hash" ? "prompt" : m;
+    // 3. registry の先頭有効モジュール
+    const available = enabledModules(moduleEnabled);
+    const preferred: ModuleId | null = currentModule ?? lastOpenedModuleId;
+    const targetModule = available.find((module) => module.id === preferred) ?? available[0];
+    if (targetModule == null) {
+      navigate("/settings");
+      onClose();
+      return;
+    }
     setLastProject(project.id);
-    setLastModule(targetModule);
-    navigate(`/projects/${project.id}/m/${targetModule}`);
+    setLastModule(targetModule.id);
+    navigate(modulePath(project.id, targetModule.id, targetModule.defaultRoute));
     onClose();
   };
 

@@ -1,9 +1,8 @@
 /**
  * ⌘K 検索オーバーレイ (`docs/ui-design.md` §6.7 / §8.3)。
  *
- * Phase 1 PR-K (本 PR): バックエンド `core_search` 接続済。Scope (project/global) +
- * Module フィルタチップ + 検索結果クリックでアイテムページへ遷移 (現状: Prompt のみ
- * 一覧画面が実装済、他モジュールは PR-L 以降で接続)。
+ * バックエンド `core_search` に接続し、Scope (project/global) と有効な stateful module の
+ * フィルタを提供する。結果表示と遷移先は registry の SearchAdapter から導出する。
  *
  * ## 状態リセットパターン
  *
@@ -11,7 +10,7 @@
  * react-hooks/set-state-in-effect で警告される。代わりに Content コンポーネントを
  * `open` で出し入れすることで自然な mount/unmount で初期化される。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -20,6 +19,8 @@ import { search as runSearch } from "@/ipc/search";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import type { Item, ModuleId, SearchScope } from "@/lib/types";
+import { enabledModules, getModuleDefinition, modulePath } from "@/modules/registry";
+import { useAppStore } from "@/store/useAppStore";
 
 interface Props {
   open: boolean;
@@ -30,15 +31,6 @@ interface Props {
 }
 
 type Scope = "project" | "global";
-
-const MODULE_FILTERS: readonly { id: ModuleId | "all"; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "prompt", label: "Prompts" },
-  { id: "linkmemo", label: "Links" },
-  { id: "color", label: "Colors" },
-];
-
-const STATEFUL_MODULES: readonly ModuleId[] = ["prompt", "linkmemo", "color"];
 
 const SEARCH_DEBOUNCE_MS = 200;
 
@@ -66,8 +58,16 @@ function SearchOverlayContent({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
+  const moduleEnabled = useAppStore((state) => state.moduleEnabled);
+  const searchDefaultScope = useAppStore((state) => state.searchDefaultScope);
+  const searchableModules = useMemo(
+    () => enabledModules(moduleEnabled).filter((module) => !module.isStateless),
+    [moduleEnabled],
+  );
   const [query, setQuery] = useState("");
-  const [scope, setScope] = useState<Scope>(currentProjectId != null ? "project" : "global");
+  const [scope, setScope] = useState<Scope>(
+    searchDefaultScope === "project" && currentProjectId == null ? "global" : searchDefaultScope,
+  );
   const [moduleFilter, setModuleFilter] = useState<ModuleId | "all">("all");
   const [results, setResults] = useState<Item[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +78,7 @@ function SearchOverlayContent({
   // 検索実行中の cancellation は cleanup 関数で `cancelled` フラグを立てて行う
   // (eslint react-hooks/set-state-in-effect の「外部システム同期」例外パターン)。
   useEffect(() => {
-    if (query.trim() === "") return;
+    if (query.trim() === "" || searchableModules.length === 0) return;
     let cancelled = false;
     const timeoutId = setTimeout(() => {
       const searchScope: SearchScope =
@@ -88,16 +88,15 @@ function SearchOverlayContent({
       void (async () => {
         if (!cancelled) setLoading(true);
         try {
-          const found = await runSearch(
-            moduleFilter === "all"
-              ? { scope: searchScope, query, limit: 50 }
-              : {
-                  scope: searchScope,
-                  query,
-                  moduleFilter: [moduleFilter],
-                  limit: 50,
-                },
-          );
+          const found = await runSearch({
+            scope: searchScope,
+            query,
+            moduleFilter:
+              moduleFilter === "all"
+                ? searchableModules.map((module) => module.id)
+                : [moduleFilter],
+            limit: 50,
+          });
           if (!cancelled) {
             setResults(found);
             setError(null);
@@ -113,14 +112,14 @@ function SearchOverlayContent({
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [query, scope, moduleFilter, currentProjectId]);
+  }, [query, scope, moduleFilter, currentProjectId, searchableModules]);
 
   const handleResultClick = (item: Item) => {
     onClose();
-    // Phase 1 では Prompt のみ一覧画面まで実装。他モジュールの詳細遷移は PR-L 以降
-    if (STATEFUL_MODULES.includes(item.module_id as ModuleId)) {
-      navigate(`/projects/${item.project_id}/m/${item.module_id}`);
-    }
+    const definition = getModuleDefinition(item.module_id);
+    if (definition?.searchAdapter == null) return;
+    const view = definition.searchAdapter.formatResult(item);
+    navigate(modulePath(item.project_id, definition.id, view.targetPath));
   };
 
   return (
@@ -158,10 +157,10 @@ function SearchOverlayContent({
         </div>
         <div className="flex items-center gap-1 text-[12px] text-[var(--fg-muted)]">
           <span className="text-[var(--fg-subtle)]">Module:</span>
-          {MODULE_FILTERS.map((m) => (
+          {[{ id: "all", displayName: "すべて" }, ...searchableModules].map((m) => (
             <ScopeChip
               key={m.id}
-              label={m.label}
+              label={m.displayName}
               selected={moduleFilter === m.id}
               onClick={() => setModuleFilter(m.id)}
             />
@@ -186,22 +185,36 @@ function SearchOverlayContent({
           </p>
         ) : (
           <ul className="-mx-2 flex flex-col">
-            {results.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => handleResultClick(item)}
-                  className="flex w-full items-center gap-3 rounded-[var(--radius)] px-2 py-1.5 text-left hover:bg-[var(--bg-muted)]"
-                >
-                  <span className="rounded-full bg-[var(--bg-muted)] px-2 py-0.5 font-mono text-[11px] text-[var(--fg-subtle)] uppercase">
-                    {item.module_id}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--fg)]">
-                    {item.title}
-                  </span>
-                </button>
-              </li>
-            ))}
+            {results.map((item) => {
+              const definition = getModuleDefinition(item.module_id);
+              const view = definition?.searchAdapter?.formatResult(item) ?? {
+                title: item.title,
+                targetPath: "/",
+              };
+              return (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => handleResultClick(item)}
+                    className="flex w-full items-center gap-3 rounded-[var(--radius)] px-2 py-1.5 text-left hover:bg-[var(--bg-muted)]"
+                  >
+                    <span className="rounded-full bg-[var(--bg-muted)] px-2 py-0.5 font-mono text-[11px] text-[var(--fg-subtle)] uppercase">
+                      {definition?.displayName ?? item.module_id}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] text-[var(--fg)]">
+                        {view.title}
+                      </span>
+                      {view.subtitle != null && (
+                        <span className="block truncate text-[11px] text-[var(--fg-subtle)]">
+                          {view.subtitle}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

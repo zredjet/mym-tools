@@ -162,10 +162,10 @@ fn initialize_schema(conn: &mut Connection) -> Result<(), AppError> {
 /// 一致しない場合は **両方向 (より新しい / より古い) で** `UnsupportedDbSchemaVersion` を
 /// 返す (`data-model.md` §4 / `architecture.md` §9: 起動を停止しエラー画面):
 /// - **より新しい**: 新版アプリで作った DB を旧版アプリで開いたケース
-/// - **より古い**: 旧版 DB のまま新版アプリを起動したが migration path が未実装のケース
+/// - **より古い**: 通常の起動 bootstrap を通らず、migration 前の DB を直接開いたケース
 ///
-/// Phase 1 では migration path 自体が未実装なので、いずれの場合も fail-fast する。
-/// 将来 ADR でマイグレーション機構を追加する際、より古い側の処理経路に分岐を入れる。
+/// 通常起動では `storage::bootstrap::migrate_if_needed` が旧 DB を先に現行版へ上げるため、
+/// 本関数は storage 構築時の最終ガードとして完全一致だけを受け入れる。
 fn verify_schema_version(conn: &Connection) -> Result<(), AppError> {
     let db_version: i64 = conn
         .query_row(
@@ -1584,8 +1584,7 @@ mod tests {
 
     #[test]
     fn unsupported_older_db_schema_version_is_detected() {
-        // codex review (PR #26 P2 #2) 反映: db_version < CURRENT も明示的にエラー化
-        // (Phase 1 では migration path 未実装 / 将来 ADR で対応)
+        // bootstrap を経由せず旧 DB を直接 from_connection した場合も明示的にエラー化する。
         let conn = Connection::open(":memory:").unwrap();
         conn.execute_batch(
             "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); \

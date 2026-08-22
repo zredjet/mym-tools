@@ -1,6 +1,6 @@
 # データモデル (Data Model)
 
-最終更新: 2026-04-25 / ステータス: Draft (Phase 1)
+最終更新: 2026-08-22 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**データをどう持つか**」を定義する。
 要件 (`requirements.md`) と構造 (`architecture.md`) で確定した方針を、
@@ -368,7 +368,7 @@ Eager-on-Read により、**読まれた行は必ず最新の search_text を持
 ただし**読まれていない古い行は古い search_text のまま残る** ため、その行は最新の検索条件に部分的にしかヒットしない可能性がある。
 
 **緩和策 — 管理コマンド「検索インデックス再構築」**:
-- ユーザーが設定画面から起動できる Rust 側コマンド `core:rebuild_search_index(module_id?)` を提供
+- ユーザーが設定画面から起動できる Rust 側コマンド `core_rebuild_search_index(module_id?)` を提供 (C-16 の実装時に追加)
 - 指定モジュール (省略時は全モジュール) の全行を読み出して Eager-on-Read を強制発火 → 全行最新化
 - ペイロードバージョンを上げたモジュールアップデート直後にユーザーに案内する選択肢として持つ
 - バックグラウンドで黙って走らせない (data_revision を一気に増やしバックアップ判定を狂わせるため、ユーザー判断にする)
@@ -668,7 +668,16 @@ project 削除実行時、StorageService は**削除トランザクションの�
     "search": {
       "default_scope": "project" | "global"
     },
-    "log_level": "info" | "debug" | "warn" | "error"
+    "log_level": "info" | "debug" | "warn" | "error",
+    "sidebar_width": 240,
+    "ui_scale": 1.0,
+    "row_density": "compact" | "comfortable",
+    "module_enabled": {
+      "prompt": true,
+      "linkmemo": true,
+      "color": true,
+      "hash": true
+    }
   },
   "modules": {
     "prompt": {
@@ -692,6 +701,10 @@ project 削除実行時、StorageService は**削除トランザクションの�
 - `core.*`: コアの設定。コアが意味を理解する
 - `modules.<id>.*`: 各モジュールの設定。**コアは中身を解釈しない**
 - モジュール ID をキーにすることで、モジュール削除時の設定残骸も `modules` ブロックを覗けば分かる
+- `core.sidebar_width`: 180〜320 の整数。範囲外は読み込み時に clamp する
+- `core.ui_scale`: 0.75〜1.5。範囲外は読み込み時に clamp する
+- `core.row_density`: `compact` (32 px) / `comfortable` (36 px)
+- `core.module_enabled.<id>`: UI 上の有効状態。キーが無ければ registry の `enabledByDefault` を使う (ADR-0012)
 
 #### 例外: `modules.<id>.last_seen_payload_version` (コアが解釈する規約フィールド)
 
@@ -702,13 +715,15 @@ project 削除実行時、StorageService は**削除トランザクションの�
 - 不一致 (上昇) を検出したら、再構築を推奨する通知を出す
 - ユーザーが実行 / 却下したら値を `current_payload_version()` に更新して通知を消す
 
-「`modules.<id>` の中身はコアが解釈しない」原則の例外として明示する。Phase 1 ではこのキーのみが例外。
+「`modules.<id>` の中身はコアが解釈しない」原則の例外として明示する。`core.module_enabled` は modules namespace の外にあり、この例外には該当しない。
 
 ### 11.3 永続化方針
 
 - 起動時に1回読み、メモリ上で保持 (Zustand の core ストアに同期)
 - 変更時は **debounce 500ms 付きでファイルに書き戻し**(キーストロークごとに書かない)
 - 書き込みは `<settings>.tmp` → `rename` の atomic 置換で行う(電源断時の破損対策)
+- Zustand `persist` / `localStorage` は使わず、永続化経路を本ファイルだけに限定する
+- JSON 構文不正や未対応の未来 `schema_version` は既定値で上書きせず、読込みエラーとして起動を停止して再試行を提示する
 
 ### 11.4 マイグレーション
 
@@ -722,12 +737,13 @@ project 削除実行時、StorageService は**削除トランザクションの�
 
 - 起動時の設定読み込み後、StorageService に対して各参照先の存在確認を行う
   - `default_project_id` / `last_opened_project_id` → projects テーブルに該当 ID があるか
-  - `last_opened_module_id` → モジュールレジストリに登録されているか (有効な ID か)
-- **参照先が無効なキーは `null` に置き換えてメモリ上保持** (ユーザーの設定変更操作と同様に debounce 経由でファイルに書き戻される)
+  - `last_opened_module_id` → モジュールレジストリに登録され、かつ `core.module_enabled` の解決結果が有効か
+- **参照先が無効な場合は安全な fallback へ正規化してメモリ上保持**する。`default_project_id` は `null`、最後に開いた project / module は実際に選ばれた fallback ID とし、debounce 経由でファイルに書き戻す
 - アプリは起動時の振る舞いを fallback で決める:
-  - `last_opened_project_id` が無効 → 最初のプロジェクト (`projects.position` 順) を開く / プロジェクト 0 件なら新規作成画面を出す
+  - `last_opened_project_id` が無効 → 有効な `default_project_id`、それも無ければ最初のプロジェクト (`projects.position` 順) を開く / プロジェクト 0 件なら新規作成画面を出す
   - `default_project_id` が無効 → 「既定プロジェクトなし」状態として扱う
-- 無効化されたことをユーザーに通知する (例: トースト「以前開いていたプロジェクトが見つからなかったので最初のプロジェクトを開きました」)
+  - `last_opened_module_id` が未登録または無効 → registry 順の最初の有効モジュールを開く / 全モジュール無効なら設定画面を開く
+- fallback 後の実際の project / module ID を Zustand に反映し、通常の debounce 保存で設定を収束させる
 
 ---
 
@@ -776,11 +792,14 @@ project 削除実行時、StorageService は**削除トランザクションの�
 
 ### 12.2 設計上のポイント
 
+- `scope = "app"` は全プロジェクト、`scope = "project"` は `projects` 配列が指定プロジェクト 1 件だけでなければならない。project scope の JSON が 0 件または複数件ならファイル全体を拒否する
 - `search_text` は**書き出さない** (再生成可能なため。インポート時にモジュールの `index_text()` で再構築)
 - `module_versions` は「エクスポート時点で各モジュールが現役だった版」のメモ。インポート先がそれより新しい版を持っていれば Eager-on-Read と同じ仕組みで吸収できる
 - インポート時のプロジェクト名衝突は許容 (別プロジェクトとしてそのまま投入)
+- `projects.id` が既存 DB と衝突した場合は、その project と配下 items をまとめてスキップする (§3.3)
+- モジュールの UI 有効状態はデータ移送のフィルタに使わない。無効モジュールの items も export / import 対象に含める (ADR-0012)
 - **エクスポートは StorageService の高レベル読み込み API を通すため、古い payload を含む items は Eager-on-Read により自動的に最新版へ更新された上で出力される**。結果として、エクスポート JSON 内の `payload_schema_version` は該当モジュールの現行版に揃う
-- 大量件数のエクスポート時は **進捗表示**を UI に出す
+- 実行中は UI を二重送信不可にして処理中状態を表示する。件数ベースの詳細進捗は、実測で同期 export が体感停止する規模に達した場合に Tauri Event / Channel を追加する
 - エクスポート前の pre-op backup は取らない (個別 UPDATE が独立トランザクション + idempotent なので、export 中の中断は data の一貫性を損なわない)。ADR-0006 §2.5 参照
 
 ### 12.3 インポートは部分成功方式

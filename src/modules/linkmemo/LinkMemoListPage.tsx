@@ -1,9 +1,9 @@
 /**
  * M-LinkMemo 一覧 (`docs/ui-design.md` §6.4 / §9.2)。
  *
- * Phase 1 PR-M (本 PR): create + edit + C-15 タイプ・トゥ・コンファーム削除 + open。
+ * create + edit + C-15 タイプ・トゥ・コンファーム削除 + open を提供する。
  * - 行高 32px / type 別アイコン (URL: 🌐 / Path: 📄 / Memo: 📝)
- * - クリックで OS 既定アプリで開く (memo は body をモーダル等で見せる UI 未実装)
+ * - クリックで OS 既定アプリで開く (memo は `LinkMemoMemoDialog` で body を表示)
  * - 編集ボタン → `LinkMemoItemDialog` (mode=edit)
  * - 削除は `ConfirmDeleteDialog`
  * - `mod+n` で新規

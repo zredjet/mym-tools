@@ -2,23 +2,14 @@
  * サイドバー (`docs/ui-design.md` §3.2)。
  *
  * - PROJECTS セクション (一覧 + `+` ボタンで C-4 ダイアログ)
- * - MODULES セクション (固定 4 モジュール、count は Phase 1 では出さない)
+ * - MODULES セクション (registry のうち設定で有効なモジュール)
  * - 末尾に `🌗` テーマトグル
  *
  * 行高 32px / padding 6px 12px / 選択行は `--bg-accent-soft` + `--accent` テキスト + 左 2px。
  */
 import { useCallback, useRef, useState } from "react";
-import {
-  FileText,
-  GripVertical,
-  Hash,
-  Link as LinkIcon,
-  Palette,
-  Pencil,
-  Plus,
-  Trash2,
-} from "lucide-react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   DndContext,
   type DragEndEvent,
@@ -45,6 +36,7 @@ import { deleteProject, reorderProjects } from "@/ipc/projects";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import type { ModuleId, Project } from "@/lib/types";
+import { enabledModules, getModuleDefinition, modulePath } from "@/modules/registry";
 import { useAppStore } from "@/store/useAppStore";
 
 interface SidebarProps {
@@ -55,33 +47,21 @@ interface SidebarProps {
   onProjectChanged: () => void;
 }
 
-interface ModuleEntry {
-  id: ModuleId;
-  label: string;
-  icon: typeof Hash;
-}
-
-/** モジュール表示順 (`docs/ui-design.md` §3.2 サイドバー、Prompts→Links→Colors→Hash) */
-const MODULES: readonly ModuleEntry[] = [
-  { id: "prompt", label: "Prompts", icon: FileText },
-  { id: "linkmemo", label: "Links", icon: LinkIcon },
-  { id: "color", label: "Colors", icon: Palette },
-  { id: "hash", label: "Hash", icon: Hash },
-];
-
 export function Sidebar({ projects, onProjectCreated, onProjectChanged }: SidebarProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
   const { projectId, moduleId } = useParams<{ projectId?: string; moduleId?: string }>();
-  const location = useLocation();
   const navigate = useNavigate();
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const setSidebarWidth = useAppStore((s) => s.setSidebarWidth);
   const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
   const lastOpenedProjectId = useAppStore((s) => s.lastOpenedProjectId);
+  const lastOpenedModuleId = useAppStore((s) => s.lastOpenedModuleId);
+  const moduleEnabled = useAppStore((s) => s.moduleEnabled);
+  const visibleModules = enabledModules(moduleEnabled);
 
   // D&D sensors: PointerSensor は 4px 動かしてから drag 開始 (誤発動防止、クリック連動)
   // KeyboardSensor は a11y 用 (Tab + Space で持ち上げ → Arrow で移動)
@@ -109,11 +89,7 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
     [projects, onProjectChanged],
   );
 
-  // PROJECTS ハイライト + module 遷移先のフォールバック (案3、メモリ参照):
-  // `/modules/hash` (stateless) では URL に projectId が無いため `useParams` は
-  // undefined を返すが、UI 上は前回開いていた project を選択中として表示し続けた方が
-  // ユーザビリティが高い。`lastOpenedProjectId` (Zustand persist) をフォールバックに使う。
-  // 該当 project が現在も存在することも確認 (削除済 ID の幽霊参照を弾く)
+  // Settings / About 表示中も直近プロジェクトを選択表示する。
   const effectiveProjectId =
     projectId ??
     (lastOpenedProjectId != null && projects.some((p) => p.id === lastOpenedProjectId)
@@ -136,30 +112,35 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
     }
   }, [deletingProject, onProjectChanged, projectId, lastOpenedProjectId, navigate, setLastProject]);
 
-  // Hash は stateless で `/modules/hash` 単独ルート → URL に `:moduleId` が無いため
-  // `useParams` の `moduleId` は undefined になる。pathname から専用判定する
-  // (PR #31 codex P2 対応)
-  const onHashRoute = location.pathname === "/modules/hash";
-  const activeModuleId: ModuleId | null = onHashRoute
-    ? "hash"
-    : ((moduleId as ModuleId | undefined) ?? null);
+  const activeModuleId: ModuleId | null = (moduleId as ModuleId | undefined) ?? null;
 
   const goToProject = (pid: string) => {
-    const m = (moduleId as ModuleId | undefined) ?? "prompt";
+    const current = moduleId != null ? getModuleDefinition(moduleId) : undefined;
+    const previous =
+      lastOpenedModuleId != null ? getModuleDefinition(lastOpenedModuleId) : undefined;
+    const target =
+      (current != null && visibleModules.some((candidate) => candidate.id === current.id)
+        ? current
+        : undefined) ??
+      (previous != null && visibleModules.some((candidate) => candidate.id === previous.id)
+        ? previous
+        : undefined) ??
+      visibleModules[0];
+    if (target == null) {
+      navigate("/settings");
+      return;
+    }
     setLastProject(pid);
-    setLastModule(m);
-    navigate(`/projects/${pid}/m/${m}`);
+    setLastModule(target.id);
+    navigate(modulePath(pid, target.id, target.defaultRoute));
   };
 
   const goToModule = (mid: ModuleId) => {
-    setLastModule(mid);
-    if (mid === "hash") {
-      navigate(`/modules/hash`);
-      return;
-    }
-    // 案3: URL に projectId が無くても (= Hash 表示中) `effectiveProjectId` で遷移可
     if (effectiveProjectId == null) return;
-    navigate(`/projects/${effectiveProjectId}/m/${mid}`);
+    const definition = getModuleDefinition(mid);
+    if (definition == null) return;
+    setLastModule(mid);
+    navigate(modulePath(effectiveProjectId, mid, definition.defaultRoute));
   };
 
   return (
@@ -216,15 +197,14 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
       {/* MODULES section */}
       <SectionHeader title="MODULES" action={<ThemeToggle />} />
       <ul className="flex flex-col px-1.5 pb-2" role="list">
-        {MODULES.map((m) => {
+        {visibleModules.map((m) => {
           const Icon = m.icon;
-          // 案3: hash 以外も effectiveProjectId (URL or lastOpened) があれば押せる
-          const disabled = m.id !== "hash" && effectiveProjectId == null;
+          const disabled = effectiveProjectId == null;
           return (
             <li key={m.id}>
               <SidebarRow
-                label={m.label}
-                icon={<Icon size={14} aria-hidden />}
+                label={m.displayName}
+                icon={<Icon className="h-3.5 w-3.5" />}
                 selected={activeModuleId === m.id}
                 disabled={disabled}
                 onClick={() => !disabled && goToModule(m.id)}

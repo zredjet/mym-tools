@@ -1,21 +1,16 @@
 /**
  * 設定ページ (`docs/ui-design.md` §6.9 C-7 / C-8)。
  *
- * Phase 1 PR-N (本 PR): バックアップ管理 (C-8) のみ実装。
- * - 「今すぐバックアップ」(manual)
- * - 全バックアップ一覧 (auto / pre-op / manual を created_at DESC で混在)
- * - 各行: 作成日時 / 種別 / data_revision / サイズ / リストア / 削除
- * - 削除 / リストアは `ConfirmDeleteDialog` で type-to-confirm
- * - リストア成功で「アプリを再起動してください」モーダル
- *
- * About (C-9) / Markdown 表示 / 設定可変項目 (theme は Sidebar から既存) は別 PR。
+ * `settings.json` の core 設定、モジュール有効状態、バックアップ管理、
+ * アプリ全体／プロジェクト単位の export / import を 1 画面に集約する。
  */
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, Download, Plus, RotateCcw, Trash2, Upload } from "lucide-react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
 
 import { Button } from "@/components/ui/Button";
+import type { AppShellOutletContext } from "@/components/shell/AppShell";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { Modal } from "@/components/ui/Modal";
 import {
@@ -34,6 +29,7 @@ import {
 } from "@/ipc/transfer";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
+import { isModuleEnabled, modules } from "@/modules/registry";
 import {
   ROW_DENSITY_PX,
   type RowDensity,
@@ -43,6 +39,8 @@ import {
 
 export function SettingsPage() {
   const navigate = useNavigate();
+  const { projects } = useOutletContext<AppShellOutletContext>();
+  const settingsError = useAppStore((state) => state.settingsError);
   const [backups, setBackups] = useState<BackupRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -122,13 +120,23 @@ export function SettingsPage() {
         <h1 className="text-lg font-semibold">設定</h1>
       </header>
 
+      {settingsError != null && (
+        <p role="alert" className="text-[12px] text-[var(--destructive)]">
+          settings.json の保存エラー: {settingsError}
+        </p>
+      )}
+
+      <CoreSettingsSection projects={projects} />
+
+      <ModuleSettingsSection />
+
       <UiScaleSection />
 
       <RowDensitySection />
 
       <SidebarWidthInfo />
 
-      <DataTransferSection />
+      <DataTransferSection projects={projects} />
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
@@ -237,6 +245,104 @@ export function SettingsPage() {
   );
 }
 
+function CoreSettingsSection({ projects }: { projects: AppShellOutletContext["projects"] }) {
+  const theme = useAppStore((state) => state.theme);
+  const setTheme = useAppStore((state) => state.setTheme);
+  const defaultProjectId = useAppStore((state) => state.defaultProjectId);
+  const setDefaultProjectId = useAppStore((state) => state.setDefaultProjectId);
+  const searchDefaultScope = useAppStore((state) => state.searchDefaultScope);
+  const setSearchDefaultScope = useAppStore((state) => state.setSearchDefaultScope);
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <h2 className="text-base font-semibold text-[var(--fg)]">基本設定</h2>
+        <p className="text-[12px] text-[var(--fg-muted)]">
+          変更は500ms後にユーザーデータフォルダの settings.json へ保存されます。
+        </p>
+      </div>
+      <label className="flex max-w-md items-center justify-between gap-4 text-[13px]">
+        <span>テーマ</span>
+        <select
+          value={theme}
+          onChange={(event) => setTheme(event.target.value as "system" | "light" | "dark")}
+          className="h-8 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg)] px-2"
+        >
+          <option value="system">システム設定</option>
+          <option value="light">ライト</option>
+          <option value="dark">ダーク</option>
+        </select>
+      </label>
+      <label className="flex max-w-md items-center justify-between gap-4 text-[13px]">
+        <span>既定プロジェクト</span>
+        <select
+          value={defaultProjectId ?? ""}
+          onChange={(event) => setDefaultProjectId(event.target.value || null)}
+          className="h-8 max-w-64 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg)] px-2"
+        >
+          <option value="">なし</option>
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex max-w-md items-center justify-between gap-4 text-[13px]">
+        <span>検索の既定スコープ</span>
+        <select
+          value={searchDefaultScope}
+          onChange={(event) =>
+            setSearchDefaultScope(event.target.value === "global" ? "global" : "project")
+          }
+          className="h-8 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg)] px-2"
+        >
+          <option value="project">現在のプロジェクト</option>
+          <option value="global">すべてのプロジェクト</option>
+        </select>
+      </label>
+    </section>
+  );
+}
+
+function ModuleSettingsSection() {
+  const overrides = useAppStore((state) => state.moduleEnabled);
+  const setModuleEnabled = useAppStore((state) => state.setModuleEnabled);
+  return (
+    <section className="flex flex-col gap-2">
+      <div>
+        <h2 className="text-base font-semibold text-[var(--fg)]">モジュール</h2>
+        <p className="text-[12px] text-[var(--fg-muted)]">
+          無効にしたモジュールはサイドバー、検索、起動時の復元候補から除外されます。
+        </p>
+      </div>
+      <ul className="max-w-md divide-y divide-[var(--border)] rounded-[var(--radius)] border border-[var(--border)]">
+        {modules.map((module) => {
+          const Icon = module.icon;
+          const enabled = isModuleEnabled(module, overrides);
+          return (
+            <li key={module.id}>
+              <label className="flex min-h-10 cursor-pointer items-center gap-3 px-3 text-[13px]">
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={(event) => setModuleEnabled(module.id, event.target.checked)}
+                />
+                <Icon className="h-4 w-4 text-[var(--fg-muted)]" />
+                <span>{module.displayName}</span>
+                {module.isStateless && (
+                  <span className="ml-auto text-[11px] text-[var(--fg-subtle)]">
+                    保存データなし
+                  </span>
+                )}
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 /**
  * UI 全体スケール設定セクション (PR-X、案 B)。
  * `body { zoom: var(--ui-scale) }` 経由で文字 / spacing / swatch / モーダル幅まで
@@ -251,7 +357,7 @@ function UiScaleSection() {
         <h2 className="text-base font-semibold text-[var(--fg)]">表示</h2>
         <p className="text-[12px] text-[var(--fg-muted)]">
           UI 全体のスケール (文字 / spacing / 色見本 / モーダル幅などすべて一緒に拡縮)。 値は
-          localStorage に保存され、再起動後も維持されます。
+          settings.json に保存され、再起動後も維持されます。
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -375,11 +481,13 @@ function SidebarWidthInfo() {
  *
  * 部分成功方式 (`data-model.md` §12.3) の結果は失敗件数 + 失敗内訳の畳んだリストで表示。
  */
-function DataTransferSection() {
+function DataTransferSection({ projects }: { projects: AppShellOutletContext["projects"] }) {
   const [busy, setBusy] = useState<"export" | "import" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exportSummary, setExportSummary] = useState<ExportSummary | null>(null);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [exportScope, setExportScope] = useState<"app" | "project">("app");
+  const [exportProjectId, setExportProjectId] = useState("");
 
   const handleExport = async () => {
     setError(null);
@@ -393,7 +501,11 @@ function DataTransferSection() {
       });
       if (path == null) return; // ユーザーキャンセル
       setBusy("export");
-      const summary = await exportJson(path);
+      const summary = await exportJson({
+        path,
+        scope: exportScope,
+        ...(exportScope === "project" ? { projectId: exportProjectId } : {}),
+      });
       setExportSummary(summary);
     } catch (e) {
       setError(formatInvokeError(e));
@@ -428,16 +540,48 @@ function DataTransferSection() {
       <div>
         <h2 className="text-base font-semibold text-[var(--fg)]">データの可搬</h2>
         <p className="text-[12px] text-[var(--fg-muted)]">
-          全プロジェクト + 全モジュールアイテム (Prompts / Links / Colors) を 1 つの JSON
-          ファイルに出し入れします (D-05 / <code className="font-mono">.mymtools.json</code>)。Hash
-          は stateless のため対象外。 インポートは <strong>部分成功方式</strong>:
+          アプリ全体または選択した1プロジェクトのアイテムを 1 つの JSON ファイルに出し入れします
+          (D-05 / <code className="font-mono">.mymtools.json</code>)。Hash
+          は保存データを持たないため対象外。インポートは <strong>部分成功方式</strong>:
           衝突や個別失敗はスキップ + 集計に 記録し、残りは継続。実行前に{" "}
           <code className="font-mono">pre-import</code> バックアップが自動取得されます。
         </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="secondary" onClick={() => void handleExport()} disabled={busy != null}>
+        <label className="flex items-center gap-1.5 text-[12px]">
+          <span>対象:</span>
+          <select
+            value={exportScope}
+            onChange={(event) =>
+              setExportScope(event.target.value === "project" ? "project" : "app")
+            }
+            className="h-8 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg)] px-2"
+          >
+            <option value="app">アプリ全体</option>
+            <option value="project">プロジェクト単位</option>
+          </select>
+        </label>
+        {exportScope === "project" && (
+          <select
+            aria-label="エクスポートするプロジェクト"
+            value={exportProjectId}
+            onChange={(event) => setExportProjectId(event.target.value)}
+            className="h-8 max-w-64 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg)] px-2 text-[12px]"
+          >
+            <option value="">プロジェクトを選択</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <Button
+          variant="secondary"
+          onClick={() => void handleExport()}
+          disabled={busy != null || (exportScope === "project" && exportProjectId === "")}
+        >
           <Download size={14} aria-hidden />
           {busy === "export" ? "エクスポート中..." : "JSON にエクスポート"}
         </Button>
