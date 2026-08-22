@@ -15,7 +15,7 @@ export function WelcomePage() {
       <EmptyState
         icon="👋"
         title="MyMyTools へようこそ"
-        description="左サイドバー上部の [+] からプロジェクトを作成して始めましょう。Hash モジュールはプロジェクトなしで使えます。"
+        description="左サイドバー上部の [+] からプロジェクトを作成して始めましょう。すべてのモジュールは選択中のプロジェクト配下で開きます。"
         actions={
           <span className="inline-flex items-center gap-1.5 text-[12px] text-[var(--fg-subtle)]">
             <ArrowLeft size={14} aria-hidden /> サイドバーの PROJECTS [+] から作成

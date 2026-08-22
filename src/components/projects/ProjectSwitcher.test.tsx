@@ -4,7 +4,7 @@
  * - filter: 部分一致 (case-insensitive)
  * - keyboard: ↑↓ で active 行が動く / Enter で navigate
  * - 0 件: 「該当なし」表示
- * - hash モジュール中に開いて enter → /projects/<id>/m/prompt にフォールバック
+ * - Hash を含む現在モジュールを新しいプロジェクトでも維持
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -62,7 +62,6 @@ function renderAt(initial: string, onClose = vi.fn()) {
       <Routes>
         <Route path="/projects/:projectId/m/prompt/:itemId" element={switcher} />
         <Route path="/projects/:projectId/m/:moduleId" element={switcher} />
-        <Route path="/modules/hash" element={switcher} />
         <Route path="*" element={<LocationProbe />} />
       </Routes>
     </MemoryRouter>,
@@ -74,6 +73,7 @@ describe("ProjectSwitcher", () => {
     useAppStore.setState({
       lastOpenedModuleId: null,
       lastOpenedProjectId: null,
+      moduleEnabled: {},
     });
   });
 
@@ -107,12 +107,12 @@ describe("ProjectSwitcher", () => {
     expect(useAppStore.getState().lastOpenedModuleId).toBe("linkmemo");
   });
 
-  it("falls back to 'prompt' module when current route is /modules/hash (hash is project-less)", () => {
-    renderAt("/modules/hash");
+  it("preserves hash module because every module is project-scoped", () => {
+    renderAt("/projects/p2/m/hash");
     const input = screen.getByLabelText("プロジェクト検索") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Apple" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(screen.getByTestId("loc").textContent).toBe("/projects/p1/m/prompt");
+    expect(screen.getByTestId("loc").textContent).toBe("/projects/p1/m/hash");
   });
 
   it("ArrowDown moves the active row down and Enter selects it", () => {

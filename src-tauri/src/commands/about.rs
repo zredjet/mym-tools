@@ -4,6 +4,8 @@
 //!   を返す。About 画面の「payload schema (現在認識)」表示で使う (`docs/ui-design.md`
 //!   §6.10 末尾)。stateless モジュール (M-Hash) は payload を持たないため除外する
 //!   (`module-contract.md` §9.2)。
+//! - `core_module_ids`: stateless を含む全 backend ID を返す。Frontend registry と起動時に
+//!   照合し、片側だけ登録されたビルドを停止する (`module-contract.md` §2)。
 //!
 //! 他の About 情報源:
 //! - **アプリ version**: フロント `@tauri-apps/api/app::getVersion()` で `tauri.conf.json`
@@ -42,6 +44,12 @@ pub fn core_module_versions(
     Ok(collect_module_versions(&state.modules))
 }
 
+/// stateless を含む全 backend ID を **id 昇順**で返す。
+#[tauri::command]
+pub fn core_module_ids(state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
+    Ok(collect_module_ids(&state.modules))
+}
+
 /// `core_module_versions` の内部ロジック (`tauri::State` を介さずユニットテスト可能な形)。
 ///
 /// 公開コマンド本体は `tauri::State<'_, AppState>` を受けるためテストから直接呼べない。
@@ -62,6 +70,17 @@ fn collect_module_versions(
         .collect();
     entries.sort_by(|a, b| a.module_id.cmp(&b.module_id));
     entries
+}
+
+fn collect_module_ids(
+    modules: &std::collections::HashMap<
+        &'static str,
+        std::sync::Arc<dyn crate::module::ModuleBackend>,
+    >,
+) -> Vec<String> {
+    let mut ids: Vec<String> = modules.keys().map(|id| (*id).to_string()).collect();
+    ids.sort();
+    ids
 }
 
 #[cfg(test)]
@@ -158,5 +177,19 @@ mod tests {
     fn all_stateless_returns_empty_list() {
         let modules = map(vec![("hash", 1, true), ("hash2", 1, true)]);
         assert!(collect_module_versions(&modules).is_empty());
+    }
+
+    #[test]
+    fn module_ids_include_stateless_modules_and_are_sorted() {
+        let modules = map(vec![
+            ("prompt", 1, false),
+            ("hash", 1, true),
+            ("color", 1, false),
+        ]);
+
+        assert_eq!(
+            collect_module_ids(&modules),
+            vec!["color", "hash", "prompt"]
+        );
     }
 }

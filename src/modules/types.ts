@@ -1,15 +1,16 @@
 /**
  * フロント側 ModuleDefinition / 関連型定義 (`docs/module-contract.md` §4)。
  *
- * Q-22 PoC では最小の構造のみ定義。Phase 1 で Shell / SearchAdapter / ItemRow を
- * 本実装する際に拡張する。
+ * Shell / Router / Search が同じ registry を共有できるよう、UI 登録情報を一か所にまとめる。
  */
 import type { ComponentType } from "react";
+
+import type { Item, ModuleId } from "@/lib/types";
 
 /** モジュール定義 (id がバックエンドの ModuleBackend と一致する必要がある) */
 export interface ModuleDefinition {
   /** ModuleBackend.id() と完全一致しなければならない */
-  readonly id: string;
+  readonly id: ModuleId;
 
   /** UI に表示する名前 (例: "ハッシュ計算") */
   readonly displayName: string;
@@ -17,17 +18,20 @@ export interface ModuleDefinition {
   /** サイドバー等のアイコン */
   readonly icon: ComponentType<{ className?: string }>;
 
-  /** Phase 1 では将来拡張用のメタ情報。実体としての enable/disable UI は提供しない */
+  /** 設定が未指定のときの有効状態 */
   readonly enabledByDefault: boolean;
 
   /** Backend の is_stateless と一致させる */
   readonly isStateless: boolean;
 
-  /** モジュール内画面のルート定義 (Phase 1 着手時に拡張) */
+  /** モジュール内画面のルート定義 */
   readonly routes: readonly ModuleRoute[];
 
   /** モジュールに入った直後に開くデフォルトルート */
   readonly defaultRoute: string;
+
+  /** 横断検索結果の表示と遷移先。stateful module では必須。 */
+  readonly searchAdapter?: SearchAdapter;
 }
 
 /** モジュール内画面のルート (`docs/module-contract.md` §4.1) */
@@ -36,4 +40,15 @@ export interface ModuleRoute {
   readonly path: string;
   /** 描画するコンポーネント */
   readonly component: ComponentType;
+}
+
+export interface SearchAdapter {
+  formatResult(item: Item): SearchResultView;
+}
+
+export interface SearchResultView {
+  title: string;
+  subtitle?: string;
+  /** モジュールルート相対パス。`/` は一覧、`/<itemId>` は詳細。 */
+  targetPath: string;
 }

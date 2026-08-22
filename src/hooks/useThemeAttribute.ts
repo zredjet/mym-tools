@@ -12,10 +12,14 @@ export function useThemeAttribute(): void {
   const theme = useAppStore((s) => s.theme);
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === "dark") {
-      root.setAttribute("data-theme", "dark");
-    } else {
-      root.removeAttribute("data-theme");
-    }
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const dark = theme === "dark" || (theme === "system" && media.matches);
+      if (dark) root.setAttribute("data-theme", "dark");
+      else root.removeAttribute("data-theme");
+    };
+    apply();
+    if (theme === "system") media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
   }, [theme]);
 }

@@ -1,8 +1,7 @@
 /**
  * `useAppStore` の挙動確認 (theme toggle / sidebar 幅クランプ)。
  *
- * persist middleware は localStorage に書き込むが、jsdom 環境では in-memory な
- * `Storage` 実装が提供されるため副作用は他テストに漏れない (各テスト内で初期化)。
+ * 永続化は別レイヤの settings.json 同期が担うため、この store は localStorage を触らない。
  */
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -18,8 +17,21 @@ describe("useAppStore", () => {
       rowDensity: "compact",
       lastOpenedModuleId: null,
       lastOpenedProjectId: null,
+      defaultProjectId: null,
+      searchDefaultScope: "project",
+      logLevel: "info",
+      moduleEnabled: {},
+      settingsDocument: null,
+      settingsHydrated: false,
+      settingsError: null,
     });
     localStorage.clear();
+  });
+
+  it("does not write application state to localStorage", () => {
+    useAppStore.getState().setTheme("dark");
+    useAppStore.getState().setSidebarWidth(300);
+    expect(localStorage.length).toBe(0);
   });
 
   it("toggleTheme switches between light and dark", () => {

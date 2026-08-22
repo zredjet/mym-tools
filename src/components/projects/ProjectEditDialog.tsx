@@ -1,7 +1,7 @@
 /**
  * プロジェクト編集ダイアログ (`docs/ui-design.md` §6 C-5)。
  *
- * `name` と `description` の更新のみ。`position` 並び替えは Phase 1 後半 (D&D で別 PR)。
+ * 本ダイアログは `name` と `description` の更新を担う。`position` は Sidebar の D&D で更新する。
  *
  * ## ショートカット
  * - `Cmd/Ctrl + S` / `Cmd/Ctrl + Enter`: 保存

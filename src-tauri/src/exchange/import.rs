@@ -43,11 +43,13 @@ pub fn parse_export_json(json: &str) -> Result<ExportData, AppError> {
             ),
         });
     }
-    if !matches!(data.scope, ExportScope::App) {
-        // Phase 1 では project スコープのインポートを受け付けない (`data-model.md` §12.1)
+    if matches!(data.scope, ExportScope::Project) && data.projects.len() != 1 {
         return Err(AppError::Validation {
             module_id: "core.import".into(),
-            reason: "only `scope: \"app\"` is supported in Phase 1".into(),
+            reason: format!(
+                "scope `project` requires exactly one project, got {}",
+                data.projects.len()
+            ),
         });
     }
     Ok(data)
@@ -59,12 +61,9 @@ pub fn parse_export_json(json: &str) -> Result<ExportData, AppError> {
 /// - pre-op バックアップは **本関数では取らない** (呼び出し側 = Tauri command の責務)
 /// - 各プロジェクトと各 item は独立トランザクションで処理し、失敗は `ImportSummary` に
 ///   集計する
-/// - プロジェクト投入が **`Inserted` または `Skipped`** のいずれの場合も、配下 items の
-///   投入は試みる (既存プロジェクトに新規 item が増える状況も想定: e.g. 同名構成の
-///   別マシンから差分エクスポートを取り込むケース)
-/// - 一方、プロジェクト投入が **Err** で失敗した場合は、その配下 items は全て skip 計上
-///   する (親が存在しないため FK エラーで失敗するのは明らかなので前段で打ち切る、
-///   `data-model.md` §12.4 トランザクション粒度)
+/// - プロジェクトIDが衝突した場合は配下 items を含むプロジェクト全体を skip する
+///   (`data-model.md` §3.3)
+/// - プロジェクト投入が Err の場合も、親が無いため配下 items は全て skip 計上する
 pub fn apply_import(
     storage: &Arc<dyn StorageService>,
     modules_by_id: &HashMap<String, Arc<dyn ModuleBackend>>,
@@ -79,8 +78,8 @@ pub fn apply_import(
 
     for pw in &data.projects {
         match import_one_project(storage, &mut summary, pw) {
-            Ok(parent_present) if parent_present => {
-                // 親が DB に存在する (新規 INSERT または既存) → 配下 items を試す
+            Ok(ImportOutcome::Inserted) => {
+                // 親を新規作成できた場合だけ配下 items を試す。
                 for item in &pw.items {
                     let inserted = import_one_item(
                         storage,
@@ -97,17 +96,17 @@ pub fn apply_import(
                     }
                 }
             }
-            Ok(_) => {
-                // 親が用意できなかった (実質起きないが安全側): items を全件 skip 扱い
+            Ok(ImportOutcome::Skipped) => {
+                // ID衝突時はプロジェクト全体を skip する (`data-model.md` §3.3)。
                 for item in &pw.items {
                     summary.items_skipped += 1;
                     record_skipped_orphan(&mut summary, item);
                 }
             }
             Err(_) => {
-                // 親 INSERT 自体が失敗 (バリデーション等) → 配下 items を全件 failed 扱い
+                // 親 INSERT 自体が失敗した場合も、配下 items は投入せず skip 扱い。
                 for item in &pw.items {
-                    summary.items_failed += 1;
+                    summary.items_skipped += 1;
                     summary.failures.push(ImportFailure {
                         entity: "item".into(),
                         id: item.id.0.clone(),
@@ -137,23 +136,21 @@ pub fn apply_import(
     summary
 }
 
-/// プロジェクトを 1 件投入する。Ok(parent_present): 親が DB 上に存在するか
-/// (= 配下 items の投入を試みてよいか)。Err: バリデーション等の真のエラー (この
-/// 場合 items は全件 failed 計上にする)。
+/// プロジェクトを 1 件投入し、新規作成／ID衝突を呼び出し側へ返す。
 fn import_one_project(
     storage: &Arc<dyn StorageService>,
     summary: &mut ImportSummary,
     pw: &ProjectWithItems,
-) -> Result<bool, AppError> {
+) -> Result<ImportOutcome, AppError> {
     let project: Project = pw.project.clone().into();
     match storage.import_project(&project) {
         Ok(ImportOutcome::Inserted) => {
             summary.projects_inserted += 1;
-            Ok(true)
+            Ok(ImportOutcome::Inserted)
         }
         Ok(ImportOutcome::Skipped) => {
             summary.projects_skipped += 1;
-            Ok(true)
+            Ok(ImportOutcome::Skipped)
         }
         Err(e) => {
             summary.projects_failed += 1;
@@ -452,18 +449,27 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_project_scope_in_phase1() {
-        let json = r#"{
-          "schema_version": 1,
-          "exported_at": "2026-05-11T00:00:00.000+09:00",
-          "app_version": "0.1.0",
-          "scope": "project",
-          "module_versions": {},
-          "projects": []
-        }"#;
-        let err = parse_export_json(json).unwrap_err();
-        let msg = format!("{err:?}");
-        assert!(msg.contains("scope") || msg.contains("Phase 1"));
+    fn parse_accepts_project_scope_with_exactly_one_project() {
+        let mut data = data_with(vec![ProjectWithItems {
+            project: project("p1", "Project 1"),
+            items: vec![],
+        }]);
+        data.scope = ExportScope::Project;
+        let json = serde_json::to_string(&data).unwrap();
+
+        let parsed = parse_export_json(&json).unwrap();
+
+        assert!(matches!(parsed.scope, ExportScope::Project));
+        assert_eq!(parsed.projects.len(), 1);
+    }
+
+    #[test]
+    fn parse_rejects_project_scope_without_exactly_one_project() {
+        let mut data = data_with(vec![]);
+        data.scope = ExportScope::Project;
+        let error = parse_export_json(&serde_json::to_string(&data).unwrap()).unwrap_err();
+
+        assert!(format!("{error:?}").contains("exactly one"));
     }
 
     #[test]
@@ -483,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_project_id_is_skipped_but_new_items_under_it_still_proceed() {
+    fn duplicate_project_id_skips_the_whole_project_subtree() {
         let (storage, modules) = setup(1);
         // 1 回目
         let data1 = data_with(vec![ProjectWithItems {
@@ -500,8 +506,9 @@ mod tests {
         let s = apply_import(&storage, &modules, &data2);
         assert_eq!(s.projects_inserted, 0);
         assert_eq!(s.projects_skipped, 1);
-        assert_eq!(s.items_inserted, 1); // 新規 i2 は入る
-                                         // プロジェクト名は元のまま (上書きされない)
+        assert_eq!(s.items_inserted, 0);
+        assert_eq!(s.items_skipped, 1);
+        // プロジェクト名は元のまま (上書きされない)
         let p = storage.get_project(&ProjectId::new("p1")).unwrap();
         assert_eq!(p.name, "Original");
     }
@@ -623,7 +630,8 @@ mod tests {
             }]),
         );
 
-        // 2 回目: 同 ID + 空 title。items_failed ではなく items_skipped に計上
+        // 2 回目: 別の新規 project 配下に同じ item ID + 空 title。
+        // project 衝突ではなく items.id のグローバル衝突を直接通す。
         let bad_dup = ItemExport {
             title: "".into(),
             ..item("i1", 1, json!({"body": "ok"}))
@@ -632,10 +640,11 @@ mod tests {
             &storage,
             &modules,
             &data_with(vec![ProjectWithItems {
-                project: project("p1", "P"),
+                project: project("p2", "P2"),
                 items: vec![bad_dup],
             }]),
         );
+        assert_eq!(s.projects_inserted, 1);
         assert_eq!(
             s.items_skipped, 1,
             "duplicate id wins over empty-title validation"

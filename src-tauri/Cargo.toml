@@ -62,3 +62,6 @@ sha2 = "0.10"
 # 既に tauri 等の transitive dep として Cargo.lock に存在するため新規 dl は発生しない。
 tempfile = "3"
 
+[target.'cfg(windows)'.dependencies]
+# `settings.json.tmp` を既存 `settings.json` へ原子的に置換するために使用する。
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

@@ -1,6 +1,6 @@
 # モジュール契約 (Module Contract)
 
-最終更新: 2026-04-26 / ステータス: Draft (Phase 1)
+最終更新: 2026-08-22 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**モジュールがコアと交わす契約**」を定義する。
 モジュールが提供するもの / コアが提供するもの / 両者がしてはいけないことを具体 API レベルで決めて、
@@ -30,8 +30,7 @@
 | Frontend | TypeScript | `ModuleDefinition` | UI 登録 / ルーティング / 検索結果整形 |
 | Backend | Rust | `ModuleBackend` (trait) | payload バリデーション / 検索インデックス生成 / payload アップグレード |
 
-両者は**同じ `id` 文字列**を持つことで紐付けられる。コアは登録時に `id` の一致と一意性を検査する。
-不一致や重複があればアプリは起動を停止する (黙って動作しない)。
+両者は**同じ `id` 文字列**を持つことで紐付けられる。各 registry は ID の形式と一意性を検査し、アプリ本体描画前に `core_module_ids` の全 backend ID と frontend ID の集合を照合する。不一致や重複があればアプリは起動を停止する (黙って動作しない)。
 
 ```
    Frontend (React)              Backend (Rust)
@@ -171,11 +170,7 @@ export interface ModuleDefinition {
   /** サイドバー等のアイコン */
   readonly icon: ComponentType<{ className?: string }>;
 
-  /**
-   * Phase 1 では将来拡張用のメタ情報。実体としての enable/disable UI は提供しない。
-   * 全モジュールが常に有効として扱われる。
-   * モジュール無効化を実装する場合は、検索 / export / routing / IPC コマンドの扱いを ADR で定義する。
-   */
+  /** settings.json に明示値が無いときの UI 有効状態 (ADR-0012) */
   readonly enabledByDefault: boolean;
 
   /** Backend の is_stateless と一致させる */
@@ -250,9 +245,14 @@ export interface ItemRow {
 - React コンポーネント。`className` 受け取り対応
 - shadcn/ui と整合する Lucide React のアイコンを推奨
 
+#### `enabledByDefault`
+- `settings.json` の `core.module_enabled.<id>` が無いときの既定値
+- 無効モジュールは sidebar / search / startup restore / routing の通常 UI 経路から除外する
+- backend / IPC は静的登録のまま維持し、export / import / backup では既存データを除外しない (ADR-0012)
+
 #### `routes` / `defaultRoute`
 - パスはモジュールルート相対 (`/` がモジュールトップ)
-- フロントのルーティングは React Router を使う想定 (architecture.md 未確定だが慣用に倣う)
+- フロントのルーティングは React Router を使い、コアが `/projects/:projectId/m/:moduleId/*` 配下へ registry から展開する
 - パスパラメータは `:itemId` 形式
 
 #### `searchAdapter.formatResult()`
@@ -270,7 +270,7 @@ export interface ItemRow {
 
 ### 4.3 ModuleDefinition に**含めない**もの
 
-- 直接 invoke ラッパ (各モジュールは `invoke("<id>:<action>", ...)` を自由に呼べる)
+- 直接 invoke ラッパ (各モジュールは `invoke("<id>_<action>", ...)` を自由に呼べる)
 - 状態 (Zustand ストアはアプリ全体状態のみ。モジュールローカル状態は素の React state)
 - グローバル CSS (Tailwind ユーティリティと shadcn/ui の token に従う)
 
@@ -538,6 +538,7 @@ data-model.md §7.6 に準拠する。`AppError::PayloadUpgradeFailed` は `Modu
 
 ### 8.2 表示側 (Frontend)
 - 横断検索結果は `ItemRow` の配列としてフロントに届く
+- 無効モジュールは検索フィルタから除外し、その module_id の結果も表示しない (ADR-0012)
 - 各行は `ModuleDefinition.searchAdapter.formatResult(item)` で整形される (searchAdapter が省略されているステートレスモジュールは結果に含まれない)
 - クリック → `targetPath` に遷移 (モジュールルート相対)
 - 古い payload バージョンの行は formatResult で「最低限の表示」(§4.2) にフォールバックされ、詳細画面遷移時に Eager-on-Read で最新化される
@@ -589,6 +590,11 @@ isStateless: true
 ### 10.3 ステートレスモジュールの扱い
 - エクスポート対象から自動除外
 - インポート時、JSON にステートレスモジュールの items が含まれていたら**警告して全件スキップ** (実装ミスの可能性も含めて検出)
+
+### 10.4 UI 無効状態の扱い
+- `core.module_enabled` は UI 利用可否であり、export / import のデータフィルタではない
+- stateful module が無効でも、その items と `module_versions` は通常どおり出力・検証する
+- 詳細は ADR-0012 に従う
 
 ---
 
@@ -688,11 +694,11 @@ src/modules/<id>/
 | ID | 論点 | 決着先 |
 |----|------|--------|
 | Q-20 | `validate_payload()` 失敗時のエラーメッセージを多言語化する仕組み (Phase 1 は日本語固定だが将来用に検討) | 必要顕在化時 |
-| Q-23 | モジュール無効化機能の本格対応時、無効化中の items / 検索 / export / routing / IPC の扱い | 機能追加時に ADR |
 
 > Q-15 (重い処理のキャンセル機構) は ADR-0009 で **Tauri Channel + `CancellationToken` + `core_cancel_operation`** として解決済み。
 > Q-16 (Shiki vs rehype-highlight) は ADR-0002 で **rehype-highlight 採用** として解決済み。
 > Q-22 (`generate_handler!` 集中登録方式の PoC) は **PR #22 (Q-22 PoC: M-Hash 最小モジュール)** で本書 §5.3 通り動作することを確認済として解決。`hash_compute_text` 1 つを `modules/registry.rs` に集約登録 → CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2) green / unit test 3 件 PASS で検証完了。
+> Q-23 (モジュール無効化中の挙動) は ADR-0012 で解決済み。
 
 ---
 
@@ -705,3 +711,4 @@ src/modules/<id>/
 | 2026-04-26 | 0.3 | レビュー反映: §6.1 の `CoreContext::spawn_blocking` 残存を `tauri::async_runtime::spawn_blocking` 直接呼び出しに修正 / §6.1 の `<id>:*` 残存を `<id>_*` に修正 / §3.4 の logger 記述を「tracing マクロ直接利用」に修正 / §12 の Phase 1 モジュールサマリのコマンド名・イベント名を全て underscore 形式に統一 / `ScopedStorage` を `&dyn ModuleBackend` から `Arc<dyn ModuleBackend>` ベースに変更しライフタイムパラメータを廃止 §5.1 / `CoreContext` トレイト自体を Phase 1 では持たない方針に変更し §5.2 を「共有コンテキストオブジェクトは持たない」に書き換え / `id()` の制約からハイフンを除外し英小文字 + 数字のみに §3.2 / 未来バージョン検出時の `AppError::UnsupportedFuturePayloadVersion` を §7.3 に明文化 / SearchAdapter「両バージョン対応」表現を §4.2 のフォールバック方針に揃えた §7.1 / §11 の registry 1 行追加表現を「ModuleBackend 1 行 + コマンド関数複数行を generate_handler! に列挙」と正確化 / M-Hash の current_payload_version 表記を「1 (呼ばれない)」に修正 §12.4 |
 | 2026-04-30 | 0.4 | ADR-0009 受理反映: §5.2 のキャンセル機構行を Q-15 から ADR-0009 ベースに更新 / §6.1 の spawn_blocking 行から「Q-15 で別途決定」を削除し ADR-0009 §2.3 規約参照に置換 / §12.4 の M-Hash 進捗を Tauri Channel `HashFileProgress` ベースに更新 (`hash_file_progress` Event 表記を撤去) / §14 から Q-15 を削除 (ADR-0009 で決着) |
 | 2026-05-07 | 0.5 | PR #22 (Q-22 PoC: M-Hash 最小モジュール) 完了反映: §14 から Q-22 を削除し脚注に「PR #22 で動作確認済」を追記。`generate_handler!` 集中登録方式が本書 §5.3 通り機能することを CI 6 ジョブ green / unit test 3 件 PASS で検証完了 |
+| 2026-08-22 | 0.6 | ADR-0012 を反映。`enabledByDefault` を `settings.json` の既定値として有効化し、無効時の search / routing / export / import 契約と全モジュール共通の project route を明記。残っていた colon 形式の invoke 例を underscore 形式へ修正し、Q-23 を解決済みに移動 |

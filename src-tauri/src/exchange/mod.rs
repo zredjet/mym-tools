@@ -6,9 +6,8 @@
 //!
 //! ## 設計上のポイント
 //!
-//! - スコープは Phase 1 では **app のみ** (全プロジェクト + 全 stateful モジュール
-//!   の items)。`project` スコープは Phase 2 (`data-model.md` §12.1 の `scope` フィールド
-//!   は将来拡張用の予約)
+//! - スコープは **app** (全プロジェクト) と **project** (指定した 1 プロジェクト) の 2 種類。
+//!   どちらも全 stateful モジュールの items を対象とする
 //! - `search_text` は書き出さない (`data-model.md` §12.2)。インポート時に
 //!   モジュールの `index_text()` で再構築する
 //! - エクスポートは **StorageService の高レベル読み込み API を通す**ため、古い
@@ -26,7 +25,7 @@
 //!   "schema_version": 1,
 //!   "exported_at": "2026-04-25T12:00:00.000+09:00",
 //!   "app_version": "0.1.0",
-//!   "scope": "app",
+//!   "scope": "app" | "project",
 //!   "module_versions": { "prompt": 1, "linkmemo": 1, "color": 1 },
 //!   "projects": [
 //!     {
@@ -41,7 +40,7 @@
 pub mod export;
 pub mod import;
 
-pub use export::build_export_data;
+pub use export::{build_export_data, build_project_export_data};
 pub use import::{apply_import, parse_export_json};
 
 use std::collections::BTreeMap;
@@ -54,13 +53,11 @@ use crate::storage::{Item, ItemId, Project, ProjectId};
 /// (`data-model.md` §12.1)。インポート時に未知の値が来たら拒否する。
 pub const CURRENT_EXPORT_SCHEMA_VERSION: u32 = 1;
 
-/// エクスポートのスコープ。Phase 1 は `App` のみ生成・受理する
-/// (`data-model.md` §12.1 の `scope` フィールド)。
+/// エクスポート／インポート対象スコープ (`data-model.md` §12.1)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportScope {
     App,
-    /// Phase 2 拡張用 (未実装、ファイル受理段階で reject される)。
     Project,
 }
 

@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-04-25 / ステータス: Draft (Phase 1)
+最終更新: 2026-08-22 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -106,21 +106,21 @@
 
 ### 4.2 IPC 境界 (Tauri Commands / Events)
 
-- フロント→Rust: `invoke("module:action", payload)` 形式の **名前空間化されたコマンド**
+- フロント→Rust: `invoke("module_action", payload)` 形式の **名前空間化されたコマンド**
 - Rust→フロント: `emit` で発火する **イベント** (進捗・通知)
-- すべてのコマンド名は `<module-id>:<action>` で一意化する。コア機能は `core:*`
+- すべてのコマンド名は `<module_id>_<action>` (snake_case) で一意化する。コア機能は `core_*`
 
 例:
 | コマンド | 意味 |
 |---------|------|
-| `core:list_projects` | プロジェクト一覧取得 |
-| `core:search` | プロジェクト内 / 横断検索 |
-| `core:export` | エクスポート (全体 or プロジェクト単位) |
-| `prompt:list` | プロンプト一覧取得 |
-| `prompt:render_template` | 変数差し込み後の完成プロンプト生成 |
-| `linkmemo:open_path` | OS 既定ファイラーでパスを開く |
-| `hash:compute_text` | テキストハッシュ計算 |
-| `hash:compute_file` | ファイルハッシュ計算 (Tokio に逃がす) |
+| `core_list_projects` | プロジェクト一覧取得 |
+| `core_search` | プロジェクト内 / 横断検索 |
+| `core_export_json` | エクスポート (全体 or プロジェクト単位) |
+| `prompt_list` | プロンプト一覧取得 |
+| `prompt_render_template` | 変数差し込み後の完成プロンプト生成 |
+| `linkmemo_open` | OS 既定アプリで URL / path を開く |
+| `hash_compute_text` | テキストハッシュ計算 |
+| `hash_compute_file` | ファイルハッシュ計算 (Tokio に逃がす) |
 
 **コマンドの粒度ルール**: 1コマンド = 1ユースケース (1画面の1操作)。
 小さな CRUD を細切れに作らない (フロント・バック往復が増えると軽量性が損なわれる)。
@@ -147,7 +147,7 @@
 各モジュールは Rust 内で独立した crate (またはモジュール) として実装される。
 
 **モジュールが提供するもの**
-- 自身の Tauri コマンド (`<id>:*`)
+- 自身の Tauri コマンド (`<id>_*`)
 - コアの `StorageService` を使った永続化 (直接 SQLite を触らない)
 - 検索対応のための「インデックス対象テキスト」生成関数 (詳細は `module-contract.md`)
 - エクスポート時の payload シリアライズ / インポート時の検証
@@ -197,6 +197,8 @@ export const modules: ModuleDefinition[] = [
 5. **コアサービス・既存モジュールのコードは編集しない**
 
 モジュール追加で編集されるコア側ファイルは **`registry.rs` / `registry.ts` の 2 つに限定**される。registry 内の編集行数は問わない (固有コマンド数で変動)。コアサービスや既存モジュールに新モジュール固有の分岐が入るなら設計のアラートとして扱う (詳細は ADR-0004)。
+
+フロントエンドでは `registry.ts` を Shell / router / search / settings / 起動復元の唯一の列挙元とする。ユーザーが無効化したモジュールはこれらの通常 UI 経路から除外するが、静的登録済み backend と既存データは維持する (ADR-0012)。全モジュールの route は stateless を含め `/projects/:projectId/m/:moduleId/*` 配下に置く (D-01)。
 
 ### 5.2 モジュールの形 (フロントエンド側)
 
@@ -324,7 +326,9 @@ D-01 により Hash もプロジェクト配下に置かれる。Phase 1 では 
 
 - アプリ全体設定は **JSON ファイル** (`settings.json`) として保存
   - 理由: SQLite に置く必然性が低く、ユーザーが手動編集できる利点を取る
-- モジュール固有設定は将来必要になったら同 JSON 内に namespace で持つ
+- Rust の SettingsService が起動時読込みと原子的なファイル置換を担い、フロントは Zustand に同期する
+- Zustand `persist` / `localStorage` は使わず、変更は 500 ms debounce で `settings.json` へ保存する
+- モジュール有効状態は `core.module_enabled`、モジュール固有設定は `modules.<id>` namespace に置く (data-model.md §11 / ADR-0012)
 
 ### 7.4 エクスポート / インポート (C-06 / D-05)
 
@@ -426,7 +430,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | ファイルハッシュ (大ファイル) | Rust の `tauri::async_runtime::spawn_blocking` で非同期実行、進捗は **Tauri Channel** で通知、キャンセルは `tokio_util::sync::CancellationToken` + `core_cancel_operation`。詳細は ADR-0009 |
 | 全文検索 | SQLite FTS5 (インメモリインデックス不要) |
 | Markdown レンダリング | フロント側で同期実行。長文時の体感劣化が出たら Web Worker 化を検討 |
-| エクスポート | 件数が多いとフリーズし得るので Rust 側で生成し進捗 Event |
+| エクスポート | Rust 側で生成し、UI は処理中の二重送信を防ぐ。実測で必要になった時点で件数進捗 Event / Channel を追加 |
 
 ---
 

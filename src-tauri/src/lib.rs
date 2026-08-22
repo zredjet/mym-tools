@@ -19,6 +19,7 @@ pub mod exchange;
 pub mod module;
 pub mod modules;
 pub mod operations;
+pub mod settings;
 pub mod state;
 pub mod storage;
 pub mod time;
@@ -28,6 +29,7 @@ use std::sync::Arc;
 use tauri::Manager;
 
 use crate::backup::{BackupKind, BackupService, LocalBackupService};
+use crate::settings::SettingsState;
 use crate::state::AppState;
 use crate::storage::{SqliteStorage, StorageService};
 
@@ -52,6 +54,7 @@ pub fn run() {
                 .map_err(|e| format!("failed to create data dir {}: {e}", data_dir.display()))?;
             let db_path = data_dir.join("data.sqlite");
             let backups_root = data_dir.join("backups");
+            let settings_path = data_dir.join("settings.json");
 
             // DB schema migration を **SqliteStorage::open の外** で実行する
             // (ADR-0011 §2.4 bootstrap 経路 — `LocalBackupService` は完成済 storage を要求するため、
@@ -82,6 +85,7 @@ pub fn run() {
             let app_state = AppState::build(backends, storage, backup)
                 .map_err(|e| format!("AppState::build failed: {e}"))?;
             app.manage(app_state);
+            app.manage(SettingsState::new(settings_path));
             Ok(())
         });
     let builder = modules::registry::register_invoke_handler(builder);

@@ -15,8 +15,11 @@ export interface Project {
   updated_at: string;
 }
 
-/** モジュール ID (`module-contract.md` §3.2、英小文字 + 数字のみ、3〜32 文字) */
-export type ModuleId = "prompt" | "linkmemo" | "color" | "hash";
+/**
+ * モジュール ID (`module-contract.md` §3.2、英小文字 + 数字のみ、3〜32 文字)。
+ * 新モジュール追加時にコア型の union 編集を要求しないため、実在性は registry で検証する。
+ */
+export type ModuleId = string;
 
 /**
  * `Item` (`storage/types.rs::Item`)。`payload` はモジュール固有の JSON で、コアからは

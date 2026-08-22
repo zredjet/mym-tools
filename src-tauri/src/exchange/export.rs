@@ -14,7 +14,7 @@ use crate::exchange::{
     CURRENT_EXPORT_SCHEMA_VERSION,
 };
 use crate::module::ModuleBackend;
-use crate::storage::StorageService;
+use crate::storage::{Project, ProjectId, StorageService};
 use crate::time::now_jst_iso8601;
 
 /// list_items のページ取得サイズ。個人ツール規模では 1 度で取り切れる想定だが、
@@ -37,7 +37,33 @@ pub fn build_export_data(
     app_version: &str,
 ) -> Result<ExportData, AppError> {
     let projects = storage.list_projects()?;
+    build_for_projects(storage, modules, app_version, ExportScope::App, projects)
+}
 
+/// 指定した1プロジェクトだけを `scope: "project"` で書き出す。
+pub fn build_project_export_data(
+    storage: &Arc<dyn StorageService>,
+    modules: &[Arc<dyn ModuleBackend>],
+    app_version: &str,
+    project_id: &ProjectId,
+) -> Result<ExportData, AppError> {
+    let project = storage.get_project(project_id)?;
+    build_for_projects(
+        storage,
+        modules,
+        app_version,
+        ExportScope::Project,
+        vec![project],
+    )
+}
+
+fn build_for_projects(
+    storage: &Arc<dyn StorageService>,
+    modules: &[Arc<dyn ModuleBackend>],
+    app_version: &str,
+    scope: ExportScope,
+    projects: Vec<Project>,
+) -> Result<ExportData, AppError> {
     // module_versions: stateful なものだけ書き出す (`data-model.md` §12.2)
     let mut module_versions: BTreeMap<String, u32> = BTreeMap::new();
     let stateful: Vec<&Arc<dyn ModuleBackend>> =
@@ -77,7 +103,7 @@ pub fn build_export_data(
         schema_version: CURRENT_EXPORT_SCHEMA_VERSION,
         exported_at: now_jst_iso8601(),
         app_version: app_version.to_string(),
-        scope: ExportScope::App,
+        scope,
         module_versions,
         projects: projects_out,
     })
@@ -186,6 +212,39 @@ mod tests {
         assert_eq!(pw.items[0].title, "Title 1");
         assert_eq!(pw.items[0].module_id, "prompt");
         assert_eq!(pw.items[0].payload_schema_version, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn project_scope_exports_only_the_requested_project() -> Result<(), AppError> {
+        let (storage, modules) = setup();
+        let first = storage.create_project("First", None)?;
+        let second = storage.create_project("Second", None)?;
+        storage.create_item(
+            "prompt",
+            &first.id,
+            "First item",
+            &[],
+            1,
+            &json!({"body": "one"}),
+            "First item one",
+        )?;
+        storage.create_item(
+            "prompt",
+            &second.id,
+            "Second item",
+            &[],
+            1,
+            &json!({"body": "two"}),
+            "Second item two",
+        )?;
+
+        let data = build_project_export_data(&storage, &modules, "0.1.0", &second.id)?;
+
+        assert!(matches!(data.scope, ExportScope::Project));
+        assert_eq!(data.projects.len(), 1);
+        assert_eq!(data.projects[0].project.id, second.id);
+        assert_eq!(data.projects[0].items[0].title, "Second item");
         Ok(())
     }
 
