@@ -8,6 +8,7 @@ export const linkMemoModule: ModuleDefinition = {
   id: "linkmemo",
   displayName: "リンク・メモ",
   icon: LinkIcon,
+  category: "manage",
   enabledByDefault: true,
   isStateless: false,
   routes: [{ path: "/", component: LinkMemoListPage }],

@@ -12,11 +12,22 @@
 use std::sync::Arc;
 
 use crate::module::ModuleBackend;
+use crate::modules::a11y::A11yModule;
+use crate::modules::codec::CodecModule;
 use crate::modules::color::ColorModule;
+use crate::modules::cron::CronModule;
+use crate::modules::datetime::DateTimeModule;
 use crate::modules::hash::HashModule;
+use crate::modules::http::HttpModule;
+use crate::modules::idgen::IdGeneratorModule;
+use crate::modules::jwt::JwtModule;
 use crate::modules::linkmemo::LinkMemoModule;
 use crate::modules::palette::PaletteModule;
 use crate::modules::prompt::PromptModule;
+use crate::modules::regex::RegexModule;
+use crate::modules::secretgen::SecretGeneratorModule;
+use crate::modules::textdiff::TextDiffModule;
+use crate::modules::urlquery::UrlQueryModule;
 
 /// アプリで利用するすべての ModuleBackend を順序付きで返す。
 ///
@@ -29,6 +40,17 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
         Arc::new(LinkMemoModule),
         Arc::new(PromptModule),
         Arc::new(PaletteModule),
+        Arc::new(CodecModule),
+        Arc::new(UrlQueryModule),
+        Arc::new(DateTimeModule),
+        Arc::new(IdGeneratorModule),
+        Arc::new(SecretGeneratorModule),
+        Arc::new(RegexModule),
+        Arc::new(TextDiffModule),
+        Arc::new(JwtModule),
+        Arc::new(CronModule),
+        Arc::new(A11yModule),
+        Arc::new(HttpModule),
         // 新モジュールはここに 1 行追加する
     ]
 }
@@ -81,6 +103,8 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         // M-Hash
         crate::modules::hash::commands::hash_compute_text,
         crate::modules::hash::commands::hash_compute_file,
+        // M-HTTP
+        crate::modules::http::commands::http_send_request,
         // M-LinkMemo
         crate::modules::linkmemo::commands::linkmemo_normalize_target,
         crate::modules::linkmemo::commands::linkmemo_open,
@@ -98,14 +122,14 @@ mod tests {
     use crate::storage::{SqliteStorage, StorageService};
     use serde_json::json;
 
-    /// 実モジュール (Color / LinkMemo / Prompt / Hash / Palette) を `AppState::build` に通せる
+    /// 全実モジュールを `AppState::build` に通せる
     /// ことを保証する。`module-contract.md` §3.2 の id 規約 (英小文字 + 数字 / 3〜32 文字 /
     /// 重複なし) が全モジュールで満たされていることもこれで担保される。
     #[test]
     fn module_backends_build_into_app_state() {
         let storage: Arc<dyn StorageService> = Arc::new(SqliteStorage::open(":memory:").unwrap());
         let backends = module_backends();
-        assert_eq!(backends.len(), 5);
+        assert_eq!(backends.len(), 16);
         let dir = tempfile::tempdir().unwrap();
         let backup: Arc<dyn crate::backup::BackupService> = Arc::new(
             crate::backup::LocalBackupService::new(dir.path().to_path_buf(), Arc::clone(&storage)),
@@ -116,6 +140,21 @@ mod tests {
         assert!(state.module("linkmemo").is_some());
         assert!(state.module("prompt").is_some());
         assert!(state.module("palette").is_some());
+        for id in [
+            "codec",
+            "urlquery",
+            "datetime",
+            "idgen",
+            "secretgen",
+            "regex",
+            "textdiff",
+            "jwt",
+            "cron",
+            "a11y",
+            "http",
+        ] {
+            assert!(state.module(id).is_some(), "missing backend: {id}");
+        }
     }
 
     /// 実モジュールを `ScopedStorage` 経由で CRUD できることを end-to-end で確認する

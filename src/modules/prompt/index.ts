@@ -8,6 +8,7 @@ export const promptModule: ModuleDefinition = {
   id: "prompt",
   displayName: "プロンプト",
   icon: FileText,
+  category: "manage",
   enabledByDefault: true,
   isStateless: false,
   routes: [

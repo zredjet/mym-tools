@@ -29,7 +29,7 @@ import {
 } from "@/ipc/transfer";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
-import { isModuleEnabled, modules } from "@/modules/registry";
+import { groupedModules, isModuleEnabled, modules } from "@/modules/registry";
 import {
   ROW_DENSITY_PX,
   type RowDensity,
@@ -315,30 +315,42 @@ function ModuleSettingsSection() {
           無効にしたモジュールはサイドバー、検索、起動時の復元候補から除外されます。
         </p>
       </div>
-      <ul className="max-w-md divide-y divide-[var(--border)] rounded-[var(--radius)] border border-[var(--border)]">
-        {modules.map((module) => {
-          const Icon = module.icon;
-          const enabled = isModuleEnabled(module, overrides);
-          return (
-            <li key={module.id}>
-              <label className="flex min-h-10 cursor-pointer items-center gap-3 px-3 text-[13px]">
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  onChange={(event) => setModuleEnabled(module.id, event.target.checked)}
-                />
-                <Icon className="h-4 w-4 text-[var(--fg-muted)]" />
-                <span>{module.displayName}</span>
-                {module.isStateless && (
-                  <span className="ml-auto text-[11px] text-[var(--fg-subtle)]">
-                    保存データなし
-                  </span>
-                )}
-              </label>
-            </li>
-          );
-        })}
-      </ul>
+      <div className="flex max-w-md flex-col gap-3">
+        {groupedModules(modules).map(({ category, modules: categoryModules }) => (
+          <section
+            key={category.id}
+            className="overflow-hidden rounded-[var(--radius)] border border-[var(--border)]"
+          >
+            <h3 className="bg-[var(--bg-muted)] px-3 py-1.5 text-[11px] font-semibold text-[var(--fg-muted)]">
+              {category.displayName}
+            </h3>
+            <ul className="divide-y divide-[var(--border)]">
+              {categoryModules.map((module) => {
+                const Icon = module.icon;
+                const enabled = isModuleEnabled(module, overrides);
+                return (
+                  <li key={module.id}>
+                    <label className="flex min-h-10 cursor-pointer items-center gap-3 px-3 text-[13px]">
+                      <input
+                        type="checkbox"
+                        checked={enabled}
+                        onChange={(event) => setModuleEnabled(module.id, event.target.checked)}
+                      />
+                      <Icon className="h-4 w-4 text-[var(--fg-muted)]" />
+                      <span>{module.displayName}</span>
+                      {module.isStateless && (
+                        <span className="ml-auto text-[11px] text-[var(--fg-subtle)]">
+                          保存データなし
+                        </span>
+                      )}
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </div>
     </section>
   );
 }

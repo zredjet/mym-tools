@@ -16,6 +16,7 @@ describe("settings document", () => {
           ui_scale: 0.5,
           row_density: "comfortable",
           module_enabled: { prompt: false, unknown: false },
+          collapsed_module_categories: ["text", "future", "text", 7],
         },
         modules: {},
       },
@@ -30,6 +31,7 @@ describe("settings document", () => {
     expect(parsed.uiScale).toBe(0.75);
     expect(parsed.rowDensity).toBe("comfortable");
     expect(parsed.moduleEnabled).toEqual({ prompt: false });
+    expect(parsed.collapsedModuleCategories).toEqual(["text", "future"]);
   });
 
   it("merges current values without discarding unknown keys", () => {
@@ -55,6 +57,7 @@ describe("settings document", () => {
       uiScale: 1.15,
       rowDensity: "compact",
       moduleEnabled: { prompt: true, color: false },
+      collapsedModuleCategories: ["web"],
     });
 
     expect(merged.future_root_key).toBe("keep");
@@ -66,5 +69,6 @@ describe("settings document", () => {
       prompt: true,
       color: false,
     });
+    expect(merged.core.collapsed_module_categories).toEqual(["web"]);
   });
 });

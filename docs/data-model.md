@@ -683,7 +683,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
     "theme": "system" | "light" | "dark",
     "default_project_id": "<uuid>" | null,
     "last_opened_project_id": "<uuid>" | null,
-    "last_opened_module_id": "prompt" | "linkmemo" | "color" | "hash" | "palette" | null,
+    "last_opened_module_id": "<registered-module-id>" | null,
     "search": {
       "default_scope": "project" | "global"
     },
@@ -691,12 +691,14 @@ project 削除実行時、StorageService は**削除トランザクションの�
     "sidebar_width": 240,
     "ui_scale": 1.0,
     "row_density": "compact" | "comfortable",
+    "collapsed_module_categories": ["text", "time"],
     "module_enabled": {
       "prompt": true,
       "linkmemo": true,
       "color": true,
       "hash": true,
-      "palette": true
+      "palette": true,
+      "http": false
     }
   },
   "modules": {
@@ -725,6 +727,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
 - `core.ui_scale`: 0.75〜1.5。範囲外は読み込み時に clamp する
 - `core.row_density`: `compact` (32 px) / `comfortable` (36 px)
 - `core.module_enabled.<id>`: UI 上の有効状態。キーが無ければ registry の `enabledByDefault` を使う (ADR-0012)
+- `core.collapsed_module_categories`: サイドバーで閉じた表示カテゴリIDの配列。キーが無い初回は全展開。未知IDは前方互換のため保持する (ADR-0014)
 
 #### 例外: `modules.<id>.last_seen_payload_version` (コアが解釈する規約フィールド)
 
@@ -1219,3 +1222,4 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-04-30 | 0.8 | ADR-0007 反映: §4 meta テーブルの `data_revision` に SQLite INTEGER / Rust `i64` 整合の注記を追加 / `last_backup_revision` を「最後に成功した任意種別の DB バックアップ時点 revision」、`last_auto_backup_at` を「auto 専用 24 時間ゲート」と責務を明確化 / §13.2 で同責務分離を再掲 / §13.4 に「pre-op 取得後に対象操作が失敗してもバックアップを削除しない」旨を追加 / §13.6 リストア手順に `PRAGMA integrity_check` 事前実行 + UI 進行中表示 + 失敗時別ファイル選択促しを追加 / 整合性テストに T-32〜T-34 を追加 |
 | 2026-04-30 | 0.9 | ADR-0009 受理反映: §17 から Q-15 を削除し ADR-0009 解決済みのフットノートを追加 (export / import / FTS 再構築 / リストアの進捗 Channel と writer mutex 中の挙動は ADR-0009 §1 表 / §7.2 を参照) |
 | 2026-08-22 | 1.0 | §10.5 に M-Palette payload v1 を追加。5 色、調和ルール、基準色位置を items.payload に保存し、コア DB スキーマは変更しない方針を確定 |
+| 2026-08-23 | 1.1 | ADR-0014を反映し、`core.collapsed_module_categories`を追加。開発ツール11種はstatelessのためDB schema、payload、export / importを変更しないことを確認 |

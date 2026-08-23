@@ -4,9 +4,20 @@
 //! と `generate_handler!` リストにそれぞれ 1 行ずつ追記する。**コアサービス・既存
 //! モジュールのコードは編集しない** (ADR-0004 §5.1)。
 
+pub mod a11y;
+pub mod codec;
 pub mod color;
+pub mod cron;
+pub mod datetime;
 pub mod hash;
+pub mod http;
+pub mod idgen;
+pub mod jwt;
 pub mod linkmemo;
 pub mod palette;
 pub mod prompt;
+pub mod regex;
 pub mod registry;
+pub mod secretgen;
+pub mod textdiff;
+pub mod urlquery;

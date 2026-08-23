@@ -10,6 +10,7 @@ export const paletteModule: ModuleDefinition = {
   id: "palette",
   displayName: "パレット",
   icon: SwatchBook,
+  category: "design",
   enabledByDefault: true,
   isStateless: false,
   routes: [

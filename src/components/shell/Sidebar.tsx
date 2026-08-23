@@ -7,8 +7,8 @@
  *
  * 行高 32px / padding 6px 12px / 選択行は `--bg-accent-soft` + `--accent` テキスト + 左 2px。
  */
-import { useCallback, useRef, useState } from "react";
-import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronRight, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   DndContext,
@@ -36,7 +36,13 @@ import { deleteProject, reorderProjects } from "@/ipc/projects";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import type { ModuleId, Project } from "@/lib/types";
-import { enabledModules, getModuleDefinition, modulePath } from "@/modules/registry";
+import {
+  enabledModules,
+  getModuleDefinition,
+  groupedModules,
+  moduleCategoryId,
+  modulePath,
+} from "@/modules/registry";
 import { useAppStore } from "@/store/useAppStore";
 
 interface SidebarProps {
@@ -61,7 +67,10 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
   const lastOpenedProjectId = useAppStore((s) => s.lastOpenedProjectId);
   const lastOpenedModuleId = useAppStore((s) => s.lastOpenedModuleId);
   const moduleEnabled = useAppStore((s) => s.moduleEnabled);
+  const collapsedCategories = useAppStore((s) => s.collapsedModuleCategories);
+  const setCategoryCollapsed = useAppStore((s) => s.setModuleCategoryCollapsed);
   const visibleModules = enabledModules(moduleEnabled);
+  const moduleGroups = groupedModules(visibleModules);
 
   // D&D sensors: PointerSensor は 4px 動かしてから drag 開始 (誤発動防止、クリック連動)
   // KeyboardSensor は a11y 用 (Tab + Space で持ち上げ → Arrow で移動)
@@ -113,6 +122,14 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
   }, [deletingProject, onProjectChanged, projectId, lastOpenedProjectId, navigate, setLastProject]);
 
   const activeModuleId: ModuleId | null = (moduleId as ModuleId | undefined) ?? null;
+
+  useEffect(() => {
+    if (moduleId == null) return;
+    const active = getModuleDefinition(moduleId);
+    if (active == null) return;
+    const category = moduleCategoryId(active);
+    if (collapsedCategories.includes(category)) setCategoryCollapsed(category, false);
+  }, [collapsedCategories, moduleId, setCategoryCollapsed]);
 
   const goToProject = (pid: string) => {
     const current = moduleId != null ? getModuleDefinition(moduleId) : undefined;
@@ -196,23 +213,48 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
 
       {/* MODULES section */}
       <SectionHeader title="MODULES" action={<ThemeToggle />} />
-      <ul className="flex flex-col px-1.5 pb-2" role="list">
-        {visibleModules.map((m) => {
-          const Icon = m.icon;
-          const disabled = effectiveProjectId == null;
+      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
+        {moduleGroups.map(({ category, modules: categoryModules }) => {
+          const collapsed = collapsedCategories.includes(category.id);
           return (
-            <li key={m.id}>
-              <SidebarRow
-                label={m.displayName}
-                icon={<Icon className="h-3.5 w-3.5" />}
-                selected={activeModuleId === m.id}
-                disabled={disabled}
-                onClick={() => !disabled && goToModule(m.id)}
-              />
-            </li>
+            <section key={category.id} aria-labelledby={`module-category-${category.id}`}>
+              <button
+                id={`module-category-${category.id}`}
+                type="button"
+                className="flex h-7 w-full items-center gap-1 px-2 text-left text-[10px] font-semibold tracking-wide text-[var(--fg-subtle)] uppercase hover:text-[var(--fg)]"
+                aria-expanded={!collapsed}
+                onClick={() => setCategoryCollapsed(category.id, !collapsed)}
+              >
+                <ChevronRight
+                  size={12}
+                  aria-hidden
+                  className={cn("transition-transform", !collapsed && "rotate-90")}
+                />
+                {category.displayName}
+              </button>
+              {!collapsed && (
+                <ul className="flex flex-col" role="list">
+                  {categoryModules.map((m) => {
+                    const Icon = m.icon;
+                    const disabled = effectiveProjectId == null;
+                    return (
+                      <li key={m.id}>
+                        <SidebarRow
+                          label={m.displayName}
+                          icon={<Icon className="h-3.5 w-3.5" />}
+                          selected={activeModuleId === m.id}
+                          disabled={disabled}
+                          onClick={() => !disabled && goToModule(m.id)}
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
           );
         })}
-      </ul>
+      </div>
 
       <ProjectCreateDialog
         open={createOpen}

@@ -24,11 +24,22 @@ describe("SettingsLifecycle", () => {
     vi.useFakeTimers();
     vi.mocked(getSettings).mockResolvedValue(document);
     vi.mocked(getBackendModuleIds).mockResolvedValue([
+      "a11y",
+      "codec",
       "color",
+      "cron",
+      "datetime",
       "hash",
+      "http",
+      "idgen",
+      "jwt",
       "linkmemo",
       "palette",
       "prompt",
+      "regex",
+      "secretgen",
+      "textdiff",
+      "urlquery",
     ]);
     vi.mocked(updateSettings).mockResolvedValue(undefined);
     useAppStore.setState({

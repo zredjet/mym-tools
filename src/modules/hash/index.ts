@@ -12,6 +12,7 @@ export const hashModule: ModuleDefinition = {
   id: "hash",
   displayName: "ハッシュ計算",
   icon: Hash,
+  category: "text",
   enabledByDefault: true,
   isStateless: true,
   routes: [{ path: "/", component: HashPage }],

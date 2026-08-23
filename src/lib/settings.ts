@@ -24,6 +24,7 @@ export interface AppSettingsSnapshot {
   uiScale: number;
   rowDensity: RowDensitySetting;
   moduleEnabled: Partial<Record<ModuleId, boolean>>;
+  collapsedModuleCategories: string[];
 }
 
 const DEFAULTS: AppSettingsSnapshot = {
@@ -37,6 +38,7 @@ const DEFAULTS: AppSettingsSnapshot = {
   uiScale: 1,
   rowDensity: "compact",
   moduleEnabled: {},
+  collapsedModuleCategories: [],
 };
 
 export function parseSettingsDocument(
@@ -71,6 +73,7 @@ export function parseSettingsDocument(
     uiScale: clampNumber(core?.["ui_scale"], 0.75, 1.5, DEFAULTS.uiScale, false),
     rowDensity: core?.["row_density"] === "comfortable" ? "comfortable" : DEFAULTS.rowDensity,
     moduleEnabled,
+    collapsedModuleCategories: stringArray(core?.["collapsed_module_categories"]),
   };
 }
 
@@ -99,6 +102,7 @@ export function mergeSettingsDocument(
       ui_scale: settings.uiScale,
       row_density: settings.rowDensity,
       module_enabled: { ...originalModuleEnabled, ...settings.moduleEnabled },
+      collapsed_module_categories: settings.collapsedModuleCategories,
     },
     modules: { ...originalModules },
   };
@@ -112,6 +116,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(value.filter((item): item is string => typeof item === "string" && item !== "")),
+  ];
 }
 
 function isTheme(value: unknown): value is ThemeSetting {

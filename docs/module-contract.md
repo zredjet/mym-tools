@@ -170,6 +170,9 @@ export interface ModuleDefinition {
   /** サイドバー等のアイコン */
   readonly icon: ComponentType<{ className?: string }>;
 
+  /** 表示カテゴリ。省略時は other (ADR-0014) */
+  readonly category?: ModuleCategoryId;
+
   /** settings.json に明示値が無いときの UI 有効状態 (ADR-0012) */
   readonly enabledByDefault: boolean;
 
@@ -244,6 +247,11 @@ export interface ItemRow {
 #### `icon`
 - React コンポーネント。`className` 受け取り対応
 - shadcn/ui と整合する Lucide React のアイコンを推奨
+
+#### `category`
+- Frontend registry が定義する表示専用 metadata。省略時は `other`
+- カテゴリはサイドバーと設定画面のグルーピングにだけ使い、module ID、route、IPC、保存、検索、権限の境界にはしない
+- カテゴリ定義と順序の正典は `src/modules/registry.ts` とする (ADR-0014)
 
 #### `enabledByDefault`
 - `settings.json` の `core.module_enabled.<id>` が無いときの既定値
@@ -680,6 +688,18 @@ src/modules/<id>/
 | 固有 IPC コマンド | なし。配色生成と色変換はフロント JS 上で実行 |
 | `index_text` の対象 | 5 色の `hex` + `harmony` |
 
+### 12.6 Stateless 開発ツール
+
+| ID | 固有 IPC | 実行境界 |
+|---|---|---|
+| `codec` / `urlquery` / `datetime` | なし | Frontend同期処理 |
+| `idgen` / `secretgen` | なし | Web Cryptoを乱数源とするFrontend処理 |
+| `regex` / `textdiff` | なし | Web Worker + timeout |
+| `jwt` / `cron` / `a11y` | なし | Frontend同期処理 |
+| `http` | `http_send_request` | Rust `reqwest` + `OperationRegistry` cancel (ADR-0015) |
+
+全11モジュールは `is_stateless = true`、`searchAdapter` なし、payloadなしとする。ローカル完結の10モジュールは `enabledByDefault = true`、ネットワーク通信する `http` のみ `false` とする。
+
 ---
 
 ## 13. 契約自体のバージョニング
@@ -723,3 +743,4 @@ src/modules/<id>/
 | 2026-05-07 | 0.5 | PR #22 (Q-22 PoC: M-Hash 最小モジュール) 完了反映: §14 から Q-22 を削除し脚注に「PR #22 で動作確認済」を追記。`generate_handler!` 集中登録方式が本書 §5.3 通り機能することを CI 6 ジョブ green / unit test 3 件 PASS で検証完了 |
 | 2026-08-22 | 0.6 | ADR-0012 を反映。`enabledByDefault` を `settings.json` の既定値として有効化し、無効時の search / routing / export / import 契約と全モジュール共通の project route を明記。残っていた colon 形式の invoke 例を underscore 形式へ修正し、Q-23 を解決済みに移動 |
 | 2026-08-22 | 0.7 | §12.5 に stateful な M-Palette 契約を追加。共通 items CRUD を使い、固有 IPC とコア DB スキーマ変更を持たないことを確定 |
+| 2026-08-23 | 0.8 | ADR-0014 / ADR-0015を反映。`ModuleDefinition.category`をoptional metadataとして追加し、stateless開発ツール11種とHTTP IPC境界を§12.6へ追加 |

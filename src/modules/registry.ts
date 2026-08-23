@@ -1,11 +1,36 @@
 /** フロント側モジュールレジストリ。Shell / Router / Search の唯一の列挙元。 */
 import type { ModuleId } from "@/lib/types";
+import { a11yModule } from "@/modules/a11y";
 import { colorModule } from "@/modules/color";
+import { codecModule } from "@/modules/codec";
+import { dateTimeModule } from "@/modules/datetime";
+import { cronModule } from "@/modules/cron";
 import { hashModule } from "@/modules/hash";
+import { httpModule } from "@/modules/http";
+import { idGeneratorModule } from "@/modules/idgen";
+import { jwtModule } from "@/modules/jwt";
 import { linkMemoModule } from "@/modules/linkmemo";
 import { paletteModule } from "@/modules/palette";
 import { promptModule } from "@/modules/prompt";
-import type { ModuleDefinition } from "@/modules/types";
+import { secretGeneratorModule } from "@/modules/secretgen";
+import { regexModule } from "@/modules/regex";
+import { textDiffModule } from "@/modules/textdiff";
+import { urlQueryModule } from "@/modules/urlquery";
+import type { ModuleCategoryDefinition, ModuleCategoryId, ModuleDefinition } from "@/modules/types";
+
+export const moduleCategories: readonly ModuleCategoryDefinition[] = [
+  { id: "manage", displayName: "管理" },
+  { id: "design", displayName: "カラー・デザイン" },
+  { id: "text", displayName: "テキスト・解析" },
+  { id: "web", displayName: "Web・通信" },
+  { id: "generate", displayName: "ID・秘密値" },
+  { id: "time", displayName: "日時・スケジュール" },
+  { id: "other", displayName: "その他" },
+];
+
+const moduleCategoryIds = new Set<ModuleCategoryId>(
+  moduleCategories.map((category) => category.id),
+);
 
 export const modules: readonly ModuleDefinition[] = [
   promptModule,
@@ -13,6 +38,17 @@ export const modules: readonly ModuleDefinition[] = [
   colorModule,
   hashModule,
   paletteModule,
+  codecModule,
+  urlQueryModule,
+  dateTimeModule,
+  idGeneratorModule,
+  secretGeneratorModule,
+  regexModule,
+  textDiffModule,
+  jwtModule,
+  cronModule,
+  a11yModule,
+  httpModule,
 ];
 
 export function validateModuleDefinitions(definitions: readonly ModuleDefinition[]): void {
@@ -23,6 +59,9 @@ export function validateModuleDefinitions(definitions: readonly ModuleDefinition
     }
     if (ids.has(definition.id)) throw new Error(`duplicate module id: ${definition.id}`);
     ids.add(definition.id);
+    if (definition.category != null && !moduleCategoryIds.has(definition.category)) {
+      throw new Error(`invalid module category: ${definition.category}`);
+    }
     if (definition.routes.length === 0) {
       throw new Error(`module ${definition.id} has no routes`);
     }
@@ -47,6 +86,19 @@ export function isModuleEnabled(
 
 export function enabledModules(overrides: Partial<Record<ModuleId, boolean>>): ModuleDefinition[] {
   return modules.filter((module) => isModuleEnabled(module, overrides));
+}
+
+export function moduleCategoryId(module: ModuleDefinition): ModuleCategoryId {
+  return module.category ?? "other";
+}
+
+export function groupedModules(definitions: readonly ModuleDefinition[]) {
+  return moduleCategories
+    .map((category) => ({
+      category,
+      modules: definitions.filter((module) => moduleCategoryId(module) === category.id),
+    }))
+    .filter((group) => group.modules.length > 0);
 }
 
 export function modulePath(projectId: string, moduleId: ModuleId, relativePath = "/"): string {

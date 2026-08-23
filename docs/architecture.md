@@ -207,9 +207,10 @@ export const modules: ModuleDefinition[] = [
 ```typescript
 // 概念定義: 詳細は module-contract.md
 type ModuleDefinition = {
-  id: string;                     // "prompt" | "linkmemo" | "color" | "hash" | "palette"
+  id: string;                     // registry 内で一意な module ID
   displayName: string;            // "プロンプト管理"
   icon: React.ComponentType;
+  category?: ModuleCategoryId;    // 表示専用。省略時は other
   enabledByDefault: boolean;
   routes: ModuleRoute[];          // モジュール内画面
   searchAdapter?: SearchAdapter;  // 横断検索の表示形整形
@@ -424,6 +425,13 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 - `tracing` クレートで構造化ログ
 - ログレベルは設定で変えられる。既定は `info`
 - ログは `<userdata>/logs/` に書き、サイズベースでローテート (個人ツールなので3〜5ファイルで十分)
+- HTTP実験モジュールはAuthorization等を扱うため、request / responseのURL、header、bodyをログへ出さない (ADR-0015)
+
+### 10.3 HTTP通信境界
+
+- 任意URLへの通信は `http` モジュールのRust commandに閉じ、WebView `fetch`を使わない
+- `http` / `https`だけを許可し、TLS検証無効化、cookie jar、multipart、file upload、proxy設定を提供しない
+- timeout、redirect、request / response sizeを制限し、`OperationRegistry`でキャンセル可能にする (ADR-0015)
 
 ---
 
@@ -502,3 +510,4 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-04-30 | 0.4 | ADR-0010 受理反映: §13 の「ビルド/配布パイプライン (CI、コード署名手順)」未確定項目を「CI 確定 (ADR-0010) / CD は将来 ADR」の形に分離。CI 範囲はジョブ構成・matrix・branch protection・lint 連携を ADR-0010 で固定済 |
 | 2026-08-22 | 0.5 | ADR-0013受理反映: §9をmacOS / Windows portable ZIPへ統一し、手動version入力から全OS成功後にReleaseを公開するPhase 1 CDを§13の確定事項へ追加 |
 | 2026-08-22 | 0.6 | 既存モジュールへ依存しない M-Palette を静的レジストリへ追加。共通 items + payload で永続化し、固有 IPC とコア DB スキーマ変更を持たない構成を追記 |
+| 2026-08-23 | 0.7 | ADR-0014 / ADR-0015を反映。表示専用category metadata、一機能一モジュールのstateless開発ツール、HTTPのRust IPC・非ログ通信境界を追記 |

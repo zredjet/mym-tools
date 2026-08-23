@@ -23,6 +23,7 @@ interface AppState {
   searchDefaultScope: SearchDefaultScope;
   logLevel: LogLevel;
   moduleEnabled: Partial<Record<ModuleId, boolean>>;
+  collapsedModuleCategories: string[];
   settingsDocument: SettingsDocument | null;
   settingsHydrated: boolean;
   settingsError: string | null;
@@ -40,6 +41,7 @@ interface AppState {
   setSearchDefaultScope: (scope: SearchDefaultScope) => void;
   setLogLevel: (level: LogLevel) => void;
   setModuleEnabled: (id: ModuleId, enabled: boolean) => void;
+  setModuleCategoryCollapsed: (id: string, collapsed: boolean) => void;
 }
 
 const SIDEBAR_MIN = 180;
@@ -75,6 +77,7 @@ export const useAppStore = create<AppState>()((set) => ({
   searchDefaultScope: "project",
   logLevel: "info",
   moduleEnabled: {},
+  collapsedModuleCategories: [],
   settingsDocument: null,
   settingsHydrated: false,
   settingsError: null,
@@ -101,4 +104,11 @@ export const useAppStore = create<AppState>()((set) => ({
   setLogLevel: (logLevel) => set({ logLevel }),
   setModuleEnabled: (id, enabled) =>
     set((state) => ({ moduleEnabled: { ...state.moduleEnabled, [id]: enabled } })),
+  setModuleCategoryCollapsed: (id, collapsed) =>
+    set((state) => {
+      const current = new Set(state.collapsedModuleCategories);
+      if (collapsed) current.add(id);
+      else current.delete(id);
+      return { collapsedModuleCategories: [...current] };
+    }),
 }));
