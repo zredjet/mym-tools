@@ -19,4 +19,10 @@ describe("regex engine", () => {
       evaluateRegex({ pattern: "(?=a)", flags: "g", text: "aa", replacement: "" }).matches,
     ).toHaveLength(2);
   });
+
+  it("advances zero-width Unicode matches by a full code point", () => {
+    const result = evaluateRegex({ pattern: "(?:)", flags: "gu", text: "😀", replacement: "" });
+
+    expect(result.matches.map((match) => match.index)).toEqual([0, 2]);
+  });
 });

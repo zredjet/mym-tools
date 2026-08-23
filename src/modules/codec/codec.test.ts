@@ -14,4 +14,13 @@ describe("codec", () => {
   it("rejects malformed base64", () => {
     expect(() => transformText("%%%", "base64", "decode")).toThrow(/Base64/);
   });
+
+  it("decodes UTF-16 surrogate-pair escapes", () => {
+    expect(transformText("\\uD83D\\uDE00", "unicode", "decode")).toBe("😀");
+  });
+
+  it("rejects isolated UTF-16 surrogate escapes", () => {
+    expect(() => transformText("\\uD83D", "unicode", "decode")).toThrow(/Unicode/);
+    expect(() => transformText("\\uDE00", "unicode", "decode")).toThrow(/Unicode/);
+  });
 });

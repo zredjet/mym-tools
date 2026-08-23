@@ -24,7 +24,7 @@ export function evaluateRegex(input: {
     let match: RegExpExecArray | null;
     while ((match = regex.exec(input.text)) != null) {
       matches.push(toResult(match));
-      if (match[0] === "") regex.lastIndex += 1;
+      if (match[0] === "") regex.lastIndex = advanceStringIndex(input.text, regex.lastIndex, regex);
       if (matches.length >= 10_000) throw new Error("match件数が10,000件を超えました");
     }
   } else {
@@ -32,6 +32,16 @@ export function evaluateRegex(input: {
     if (match != null) matches.push(toResult(match));
   }
   return { matches, replacement: input.text.replace(regex, input.replacement) };
+}
+
+function advanceStringIndex(text: string, index: number, regex: RegExp): number {
+  if (!regex.unicode && !regex.flags.includes("v")) return index + 1;
+
+  const first = text.charCodeAt(index);
+  const second = text.charCodeAt(index + 1);
+  const isSurrogatePair =
+    first >= 0xd800 && first <= 0xdbff && second >= 0xdc00 && second <= 0xdfff;
+  return index + (isSurrogatePair ? 2 : 1);
 }
 
 function toResult(match: RegExpExecArray): RegexMatchResult {

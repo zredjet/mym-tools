@@ -17,7 +17,7 @@ export function nextCronRuns(
   const expected = mode === "five" ? 5 : 6;
   if (fields.length !== expected) throw new Error(`${expected}フィールドで入力してください`);
   for (const field of fields) {
-    if (/[?LW#H]/i.test(field) || !/^[\dA-Za-z*,/-]+$/.test(field)) {
+    if (!/^[\dA-Za-z*,/?#-]+$/.test(field) || containsUnsupportedMarker(field)) {
       throw new Error("Quartz固有記号または未対応の文字が含まれています");
     }
   }
@@ -32,4 +32,13 @@ export function nextCronRuns(
       .toZonedDateTimeISO(timeZone)
       .toString({ smallestUnit: mode === "six" ? "second" : "minute" });
   });
+}
+
+function containsUnsupportedMarker(field: string): boolean {
+  if (/[?#]/.test(field)) return true;
+
+  return field
+    .split(/[,*/-]/)
+    .filter(Boolean)
+    .some((token) => /^(?:H|L|W|LW|\d+[LW])$/i.test(token));
 }

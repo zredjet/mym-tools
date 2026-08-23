@@ -87,11 +87,20 @@ function base64ToBytes(input: string): Uint8Array {
 }
 
 function decodeUnicodeEscapes(input: string): string {
-  return input.replace(/\\u\{([0-9a-fA-F]{1,6})\}|\\u([0-9a-fA-F]{4})/g, (_, braced, fixed) => {
-    const value = Number.parseInt((braced ?? fixed) as string, 16);
-    if (value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) {
-      throw new Error("Unicode code point が不正です");
-    }
-    return String.fromCodePoint(value);
-  });
+  return input.replace(
+    /\\u\{([0-9a-fA-F]{1,6})\}|\\u([dD][89aAbB][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})|\\u([0-9a-fA-F]{4})/g,
+    (_, braced, high, low, fixed) => {
+      if (high != null && low != null) {
+        const highValue = Number.parseInt(high as string, 16);
+        const lowValue = Number.parseInt(low as string, 16);
+        return String.fromCodePoint((highValue - 0xd800) * 0x400 + lowValue - 0xdc00 + 0x10000);
+      }
+
+      const value = Number.parseInt((braced ?? fixed) as string, 16);
+      if (value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) {
+        throw new Error("Unicode code point が不正です");
+      }
+      return String.fromCodePoint(value);
+    },
+  );
 }
