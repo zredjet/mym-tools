@@ -10,7 +10,7 @@
 //! 後続フェーズで:
 //! - items CRUD (ScopedStorage) + Eager-on-Read (ADR-0006)
 //! - Backup 3 系統 (ADR-0007)
-//! - 各モジュール本実装 (M-Hash file hash / M-Color / M-LinkMemo / M-Prompt)
+//! - 各モジュール本実装 (M-Hash file hash / M-Color / M-Link / M-Memo / M-Prompt)
 
 pub mod backup;
 pub mod commands;
@@ -29,6 +29,7 @@ use std::sync::Arc;
 use tauri::Manager;
 
 use crate::backup::{BackupKind, BackupService, LocalBackupService};
+use crate::error::AppError;
 use crate::settings::SettingsState;
 use crate::state::AppState;
 use crate::storage::{SqliteStorage, StorageService};
@@ -66,14 +67,26 @@ pub fn run() {
 
             // SQLite を開いて schema 整合性チェック (`data-model.md` §4 / §13)
             // migration が走った後なので、`verify_schema_version` は CURRENT と一致する想定
-            let storage: Arc<dyn StorageService> = Arc::new(
+            let sqlite_storage = Arc::new(
                 SqliteStorage::open(&db_path)
                     .map_err(|e| format!("failed to open SQLite at {}: {e}", db_path.display()))?,
             );
+            let storage: Arc<dyn StorageService> = sqlite_storage.clone();
 
             // バックアップサービス (ADR-0007)
             let backup: Arc<dyn BackupService> =
                 Arc::new(LocalBackupService::new(backups_root, Arc::clone(&storage)));
+
+            // Link / Memo 分離前の単独 Memo がある場合だけ pre-op backup を取得し、
+            // 成功後に所属移行する。失敗は既存の setup 起動失敗経路へ返す。
+            migrate_linkmemo_split_with_backup(sqlite_storage.as_ref(), || {
+                backup
+                    .take(BackupKind::PreOp {
+                        prefix: "pre-split-linkmemo".into(),
+                    })
+                    .map(|_| ())
+            })
+            .map_err(|e| format!("Link / Memo data migration failed: {e}"))?;
 
             // 起動時 auto バックアップ判定 (`data-model.md` §13.3): 24h 経過 + revision 変化
             // 取得は短時間 (~数百 ms) のため起動 setup 内で同期実行。失敗してもアプリは
@@ -92,6 +105,25 @@ pub fn run() {
     builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn migrate_linkmemo_split_with_backup(
+    storage: &SqliteStorage,
+    take_backup: impl FnOnce() -> Result<(), AppError>,
+) -> Result<usize, AppError> {
+    let count = storage.legacy_linkmemo_memo_count()?;
+    if count == 0 {
+        return Ok(0);
+    }
+    take_backup()?;
+    let moved = storage.migrate_legacy_linkmemo_memos()?;
+    if moved != count {
+        return Err(AppError::Storage(format!(
+            "legacy memo count changed during startup migration: expected {count}, moved {moved}"
+        )));
+    }
+    tracing::info!(moved, "legacy LinkMemo rows migrated to Memo module");
+    Ok(moved)
 }
 
 /// 起動時の auto バックアップ判定 + 取得 (`data-model.md` §13.3 / ADR-0007 §2.3)。
@@ -118,5 +150,53 @@ fn try_take_auto_backup(backup: &dyn BackupService) {
         Err(e) => {
             tracing::error!(error = %e, "should_take_auto check failed");
         }
+    }
+}
+
+#[cfg(test)]
+mod startup_data_migration_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn backup_failure_prevents_linkmemo_split() {
+        let storage = SqliteStorage::open(":memory:").unwrap();
+        let project = storage.create_project("Project", None).unwrap();
+        storage
+            .create_item(
+                "linkmemo",
+                &project.id,
+                "Legacy",
+                &[],
+                1,
+                &json!({"type":"memo","target":null,"body":"body"}),
+                "Legacy body",
+            )
+            .unwrap();
+
+        let result = migrate_linkmemo_split_with_backup(&storage, || {
+            Err(AppError::Io("backup failed".into()))
+        });
+        assert!(matches!(result, Err(AppError::Io(_))));
+        assert_eq!(storage.legacy_linkmemo_memo_count().unwrap(), 1);
+        assert!(storage
+            .list_items("memo", &project.id, 100, 0)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn no_legacy_rows_skip_backup() {
+        let storage = SqliteStorage::open(":memory:").unwrap();
+        let called = std::cell::Cell::new(false);
+        assert_eq!(
+            migrate_linkmemo_split_with_backup(&storage, || {
+                called.set(true);
+                Ok(())
+            })
+            .unwrap(),
+            0
+        );
+        assert!(!called.get());
     }
 }

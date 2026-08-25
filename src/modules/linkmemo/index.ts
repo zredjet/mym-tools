@@ -1,12 +1,12 @@
 import { Link as LinkIcon } from "lucide-react";
 
-import type { LinkMemoPayloadV1 } from "@/lib/types";
+import type { LinkPayloadV1 } from "@/lib/types";
 import { LinkMemoListPage } from "@/modules/linkmemo/LinkMemoListPage";
 import type { ModuleDefinition } from "@/modules/types";
 
 export const linkMemoModule: ModuleDefinition = {
   id: "linkmemo",
-  displayName: "リンク・メモ",
+  displayName: "リンク",
   icon: LinkIcon,
   category: "manage",
   enabledByDefault: true,
@@ -15,7 +15,7 @@ export const linkMemoModule: ModuleDefinition = {
   defaultRoute: "/",
   searchAdapter: {
     formatResult: (item) => {
-      const payload = item.payload as Partial<LinkMemoPayloadV1>;
+      const payload = item.payload as Partial<LinkPayloadV1>;
       return {
         title: item.title,
         ...(typeof payload.target === "string" && payload.target !== ""

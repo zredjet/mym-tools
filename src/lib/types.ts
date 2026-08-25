@@ -50,19 +50,24 @@ export interface PromptPayloadV1 {
   body: string;
 }
 
-/** M-LinkMemo payload v1 (`data-model.md` §10.2) */
-export interface LinkMemoPayloadV1 {
-  type: "url" | "path" | "memo";
-  target: string | null;
+/** M-Link payload v1 (`data-model.md` §10.2) */
+export interface LinkPayloadV1 {
+  type: "url" | "path";
+  target: string;
   body: string;
 }
 
-/** M-Color payload v1 (`data-model.md` §10.3) */
+/** M-Memo payload v1 (`data-model.md` §10.3) */
+export interface MemoPayloadV1 {
+  body: string;
+}
+
+/** M-Color payload v1 (`data-model.md` §10.4) */
 export interface ColorPayloadV1 {
   hex: string;
 }
 
-/** M-Palette の調和ルール (`data-model.md` §10.5) */
+/** M-Palette の調和ルール (`data-model.md` §10.6) */
 export type HarmonyRule =
   | "custom"
   | "analogous"
@@ -77,7 +82,7 @@ export type HarmonyRule =
 export type PaletteIndex = 0 | 1 | 2 | 3 | 4;
 export type PaletteColors = [string, string, string, string, string];
 
-/** M-Palette payload v1 (`data-model.md` §10.5) */
+/** M-Palette payload v1 (`data-model.md` §10.6) */
 export interface PalettePayloadV1 {
   colors: PaletteColors;
   harmony: HarmonyRule;

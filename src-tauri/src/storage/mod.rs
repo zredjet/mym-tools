@@ -16,6 +16,7 @@
 //! を発火する。
 
 pub mod bootstrap;
+pub(crate) mod data_migrations;
 pub mod schema;
 pub mod scoped;
 pub mod sqlite;

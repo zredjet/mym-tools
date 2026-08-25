@@ -152,7 +152,7 @@ impl ScopedStorage {
 ///
 /// title / tags は共通カラムから StorageService が取り出して結合する責務。
 /// `module.index_text` は payload 由来の文字列のみを返す (純粋関数)。
-fn build_search_text(title: &str, tags: &[String], module_text: &str) -> String {
+pub(crate) fn build_search_text(title: &str, tags: &[String], module_text: &str) -> String {
     let mut s = String::with_capacity(title.len() + module_text.len() + 16);
     s.push_str(title);
     if !tags.is_empty() {

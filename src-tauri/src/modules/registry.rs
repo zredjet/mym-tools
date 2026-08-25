@@ -22,6 +22,7 @@ use crate::modules::http::HttpModule;
 use crate::modules::idgen::IdGeneratorModule;
 use crate::modules::jwt::JwtModule;
 use crate::modules::linkmemo::LinkMemoModule;
+use crate::modules::memo::MemoModule;
 use crate::modules::palette::PaletteModule;
 use crate::modules::prompt::PromptModule;
 use crate::modules::regex::RegexModule;
@@ -38,6 +39,7 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
         Arc::new(HashModule),
         Arc::new(ColorModule),
         Arc::new(LinkMemoModule),
+        Arc::new(MemoModule),
         Arc::new(PromptModule),
         Arc::new(PaletteModule),
         Arc::new(CodecModule),
@@ -105,7 +107,7 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         crate::modules::hash::commands::hash_compute_file,
         // M-HTTP
         crate::modules::http::commands::http_send_request,
-        // M-LinkMemo
+        // M-Link (公開済みIDは linkmemo)
         crate::modules::linkmemo::commands::linkmemo_normalize_target,
         crate::modules::linkmemo::commands::linkmemo_open,
         // M-Prompt
@@ -129,7 +131,7 @@ mod tests {
     fn module_backends_build_into_app_state() {
         let storage: Arc<dyn StorageService> = Arc::new(SqliteStorage::open(":memory:").unwrap());
         let backends = module_backends();
-        assert_eq!(backends.len(), 16);
+        assert_eq!(backends.len(), 17);
         let dir = tempfile::tempdir().unwrap();
         let backup: Arc<dyn crate::backup::BackupService> = Arc::new(
             crate::backup::LocalBackupService::new(dir.path().to_path_buf(), Arc::clone(&storage)),
@@ -138,6 +140,7 @@ mod tests {
         assert!(state.module("hash").is_some());
         assert!(state.module("color").is_some());
         assert!(state.module("linkmemo").is_some());
+        assert!(state.module("memo").is_some());
         assert!(state.module("prompt").is_some());
         assert!(state.module("palette").is_some());
         for id in [

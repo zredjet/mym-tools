@@ -81,7 +81,7 @@ impl SqliteStorage {
 
     /// writer mutex を取得して `&mut Connection` を渡すヘルパ。
     /// poison は致命扱い (StorageService 自体が壊れた状態のため)。
-    fn with_conn<T>(
+    pub(crate) fn with_conn<T>(
         &self,
         f: impl FnOnce(&mut Connection) -> Result<T, AppError>,
     ) -> Result<T, AppError> {
@@ -90,6 +90,16 @@ impl SqliteStorage {
             .lock()
             .map_err(|_| AppError::Storage("storage mutex poisoned".into()))?;
         f(&mut guard)
+    }
+
+    /// Link / Memo 分離前の単独 Memo 行数を返す。起動時の pre-op 判定専用。
+    pub(crate) fn legacy_linkmemo_memo_count(&self) -> Result<usize, AppError> {
+        self.with_conn(crate::storage::data_migrations::legacy_linkmemo_memo_count)
+    }
+
+    /// 旧 `linkmemo(type=memo)` を `memo` へ再所属する。公開 Storage 契約には露出しない。
+    pub(crate) fn migrate_legacy_linkmemo_memos(&self) -> Result<usize, AppError> {
+        self.with_conn(crate::storage::data_migrations::migrate_legacy_linkmemo_memos)
     }
 
     /// `data_revision` を `+1` する (書込みコミットの一環として呼ぶ)。

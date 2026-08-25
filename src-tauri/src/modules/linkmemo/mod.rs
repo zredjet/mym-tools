@@ -1,11 +1,11 @@
-//! M-LinkMemo: リンク・メモ管理モジュール (`requirements.md` §2.2 / `data-model.md`
+//! M-Link: URL / Path 管理モジュール (`requirements.md` §2.2 / `data-model.md`
 //! §10.2 / `module-contract.md` §12.2)。
 //!
 //! ## payload (version 1)
 //! ```jsonc
 //! {
-//!   "type": "url" | "path" | "memo",
-//!   "target": "https://..." | "/Users/x/folder" | "\\\\server\\share\\dir" | null,
+//!   "type": "url" | "path",
+//!   "target": "https://..." | "/Users/x/folder" | "\\\\server\\share\\dir",
 //!   "body": "..."
 //! }
 //! ```
@@ -13,7 +13,6 @@
 //! ## バリデーション (`data-model.md` §10.2)
 //! - `type=url`: `target` は `http://` または `https://` で始まる
 //! - `type=path`: `target` は空文字でない
-//! - `type=memo`: `body` は空文字でない (空メモは項目化させない)
 //! - `file://` で入力された URL は `linkmemo_normalize_target` で path に変換される前提。
 //!   そのため `validate_payload` の段階で `type=url` & `target.starts_with("file://")` は
 //!   形式違反として弾く
@@ -29,7 +28,7 @@ use serde_json::Value as JsonValue;
 
 use crate::module::{ModuleBackend, ModuleError};
 
-/// M-LinkMemo の `ModuleBackend` 実装。
+/// 公開済み ID `linkmemo` を維持する M-Link の `ModuleBackend` 実装。
 pub struct LinkMemoModule;
 
 impl ModuleBackend for LinkMemoModule {
@@ -45,8 +44,12 @@ impl ModuleBackend for LinkMemoModule {
                 reason: "linkmemo payload must have `type` field".into(),
             })?;
         let target = payload.get("target").and_then(|v| v.as_str());
-        let body = payload.get("body").and_then(|v| v.as_str()).unwrap_or("");
-
+        payload
+            .get("body")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| ModuleError::ValidationFailed {
+                reason: "linkmemo payload must have `body` string".into(),
+            })?;
         match type_ {
             "url" => {
                 let t = target.ok_or_else(|| ModuleError::ValidationFailed {
@@ -67,13 +70,6 @@ impl ModuleBackend for LinkMemoModule {
                 if t.is_empty() {
                     return Err(ModuleError::ValidationFailed {
                         reason: "linkmemo type=path target must not be empty".into(),
-                    });
-                }
-            }
-            "memo" => {
-                if body.is_empty() {
-                    return Err(ModuleError::ValidationFailed {
-                        reason: "linkmemo type=memo body must not be empty".into(),
                     });
                 }
             }
@@ -145,7 +141,8 @@ mod tests {
         let err = LinkMemoModule
             .validate_payload(&json!({
                 "type": "url",
-                "target": "file:///Users/x"
+                "target": "file:///Users/x",
+                "body": ""
             }))
             .unwrap_err();
         assert!(matches!(err, ModuleError::ValidationFailed { .. }));
@@ -154,7 +151,7 @@ mod tests {
     #[test]
     fn validate_url_missing_target_rejected() {
         let err = LinkMemoModule
-            .validate_payload(&json!({"type": "url"}))
+            .validate_payload(&json!({"type": "url", "body": ""}))
             .unwrap_err();
         assert!(matches!(err, ModuleError::ValidationFailed { .. }));
     }
@@ -177,9 +174,21 @@ mod tests {
         LinkMemoModule
             .validate_payload(&json!({
                 "type": "path",
-                "target": "\\\\server\\share\\dir"
+                "target": "\\\\server\\share\\dir",
+                "body": ""
             }))
             .unwrap();
+    }
+
+    #[test]
+    fn validate_missing_body_rejected() {
+        let err = LinkMemoModule
+            .validate_payload(&json!({
+                "type": "path",
+                "target": "/tmp"
+            }))
+            .unwrap_err();
+        assert!(matches!(err, ModuleError::ValidationFailed { .. }));
     }
 
     #[test]
@@ -187,7 +196,8 @@ mod tests {
         let err = LinkMemoModule
             .validate_payload(&json!({
                 "type": "path",
-                "target": ""
+                "target": "",
+                "body": ""
             }))
             .unwrap_err();
         assert!(matches!(err, ModuleError::ValidationFailed { .. }));
@@ -196,14 +206,15 @@ mod tests {
     // -------- validate: memo --------
 
     #[test]
-    fn validate_memo_with_body_succeeds() {
-        LinkMemoModule
+    fn validate_memo_with_body_rejected_after_split() {
+        let err = LinkMemoModule
             .validate_payload(&json!({
                 "type": "memo",
                 "target": null,
                 "body": "メモ本文"
             }))
-            .unwrap();
+            .unwrap_err();
+        assert!(matches!(err, ModuleError::ValidationFailed { .. }));
     }
 
     #[test]
@@ -223,7 +234,7 @@ mod tests {
     #[test]
     fn validate_unknown_type_rejected() {
         let err = LinkMemoModule
-            .validate_payload(&json!({"type": "ftp", "target": "ftp://x"}))
+            .validate_payload(&json!({"type": "ftp", "target": "ftp://x", "body": ""}))
             .unwrap_err();
         match err {
             ModuleError::ValidationFailed { reason } => assert!(reason.contains("ftp")),
@@ -259,16 +270,6 @@ mod tests {
             "body": ""
         }));
         assert_eq!(s, "/Users/x/folder");
-    }
-
-    #[test]
-    fn index_text_memo_no_target() {
-        let s = LinkMemoModule.index_text(&json!({
-            "type": "memo",
-            "target": null,
-            "body": "メモ本文"
-        }));
-        assert_eq!(s, "メモ本文");
     }
 
     #[test]

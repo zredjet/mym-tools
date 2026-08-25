@@ -129,7 +129,7 @@ export function AboutPage() {
         <div>
           <h2 className="text-2xl font-bold text-[var(--fg)]">MyMyTools</h2>
           <p className="mt-1 text-[13px] text-[var(--fg-muted)]">
-            個人用ローカルツールの集合体 — プロンプト / リンク・メモ / カラー / ハッシュ / パレット
+            個人用ローカルツールの集合体 — プロンプト / リンク / メモ / カラー / ハッシュ / パレット
           </p>
         </div>
 
@@ -214,13 +214,14 @@ export function AboutPage() {
  * payload schema 表示用の **正典モジュール名** (`docs/ui-design.md` §6.10 / docs 全般)。
  *
  * `module_id` (英小文字、`module-contract.md` §3.2) → 表示用ラベルへの写像。
- * 単純な `capitalize` だと `linkmemo` → `Linkmemo` となり正典 `M-LinkMemo` と乖離する
+ * 単純な `capitalize` だと `linkmemo` → `Linkmemo` となり公開名 `M-Link` と乖離する
  * (codex PR-AF P3)。未知 ID は `M-<Id>` の generic ケースにフォールバックする。
  */
 function canonicalModuleLabel(moduleId: string): string {
   const canonical: Record<string, string> = {
     prompt: "M-Prompt",
-    linkmemo: "M-LinkMemo",
+    linkmemo: "M-Link",
+    memo: "M-Memo",
     color: "M-Color",
     hash: "M-Hash",
   };

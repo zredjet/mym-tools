@@ -34,6 +34,7 @@ describe("SettingsLifecycle", () => {
       "idgen",
       "jwt",
       "linkmemo",
+      "memo",
       "palette",
       "prompt",
       "regex",

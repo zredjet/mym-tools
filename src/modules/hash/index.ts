@@ -1,5 +1,5 @@
 /**
- * M-Hash モジュール定義 (`docs/module-contract.md` §4 / §12.4)。
+ * M-Hash モジュール定義 (`docs/module-contract.md` §4 / §12.5)。
  *
  * `isStateless: true` のため `searchAdapter` は省略し、横断検索の対象外とする。
  */

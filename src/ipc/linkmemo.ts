@@ -1,5 +1,5 @@
 /**
- * M-LinkMemo 固有 Tauri コマンドのラッパー (`module-contract.md` §12.2)。
+ * M-Link 固有 Tauri コマンドのラッパー (`module-contract.md` §12.2)。
  */
 import { invoke } from "@tauri-apps/api/core";
 

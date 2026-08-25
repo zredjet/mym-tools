@@ -10,6 +10,7 @@ import { httpModule } from "@/modules/http";
 import { idGeneratorModule } from "@/modules/idgen";
 import { jwtModule } from "@/modules/jwt";
 import { linkMemoModule } from "@/modules/linkmemo";
+import { memoModule } from "@/modules/memo";
 import { paletteModule } from "@/modules/palette";
 import { promptModule } from "@/modules/prompt";
 import { secretGeneratorModule } from "@/modules/secretgen";
@@ -35,6 +36,7 @@ const moduleCategoryIds = new Set<ModuleCategoryId>(
 export const modules: readonly ModuleDefinition[] = [
   promptModule,
   linkMemoModule,
+  memoModule,
   colorModule,
   hashModule,
   paletteModule,

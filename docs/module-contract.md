@@ -1,6 +1,6 @@
 # モジュール契約 (Module Contract)
 
-最終更新: 2026-08-22 / ステータス: Draft (Phase 1)
+最終更新: 2026-08-25 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**モジュールがコアと交わす契約**」を定義する。
 モジュールが提供するもの / コアが提供するもの / 両者がしてはいけないことを具体 API レベルで決めて、
@@ -651,7 +651,7 @@ src/modules/<id>/
 | `index_text` の対象 | `body` |
 | 変数名の許容文字 | **Unicode letter / number + `_`** (PR-AD / `data-model.md` §10.1)。ASCII (`topic` / `lang_1`) + CJK (`言語` / `トピック`) を許容、空白 / 記号は silently 無視 |
 
-### 12.2 M-LinkMemo
+### 12.2 M-Link
 | 項目 | 値 |
 |------|----|
 | `id` | `linkmemo` |
@@ -659,8 +659,22 @@ src/modules/<id>/
 | `current_payload_version` | 1 |
 | 固有 IPC コマンド | `linkmemo_open` (URL or path を OS の既定アプリで開く) / `linkmemo_normalize_target` (`file://` の path 化) |
 | `index_text` の対象 | `target` (URL or path) + `body` |
+| payload v1 | `{ type: "url" \| "path", target: string, body: string }`。`body`はリンク固有の任意メモ |
 
-### 12.3 M-Color
+### 12.3 M-Memo
+| 項目 | 値 |
+|------|----|
+| `id` | `memo` |
+| `is_stateless` | false |
+| `current_payload_version` | 1 |
+| 固有 IPC コマンド | なし。共通items APIだけを使用 |
+| `index_text` の対象 | `body` |
+| payload v1 | `{ body: string }` |
+| Frontend routes | `/`、`/new`、`/:itemId`、`/edit/:itemId` |
+
+旧exportの`linkmemo/type=memo`正規化と起動時所属移行はコアの互換境界であり、Memo固有IPCや公開`StorageService`契約には追加しない (ADR-0016)。
+
+### 12.4 M-Color
 | 項目 | 値 |
 |------|----|
 | `id` | `color` |
@@ -669,7 +683,7 @@ src/modules/<id>/
 | 固有 IPC コマンド | (なし。変換は全てフロント JS 上で実行) |
 | `index_text` の対象 | `hex` |
 
-### 12.4 M-Hash
+### 12.5 M-Hash
 | 項目 | 値 |
 |------|----|
 | `id` | `hash` |
@@ -678,7 +692,7 @@ src/modules/<id>/
 | 固有 IPC コマンド | `hash_compute_text` / `hash_compute_file` (進捗は **Tauri Channel `HashFileProgress`** 経由 / キャンセルは `core_cancel_operation`、ADR-0009 §2.4) |
 | `index_text` | 呼ばれない (items を持たないため) |
 
-### 12.5 M-Palette
+### 12.6 M-Palette
 
 | 項目 | 値 |
 |------|----|
@@ -688,7 +702,7 @@ src/modules/<id>/
 | 固有 IPC コマンド | なし。配色生成と色変換はフロント JS 上で実行 |
 | `index_text` の対象 | 5 色の `hex` + `harmony` |
 
-### 12.6 Stateless 開発ツール
+### 12.7 Stateless 開発ツール
 
 | ID | 固有 IPC | 実行境界 |
 |---|---|---|
@@ -744,3 +758,4 @@ src/modules/<id>/
 | 2026-08-22 | 0.6 | ADR-0012 を反映。`enabledByDefault` を `settings.json` の既定値として有効化し、無効時の search / routing / export / import 契約と全モジュール共通の project route を明記。残っていた colon 形式の invoke 例を underscore 形式へ修正し、Q-23 を解決済みに移動 |
 | 2026-08-22 | 0.7 | §12.5 に stateful な M-Palette 契約を追加。共通 items CRUD を使い、固有 IPC とコア DB スキーマ変更を持たないことを確定 |
 | 2026-08-23 | 0.8 | ADR-0014 / ADR-0015を反映。`ModuleDefinition.category`をoptional metadataとして追加し、stateless開発ツール11種とHTTP IPC境界を§12.6へ追加 |
+| 2026-08-25 | 0.9 | ADR-0016を反映。M-Link payloadから単独Memoを除外し、共通items APIのみを使うM-Memoと4つのFrontend routeを追加。公開Storage / ModuleDefinition契約は不変 |

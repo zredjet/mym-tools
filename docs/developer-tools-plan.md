@@ -64,7 +64,7 @@
 
 ## 6. 実装結果
 
-- 11機能を個別のFrontend / Backend moduleとして登録し、既存5機能と合わせて16モジュールになった。
+- 11機能を個別のFrontend / Backend moduleとして登録し、Link / Memo分離後の既存6機能と合わせて17モジュールになった。
 - カテゴリ別の折りたたみSidebarとSettings表示を追加し、開閉状態を`core.collapsed_module_categories`へ保存する。
 - 全新規画面をroute単位で遅延読込し、未使用モジュールの処理ライブラリを起動時bundleから分離した。
 - Frontendの純粋処理テスト、11画面の代表操作テスト、registry / settingsテストを追加した。

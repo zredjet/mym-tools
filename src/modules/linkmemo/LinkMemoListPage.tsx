@@ -1,24 +1,15 @@
 /**
- * M-LinkMemo 一覧 (`docs/ui-design.md` §6.4 / §9.2)。
+ * M-Link 一覧 (`docs/ui-design.md` §6.4 / §9.2)。
  *
  * create + edit + C-15 タイプ・トゥ・コンファーム削除 + open を提供する。
- * - 行高 32px / type 別アイコン (URL: 🌐 / Path: 📄 / Memo: 📝)
- * - クリックで OS 既定アプリで開く (memo は `LinkMemoMemoDialog` で body を表示)
+ * - 行高 32px / type 別アイコン (URL: 🌐 / Path: 📄)
+ * - クリックで OS 既定アプリで開く
  * - 編集ボタン → `LinkMemoItemDialog` (mode=edit)
  * - 削除は `ConfirmDeleteDialog`
  * - `mod+n` で新規
  */
 import { useCallback, useEffect, useState } from "react";
-import {
-  ExternalLink,
-  FileText,
-  Globe,
-  GripVertical,
-  Pencil,
-  Plus,
-  StickyNote,
-  Trash2,
-} from "lucide-react";
+import { ExternalLink, FileText, Globe, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useParams } from "react-router-dom";
 import {
@@ -42,13 +33,12 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { deleteItem, listItems, reorderItems } from "@/ipc/items";
+import { deleteItem, listAllItems, reorderItems } from "@/ipc/items";
 import { linkmemoOpen } from "@/ipc/linkmemo";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
-import type { Item, LinkMemoPayloadV1 } from "@/lib/types";
+import type { Item, LinkPayloadV1 } from "@/lib/types";
 import { LinkMemoItemDialog } from "@/modules/linkmemo/LinkMemoItemDialog";
-import { LinkMemoMemoDialog } from "@/modules/linkmemo/LinkMemoMemoDialog";
 
 export function LinkMemoListPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -58,12 +48,11 @@ export function LinkMemoListPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deletingItem, setDeletingItem] = useState<Item | null>(null);
-  const [viewingMemo, setViewingMemo] = useState<Item | null>(null);
 
   const refresh = useCallback(async (pid: string) => {
     try {
       setLoading(true);
-      const list = await listItems({ moduleId: "linkmemo", projectId: pid });
+      const list = await listAllItems({ moduleId: "linkmemo", projectId: pid });
       setItems(list);
       setError(null);
     } catch (e) {
@@ -78,7 +67,7 @@ export function LinkMemoListPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const list = await listItems({ moduleId: "linkmemo", projectId });
+        const list = await listAllItems({ moduleId: "linkmemo", projectId });
         if (!cancelled) {
           setItems(list);
           setError(null);
@@ -136,12 +125,7 @@ export function LinkMemoListPage() {
 
   const handleOpen = async (item: Item) => {
     const payload = asPayload(item);
-    // memo は OS で開けないので詳細モーダルを表示
-    if (payload.type === "memo") {
-      setViewingMemo(item);
-      return;
-    }
-    if (payload.target == null || payload.target === "") return;
+    if (payload.target === "") return;
     try {
       await linkmemoOpen({ itemType: payload.type, target: payload.target });
     } catch (e) {
@@ -161,10 +145,10 @@ export function LinkMemoListPage() {
     <div className="flex h-full flex-col px-[var(--page-pad)] py-6">
       <header className="mb-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold">
-          Links / Memos <span className="text-[var(--fg-subtle)]">· {items.length}</span>
+          Links <span className="text-[var(--fg-subtle)]">· {items.length}</span>
         </h1>
         <Button variant="primary" onClick={() => setCreateOpen(true)}>
-          <Plus size={14} aria-hidden /> 新規 Link/Memo
+          <Plus size={14} aria-hidden /> 新規 Link
           <span className="ml-1 text-[10px] opacity-70">⌘N</span>
         </Button>
       </header>
@@ -184,11 +168,11 @@ export function LinkMemoListPage() {
         <div className="flex-1 rounded-[var(--radius)] border border-dashed border-[var(--border)]">
           <EmptyState
             icon="🔗"
-            title="Link / Memo を追加しましょう"
-            description="URL / ローカルパス / メモをプロジェクトごとに整理できます。"
+            title="Link を追加しましょう"
+            description="URL / ローカルパスをプロジェクトごとに整理できます。"
             actions={
               <Button variant="primary" onClick={() => setCreateOpen(true)}>
-                <Plus size={14} aria-hidden /> 新規 Link/Memo
+                <Plus size={14} aria-hidden /> 新規 Link
               </Button>
             }
           />
@@ -229,30 +213,18 @@ export function LinkMemoListPage() {
       )}
       <ConfirmDeleteDialog
         open={deletingItem != null}
-        entityLabel="Link / Memo"
+        entityLabel="Link"
         name={deletingItem?.title ?? ""}
         onClose={() => setDeletingItem(null)}
         onConfirm={handleConfirmDelete}
-      />
-      <LinkMemoMemoDialog
-        open={viewingMemo != null}
-        item={viewingMemo}
-        onClose={() => setViewingMemo(null)}
-        onEdit={() => {
-          // 詳細モーダルから編集に遷移
-          if (viewingMemo == null) return;
-          const item = viewingMemo;
-          setViewingMemo(null);
-          setEditingItem(item);
-        }}
       />
     </div>
   );
 }
 
-function asPayload(item: Item): LinkMemoPayloadV1 {
-  const p = item.payload as LinkMemoPayloadV1 | undefined;
-  return p ?? { type: "memo", target: null, body: "" };
+function asPayload(item: Item): LinkPayloadV1 {
+  const p = item.payload as LinkPayloadV1 | undefined;
+  return p ?? { type: "url", target: "", body: "" };
 }
 
 function LinkMemoRow({
@@ -267,8 +239,8 @@ function LinkMemoRow({
   onDelete: () => void;
 }) {
   const payload = asPayload(item);
-  const Icon = payload.type === "url" ? Globe : payload.type === "path" ? FileText : StickyNote;
-  const openable = payload.type !== "memo" && payload.target != null && payload.target !== "";
+  const Icon = payload.type === "url" ? Globe : FileText;
+  const openable = payload.target !== "";
 
   // D&D (`docs/ui-design.md` §3.3.1)、Sidebar / Prompt と同パターン
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -301,18 +273,12 @@ function LinkMemoRow({
       <Icon
         size={14}
         aria-hidden
-        className={
-          payload.type === "url"
-            ? "text-[var(--accent)]"
-            : payload.type === "path"
-              ? "text-[var(--fg-muted)]"
-              : "text-[var(--fg-subtle)]"
-        }
+        className={payload.type === "url" ? "text-[var(--accent)]" : "text-[var(--fg-muted)]"}
       />
       <button
         type="button"
         onClick={onOpen}
-        title={payload.type === "memo" ? "メモを表示" : (payload.target ?? "")}
+        title={payload.target}
         className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-[var(--fg)] hover:text-[var(--accent)]"
       >
         {item.title}

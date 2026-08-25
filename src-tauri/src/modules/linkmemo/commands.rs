@@ -1,4 +1,4 @@
-//! M-LinkMemo の Tauri コマンド (`module-contract.md` §12.2)。
+//! M-Link の Tauri コマンド (`module-contract.md` §12.2)。
 //!
 //! - `linkmemo_normalize_target`: 入力文字列を `(type, target)` に正規化。pure function
 //!   なので Tauri ランタイム不要 (テストは `normalize` モジュールで完結)
@@ -25,7 +25,6 @@ pub fn linkmemo_normalize_target(input: String) -> NormalizedTarget {
 /// - `url`: 既定ブラウザで `target` を開く (`http://` / `https://` のみ受理、
 ///   `file://` 等は事前に `linkmemo_normalize_target` で path 化されている前提)
 /// - `path`: OS 既定ファイラー / 既定アプリで `target` を開く (Finder / Explorer)
-/// - `memo`: アプリ内表示なので **OS 経由で開かない**。呼ばれたら validation エラー
 #[tauri::command]
 pub async fn linkmemo_open<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -56,12 +55,6 @@ pub async fn linkmemo_open<R: tauri::Runtime>(
             app.opener()
                 .open_path(target, None::<&str>)
                 .map_err(|e| AppError::Internal(format!("opener.open_path failed: {e}")))?;
-        }
-        "memo" => {
-            return Err(AppError::Validation {
-                module_id: "linkmemo".into(),
-                reason: "linkmemo_open: memo type cannot be opened with OS app".into(),
-            });
         }
         other => {
             return Err(AppError::Validation {

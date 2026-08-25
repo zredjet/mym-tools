@@ -103,7 +103,7 @@ export function AppShell() {
     return null;
   }, [projects, projectId, lastOpenedProjectId]);
 
-  // Cmd/Ctrl+1〜5 で現在有効なモジュールを registry 順に切替 (`docs/ui-design.md` §8.1)
+  // Cmd/Ctrl+1〜6 はモジュール追加・無効化でずれない固定割当 (`docs/ui-design.md` §8.1)
   const goToModule = useCallback(
     (mod: ModuleId) => {
       if (currentProject == null) return;
@@ -116,23 +116,27 @@ export function AppShell() {
   );
   useHotkeys("mod+1", (e) => {
     e.preventDefault();
-    if (visibleModules[0] != null) goToModule(visibleModules[0].id);
+    goToModule("prompt");
   });
   useHotkeys("mod+2", (e) => {
     e.preventDefault();
-    if (visibleModules[1] != null) goToModule(visibleModules[1].id);
+    goToModule("linkmemo");
   });
   useHotkeys("mod+3", (e) => {
     e.preventDefault();
-    if (visibleModules[2] != null) goToModule(visibleModules[2].id);
+    goToModule("memo");
   });
   useHotkeys("mod+4", (e) => {
     e.preventDefault();
-    if (visibleModules[3] != null) goToModule(visibleModules[3].id);
+    goToModule("color");
   });
   useHotkeys("mod+5", (e) => {
     e.preventDefault();
-    if (visibleModules[4] != null) goToModule(visibleModules[4].id);
+    goToModule("hash");
+  });
+  useHotkeys("mod+6", (e) => {
+    e.preventDefault();
+    goToModule("palette");
   });
 
   // Cmd/Ctrl+, で設定ページ (`docs/ui-design.md` §8.1)

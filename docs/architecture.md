@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-08-22 / ステータス: Draft (Phase 1)
+最終更新: 2026-08-25 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -37,9 +37,10 @@
 |  |  │                      |    ├─ ExportImportService     |   |
 |  |  └─ ModuleRegistry      |    ├─ ModuleRegistry          |   |
 |  |     ├─ M-Prompt UI      |    │                          |   |
-|  |     ├─ M-LinkMemo UI    |    Module Backends            |   |
+|  |     ├─ M-Link UI        |    Module Backends            |   |
+|  |     ├─ M-Memo UI        |    ├─ M-Memo backend          |   |
 |  |     ├─ M-Color UI       |    ├─ M-Prompt commands       |   |
-|  |     ├─ M-Hash UI        |    ├─ M-LinkMemo commands     |   |
+|  |     ├─ M-Hash UI        |    ├─ M-Link commands         |   |
 |  |     └─ M-Palette UI     |    ├─ M-Color backend         |   |
 |  |                         |    ├─ M-Hash commands         |   |
 |  |                         |    └─ M-Palette backend       |   |
@@ -511,3 +512,4 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-08-22 | 0.5 | ADR-0013受理反映: §9をmacOS / Windows portable ZIPへ統一し、手動version入力から全OS成功後にReleaseを公開するPhase 1 CDを§13の確定事項へ追加 |
 | 2026-08-22 | 0.6 | 既存モジュールへ依存しない M-Palette を静的レジストリへ追加。共通 items + payload で永続化し、固有 IPC とコア DB スキーマ変更を持たない構成を追記 |
 | 2026-08-23 | 0.7 | ADR-0014 / ADR-0015を反映。表示専用category metadata、一機能一モジュールのstateless開発ツール、HTTPのRust IPC・非ログ通信境界を追記 |
+| 2026-08-25 | 0.8 | ADR-0016を反映。公開ID `linkmemo` のM-Linkと新規 `memo` backend/UIを分離し、共通items APIを維持した起動時所属移行を追加 |
