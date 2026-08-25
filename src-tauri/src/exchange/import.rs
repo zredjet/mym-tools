@@ -81,7 +81,7 @@ pub fn apply_import(
             Ok(ImportOutcome::Inserted) => {
                 // 親を新規作成できた場合だけ配下 items を試す。
                 for item in &pw.items {
-                    let inserted = import_one_item(
+                    let inserted_module_id = import_one_item(
                         storage,
                         modules_by_id,
                         &mut summary,
@@ -91,8 +91,8 @@ pub fn apply_import(
                     // codex PR-Y P1: **新規 INSERT が実際に発生したスコープのみ** を追跡する。
                     // skip / failed のみのスコープを normalize すると、無駄に position を書き換え
                     // data_revision +1 が発生する (= 再 import を no-op として扱う冪等性が崩れる)。
-                    if inserted {
-                        touched_scopes.insert((pw.project.id.0.clone(), item.module_id.clone()));
+                    if let Some(module_id) = inserted_module_id {
+                        touched_scopes.insert((pw.project.id.0.clone(), module_id));
                     }
                 }
             }
@@ -172,26 +172,38 @@ fn import_one_project(
 /// - import_item の真のエラー → failed
 /// - import_item の Skipped → skipped 計上
 ///
-/// 戻り値: **新規 INSERT が成功した場合のみ** `true`。skip / failed は `false`。
-/// 呼び出し側は `true` のときだけ `touched_scopes` に追加する (codex PR-Y P1)。
+/// 戻り値: **新規 INSERT が成功した場合のみ** 実効 module_id。skip / failed は `None`。
 fn import_one_item(
     storage: &Arc<dyn StorageService>,
     modules_by_id: &HashMap<String, Arc<dyn ModuleBackend>>,
     summary: &mut ImportSummary,
     parent_project_id: &str,
     item: &ItemExport,
-) -> bool {
-    let module = match modules_by_id.get(&item.module_id) {
+) -> Option<String> {
+    let (module_id, mut payload, mut from) = match normalize_legacy_linkmemo_memo(item) {
+        Ok(normalized) => normalized,
+        Err(reason) => {
+            summary.items_failed += 1;
+            summary.failures.push(ImportFailure {
+                entity: "item".into(),
+                id: item.id.0.clone(),
+                module_id: Some(item.module_id.clone()),
+                reason,
+            });
+            return None;
+        }
+    };
+    let module = match modules_by_id.get(&module_id) {
         Some(m) => m,
         None => {
             summary.items_failed += 1;
             summary.failures.push(ImportFailure {
                 entity: "item".into(),
                 id: item.id.0.clone(),
-                module_id: Some(item.module_id.clone()),
-                reason: format!("unknown module_id: {}", item.module_id),
+                module_id: Some(module_id.clone()),
+                reason: format!("unknown module_id: {module_id}"),
             });
-            return false;
+            return None;
         }
     };
 
@@ -202,19 +214,14 @@ fn import_one_item(
         summary.failures.push(ImportFailure {
             entity: "item".into(),
             id: item.id.0.clone(),
-            module_id: Some(item.module_id.clone()),
-            reason: format!(
-                "module {} is stateless and cannot accept items",
-                item.module_id
-            ),
+            module_id: Some(module_id.clone()),
+            reason: format!("module {} is stateless and cannot accept items", module_id),
         });
-        return false;
+        return None;
     }
 
     // payload を現行版までアップグレード (`data-model.md` §12.4 step 4)
     let current = module.current_payload_version();
-    let mut payload = item.payload.clone();
-    let mut from = item.payload_schema_version;
     while from < current {
         match module.upgrade_payload(from, payload) {
             Ok(next) => {
@@ -226,10 +233,10 @@ fn import_one_item(
                 summary.failures.push(ImportFailure {
                     entity: "item".into(),
                     id: item.id.0.clone(),
-                    module_id: Some(item.module_id.clone()),
+                    module_id: Some(module_id.clone()),
                     reason: format!("payload upgrade {} -> {} failed: {}", from, from + 1, e),
                 });
-                return false;
+                return None;
             }
         }
     }
@@ -239,13 +246,13 @@ fn import_one_item(
         summary.failures.push(ImportFailure {
             entity: "item".into(),
             id: item.id.0.clone(),
-            module_id: Some(item.module_id.clone()),
+            module_id: Some(module_id.clone()),
             reason: format!(
                 "payload_schema_version {} is newer than this build supports ({})",
                 from, current
             ),
         });
-        return false;
+        return None;
     }
 
     // validate (`data-model.md` §12.4 step 5)
@@ -254,10 +261,10 @@ fn import_one_item(
         summary.failures.push(ImportFailure {
             entity: "item".into(),
             id: item.id.0.clone(),
-            module_id: Some(item.module_id.clone()),
+            module_id: Some(module_id.clone()),
             reason: format!("validate failed: {e}"),
         });
-        return false;
+        return None;
     }
 
     // search_text 生成 (`data-model.md` §12.4 step 6)
@@ -270,7 +277,7 @@ fn import_one_item(
     let outcome = storage.import_item(
         &item.id,
         &crate::storage::ProjectId::new(parent_project_id.to_string()),
-        &item.module_id,
+        &module_id,
         &item.title,
         &item.tags,
         current,
@@ -283,23 +290,50 @@ fn import_one_item(
     match outcome {
         Ok(ImportOutcome::Inserted) => {
             summary.items_inserted += 1;
-            true
+            Some(module_id)
         }
         Ok(ImportOutcome::Skipped) => {
             summary.items_skipped += 1;
-            false
+            None
         }
         Err(e) => {
             summary.items_failed += 1;
             summary.failures.push(ImportFailure {
                 entity: "item".into(),
                 id: item.id.0.clone(),
-                module_id: Some(item.module_id.clone()),
+                module_id: Some(module_id),
                 reason: format!("insert failed: {e}"),
             });
-            false
+            None
         }
     }
+}
+
+/// export schema v1 の旧単独Memoを、module lookupより前に新しい契約へ正規化する。
+fn normalize_legacy_linkmemo_memo(
+    item: &ItemExport,
+) -> Result<(String, serde_json::Value, u32), String> {
+    let is_legacy_memo = item.module_id == "linkmemo"
+        && item.payload.get("type").and_then(serde_json::Value::as_str) == Some("memo");
+    if !is_legacy_memo {
+        return Ok((
+            item.module_id.clone(),
+            item.payload.clone(),
+            item.payload_schema_version,
+        ));
+    }
+    if item.payload_schema_version != 1 {
+        return Err(format!(
+            "legacy linkmemo memo requires payload_schema_version 1, got {}",
+            item.payload_schema_version
+        ));
+    }
+    let body = item
+        .payload
+        .get("body")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "legacy linkmemo memo has no body string".to_string())?;
+    Ok(("memo".into(), serde_json::json!({ "body": body }), 1))
 }
 
 fn record_skipped_orphan(summary: &mut ImportSummary, item: &ItemExport) {
@@ -394,6 +428,10 @@ mod tests {
         });
         let mut map = HashMap::new();
         map.insert("prompt".to_string(), module);
+        map.insert(
+            "memo".to_string(),
+            Arc::new(crate::modules::memo::MemoModule),
+        );
         (storage, map)
     }
 
@@ -486,6 +524,52 @@ mod tests {
         // 実 DB にも入った
         let p = storage.get_project(&ProjectId::new("p1")).unwrap();
         assert_eq!(p.name, "Project 1");
+    }
+
+    #[test]
+    fn imports_legacy_linkmemo_memo_as_memo_v1() {
+        let (storage, modules) = setup(1);
+        let legacy = ItemExport {
+            module_id: "linkmemo".into(),
+            title: "Legacy memo".into(),
+            tags: vec!["old".into()],
+            position: 7,
+            ..item(
+                "legacy-memo",
+                1,
+                json!({"type":"memo","target":null,"body":"searchable body"}),
+            )
+        };
+        let summary = apply_import(
+            &storage,
+            &modules,
+            &data_with(vec![ProjectWithItems {
+                project: project("p1", "P"),
+                items: vec![legacy],
+            }]),
+        );
+        assert_eq!(summary.items_inserted, 1);
+        let memo = storage
+            .list_items("memo", &ProjectId::new("p1"), 100, 0)
+            .unwrap();
+        assert_eq!(memo.len(), 1);
+        assert_eq!(memo[0].payload, json!({"body":"searchable body"}));
+        assert!(storage
+            .list_items("linkmemo", &ProjectId::new("p1"), 100, 0)
+            .unwrap()
+            .is_empty());
+        let found = storage
+            .search(
+                &crate::storage::types::SearchScope::Project {
+                    project_id: ProjectId::new("p1"),
+                },
+                "searchable",
+                Some(&["memo".into()]),
+                100,
+                0,
+            )
+            .unwrap();
+        assert_eq!(found.len(), 1);
     }
 
     #[test]

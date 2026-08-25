@@ -1,4 +1,4 @@
-//! M-Hash の Tauri コマンド (`module-contract.md` §12.4)。
+//! M-Hash の Tauri コマンド (`module-contract.md` §12.5)。
 //!
 //! - `hash_compute_text`: テキストハッシュ (Q-22 PoC で実装済)
 //! - `hash_compute_file`: ファイルハッシュ + キャンセル機構 (ADR-0009 §2)

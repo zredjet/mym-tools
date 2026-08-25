@@ -57,6 +57,14 @@ export function parseSettingsDocument(
         moduleEnabled[id] = value;
       }
     }
+    // Link / Memo 分離前の明示設定だけを一度継承する。memo が既にあれば個別設定を尊重する。
+    if (
+      known.has("memo") &&
+      moduleEnabled.memo == null &&
+      typeof enabled["linkmemo"] === "boolean"
+    ) {
+      moduleEnabled.memo = enabled["linkmemo"];
+    }
   }
 
   const lastModule = stringOrNull(core?.["last_opened_module_id"]);

@@ -20,7 +20,7 @@ describe("settings document", () => {
         },
         modules: {},
       },
-      ["prompt", "linkmemo", "color", "hash", "palette"],
+      ["prompt", "linkmemo", "memo", "color", "hash", "palette"],
     );
 
     expect(parsed.theme).toBe("dark");
@@ -32,6 +32,24 @@ describe("settings document", () => {
     expect(parsed.rowDensity).toBe("comfortable");
     expect(parsed.moduleEnabled).toEqual({ prompt: false });
     expect(parsed.collapsedModuleCategories).toEqual(["text", "future"]);
+  });
+
+  it("inherits the explicit legacy Link enabled state for Memo only when Memo is absent", () => {
+    const inherited = parseSettingsDocument(
+      { schema_version: 1, core: { module_enabled: { linkmemo: false } }, modules: {} },
+      ["linkmemo", "memo"],
+    );
+    expect(inherited.moduleEnabled).toEqual({ linkmemo: false, memo: false });
+
+    const explicit = parseSettingsDocument(
+      {
+        schema_version: 1,
+        core: { module_enabled: { linkmemo: false, memo: true } },
+        modules: {},
+      },
+      ["linkmemo", "memo"],
+    );
+    expect(explicit.moduleEnabled).toEqual({ linkmemo: false, memo: true });
   });
 
   it("merges current values without discarding unknown keys", () => {

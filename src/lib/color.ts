@@ -1,12 +1,12 @@
 /**
  * 色空間変換ユーティリティ (`docs/ui-design.md` §6.5 K-2)。
  *
- * HEX を canonical (`data-model.md` §10.3) として、RGB / HSL / OKLCH の表記文字列
+ * HEX を canonical (`data-model.md` §10.4) として、RGB / HSL / OKLCH の表記文字列
  * との相互変換を提供する。
  *
  * 各 `parseXxx(input)` は **入力文字列を受けて canonical HEX (6 桁、`#RRGGBB`、
  * 大文字)** を返す。パース失敗時は `null`。alpha は Phase 1 では扱わない (K-2 拡張
- * 余地として将来検討、`data-model.md` §10.3 では `#RRGGBBAA` も許容)。
+ * 余地として将来検討、`data-model.md` §10.4 では `#RRGGBBAA` も許容)。
  *
  * 各 `formatXxx(hex)` は HEX 6 桁を受けて表示用文字列を返す。culori 経由なので
  * sRGB <-> OKLab 変換は CSS Color 4 仕様に準拠 (https://drafts.csswg.org/css-color-4/)。
@@ -33,7 +33,7 @@ function strip6(hex: string): string {
 }
 
 /**
- * `#RRGGBB` または `#RRGGBBAA` の妥当な hex 文字列か判定する。`data-model.md` §10.3
+ * `#RRGGBB` または `#RRGGBBAA` の妥当な hex 文字列か判定する。`data-model.md` §10.4
  * で許容される backend 仕様と一致 (8 桁 alpha も valid 扱い)。
  */
 export function isValidStorableHex(hex: string): boolean {

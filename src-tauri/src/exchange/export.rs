@@ -171,6 +171,10 @@ mod tests {
                 id: "linkmemo",
                 version: 1,
             }),
+            Arc::new(TestModule {
+                id: "memo",
+                version: 1,
+            }),
             Arc::new(StatelessModule),
         ];
         (storage, modules)
@@ -187,6 +191,7 @@ mod tests {
         // hash (stateless) は含まれない
         assert!(data.module_versions.contains_key("prompt"));
         assert!(data.module_versions.contains_key("linkmemo"));
+        assert!(data.module_versions.contains_key("memo"));
         assert!(!data.module_versions.contains_key("hash"));
     }
 
@@ -212,6 +217,37 @@ mod tests {
         assert_eq!(pw.items[0].title, "Title 1");
         assert_eq!(pw.items[0].module_id, "prompt");
         assert_eq!(pw.items[0].payload_schema_version, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn exports_link_and_memo_as_separate_modules_in_schema_v1() -> Result<(), AppError> {
+        let (storage, modules) = setup();
+        let project = storage.create_project("P", None)?;
+        storage.create_item(
+            "linkmemo",
+            &project.id,
+            "Link",
+            &[],
+            1,
+            &json!({"type":"url","target":"https://example.com","body":"note"}),
+            "Link https://example.com note",
+        )?;
+        storage.create_item(
+            "memo",
+            &project.id,
+            "Memo",
+            &[],
+            1,
+            &json!({"body":"body"}),
+            "Memo body",
+        )?;
+
+        let data = build_export_data(&storage, &modules, "0.1.0")?;
+        assert_eq!(data.schema_version, 1);
+        let items = &data.projects[0].items;
+        assert!(items.iter().any(|item| item.module_id == "linkmemo"));
+        assert!(items.iter().any(|item| item.module_id == "memo"));
         Ok(())
     }
 

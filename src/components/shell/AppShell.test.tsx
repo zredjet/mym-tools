@@ -40,7 +40,7 @@ describe("AppShell", () => {
     expect(shell).not.toHaveClass("h-screen", "w-screen");
   });
 
-  it("opens the fifth visible module with Cmd/Ctrl+5", async () => {
+  it("uses fixed module shortcuts for Memo and Palette", async () => {
     vi.mocked(listProjects).mockResolvedValue([
       {
         id: "p1",
@@ -62,9 +62,41 @@ describe("AppShell", () => {
     );
 
     await waitFor(() => expect(listProjects).toHaveBeenCalled());
-    fireEvent.keyDown(document, { key: "5", code: "Digit5", ctrlKey: true });
+    fireEvent.keyDown(document, { key: "3", code: "Digit3", ctrlKey: true });
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent("/projects/p1/m/memo"),
+    );
+    fireEvent.keyDown(document, { key: "6", code: "Digit6", ctrlKey: true });
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent("/projects/p1/m/palette"),
+    );
+  });
+
+  it("does nothing when the fixed shortcut target is disabled", async () => {
+    useAppStore.setState({ moduleEnabled: { memo: false } });
+    vi.mocked(listProjects).mockResolvedValue([
+      {
+        id: "p1",
+        name: "Project",
+        description: null,
+        position: 0,
+        created_at: "",
+        updated_at: "",
+      },
+    ]);
+    render(
+      <MemoryRouter initialEntries={["/projects/p1/m/prompt"]}>
+        <Routes>
+          <Route path="/projects/:projectId/*" element={<AppShell />}>
+            <Route path="m/:moduleId" element={<LocationProbe />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.keyDown(document, { key: "3", code: "Digit3", ctrlKey: true });
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent("/projects/p1/m/prompt"),
     );
   });
 });

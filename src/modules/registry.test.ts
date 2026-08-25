@@ -14,6 +14,7 @@ describe("frontend module registry", () => {
     expect(modules.map((module) => module.id)).toEqual([
       "prompt",
       "linkmemo",
+      "memo",
       "color",
       "hash",
       "palette",
@@ -31,6 +32,24 @@ describe("frontend module registry", () => {
     ]);
     expect(() => validateModuleDefinitions(modules)).not.toThrow();
     for (const module of modules) expect(module.routes.length).toBeGreaterThan(0);
+  });
+
+  it("routes Memo search results to the detail page", () => {
+    const memo = getModuleDefinition("memo")!;
+    expect(
+      memo.searchAdapter?.formatResult({
+        id: "memo-1",
+        project_id: "p1",
+        module_id: "memo",
+        title: "設計メモ",
+        tags: [],
+        payload_schema_version: 1,
+        payload: { body: "本文" },
+        position: 0,
+        created_at: "",
+        updated_at: "",
+      }),
+    ).toEqual({ title: "設計メモ", subtitle: "本文", targetPath: "/memo-1" });
   });
 
   it("is the single lookup and path authority", () => {

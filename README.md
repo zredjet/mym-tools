@@ -73,11 +73,11 @@ cargo test --workspace --lib --all-features --locked
 
 ## 開発状況
 
-**Phase 1 の主要機能を実装済み (`0.1.0-alpha.6`)**。
+**Phase 1 の主要機能を実装済み (`0.1.0-alpha.7`)**。
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
 rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing の Rust バックエンドで構成。
-プロジェクト管理、カテゴリ表示付き16モジュール、横断検索、`settings.json`、バックアップ、
+プロジェクト管理、カテゴリ表示付き17モジュール、横断検索、`settings.json`、バックアップ、
 アプリ全体／プロジェクト単位の JSON export / import を備える。
 
 CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2)

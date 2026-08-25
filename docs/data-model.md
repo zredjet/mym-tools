@@ -1,6 +1,6 @@
 # データモデル (Data Model)
 
-最終更新: 2026-08-22 / ステータス: Draft (Phase 1)
+最終更新: 2026-08-25 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**データをどう持つか**」を定義する。
 要件 (`requirements.md`) と構造 (`architecture.md`) で確定した方針を、
@@ -13,7 +13,7 @@
 確定済みの方針 (D-01 〜 D-13) を満たす具体スキーマを定義する。特に:
 
 - **D-03**: 原則マイグレーション不要 — schema 変更は payload 側で吸収
-- **D-11**: 各行に `payload_schema_version` を持たせ Lazy Migration on Read を実装
+- **D-11**: 各行に `payload_schema_version` を持たせ Eager-on-Read を実装
 - **D-12**: items 書き込みと FTS5 を同一トランザクションに閉じる (SQLite トリガ)
 - **E-04**: コア起因のマイグレーションを発生させない
 
@@ -589,15 +589,15 @@ project 削除実行時、StorageService は**削除トランザクションの�
 
 **search_text 生成**: `title + " " + body`
 
-### 10.2 M-LinkMemo (Q-08 の決着)
+### 10.2 M-Link (`id = linkmemo`)
 
-> **採用案**: 単一テーブル + `type` フラグ (architecture.md §4.4 の方針と整合)
+公開済みIDは互換性のため維持し、URL / Pathとリンク固有の任意メモだけを保存する。
 
 ```jsonc
 // items.payload (version 1)
 {
-  "type": "url" | "path" | "memo",
-  "target": "https://example.com" | "/Users/x/folder" | "\\\\nas\\share\\dir" | null,
+  "type": "url" | "path",
+  "target": "https://example.com" | "/Users/x/folder" | "\\\\nas\\share\\dir",
   "body": "任意のメモ本文"
 }
 ```
@@ -606,7 +606,6 @@ project 削除実行時、StorageService は**削除トランザクションの�
 |--------|----------|--------|------------------|
 | `url`  | URL 文字列 (必須) — `http` / `https` のみ | 任意 | 既定ブラウザで `target` を開く |
 | `path` | OS パス (必須) — ローカル / UNC 形式 / `file://` 由来のパス | 任意 | OS 既定ファイラーで `target` を開く |
-| `memo` | `null` | 必須 | アプリ内で `body` を表示 |
 
 **ローカルとネットワークパスを `type` で分けない理由**:
 - 「開く」の挙動は同じ (OS の Explorer / Finder が透過的にローカル/UNC を解釈する)
@@ -624,11 +623,24 @@ project 削除実行時、StorageService は**削除トランザクションの�
 **バリデーション**:
 - `type=url` のとき: `target` は `http://` または `https://` で始まる (`file://` 入力は path に正規化されているのでここに来ない)
 - `type=path` のとき: `target` は空文字でない
-- `type=memo` のとき: `body` は空文字でない (空メモは項目化させない)
+**search_text 生成**: `title + " " + target + " " + body`
 
-**search_text 生成**: `title + " " + (target ?? "") + " " + body`
+### 10.3 M-Memo (`id = memo`)
 
-### 10.3 M-Color
+```jsonc
+// items.payload (version 1)
+{
+  "body": "# 見出し\n\nMarkdown本文"
+}
+```
+
+- `title` / `tags` は共通カラムを使う
+- `body` は空白だけを許可しない
+- Linkに付随する任意メモはM-Linkの`body`に残し、リンクを伴わない単独Memoだけを本モジュールへ所属させる
+
+**search_text 生成**: `title + " " + tags.join(" ") + " " + body`
+
+### 10.4 M-Color
 
 ```jsonc
 // items.payload (version 1)
@@ -646,12 +658,12 @@ project 削除実行時、StorageService は**削除トランザクションの�
 色名 (例: "red") で検索したい場合は、ユーザーが `title` に色名を入れる前提とする。
 `hex` から自動で色名を引く辞書 (例: CSS Named Colors) は持たない (Phase 1 では YAGNI / 言語依存の温床になりやすい)。
 
-### 10.4 M-Hash (D-06)
+### 10.5 M-Hash (D-06)
 
 `items` テーブルには**何も保存しない**。
 モジュールは `is_stateless = true` を宣言する (詳細は `module-contract.md`)。
 
-### 10.5 M-Palette
+### 10.6 M-Palette
 
 ```jsonc
 // items.payload (version 1)
@@ -695,6 +707,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
     "module_enabled": {
       "prompt": true,
       "linkmemo": true,
+      "memo": true,
       "color": true,
       "hash": true,
       "palette": true,
@@ -707,6 +720,9 @@ project 削除実行時、StorageService は**削除トランザクションの�
     },
     "linkmemo": {
       "favicon_fetch_enabled": false,
+      "last_seen_payload_version": 1
+    },
+    "memo": {
       "last_seen_payload_version": 1
     },
     "color": {
@@ -727,6 +743,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
 - `core.ui_scale`: 0.75〜1.5。範囲外は読み込み時に clamp する
 - `core.row_density`: `compact` (32 px) / `comfortable` (36 px)
 - `core.module_enabled.<id>`: UI 上の有効状態。キーが無ければ registry の `enabledByDefault` を使う (ADR-0012)
+- ADR-0016以前の設定で `linkmemo` が明示され、`memo` が無い場合だけ、初回読込み時のMemo有効状態へ同値を継承する。`memo` が存在すれば個別値を優先する
 - `core.collapsed_module_categories`: サイドバーで閉じた表示カテゴリIDの配列。キーが無い初回は全展開。未知IDは前方互換のため保持する (ADR-0014)
 
 #### 例外: `modules.<id>.last_seen_payload_version` (コアが解釈する規約フィールド)
@@ -785,6 +802,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
   "module_versions": {                            // 各モジュールが書き出した時の payload 版を記録
     "prompt": 1,
     "linkmemo": 1,
+    "memo": 1,
     "color": 1
   },
   "projects": [
@@ -818,6 +836,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
 - `scope = "app"` は全プロジェクト、`scope = "project"` は `projects` 配列が指定プロジェクト 1 件だけでなければならない。project scope の JSON が 0 件または複数件ならファイル全体を拒否する
 - `search_text` は**書き出さない** (再生成可能なため。インポート時にモジュールの `index_text()` で再構築)
 - `module_versions` は「エクスポート時点で各モジュールが現役だった版」のメモ。インポート先がそれより新しい版を持っていれば Eager-on-Read と同じ仕組みで吸収できる
+- 新規exportは`linkmemo`と`memo`を別モジュールとして出力する。schema versionは1を維持する
 - インポート時のプロジェクト名衝突は許容 (別プロジェクトとしてそのまま投入)
 - `projects.id` が既存 DB と衝突した場合は、その project と配下 items をまとめてスキップする (§3.3)
 - モジュールの UI 有効状態はデータ移送のフィルタに使わない。無効モジュールの items も export / import 対象に含める (ADR-0012)
@@ -861,13 +880,13 @@ project 削除実行時、StorageService は**削除トランザクションの�
 ```
 [インポート 1 件あたりの流れ]
 1. JSON ルートの schema_version を見てコンバータを通す (バッチ全体の前処理)
-2. item の module_id をモジュールレジストリで解決
-3. ID 衝突チェック (§3.3 のスキップ規則)
-4. payload を現行 payload_schema_version までアップグレード (モジュールの upgrade_payload を順次適用)
-5. アップグレード後 payload を validate_payload() で検証
-6. アップグレード後 payload に対して index_text() を実行し search_text を生成
-7. items に INSERT (1 トランザクション、FTS5 トリガが連動)
-8. 失敗時は当該行のトランザクションのみロールバックし、残りは継続
+2. export schema v1の旧 `module_id=linkmemo` / `payload.type=memo` を `module_id=memo` / `{body}` v1へ正規化
+3. item の module_id をモジュールレジストリで解決
+4. ID 衝突チェック (§3.3 のスキップ規則)
+5. payload を現行 payload_schema_version までアップグレード (モジュールの upgrade_payload を順次適用)
+6. アップグレード後 payload を validate_payload() で検証
+7. アップグレード後 payload に対して index_text() を実行し search_text を生成
+8. items に INSERT (1 トランザクション、FTS5 トリガが連動)。失敗時は当該行だけロールバックし残りは継続
 ```
 
 #### 投入後の追補処理 (バッチ全体に対して 1 回)
@@ -1128,6 +1147,19 @@ ADR-0011 §2.1 のチェックリストを満たすものに限る:
 |---|---|---|
 | 1 → 2 | `items.position` カラム追加 (`NOT NULL DEFAULT 0`) + `idx_items_project_module_position` 追加 | PR-Y / ADR-0011 |
 
+### 14.5 Link / Memo所属移行の限定例外 (ADR-0016)
+
+この処理はDB schema migrationではないため`MIGRATIONS`配列と`db_schema_version`を変更しない。通常画面表示前に次の順序で実行する。
+
+1. `module_id=linkmemo`かつ`payload.type=memo`の未移行行を数える。0件なら何もしない
+2. 1件以上なら`pre-split-linkmemo` pre-opバックアップを取得する。失敗時は起動停止しDBを変更しない
+3. 全対象payloadの`body`を変換可能か先に検証する
+4. 単一トランザクションで`module_id=memo`、payload v1 `{body}`、Memo用`search_text`へ更新する。FTSはUPDATEトリガで同期する
+5. 影響projectの`linkmemo` / `memo`それぞれを現在の表示順のまま`position=0..N-1`へ正規化する
+6. ID、project、title、tags、created_at、updated_atを保持し、`data_revision`を増やさない。1件でも失敗すれば全件ロールバックする
+
+再起動時は旧所属行だけを再判定するため冪等である。旧版へ戻す自動処理は提供せず、pre-opバックアップを復旧手段とする。
+
 ---
 
 ## 15. 整合性テスト一覧 (Acceptance Test Scenarios)
@@ -1177,6 +1209,12 @@ ADR-0011 §2.1 のチェックリストを満たすものに限る:
 | T-38 | `core_reorder_items` の引数検証 | `ordered_ids` 集合が `SELECT id FROM items WHERE project_id=? AND module_id=?` と完全一致しない (欠損 / 余分 / 他スコープ ID 混入) → `AppError::Validation` で reject。1 件成功時は全件 UPDATE → `data_revision +1`、`updated_at` 不変 (§6.5) |
 | T-39 | `core_reorder_items` で他スコープの item ID を ordered_ids に混入 | UPDATE 句の三条件 WHERE (`id=? AND project_id=? AND module_id=?`) で物理的に弾かれ、他スコープが silently 上書きされない (§6.5) |
 | T-40 | 未編集スコープ (全行 position=0) への新規 INSERT | 新規行も `position=0` で append され、全行 0 が維持される。ORDER BY タイブレーカーで updated_at DESC により先頭に表示される (§6.5) |
+| T-41 | Link / Memo混在DBで起動 | 旧単独Memoだけが`memo` / `{body}`へ移り、Linkの任意`body`は`linkmemo`に残る。ID、project、title、tags、時刻、相対順序を保持し両positionが密になる (§14.5) |
+| T-42 | T-41後に再起動 | 対象0件としてバックアップもUPDATEも発生しない |
+| T-43 | `pre-split-linkmemo`バックアップ失敗 | 所属移行を開始せず、旧行を保持したまま起動失敗経路へ進む |
+| T-44 | 複数対象中に変換不能payloadまたはSQL失敗 | トランザクション全体がロールバックし、部分移行・`data_revision`増加・`updated_at`変更が起きない |
+| T-45 | 旧export schema v1の`linkmemo/type=memo`をimport | module解決前に`memo/{body}` v1へ正規化され、Memo検索にヒットする |
+| T-46 | 新規export | schema version 1のまま`linkmemo`と`memo`が別moduleとして出力される |
 
 ---
 
@@ -1184,7 +1222,7 @@ ADR-0011 §2.1 のチェックリストを満たすものに限る:
 
 | ID | 論点 | 提案 |
 |----|------|------|
-| Q-08 | M-LinkMemo: 単一テーブル+種別フラグ vs 種別ごと分割 | **単一テーブル+`type`フラグ** (§10.2)。ローカル/ネットワークパスは `type=path` に統合。`file://` 入力は path に正規化 |
+| Q-08 | M-LinkMemo: 単一モジュール vs 分割 | 初期決定後、**ADR-0016でM-Link (`linkmemo`)とM-Memo (`memo`)へ分離**。Link内ではURL/Pathを`type`で区別する (§10.2 / §10.3) |
 | Q-11 | items 具体スキーマと FTS5 トリガ設計 | 本書 §6 / §8 で確定 |
 | Q-13 | 設定 JSON の名前空間設計 | `core` / `modules.<id>` の2階層 (§11) |
 | Q-14 | プロジェクト削除のカスケード | FK の `ON DELETE CASCADE` + `PRAGMA foreign_keys = ON` (§9) |
@@ -1223,3 +1261,4 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-04-30 | 0.9 | ADR-0009 受理反映: §17 から Q-15 を削除し ADR-0009 解決済みのフットノートを追加 (export / import / FTS 再構築 / リストアの進捗 Channel と writer mutex 中の挙動は ADR-0009 §1 表 / §7.2 を参照) |
 | 2026-08-22 | 1.0 | §10.5 に M-Palette payload v1 を追加。5 色、調和ルール、基準色位置を items.payload に保存し、コア DB スキーマは変更しない方針を確定 |
 | 2026-08-23 | 1.1 | ADR-0014を反映し、`core.collapsed_module_categories`を追加。開発ツール11種はstatelessのためDB schema、payload、export / importを変更しないことを確認 |
+| 2026-08-25 | 1.2 | ADR-0016を反映。M-Link / M-Memo payload、設定継承、旧export正規化、新export分離、`db_schema_version`を変えない起動時所属移行とT-41〜T-46を追加 |

@@ -1,7 +1,7 @@
 /**
- * LinkMemo 新規作成 / 編集ダイアログ (`docs/ui-design.md` §6.4 L-3)。
+ * Link 新規作成 / 編集ダイアログ (`docs/ui-design.md` §6.4 L-3)。
  *
- * `mode` で create / edit を切替。type は segmented control (URL / Path / Memo)。
+ * `mode` で create / edit を切替。type は segmented control (URL / Path)。
  *
  * 仕様:
  * - URL タブで `file://` 入力時は保存時に `linkmemo_normalize_target` で path に振替
@@ -12,7 +12,7 @@
  * - `Cmd/Ctrl + S` / `Cmd/Ctrl + Enter`: 保存
  */
 import { useState } from "react";
-import { FileText, Globe, StickyNote } from "lucide-react";
+import { FileText, Globe } from "lucide-react";
 import { useHotkeys } from "react-hotkeys-hook";
 
 import { Button } from "@/components/ui/Button";
@@ -21,9 +21,9 @@ import { createItem, updateItem } from "@/ipc/items";
 import { linkmemoNormalizeTarget } from "@/ipc/linkmemo";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
-import type { Item, LinkMemoPayloadV1 } from "@/lib/types";
+import type { Item, LinkPayloadV1 } from "@/lib/types";
 
-type LinkType = "url" | "path" | "memo";
+type LinkType = "url" | "path";
 
 type DialogMode = { mode: "create"; projectId: string } | { mode: "edit"; item: Item };
 
@@ -34,7 +34,7 @@ type Props = {
 } & DialogMode;
 
 export function LinkMemoItemDialog(props: Props) {
-  const title = props.mode === "create" ? "新規 Link / Memo" : "Link / Memo を編集";
+  const title = props.mode === "create" ? "新規 Link" : "Link を編集";
   return (
     <Modal open={props.open} onClose={props.onClose} title={title} widthClassName="w-full max-w-xl">
       {props.open && <Content {...props} />}
@@ -43,8 +43,8 @@ export function LinkMemoItemDialog(props: Props) {
 }
 
 function Content(props: Props) {
-  const initial: LinkMemoPayloadV1 | null =
-    props.mode === "edit" ? (props.item.payload as LinkMemoPayloadV1) : null;
+  const initial: LinkPayloadV1 | null =
+    props.mode === "edit" ? (props.item.payload as LinkPayloadV1) : null;
   const [type, setType] = useState<LinkType>(initial?.type ?? "url");
   const [title, setTitle] = useState(props.mode === "edit" ? props.item.title : "");
   const [target, setTarget] = useState(initial?.target ?? "");
@@ -56,14 +56,10 @@ function Content(props: Props) {
   const [error, setError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
 
-  const targetLabel = type === "url" ? "URL" : type === "path" ? "ローカルパス" : "本文";
-  const targetPlaceholder =
-    type === "url" ? "https://example.com" : type === "path" ? "/Users/redjet/folder" : "";
+  const targetLabel = type === "url" ? "URL" : "ローカルパス";
+  const targetPlaceholder = type === "url" ? "https://example.com" : "/Users/redjet/folder";
 
-  const canSubmit =
-    !submitting &&
-    title.trim().length > 0 &&
-    ((type !== "memo" && target.trim().length > 0) || (type === "memo" && body.trim().length > 0));
+  const canSubmit = !submitting && title.trim().length > 0 && target.trim().length > 0;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -72,10 +68,10 @@ function Content(props: Props) {
     setHint(null);
     try {
       let actualType: LinkType = type;
-      let actualTarget: string | null = target.trim() === "" ? null : target.trim();
+      let actualTarget = target.trim();
 
       // URL タブで `file://` を入れた場合は path に自動振替
-      if (type === "url" && actualTarget != null && actualTarget.startsWith("file://")) {
+      if (type === "url" && actualTarget.startsWith("file://")) {
         const normalized = await linkmemoNormalizeTarget(actualTarget);
         actualType = normalized.type;
         actualTarget = normalized.target;
@@ -86,10 +82,7 @@ function Content(props: Props) {
         .split(",")
         .map((t) => t.trim().replace(/^#/, ""))
         .filter((t) => t.length > 0);
-      const payload: LinkMemoPayloadV1 =
-        actualType === "memo"
-          ? { type: "memo", target: null, body: body.trim() }
-          : { type: actualType, target: actualTarget ?? "", body: body.trim() };
+      const payload: LinkPayloadV1 = { type: actualType, target: actualTarget, body: body.trim() };
 
       if (props.mode === "create") {
         await createItem({
@@ -149,12 +142,6 @@ function Content(props: Props) {
             selected={type === "path"}
             onClick={() => setType("path")}
           />
-          <TypeTab
-            label="Memo"
-            icon={<StickyNote size={14} aria-hidden />}
-            selected={type === "memo"}
-            onClick={() => setType("memo")}
-          />
         </div>
       </div>
 
@@ -173,28 +160,25 @@ function Content(props: Props) {
         />
       </Field>
 
-      {type !== "memo" && (
-        <Field label={targetLabel} htmlFor="link-target">
-          <input
-            id="link-target"
-            type="text"
-            required
-            maxLength={2000}
-            placeholder={targetPlaceholder}
-            className="h-8 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg)] px-2.5 text-sm text-[var(--fg)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            disabled={submitting}
-          />
-        </Field>
-      )}
+      <Field label={targetLabel} htmlFor="link-target">
+        <input
+          id="link-target"
+          type="text"
+          required
+          maxLength={2000}
+          placeholder={targetPlaceholder}
+          className="h-8 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg)] px-2.5 text-sm text-[var(--fg)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+          disabled={submitting}
+        />
+      </Field>
 
-      <Field label={type === "memo" ? "本文 (必須)" : "メモ (任意)"} htmlFor="link-body">
+      <Field label="メモ (任意)" htmlFor="link-body">
         <textarea
           id="link-body"
-          rows={type === "memo" ? 6 : 3}
-          required={type === "memo"}
-          placeholder={type === "memo" ? "メモ本文..." : "リンクへのメモ"}
+          rows={3}
+          placeholder="リンクへのメモ"
           className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg)] p-2.5 font-mono text-[13px] text-[var(--fg)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
           value={body}
           onChange={(e) => setBody(e.target.value)}

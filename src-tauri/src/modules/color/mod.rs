@@ -1,5 +1,5 @@
-//! M-Color: 色管理モジュール (`requirements.md` §2.2 / `data-model.md` §10.3 /
-//! `module-contract.md` §12.3)。
+//! M-Color: 色管理モジュール (`requirements.md` §2.2 / `data-model.md` §10.4 /
+//! `module-contract.md` §12.4)。
 //!
 //! ## payload (version 1)
 //! ```jsonc
@@ -12,7 +12,7 @@
 //!   (フロント側で正規化、バリデータは形式のみ確認)
 //! - 固有 IPC コマンド: なし (RGB/HSL 変換は全てフロント JS 上)
 //!
-//! ## search_text 生成 (`data-model.md` §10.3)
+//! ## search_text 生成 (`data-model.md` §10.4)
 //! `title + " " + hex`
 
 use serde_json::Value as JsonValue;
@@ -92,7 +92,7 @@ mod tests {
 
     #[test]
     fn validate_accepts_rrggbb_lowercase() {
-        // フロント正規化前の入力経路を考慮して大小文字どちらも受理 (data-model.md §10.3)
+        // フロント正規化前の入力経路を考慮して大小文字どちらも受理 (data-model.md §10.4)
         ColorModule
             .validate_payload(&json!({"hex": "#ff5733"}))
             .unwrap();

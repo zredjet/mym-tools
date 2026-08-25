@@ -14,6 +14,7 @@ pub mod http;
 pub mod idgen;
 pub mod jwt;
 pub mod linkmemo;
+pub mod memo;
 pub mod palette;
 pub mod prompt;
 pub mod regex;

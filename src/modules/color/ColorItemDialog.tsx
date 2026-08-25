@@ -4,7 +4,7 @@
  * `mode` で create / edit を切替。**HEX/RGB/HSL/OKLCH の 4 色空間を同時表示** し、
  * いずれかを編集すると他の 3 つも自動同期する (canonical = HEX、6 桁または 8 桁)。
  *
- * - 保存値は大文字正規化 (`docs/data-model.md` §10.3)
+ * - 保存値は大文字正規化 (`docs/data-model.md` §10.4)
  * - **alpha (`#RRGGBBAA`) は保存時に drop しない** (PR #43 codex P1):
  *   既存 8 桁データを開いて name / tags だけ編集 → 保存しても元の alpha を維持。
  *   ユーザーが色 input を触ると 6 桁化 (RGB / HSL / OKLCH 入力からは alpha 復元不能)

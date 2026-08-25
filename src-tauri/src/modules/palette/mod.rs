@@ -1,5 +1,5 @@
 //! M-Palette: 5 色カラーパレット作成モジュール (`requirements.md` §2.2 /
-//! `data-model.md` §10.5 / `module-contract.md` §12.5)。
+//! `data-model.md` §10.6 / `module-contract.md` §12.6)。
 //!
 //! ## payload (version 1)
 //! ```jsonc
