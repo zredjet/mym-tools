@@ -31,6 +31,10 @@ import { modulePath } from "@/modules/registry";
 
 export function MemoListPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  return <MemoListPageContent key={projectId} projectId={projectId} />;
+}
+
+function MemoListPageContent({ projectId }: { projectId: string | undefined }) {
   const navigate = useNavigate();
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);

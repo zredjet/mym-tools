@@ -12,6 +12,16 @@ import { modulePath } from "@/modules/registry";
 
 export function MemoDetailPage() {
   const { projectId, itemId } = useParams<{ projectId: string; itemId: string }>();
+  return <MemoDetailPageContent key={itemId} projectId={projectId} itemId={itemId} />;
+}
+
+function MemoDetailPageContent({
+  projectId,
+  itemId,
+}: {
+  projectId: string | undefined;
+  itemId: string | undefined;
+}) {
   const navigate = useNavigate();
   const [item, setItem] = useState<Item | null>(null);
   const [loading, setLoading] = useState(true);

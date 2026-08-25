@@ -32,6 +32,16 @@ const memo: Item = {
   updated_at: "",
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function router(initialEntry: string) {
   return createMemoryRouter(
     [
@@ -66,6 +76,21 @@ describe("Memo pages", () => {
     expect(listAllItems).toHaveBeenCalledWith({ moduleId: "memo", projectId: "project-1" });
   });
 
+  it("clears the previous project list while the next project loads", async () => {
+    const nextProject = deferred<Item[]>();
+    vi.mocked(listAllItems).mockResolvedValueOnce([memo]).mockReturnValueOnce(nextProject.promise);
+    const appRouter = router("/projects/project-1/m/memo");
+    render(<RouterProvider router={appRouter} />);
+    expect(await screen.findByText("設計メモ")).toBeInTheDocument();
+
+    await appRouter.navigate("/projects/project-2/m/memo");
+    expect(await screen.findByText("読込中...")).toBeInTheDocument();
+    expect(screen.queryByText("設計メモ")).not.toBeInTheDocument();
+
+    nextProject.resolve([]);
+    expect(await screen.findByText("まだメモがありません")).toBeInTheDocument();
+  });
+
   it("shows Markdown and Raw views and exposes copy and edit actions", async () => {
     const user = userEvent.setup();
     render(<RouterProvider router={router("/projects/project-1/m/memo/memo-1")} />);
@@ -76,6 +101,27 @@ describe("Memo pages", () => {
     expect(screen.getByRole("button", { name: /本文をコピー/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "編集" }));
     expect(await screen.findByRole("heading", { name: "メモを編集" })).toBeInTheDocument();
+  });
+
+  it("clears stale detail and errors while another Memo loads", async () => {
+    const nextMemo = deferred<Item>();
+    vi.mocked(getItem)
+      .mockResolvedValueOnce(memo)
+      .mockRejectedValueOnce(new Error("missing"))
+      .mockReturnValueOnce(nextMemo.promise);
+    const appRouter = router("/projects/project-1/m/memo/memo-1");
+    render(<RouterProvider router={appRouter} />);
+    expect(await screen.findByRole("heading", { name: "設計メモ" })).toBeInTheDocument();
+
+    await appRouter.navigate("/projects/project-1/m/memo/missing");
+    expect(await screen.findByRole("alert")).toHaveTextContent("missing");
+    await appRouter.navigate("/projects/project-1/m/memo/memo-2");
+    expect(await screen.findByText("メモを読み込んでいます...")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "設計メモ" })).not.toBeInTheDocument();
+
+    nextMemo.resolve({ ...memo, id: "memo-2", title: "次のメモ" });
+    expect(await screen.findByRole("heading", { name: "次のメモ" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("creates a Memo v1 and moves to its detail page", async () => {
