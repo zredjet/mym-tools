@@ -59,12 +59,13 @@ export function SecretGeneratorPage() {
                   min={8}
                   max={256}
                   value={options.length}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const length = event.currentTarget.valueAsNumber;
                     setOptions((current) => ({
                       ...current,
-                      length: event.currentTarget.valueAsNumber,
-                    }))
-                  }
+                      length,
+                    }));
+                  }}
                 />
               </label>
               {(["lower", "upper", "digits", "symbols", "excludeAmbiguous"] as const).map((key) => (
