@@ -2315,11 +2315,14 @@ dependencies = [
 
 [[package]]
 name = "mym-tools"
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "digest",
  "md-5",
+ "percent-encoding",
+ "quick-xml",
  "reqwest",
  "rusqlite",
  "serde",

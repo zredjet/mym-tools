@@ -5,12 +5,14 @@ import { colorModule } from "@/modules/color";
 import { codecModule } from "@/modules/codec";
 import { dateTimeModule } from "@/modules/datetime";
 import { cronModule } from "@/modules/cron";
+import { diagramModule } from "@/modules/diagram";
 import { hashModule } from "@/modules/hash";
 import { httpModule } from "@/modules/http";
 import { idGeneratorModule } from "@/modules/idgen";
 import { jwtModule } from "@/modules/jwt";
 import { linkMemoModule } from "@/modules/linkmemo";
 import { memoModule } from "@/modules/memo";
+import { mermaidModule } from "@/modules/mermaid";
 import { paletteModule } from "@/modules/palette";
 import { promptModule } from "@/modules/prompt";
 import { secretGeneratorModule } from "@/modules/secretgen";
@@ -40,6 +42,8 @@ export const modules: readonly ModuleDefinition[] = [
   colorModule,
   hashModule,
   paletteModule,
+  mermaidModule,
+  diagramModule,
   codecModule,
   urlQueryModule,
   dateTimeModule,

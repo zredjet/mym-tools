@@ -1,13 +1,16 @@
 {
   "name": "mym-tools",
   "private": true,
-  "version": "0.1.0-alpha.7",
+  "version": "0.1.0-alpha.8",
   "type": "module",
   "engines": {
     "node": ">=22 <23"
   },
   "scripts": {
+    "prepare:drawio": "node scripts/drawio/prepare-assets.mjs",
+    "predev": "npm run prepare:drawio",
     "dev": "vite",
+    "prebuild": "npm run prepare:drawio",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -31,6 +34,7 @@
     "culori": "^4.0.2",
     "diff": "^9.0.0",
     "lucide-react": "^1.14.0",
+    "mermaid": "11.17.2",
     "nanoid": "^6.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

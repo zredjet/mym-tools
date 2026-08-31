@@ -682,6 +682,37 @@ project 削除実行時、StorageService は**削除トランザクションの�
 
 **search_text 生成**: `title + " " + tags + " " + colors.join(" ") + " " + harmony`
 
+### 10.7 M-Mermaid
+
+```jsonc
+// items.payload (version 1)
+{
+  "source": "flowchart LR\n  A --> B"
+}
+```
+
+- `source`: UTF-8で1MiB以下のMermaid記法。空文字と構文不正は保存しない
+- themeや生成SVGは表示時に再生成し、payloadへ保存しない
+
+**search_text 生成**: `title + " " + tags + " " + source`
+
+### 10.8 M-Diagram
+
+```jsonc
+// items.payload (version 1)
+{
+  "xml": "<mxfile>...</mxfile>",
+  "text": "Client Server Database"
+}
+```
+
+- `xml`: UTF-8で1MiB以下。rootは`mxfile`または`mxGraphModel`だけを許可し、DTD / entity宣言を拒否する
+- `text`: draw.io editorの`textContent` actionで保存直前に取得する全page検索用文字列。UTF-8で1MiB以下
+- SVG / PNG export dataや画像binaryはitemsへ保存しない
+- project export/importは他のstateful moduleと同じpayload v1を通し、DB / export schema versionを変更しない
+
+**search_text 生成**: `title + " " + tags + " " + text`
+
 ---
 
 ## 11. 設定 JSON (`settings.json`, Q-13)
@@ -1215,6 +1246,10 @@ ADR-0011 §2.1 のチェックリストを満たすものに限る:
 | T-44 | 複数対象中に変換不能payloadまたはSQL失敗 | トランザクション全体がロールバックし、部分移行・`data_revision`増加・`updated_at`変更が起きない |
 | T-45 | 旧export schema v1の`linkmemo/type=memo`をimport | module解決前に`memo/{body}` v1へ正規化され、Memo検索にヒットする |
 | T-46 | 新規export | schema version 1のまま`linkmemo`と`memo`が別moduleとして出力される |
+| T-47 | Mermaid item create/update | 構文確認済みの1MiB以下sourceだけが保存され、title / tags / sourceで検索できる |
+| T-48 | Diagram item create/update | `mxfile` / `mxGraphModel` root、DTD/entityなし、XML/text各1MiB以下だけが保存され、textで検索できる |
+| T-49 | Diagramを含むproject export/import | 共通items経路でpayload v1を保持し、import後にtextからsearch_textが再生成される |
+| T-50 | `.drawio` / `.xml` import | 拡張子、容量、UTF-8、XML root、DTD/entityのいずれかが不正ならitemsを変更せず拒否する |
 
 ---
 
@@ -1262,3 +1297,4 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-08-22 | 1.0 | §10.5 に M-Palette payload v1 を追加。5 色、調和ルール、基準色位置を items.payload に保存し、コア DB スキーマは変更しない方針を確定 |
 | 2026-08-23 | 1.1 | ADR-0014を反映し、`core.collapsed_module_categories`を追加。開発ツール11種はstatelessのためDB schema、payload、export / importを変更しないことを確認 |
 | 2026-08-25 | 1.2 | ADR-0016を反映。M-Link / M-Memo payload、設定継承、旧export正規化、新export分離、`db_schema_version`を変えない起動時所属移行とT-41〜T-46を追加 |
+| 2026-08-31 | 1.3 | ADR-0017を反映。M-Mermaid / M-Diagram payload v1、1MiB境界、検索、共通export/import、T-47〜T-50を追加 |

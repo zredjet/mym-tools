@@ -17,12 +17,14 @@ use crate::modules::codec::CodecModule;
 use crate::modules::color::ColorModule;
 use crate::modules::cron::CronModule;
 use crate::modules::datetime::DateTimeModule;
+use crate::modules::diagram::DiagramModule;
 use crate::modules::hash::HashModule;
 use crate::modules::http::HttpModule;
 use crate::modules::idgen::IdGeneratorModule;
 use crate::modules::jwt::JwtModule;
 use crate::modules::linkmemo::LinkMemoModule;
 use crate::modules::memo::MemoModule;
+use crate::modules::mermaid::MermaidModule;
 use crate::modules::palette::PaletteModule;
 use crate::modules::prompt::PromptModule;
 use crate::modules::regex::RegexModule;
@@ -40,6 +42,8 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
         Arc::new(ColorModule),
         Arc::new(LinkMemoModule),
         Arc::new(MemoModule),
+        Arc::new(MermaidModule),
+        Arc::new(DiagramModule),
         Arc::new(PromptModule),
         Arc::new(PaletteModule),
         Arc::new(CodecModule),
@@ -64,7 +68,7 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
 /// 固有コマンドを追記する。
 ///
 /// `core_*` コマンドもここで登録する (Tauri 制約: invoke_handler は 1 度しか呼べない)。
-pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+pub fn register_invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.invoke_handler(tauri::generate_handler![
         // Core (ADR-0009 §2 / `module-contract.md` §6.2)
         crate::commands::cancel::core_cancel_operation,
@@ -110,6 +114,10 @@ pub fn register_invoke_handler<R: tauri::Runtime>(builder: tauri::Builder<R>) ->
         // M-Link (公開済みIDは linkmemo)
         crate::modules::linkmemo::commands::linkmemo_normalize_target,
         crate::modules::linkmemo::commands::linkmemo_open,
+        // M-Diagram: user-selected local files only
+        crate::modules::diagram::protocol::diagram_editor_url,
+        crate::modules::diagram::commands::diagram_read_file,
+        crate::modules::diagram::commands::diagram_write_file,
         // M-Prompt
         crate::modules::prompt::commands::prompt_render_template,
         // M-Color / M-Palette はフロントだけで完結 (固有 IPC コマンドなし)
@@ -131,7 +139,7 @@ mod tests {
     fn module_backends_build_into_app_state() {
         let storage: Arc<dyn StorageService> = Arc::new(SqliteStorage::open(":memory:").unwrap());
         let backends = module_backends();
-        assert_eq!(backends.len(), 17);
+        assert_eq!(backends.len(), 19);
         let dir = tempfile::tempdir().unwrap();
         let backup: Arc<dyn crate::backup::BackupService> = Arc::new(
             crate::backup::LocalBackupService::new(dir.path().to_path_buf(), Arc::clone(&storage)),
@@ -141,6 +149,8 @@ mod tests {
         assert!(state.module("color").is_some());
         assert!(state.module("linkmemo").is_some());
         assert!(state.module("memo").is_some());
+        assert!(state.module("mermaid").is_some());
+        assert!(state.module("diagram").is_some());
         assert!(state.module("prompt").is_some());
         assert!(state.module("palette").is_some());
         for id in [

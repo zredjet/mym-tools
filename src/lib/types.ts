@@ -62,6 +62,17 @@ export interface MemoPayloadV1 {
   body: string;
 }
 
+/** M-Mermaid payload v1 (`data-model.md` §10.7) */
+export interface MermaidPayloadV1 {
+  source: string;
+}
+
+/** M-Diagram payload v1 (`data-model.md` §10.8) */
+export interface DiagramPayloadV1 {
+  xml: string;
+  text: string;
+}
+
 /** M-Color payload v1 (`data-model.md` §10.4) */
 export interface ColorPayloadV1 {
   hex: string;

@@ -336,8 +336,10 @@ shadcn/ui のコンポーネントを土台とし、本ツール固有の使い�
 | H-1 | M-Hash 画面 | ★ | ✅ MD5/SHA1/SHA256/SHA512 から 1 つ選択 |
 | PL-1 | M-Palette 作成 / 編集 | ★★★ | ✅ 5 色固定・9 調和ルール・Undo/Redo |
 | PL-2 | M-Palette 保存済み一覧 | ★★ | ✅ 5 色プレビュー・編集・削除・D&D |
+| MM-1 | M-Mermaid workspace | ★★★ | ✅ document切替・title・code・preview・明示保存 |
+| DG-1 | M-Diagram workspace | ★★★ | ✅ draw.io編集・取込・保存・drawio/SVG/PNG書出し |
 
-合計: コア 16 + モジュール 14 = **30 画面相当**。C-12 は一部実装、C-13 / C-14 / C-16 は未実装として明示する。
+合計: コア 16 + モジュール 16 = **32 画面相当**。C-12 は一部実装、C-13 / C-14 / C-16 は未実装として明示する。
 
 ---
 
@@ -744,7 +746,22 @@ Memoは`/`一覧、`/new`作成、`/:itemId`詳細、`/edit/:itemId`編集のペ
 - 新規ルートを既定とし、保存後は編集ルートへ置換遷移する。保存済み一覧は 5 色プレビュー、名前、タグ、調和ルール、編集、削除、D&D を提供する。
 - 永続化対象との差分がある内部遷移では「保存 / 破棄 / キャンセル」を提示する。ロックと Undo/Redo 履歴は永続化しない。
 
-### 6.18 Stateless 開発ツール
+### 6.18 MM-1 M-Mermaid workspace
+
+- module選択時は一覧を挟まず、`updated_at`が最新のitemまたは新規draftへreplace遷移する
+- 上部にdocument selector、新規、title、tags、保存を置き、下部を等幅`textarea`とpreviewの2 columnにする
+- 入力後300msでrenderする。新しい入力が来た場合は古い非同期結果を破棄し、構文error中は最後に成功したpreviewを残す
+- 現在sourceのrender成功前は保存を無効にする。明示保存と`Cmd/Ctrl+S`だけで永続化し、未保存のroute遷移 / window closeを既存確認UIでblockする
+
+### 6.19 DG-1 M-Diagram workspace
+
+- module選択時は一覧を挟まず、直近itemまたは空canvasを直接開く
+- 上部にdocument selector、新規、`.drawio` / `.xml`取込、保存、`.drawio` / SVG / PNG書出し、title、tagsを置く
+- editor本体は残り領域を占めるsandboxed iframeとし、moduleを開くまで生成しない。外部serviceのlogo / cloud storage UIは出さない
+- editorからのautosave eventは未保存stateの更新にだけ使い、itemsへの永続化は明示保存 / `Cmd/Ctrl+S`時にXMLとtextを取得して行う
+- 図内linkはeditorで直接開かず、親側の確認後にOS browserへ渡す
+
+### 6.20 Stateless 開発ツール
 
 全画面で共通シェル、ページ見出し、説明、入力panel、結果panelを使う。入力・結果・履歴・presetは画面を離れた時点で破棄し、保存・検索・件数表示を提供しない。
 
@@ -850,6 +867,14 @@ Linear 同様、マウスを離さずに完結できるよう全画面で一貫�
 | `Cmd/Ctrl + Z` / `Cmd/Ctrl + Shift + Z` | 色編集履歴の Undo / Redo (テキスト入力フォーカス中を除く) |
 | `Cmd/Ctrl + N` | 新規パレットへ移動 (未保存差分があれば確認) |
 | 色相環上の矢印キー | 色相 / 彩度を 1 段階調整 (`Shift` 併用で 10 段階) |
+
+### 8.8 MM-1 / DG-1 図編集
+
+| キー | 動作 |
+|------|------|
+| `Cmd/Ctrl + S` | 現在の図を明示保存。Mermaid構文error / size超過中は実行しない |
+| `Cmd/Ctrl + N` | 新規draft / canvasへ移動（未保存差分があれば確認） |
+| `Tab` / `Shift+Tab` | 親toolbar / fieldsを移動。draw.io canvas内のkey操作はeditorへ委譲 |
 
 > ショートカットは設定ページ (C-7) で一覧表示。`?` キーでチートシートをオーバーレイ表示する案あり (Phase 2)。
 
@@ -967,6 +992,7 @@ H-1 は stateless モジュールのため空状態は無し。代わりに「�
 | 2026-08-22 | 1.0 | 独立 M-Palette の PL-1 / PL-2 を追加。Adobe Color 型の左右分割、5 色固定、9 調和ルール、詳細 4 色空間、ロック、Random、Undo/Redo、保存済み一覧、未保存確認、Cmd/Ctrl+5 を確定。 |
 | 2026-08-23 | 1.1 | ADR-0014 / ADR-0015を反映。サイドバーのカテゴリ別折りたたみ、active category自動展開、stateless開発ツール11画面の共通構造と安全表示を追加。 |
 | 2026-08-25 | 1.2 | ADR-0016を反映。Link / Memoを別モジュール化し、Memoの4ページ、LinkのURL / Pathモーダル、100件超一覧、固定1〜6ショートカット、未保存遷移契約を追加 |
+| 2026-08-31 | 1.3 | ADR-0017を反映。Mermaid / Diagramの直接workspace、document切替、preview / iframe、明示保存、file取込・書出し、未保存遷移UIを追加 |
 
 ---
 

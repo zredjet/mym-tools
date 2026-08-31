@@ -13,7 +13,7 @@
 `requirements.md` の決定事項 (D-01〜D-05) を満たす構造を定義する。
 特に以下の制約に対する技術的回答を与える。
 
-- **軽量性** (起動 1.5s / メモリ 100MB / インストーラ 30MB)
+- **軽量性** (起動 1.5s / 起動直後メモリ 100MB / portable ZIP各80,000,000 bytes上限)
 - **モジュール独立性** (E-01〜E-04: コア改修なしでモジュール追加可能)
 - **データ永劫互換** (D-03: 原則マイグレーション不要)
 - **手動差し替え更新** (D-04: アプリとユーザーデータの物理分離)
@@ -434,6 +434,16 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 - `http` / `https`だけを許可し、TLS検証無効化、cookie jar、multipart、file upload、proxy設定を提供しない
 - timeout、redirect、request / response sizeを制限し、`OperationRegistry`でキャンセル可能にする (ADR-0015)
 
+### 10.4 完全オフライン図編集境界
+
+- Mermaid 11.17.2は画面を開いたときだけdynamic importし、300ms debounce後に`securityLevel: strict` / HTML label無効で描画する。render tokenが古い非同期結果を破棄する
+- draw.io 31.4.1は固定submoduleから`.generated/public/drawio`へ決定的にprepareし、Vite `publicDir`経由でTauri assetへ埋め込む。build時にnetwork取得しない
+- draw.io iframeはmoduleを開いた時だけ`127.0.0.1`のrandom portへbindするasset serverを起動し、親と異なるloopback originでlazy初期化する。serverはGET / HEAD、厳密なHost、asset pathだけを受理し、図dataは扱わない
+- editor originは同梱資産読込みだけを許可するCSP `connect-src 'self'`、sandbox `allow-scripts allow-same-origin`で動かす。Tauri ACLはapp commandをlocal app originだけへ許可し、remote扱いのloopback editorにはcore / plugin IPC権限を付与しない。親との唯一のdata pathは`postMessage`
+- 親は`event.source`、origin、init後のevent順序、request ID、1MiB XML/text、export受信sizeを検証する。不正messageはstateへ反映しない
+- local file I/Oは`diagram_read_file` / `diagram_write_file`だけが担当し、拡張子、XML root、DTD/entity、PNG signatureを検証して同一directory内temp fileからatomic replaceする
+- project export/importは共通items経路を使い、diagram binary添付やDB schemaを追加しない
+
 ---
 
 ## 11. 重い処理の扱い
@@ -476,10 +486,13 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 全文検索 | SQLite FTS5 (items 更新と同一トランザクション、トリガで自動同期) |
 | ロギング | `tracing` |
 | Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` (ADR-0002 で確定) |
+| Mermaid図 | Mermaid 11.17.2、strict security、dynamic import |
+| 自由図編集 | draw.io 31.4.1固定submodule、IPC権限なしloopback origin、sandboxed iframe |
 
 **確定済**:
 - **CI パイプライン (検証)**: ADR-0010 で確定 — GitHub Actions / lint-rust / test-rust / lint-frontend / test-frontend / build-tauri matrix (macOS + Windows) / branch protection / `clippy.toml` `disallowed-methods` 連携
 - **Phase 1 CD パイプライン (無署名portable ZIP)**: ADR-0013で確定 — 手動version入力 / tag commit固定 / macOS + Windows全成功後のRelease作成 / 既存Release上書き禁止
+- **図編集asset / size契約**: ADR-0017で確定 — 完全オフライン同梱 / local origin隔離 / portable ZIP各80,000,000 bytes上限
 
 **まだ未確定**:
 - **公開配布向けCD拡張**: 署名・Notarization・signtool / Azure Trusted Signing統合・SHA-256 / provenance添付・secrets管理
@@ -513,3 +526,4 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-08-22 | 0.6 | 既存モジュールへ依存しない M-Palette を静的レジストリへ追加。共通 items + payload で永続化し、固有 IPC とコア DB スキーマ変更を持たない構成を追記 |
 | 2026-08-23 | 0.7 | ADR-0014 / ADR-0015を反映。表示専用category metadata、一機能一モジュールのstateless開発ツール、HTTPのRust IPC・非ログ通信境界を追記 |
 | 2026-08-25 | 0.8 | ADR-0016を反映。公開ID `linkmemo` のM-Linkと新規 `memo` backend/UIを分離し、共通items APIを維持した起動時所属移行を追加 |
+| 2026-08-31 | 0.9 | ADR-0017を反映。Mermaid dynamic import、draw.io固定asset / loopback origin / Tauri ACL / postMessage隔離、file I/O、80MB release契約を追加 |

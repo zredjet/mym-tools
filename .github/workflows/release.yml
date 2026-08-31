@@ -104,6 +104,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.validate-release.outputs.release_sha }}
+          submodules: true
 
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master HEAD pinned
         with:
@@ -219,6 +220,8 @@ jobs:
 
       - name: Verify tag and portable ZIP set
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           ACTUAL_SHA="$(git -C release-source rev-parse HEAD)"
@@ -227,8 +230,12 @@ jobs:
             echo "expected=${RELEASE_SHA} actual=${ACTUAL_SHA}" >&2
             exit 1
           fi
+          PREVIOUS_ASSET_SIZES_JSON="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/latest" \
+            --jq '[.assets[] | {key: .name, value: .size}] | from_entries' 2>/dev/null || echo '{}')"
+          export PREVIOUS_ASSET_SIZES_JSON
           node scripts/release/release-contract.mjs \
-            check-assets "${RELEASE_VERSION}" release-assets
+            check-assets "${RELEASE_VERSION}" release-assets | tee -a "${GITHUB_STEP_SUMMARY}"
 
       - name: Create, upload, and publish release
         shell: bash
