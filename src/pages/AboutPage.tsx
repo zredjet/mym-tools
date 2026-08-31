@@ -29,6 +29,8 @@ import { formatInvokeError } from "@/lib/error";
 
 const RELEASES_URL = "https://github.com/zredjet/mym-tools/releases";
 const REPO_URL = "https://github.com/zredjet/mym-tools";
+const MERMAID_URL = "https://github.com/mermaid-js/mermaid/tree/v11.17.2";
+const DRAWIO_URL = "https://github.com/jgraph/drawio/tree/fea5e877f3e6f849331ad09894f7edb9771708fa";
 
 interface ModuleVersionInfo {
   module_id: string;
@@ -129,7 +131,7 @@ export function AboutPage() {
         <div>
           <h2 className="text-2xl font-bold text-[var(--fg)]">MyMyTools</h2>
           <p className="mt-1 text-[13px] text-[var(--fg-muted)]">
-            個人用ローカルツールの集合体 — プロンプト / リンク / メモ / カラー / ハッシュ / パレット
+            個人用ローカルツールの集合体 — プロンプト / メモ / デザイン / 開発ツール
           </p>
         </div>
 
@@ -186,6 +188,37 @@ export function AboutPage() {
           schema v2 自動 migration あり、ADR-0011)。
         </p>
 
+        <section className="border-t border-[var(--border)] pt-4">
+          <h3 className="mb-2 text-[11px] font-semibold tracking-[0.05em] text-[var(--fg-subtle)] uppercase">
+            Offline diagram components
+          </h3>
+          <ul className="space-y-1 text-[12px] text-[var(--fg-muted)]">
+            <li>
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-[var(--fg)]"
+                onClick={() => void openExternal(MERMAID_URL)}
+              >
+                Mermaid 11.17.2
+              </button>{" "}
+              — MIT License
+            </li>
+            <li>
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-[var(--fg)]"
+                onClick={() => void openExternal(DRAWIO_URL)}
+              >
+                draw.io 31.4.1 (fea5e877)
+              </button>{" "}
+              — Apache License 2.0
+            </li>
+          </ul>
+          <p className="mt-2 text-[11px] text-[var(--fg-subtle)]">
+            編集資産はアプリに同梱され、図データや利用状況を外部へ送信しません。
+          </p>
+        </section>
+
         {/* payload schema 表示 (docs/ui-design.md §6.10 末尾)。
             障害発生時のサポート連絡時に「どのバージョンを認識しているか」確認用 */}
         {moduleVersions != null && moduleVersions.length > 0 && (
@@ -224,6 +257,8 @@ function canonicalModuleLabel(moduleId: string): string {
     memo: "M-Memo",
     color: "M-Color",
     hash: "M-Hash",
+    mermaid: "M-Mermaid",
+    diagram: "M-Diagram",
   };
   return canonical[moduleId] ?? `M-${moduleId.charAt(0).toUpperCase()}${moduleId.slice(1)}`;
 }

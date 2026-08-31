@@ -24,6 +24,7 @@ MyMyToolsのmacOS / Windows向けportable ZIPを、GitHub Actionsから手動公
 - `main`のbranch protectionを迂回せず、release準備もPR経由でマージする
 - 対象versionのtagとGitHub Releaseがまだ存在しない
 - 作業開始時のworktreeがcleanである
+- draw.io submoduleがcommit `fea5e877f3e6f849331ad09894f7edb9771708fa`で初期化されている
 
 以下では例として次の変数を使う。実際に公開するversionとPR番号へ置き換える。
 
@@ -77,7 +78,9 @@ node scripts/release/release-contract.mjs check-version "${RELEASE_VERSION}" .
 依存関係をlockfileどおりに入れ直し、フロントエンドとRustの検証を行う。
 
 ```bash
+git submodule update --init
 npm ci
+npm run prepare:drawio
 npm run lint
 npm run typecheck
 npm run test
@@ -172,6 +175,8 @@ gh run watch <RUN_ID> --exit-status
 3. `Build portable ZIP (windows-latest)`: x64 `.exe`をZIP化・内容検査・artifact upload
 4. `Publish GitHub Release`: tag SHAと2成果物を再検証し、draft作成、upload、公開
 
+publish直前の`check-assets`は各ZIPが80,000,000 bytes以下であることを検査し、現在sizeと直前Releaseからの増減をStep Summaryへ出す。上限超過時はdraw.io assetを縮小せずReleaseを停止し、ADR-0017に従って再判断する。
+
 ## 8. 公開後の確認
 
 Releaseがdraftではなく、pre-release versionなら`isPrerelease`が`true`であり、assetが期待する2件だけであることを確認する。
@@ -236,3 +241,4 @@ gh release view "v${RELEASE_VERSION}"
 - GitHub Releaseが公開済みで、draftではない
 - macOS / Windowsのportable ZIPが2件ちょうど存在する
 - 公開済みZIPの展開、内部構造、SHA-256を確認している
+- 両ZIPが各80,000,000 bytes以下で、workflowのsize / 前Release差分reportを確認している

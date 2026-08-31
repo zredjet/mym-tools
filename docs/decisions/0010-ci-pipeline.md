@@ -17,7 +17,7 @@ Phase 1 着手前にリポジトリ規模の検証パイプライン (CI) を確
 | ADR-0008 §2.5 | 「CI 詳細は別 ADR『CI/CD・リリースパイプライン』で扱う」と予告。本 ADR がその CI 部分 |
 | ADR-0008 §6.1 / §6.2 | Phase 1 は無署名ビルド許容 / 公開配布フェーズで署名 + Notarization |
 | ADR-0009 §6.2 | `clippy.toml` の **`disallowed-methods`** (kebab-case の設定キー / lint 名は `disallowed_methods` のアンダースコア) に `tokio::task::spawn_blocking` / `std::thread::spawn` / `tokio::runtime::Handle::block_on` を登録し `cargo clippy -- -D warnings` で違反検出。`disallowed_methods` lint は free function も捕捉対象 |
-| `requirements.md` §3.1 | 軽量性 (起動 1.5s / インストーラ 30MB) — 巨大 CI 依存追加は避けたい |
+| `requirements.md` §3.1 | 軽量性 (起動 1.5s / portable ZIP各80,000,000 bytes上限、ADR-0017で更新) — 巨大 CI 依存追加は避けたい |
 | `requirements.md` §3.2 | Linux はサポート対象外。Phase 1 では検証もテストもしない |
 | ADR-0002 / ADR-0003 | フロント = React + TS + Vite + Tailwind v4 + shadcn/ui + Zustand。Rust = rusqlite (bundled + FTS5) |
 | `architecture.md` §13 | ビルド/配布パイプラインは未確定 (本 ADR と将来の CD ADR で確定) |
@@ -662,7 +662,7 @@ Round 5 で識別したセキュリティ・運用障害リスクの要約。詳
 | `data-model.md` §15 T-01〜T-34 整合性テスト | どれを `test-rust` ユニット / どれを integration / どれを手動チェックリストに置くかの分類 |
 | CLAUDE.md 不変条件の機械検出 | フロントから `@tauri-apps/plugin-sql` 直 import 禁止 (`no-restricted-imports`) / Rust ソース内の `CURRENT_TIMESTAMP` / `datetime('now')` 等 DB 側時刻生成パターン grep 禁止 / 検索スコープ内部値 `"project" \| "global"` 以外の出現禁止 (TS 型で保護) |
 | Tauri バイナリ E2E | WebDriver / Playwright を使ったキー操作・スクリーンショット差分など |
-| バンドルサイズ計測 | 要件 §3.1 のインストーラ 30MB 目標を CI 上で検証する仕組み (CD ADR と要相談) |
+| バンドルサイズ計測 | ADR-0017でRelease契約へ実装済み。portable ZIP各80,000,000 bytes上限と前Release差分を検査する |
 | `module-contract.md` §5.3 Q-22 PoC (`generate_handler!` 集中登録) | Phase 1 着手最初期の PoC 結果を CI に取り込むかどうか |
 
 これらは本 ADR では「規約のフックポイントだけ用意」 (§2.4.2 ESLint flat config / §2.5 grep) に留め、具体ルールはテスト戦略 ADR で確定する。

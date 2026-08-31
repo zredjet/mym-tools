@@ -81,6 +81,15 @@ describe("stateless developer tool pages", () => {
     expect(screen.queryByText("—")).not.toBeInTheDocument();
   });
 
+  it("updates the password length before generating a secret", () => {
+    render(<SecretGeneratorPage />);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "長さ" }), {
+      target: { value: "25" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    expect(screen.getByText(/^.{25}$/)).toBeInTheDocument();
+  });
+
   it("evaluates a regex through a worker", () => {
     render(<RegexPage />);
     fireEvent.click(screen.getByRole("button", { name: "評価" }));

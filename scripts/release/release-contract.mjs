@@ -1,10 +1,13 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
+import { Buffer } from "node:buffer";
 import { resolve } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 const SEMVER_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+export const MAX_PORTABLE_ARCHIVE_BYTES = 80_000_000;
 
 function assertValidPrereleaseIdentifiers(prerelease) {
   if (!prerelease) {
@@ -110,14 +113,53 @@ export function assertPortableArchives(input, assetsDirectory) {
   for (const archive of expected) {
     const archivePath = resolve(directory, archive);
     const stat = statSync(archivePath);
-    const signature = readFileSync(archivePath).subarray(0, 2).toString("ascii");
+    const signature = readZipSignature(archivePath);
 
     if (stat.size === 0 || signature !== "PK") {
       throw new Error(`有効なZIPではありません: ${archive} (${stat.size} bytes)`);
     }
+    if (stat.size > MAX_PORTABLE_ARCHIVE_BYTES) {
+      throw new Error(
+        `portable ZIPが上限 ${MAX_PORTABLE_ARCHIVE_BYTES} bytesを超えています: ${archive} (${stat.size} bytes)`,
+      );
+    }
   }
 
   return expected;
+}
+
+export function portableArchiveSizeReport(input, assetsDirectory, previousSizes = {}) {
+  return expectedPortableArchives(input)
+    .sort()
+    .map((archive) => {
+      const current = statSync(resolve(assetsDirectory, archive)).size;
+      const previous = Number(previousSizes[archive]);
+      return {
+        archive,
+        current,
+        previous: Number.isFinite(previous) ? previous : null,
+        delta: Number.isFinite(previous) ? current - previous : null,
+      };
+    });
+}
+
+function readZipSignature(path) {
+  const descriptor = openSync(path, "r");
+  try {
+    const signature = Buffer.alloc(2);
+    readSync(descriptor, signature, 0, signature.length, 0);
+    return signature.toString("ascii");
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function printArchiveReport(report) {
+  for (const row of report) {
+    const comparison =
+      row.previous == null ? "previous=n/a" : `previous=${row.previous} delta=${row.delta}`;
+    process.stdout.write(`${row.archive}: current=${row.current} ${comparison}\n`);
+  }
 }
 
 function printGithubOutputs(release) {
@@ -140,6 +182,13 @@ function runCli(argv) {
       break;
     case "check-assets":
       assertPortableArchives(input, target ?? process.cwd());
+      printArchiveReport(
+        portableArchiveSizeReport(
+          input,
+          target ?? process.cwd(),
+          JSON.parse(process.env.PREVIOUS_ASSET_SIZES_JSON || "{}"),
+        ),
+      );
       break;
     default:
       throw new Error(`不明なコマンドです: ${command ?? "(none)"}`);

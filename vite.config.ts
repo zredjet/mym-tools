@@ -10,6 +10,10 @@ const host = process.env["TAURI_DEV_HOST"];
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
 
+  // draw.io の固定 client assets と第三者ライセンスは prepare:drawio がここへ生成する。
+  // public/ を直接巨大化させず、submodule の指定 commit から毎回決定的に組み立てる。
+  publicDir: path.resolve(__dirname, ".generated/public"),
+
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

@@ -1,3 +1,44 @@
 fn main() {
-    tauri_build::build()
+    const APP_COMMANDS: &[&str] = &[
+        "core_cancel_operation",
+        "core_list_projects",
+        "core_get_project",
+        "core_create_project",
+        "core_update_project",
+        "core_delete_project",
+        "core_reorder_projects",
+        "core_list_items",
+        "core_get_item",
+        "core_create_item",
+        "core_update_item",
+        "core_delete_item",
+        "core_reorder_items",
+        "core_search",
+        "core_get_settings",
+        "core_update_settings",
+        "core_backup_should_take_auto",
+        "core_backup_list",
+        "core_backup_take_auto",
+        "core_backup_take_manual",
+        "core_backup_delete",
+        "core_backup_verify",
+        "core_backup_restore",
+        "core_export_json",
+        "core_import_json",
+        "core_module_versions",
+        "core_module_ids",
+        "hash_compute_text",
+        "hash_compute_file",
+        "http_send_request",
+        "linkmemo_normalize_target",
+        "linkmemo_open",
+        "diagram_editor_url",
+        "diagram_read_file",
+        "diagram_write_file",
+        "prompt_render_template",
+    ];
+
+    let attributes = tauri_build::Attributes::new()
+        .app_manifest(tauri_build::AppManifest::new().commands(APP_COMMANDS));
+    tauri_build::try_build(attributes).expect("failed to run Tauri build script");
 }

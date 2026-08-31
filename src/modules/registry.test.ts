@@ -18,6 +18,8 @@ describe("frontend module registry", () => {
       "color",
       "hash",
       "palette",
+      "mermaid",
+      "diagram",
       "codec",
       "urlquery",
       "datetime",
@@ -57,6 +59,43 @@ describe("frontend module registry", () => {
     expect(getModuleDefinition("unknown")).toBeUndefined();
     expect(modulePath("p1", "hash")).toBe("/projects/p1/m/hash");
     expect(modulePath("p1", "prompt", "/item-1")).toBe("/projects/p1/m/prompt/item-1");
+  });
+
+  it("routes Mermaid and diagram search results to their editors", () => {
+    const base = {
+      project_id: "p1",
+      tags: [],
+      payload_schema_version: 1,
+      position: 0,
+      created_at: "",
+      updated_at: "",
+    };
+    expect(
+      getModuleDefinition("mermaid")?.searchAdapter?.formatResult({
+        ...base,
+        id: "mermaid-1",
+        module_id: "mermaid",
+        title: "処理フロー",
+        payload: { source: "flowchart LR\nA-->B" },
+      }),
+    ).toEqual({
+      title: "処理フロー",
+      subtitle: "flowchart LR A-->B",
+      targetPath: "/edit/mermaid-1",
+    });
+    expect(
+      getModuleDefinition("diagram")?.searchAdapter?.formatResult({
+        ...base,
+        id: "diagram-1",
+        module_id: "diagram",
+        title: "構成図",
+        payload: { xml: "<mxfile/>", text: "Client Server" },
+      }),
+    ).toEqual({
+      title: "構成図",
+      subtitle: "Client Server",
+      targetPath: "/edit/diagram-1",
+    });
   });
 
   it("routes palette search results to the saved editor", () => {

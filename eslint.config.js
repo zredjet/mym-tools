@@ -11,7 +11,7 @@ import globals from "globals";
 
 export default tseslint.config(
   {
-    ignores: ["dist", "src-tauri/target", "src-tauri/gen", "node_modules"],
+    ignores: [".generated", "dist", "src-tauri/target", "src-tauri/gen", "node_modules", "vendor"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

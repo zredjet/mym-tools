@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,7 +8,9 @@ import {
   assertConfiguredVersion,
   assertPortableArchives,
   expectedPortableArchives,
+  MAX_PORTABLE_ARCHIVE_BYTES,
   normalizeVersion,
+  portableArchiveSizeReport,
 } from "./release-contract.mjs";
 
 const temporaryDirectories = [];
@@ -102,5 +104,27 @@ describe("assertPortableArchives", () => {
     writeFileSync(resolve(root, windowsArchive), Buffer.from("PK\u0003\u0004content"));
 
     expect(() => assertPortableArchives("0.2.0", root)).toThrow("有効なZIPではありません");
+  });
+
+  it("80,000,000 bytesを超えるportable ZIPを拒否する", () => {
+    const root = createTemporaryDirectory();
+    const [macArchive, windowsArchive] = expectedPortableArchives("0.2.0");
+    writeFileSync(resolve(root, macArchive), Buffer.from("PK\u0003\u0004content"));
+    truncateSync(resolve(root, macArchive), MAX_PORTABLE_ARCHIVE_BYTES + 1);
+    writeFileSync(resolve(root, windowsArchive), Buffer.from("PK\u0003\u0004content"));
+
+    expect(() => assertPortableArchives("0.2.0", root)).toThrow("80000000");
+  });
+
+  it("前リリースからのサイズ増減を報告する", () => {
+    const root = createTemporaryDirectory();
+    const archives = expectedPortableArchives("0.2.0");
+    for (const archive of archives) writeFileSync(resolve(root, archive), Buffer.from("PK1234"));
+
+    expect(portableArchiveSizeReport("0.2.0", root, { [archives[0]]: 4 })).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ archive: archives[0], current: 6, previous: 4, delta: 2 }),
+      ]),
+    );
   });
 });

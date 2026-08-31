@@ -1,10 +1,11 @@
 # MyMyTools
 
 軽量なクロスプラットフォーム多目的 GUI ツール (個人用ローカルツール)。
-保存系ツール5種と、変換・解析・生成・通信の開発ツール11種を、一機能一モジュールで統合。
+保存系ツール7種と、変換・解析・生成・通信の開発ツール11種を、一機能一モジュールで統合。
 
 - **対象 OS**: macOS / Windows (Linux は対象外)
 - **配布形式**: portable 差し替え方式 (自動更新なし)
+- **図編集**: Mermaid 11.17.2 / draw.io 31.4.1を全資産同梱で完全オフライン実行
 - **データ保存**: ローカル SQLite (アプリ実行ファイルとは別ディレクトリ)
 - **ライセンス**: MIT
 
@@ -19,7 +20,7 @@
 | [docs/ui-design.md](docs/ui-design.md) | UI トークン、画面スケルトン、キーボードショートカット |
 | [docs/developer-tools-plan.md](docs/developer-tools-plan.md) | 開発ツール11モジュールの範囲、段階、品質条件 |
 | [docs/release-process.md](docs/release-process.md) | 担当者向けの手動リリース手順、公開後検証、失敗時対応 |
-| [docs/decisions/](docs/decisions/) | ADR-0001〜0015 (既存設計に加え、一機能一モジュール / HTTP通信境界) |
+| [docs/decisions/](docs/decisions/) | ADR-0001〜0017 (モジュール化 / HTTP通信境界 / 完全オフライン図編集) |
 | [CLAUDE.md](CLAUDE.md) | 作業時の不変条件と参照優先順位 |
 
 ## 開発
@@ -73,11 +74,11 @@ cargo test --workspace --lib --all-features --locked
 
 ## 開発状況
 
-**Phase 1 の主要機能を実装済み (`0.1.0-alpha.7`)**。
+**Phase 1 の主要機能を実装済み (`0.1.0-alpha.8`)**。
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
 rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing の Rust バックエンドで構成。
-プロジェクト管理、カテゴリ表示付き17モジュール、横断検索、`settings.json`、バックアップ、
+プロジェクト管理、カテゴリ表示付き19モジュール、横断検索、`settings.json`、バックアップ、
 アプリ全体／プロジェクト単位の JSON export / import を備える。
 
 CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2)
