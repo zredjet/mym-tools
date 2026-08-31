@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRight, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   DndContext,
   type DragEndEvent,
@@ -59,6 +59,7 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
   const { projectId, moduleId } = useParams<{ projectId?: string; moduleId?: string }>();
+  const { pathname } = useLocation();
   const navigate = useNavigate();
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const setSidebarWidth = useAppStore((s) => s.setSidebarWidth);
@@ -121,7 +122,14 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
     }
   }, [deletingProject, onProjectChanged, projectId, lastOpenedProjectId, navigate, setLastProject]);
 
-  const activeModuleId: ModuleId | null = (moduleId as ModuleId | undefined) ?? null;
+  const routeModuleId = deriveModuleIdFromPath(pathname);
+  const activeModuleId: ModuleId | null =
+    routeModuleId ??
+    (effectiveProjectId != null &&
+    lastOpenedModuleId != null &&
+    visibleModules.some((module) => module.id === lastOpenedModuleId)
+      ? lastOpenedModuleId
+      : null);
 
   useEffect(() => {
     if (moduleId == null) return;
@@ -285,6 +293,15 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
       />
     </aside>
   );
+}
+
+/** 固定リテラルで登録されたモジュールルートから、現在のモジュール ID を取得する。 */
+function deriveModuleIdFromPath(pathname: string): ModuleId | null {
+  const match = pathname.match(/^\/projects\/[^/]+\/m\/([^/]+)/);
+  const candidate = match?.[1];
+  return candidate != null && getModuleDefinition(candidate) != null
+    ? (candidate as ModuleId)
+    : null;
 }
 
 /**
