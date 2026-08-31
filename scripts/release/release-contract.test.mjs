@@ -121,9 +121,25 @@ describe("assertPortableArchives", () => {
     const archives = expectedPortableArchives("0.2.0");
     for (const archive of archives) writeFileSync(resolve(root, archive), Buffer.from("PK1234"));
 
-    expect(portableArchiveSizeReport("0.2.0", root, { [archives[0]]: 4 })).toEqual(
+    expect(
+      portableArchiveSizeReport("0.2.0", root, {
+        macos_aarch64: 4,
+        windows_x64: 8,
+      }),
+    ).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ archive: archives[0], current: 6, previous: 4, delta: 2 }),
+        expect.objectContaining({
+          archive: "MyMyTools_0.2.0_macos_aarch64.zip",
+          current: 6,
+          previous: 4,
+          delta: 2,
+        }),
+        expect.objectContaining({
+          archive: "MyMyTools_0.2.0_windows_x64.zip",
+          current: 6,
+          previous: 8,
+          delta: -2,
+        }),
       ]),
     );
   });

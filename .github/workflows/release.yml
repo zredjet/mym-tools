@@ -230,9 +230,25 @@ jobs:
             echo "expected=${RELEASE_SHA} actual=${ACTUAL_SHA}" >&2
             exit 1
           fi
-          PREVIOUS_ASSET_SIZES_JSON="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/releases/latest" \
-            --jq '[.assets[] | {key: .name, value: .size}] | from_entries' 2>/dev/null || echo '{}')"
+          if ! PREVIOUS_ASSET_SIZES_JSON="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '(map(select(.draft == false))[0].assets // [])
+              | map(
+                  select(
+                    (.name | endswith("_macos_aarch64.zip")) or
+                    (.name | endswith("_windows_x64.zip"))
+                  )
+                  | {
+                      key: (if (.name | endswith("_macos_aarch64.zip"))
+                        then "macos_aarch64"
+                        else "windows_x64"
+                      end),
+                      value: .size
+                    }
+                )
+              | from_entries' 2>/dev/null)"; then
+            PREVIOUS_ASSET_SIZES_JSON='{}'
+          fi
           export PREVIOUS_ASSET_SIZES_JSON
           node scripts/release/release-contract.mjs \
             check-assets "${RELEASE_VERSION}" release-assets | tee -a "${GITHUB_STEP_SUMMARY}"
