@@ -133,14 +133,27 @@ export function portableArchiveSizeReport(input, assetsDirectory, previousSizes 
     .sort()
     .map((archive) => {
       const current = statSync(resolve(assetsDirectory, archive)).size;
-      const previous = Number(previousSizes[archive]);
+      const previous = previousArchiveSize(previousSizes, archive);
       return {
         archive,
         current,
-        previous: Number.isFinite(previous) ? previous : null,
-        delta: Number.isFinite(previous) ? current - previous : null,
+        previous,
+        delta: previous == null ? null : current - previous,
       };
     });
+}
+
+function previousArchiveSize(previousSizes, archive) {
+  const platformKey = archive.endsWith("_macos_aarch64.zip")
+    ? "macos_aarch64"
+    : archive.endsWith("_windows_x64.zip")
+      ? "windows_x64"
+      : undefined;
+  for (const value of [previousSizes[archive], platformKey && previousSizes[platformKey]]) {
+    const size = Number(value);
+    if (Number.isFinite(size)) return size;
+  }
+  return null;
 }
 
 function readZipSignature(path) {
