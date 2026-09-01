@@ -35,6 +35,7 @@ fn main() {
         "diagram_editor_url",
         "diagram_read_file",
         "diagram_write_file",
+        "mermaid_write_file",
         "prompt_render_template",
     ];
 

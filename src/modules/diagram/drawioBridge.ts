@@ -1,4 +1,5 @@
 export const MAX_DRAWIO_MESSAGE_CHARS = 28 * 1024 * 1024;
+export type DrawioExportFormat = "svg" | "png";
 
 export type DrawioEvent =
   | { event: "init" }
@@ -24,6 +25,7 @@ export function drawioEditorUrl(baseUrl: string): string {
     proto: "json",
     spin: "1",
     libraries: "1",
+    lang: "ja",
     noSaveBtn: "1",
     noExitBtn: "1",
     saveAndExit: "0",
@@ -100,6 +102,16 @@ export function drawioLoadMessage(xml: string, title: string): string {
     noExitBtn: 1,
     saveAndExit: 0,
   });
+}
+
+export function drawioExportMessage(format: DrawioExportFormat, requestId: string): object {
+  return {
+    action: "export",
+    format,
+    requestId,
+    ...(format === "svg" ? { asText: true, embedImages: true, embedFonts: true } : {}),
+    ...(format === "png" ? { scale: 1, border: 0, transparent: false, currentPage: true } : {}),
+  };
 }
 
 function nestedRequestId(value: unknown): string | undefined {

@@ -5,6 +5,7 @@ import {
   CLIENT_FILES,
   DRAWIO_COMMIT,
   DRAWIO_VERSION,
+  REQUIRED_CLIENT_ASSETS,
   drawioAssetStamp,
 } from "./prepare-assets.mjs";
 
@@ -31,6 +32,7 @@ describe("draw.io offline asset contract", () => {
       ]),
     );
     expect(CLIENT_FILES).toContain("index.html");
+    expect(REQUIRED_CLIENT_ASSETS).toContain("resources/dia_ja.txt");
     expect([...CLIENT_DIRECTORIES, ...CLIENT_FILES]).not.toEqual(
       expect.arrayContaining(["WEB-INF", "META-INF", "service-worker.js"]),
     );

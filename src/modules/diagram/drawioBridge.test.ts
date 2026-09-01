@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_DRAWIO_MESSAGE_CHARS,
   drawioEditorUrl,
+  drawioExportMessage,
   drawioLoadMessage,
   drawioTargetOrigin,
   isTrustedDrawioOrigin,
@@ -16,6 +17,7 @@ describe("draw.io parent bridge", () => {
     expect(url.origin).toBe("http://127.0.0.1:43123");
     expect(url.searchParams.get("offline")).toBe("1");
     expect(url.searchParams.get("lockdown")).toBe("1");
+    expect(url.searchParams.get("lang")).toBe("ja");
     expect(url.searchParams.get("suppressNewWindows")).toBe("1");
     expect(editorUrl).not.toContain("diagrams.net");
     expect(() => drawioEditorUrl("https://127.0.0.1:43123/index.html")).toThrow();
@@ -78,6 +80,26 @@ describe("draw.io parent bridge", () => {
       noSaveBtn: 1,
       noExitBtn: 1,
       saveAndExit: 0,
+    });
+  });
+
+  it("exports only PNG from the currently visible page", () => {
+    expect(drawioExportMessage("png", "png-1")).toEqual({
+      action: "export",
+      format: "png",
+      requestId: "png-1",
+      scale: 1,
+      border: 0,
+      transparent: false,
+      currentPage: true,
+    });
+    expect(drawioExportMessage("svg", "svg-1")).toEqual({
+      action: "export",
+      format: "svg",
+      requestId: "svg-1",
+      asText: true,
+      embedImages: true,
+      embedFonts: true,
     });
   });
 });
