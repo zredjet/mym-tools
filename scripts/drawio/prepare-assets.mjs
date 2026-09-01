@@ -35,6 +35,7 @@ export const CLIENT_DIRECTORIES = [
 ];
 
 export const CLIENT_FILES = ["export-fonts.css", "favicon.ico", "index.html", "shortcuts.svg"];
+export const REQUIRED_CLIENT_ASSETS = ["resources/dia_ja.txt"];
 
 function currentCommit() {
   if (!existsSync(resolve(DRAWIO_ROOT, ".git"))) {
@@ -92,6 +93,11 @@ export function prepareDrawioAssets() {
   }
   for (const name of CLIENT_FILES) {
     cpSync(resolve(SOURCE_ROOT, name), resolve(TARGET_ROOT, name));
+  }
+  for (const name of REQUIRED_CLIENT_ASSETS) {
+    if (!existsSync(resolve(TARGET_ROOT, name))) {
+      throw new Error(`required draw.io client asset is missing: ${name}`);
+    }
   }
 
   cpSync(PRECONFIG_PATH, resolve(TARGET_ROOT, "js/PreConfig.js"));

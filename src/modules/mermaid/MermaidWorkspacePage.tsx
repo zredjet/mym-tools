@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FilePlus2, Save } from "lucide-react";
+import { Download, FilePlus2, Save } from "lucide-react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useBlocker, useLocation, useNavigate, useParams } from "react-router-dom";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { createItem, getItem, listAllItems, updateItem } from "@/ipc/items";
+import { mermaidWriteFile, type MermaidExportFormat } from "@/ipc/mermaid";
 import { formatInvokeError } from "@/lib/error";
 import type { Item, MermaidPayloadV1 } from "@/lib/types";
 import { modulePath } from "@/modules/registry";
 import { useAppStore } from "@/store/useAppStore";
 
 import { readableMermaidError, renderMermaid, type MermaidTheme } from "./mermaidRenderer";
+import { MAX_MERMAID_EXPORT_BYTES, renderMermaidPng } from "./mermaidExporter";
 
 const DEFAULT_SOURCE = `flowchart LR
   A[アイデア] --> B[設計]
@@ -73,11 +76,15 @@ export function MermaidWorkspacePage() {
   const [submitting, setSubmitting] = useState(false);
   const [rendering, setRendering] = useState(true);
   const [validSource, setValidSource] = useState<string | null>(null);
+  const [validRenderKey, setValidRenderKey] = useState<string | null>(null);
   const [previewSvg, setPreviewSvg] = useState("");
   const [renderError, setRenderError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<MermaidExportFormat | null>(null);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
   const allowNavigation = useRef(false);
   const renderToken = useRef(0);
+  const exportingRef = useRef(false);
 
   const refreshDocuments = useCallback(async () => {
     if (projectId == null) return;
@@ -135,6 +142,7 @@ export function MermaidWorkspacePage() {
 
   const theme: MermaidTheme =
     configuredTheme === "dark" || (configuredTheme === "system" && systemDark) ? "dark" : "default";
+  const renderKey = `${theme}\u0000${source}`;
   const sourceBytes = useMemo(() => new TextEncoder().encode(source).byteLength, [source]);
 
   useEffect(() => {
@@ -142,6 +150,8 @@ export function MermaidWorkspacePage() {
     const timeout = window.setTimeout(() => {
       if (source.trim() === "") {
         if (token === renderToken.current) {
+          setValidSource(null);
+          setValidRenderKey(null);
           setRenderError("Mermaid記法を入力してください。");
           setRendering(false);
         }
@@ -149,6 +159,8 @@ export function MermaidWorkspacePage() {
       }
       if (sourceBytes > MAX_SOURCE_BYTES) {
         if (token === renderToken.current) {
+          setValidSource(null);
+          setValidRenderKey(null);
           setRenderError("Mermaid記法はUTF-8で1MiB以下にしてください。");
           setRendering(false);
         }
@@ -161,9 +173,14 @@ export function MermaidWorkspacePage() {
           setPreviewSvg(svg);
           setRenderError(null);
           setValidSource(source);
+          setValidRenderKey(`${theme}\u0000${source}`);
         })
         .catch((cause) => {
-          if (token === renderToken.current) setRenderError(readableMermaidError(cause));
+          if (token === renderToken.current) {
+            setValidSource(null);
+            setValidRenderKey(null);
+            setRenderError(readableMermaidError(cause));
+          }
         })
         .finally(() => {
           if (token === renderToken.current) setRendering(false);
@@ -192,6 +209,12 @@ export function MermaidWorkspacePage() {
 
   const canSave =
     !submitting && title.trim() !== "" && validSource === source && sourceBytes <= MAX_SOURCE_BYTES;
+  const canExport =
+    !rendering &&
+    validSource === source &&
+    validRenderKey === renderKey &&
+    previewSvg !== "" &&
+    exporting == null;
   const save = useCallback(async (): Promise<boolean> => {
     if (projectId == null || !canSave) return false;
     setSubmitting(true);
@@ -245,6 +268,38 @@ export function MermaidWorkspacePage() {
     [save],
   );
 
+  const exportImage = useCallback(
+    async (format: MermaidExportFormat) => {
+      if (!canExport || exportingRef.current) return;
+      exportingRef.current = true;
+      setExporting(format);
+      setExportNotice(null);
+      setError(null);
+      try {
+        const path = await saveDialog({
+          defaultPath: `${safeFileName(title)}.${format}`,
+          filters: [{ name: format.toUpperCase(), extensions: [format] }],
+        });
+        if (path == null) return;
+        const data = format === "svg" ? previewSvg : await renderMermaidPng(previewSvg);
+        if (
+          format === "svg" &&
+          new TextEncoder().encode(data).byteLength > MAX_MERMAID_EXPORT_BYTES
+        ) {
+          throw new Error("SVGは20MiB以下にしてください。");
+        }
+        await mermaidWriteFile({ path, format, data });
+        setExportNotice(`${format.toUpperCase()}を書き出しました`);
+      } catch (cause) {
+        setError(formatInvokeError(cause));
+      } finally {
+        exportingRef.current = false;
+        setExporting(null);
+      }
+    },
+    [canExport, previewSvg, title],
+  );
+
   if (projectId == null)
     return <div className="p-6 text-sm">プロジェクトが選択されていません。</div>;
   if (loading)
@@ -279,8 +334,15 @@ export function MermaidWorkspacePage() {
         >
           <FilePlus2 size={14} /> 新規
         </Button>
+        <Button disabled={!canExport} onClick={() => void exportImage("svg")}>
+          <Download size={14} /> {exporting === "svg" ? "SVG生成中..." : "SVG"}
+        </Button>
+        <Button disabled={!canExport} onClick={() => void exportImage("png")}>
+          {exporting === "png" ? "PNG生成中..." : "PNG"}
+        </Button>
         <span className="ml-auto text-xs text-[var(--fg-muted)]">
           {dirty ? "未保存" : "保存済み"}
+          {exportNotice == null ? "" : `・${exportNotice}`}
         </span>
         <Button variant="primary" disabled={!canSave} onClick={() => void save()}>
           <Save size={14} /> {submitting ? "保存中..." : "保存"}
@@ -384,4 +446,9 @@ function parseTags(value: string): string[] {
 
 function documentKey(title: string, tags: string, source: string): string {
   return JSON.stringify([title, tags, source]);
+}
+
+function safeFileName(value: string): string {
+  const sanitized = value.trim().replace(/[\\/:*?"<>|]/g, "-");
+  return sanitized || "mermaid";
 }

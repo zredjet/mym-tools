@@ -3,6 +3,8 @@
 //! payload v1 は `{ "source": string }`。レンダリングと構文検査は固定した Mermaid
 //! runtime の責任で、backend は保存境界として空文字と 1 MiB 超過を拒否する。
 
+pub mod commands;
+
 use serde_json::Value as JsonValue;
 
 use crate::module::{ModuleBackend, ModuleError};

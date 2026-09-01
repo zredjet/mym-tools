@@ -118,6 +118,8 @@ pub fn register_invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Bu
         crate::modules::diagram::protocol::diagram_editor_url,
         crate::modules::diagram::commands::diagram_read_file,
         crate::modules::diagram::commands::diagram_write_file,
+        // M-Mermaid: user-selected local SVG / PNG files only
+        crate::modules::mermaid::commands::mermaid_write_file,
         // M-Prompt
         crate::modules::prompt::commands::prompt_render_template,
         // M-Color / M-Palette はフロントだけで完結 (固有 IPC コマンドなし)

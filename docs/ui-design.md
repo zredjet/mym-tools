@@ -749,15 +749,17 @@ Memoは`/`一覧、`/new`作成、`/:itemId`詳細、`/edit/:itemId`編集のペ
 ### 6.18 MM-1 M-Mermaid workspace
 
 - module選択時は一覧を挟まず、`updated_at`が最新のitemまたは新規draftへreplace遷移する
-- 上部にdocument selector、新規、title、tags、保存を置き、下部を等幅`textarea`とpreviewの2 columnにする
+- 上部にdocument selector、新規、SVG / PNG書出し、title、tags、保存を置き、下部を等幅`textarea`とpreviewの2 columnにする
 - 入力後300msでrenderする。新しい入力が来た場合は古い非同期結果を破棄し、構文error中は最後に成功したpreviewを残す
 - 現在sourceのrender成功前は保存を無効にする。明示保存と`Cmd/Ctrl+S`だけで永続化し、未保存のroute遷移 / window closeを既存確認UIでblockする
+- SVGは現在のサニタイズ済みpreview、PNGは同じpreviewの白背景・2倍画像をuser-selected pathへ書き出す。構文error中の直前previewは書き出さず、画像書出しで未保存stateを変更しない
 
 ### 6.19 DG-1 M-Diagram workspace
 
 - module選択時は一覧を挟まず、直近itemまたは空canvasを直接開く
 - 上部にdocument selector、新規、`.drawio` / `.xml`取込、保存、`.drawio` / SVG / PNG書出し、title、tagsを置く
 - editor本体は残り領域を占めるsandboxed iframeとし、moduleを開くまで生成しない。外部serviceのlogo / cloud storage UIは出さない
+- editor UIは同梱済みlanguage resourceを使う日本語固定とし、言語切替を提供しない。PNGは現在表示中のpageだけ、SVGは現在の編集page、`.drawio`は全pageを書き出す
 - editorからのautosave eventは未保存stateの更新にだけ使い、itemsへの永続化は明示保存 / `Cmd/Ctrl+S`時にXMLとtextを取得して行う
 - 図内linkはeditorで直接開かず、親側の確認後にOS browserへ渡す
 
@@ -992,6 +994,7 @@ H-1 は stateless モジュールのため空状態は無し。代わりに「�
 | 2026-08-22 | 1.0 | 独立 M-Palette の PL-1 / PL-2 を追加。Adobe Color 型の左右分割、5 色固定、9 調和ルール、詳細 4 色空間、ロック、Random、Undo/Redo、保存済み一覧、未保存確認、Cmd/Ctrl+5 を確定。 |
 | 2026-08-23 | 1.1 | ADR-0014 / ADR-0015を反映。サイドバーのカテゴリ別折りたたみ、active category自動展開、stateless開発ツール11画面の共通構造と安全表示を追加。 |
 | 2026-08-25 | 1.2 | ADR-0016を反映。Link / Memoを別モジュール化し、Memoの4ページ、LinkのURL / Pathモーダル、100件超一覧、固定1〜6ショートカット、未保存遷移契約を追加 |
+| 2026-09-01 | 1.4 | MermaidのSVG / 白背景2倍PNGボタン、draw.io日本語固定、現在page PNG書出しを追加 |
 | 2026-08-31 | 1.3 | ADR-0017を反映。Mermaid / Diagramの直接workspace、document切替、preview / iframe、明示保存、file取込・書出し、未保存遷移UIを追加 |
 
 ---

@@ -711,8 +711,10 @@ src/modules/<id>/
 | `is_stateless` | false |
 | frontend route | `/`（直近item解決）、`/new`、`/edit/:itemId` |
 | payload v1 | `{ source: string }`。UTF-8で1MiB以下 |
-| 固有 IPC コマンド | なし。Mermaid 11.17.2をdynamic importしてFrontendで描画 |
+| 固有 IPC コマンド | `mermaid_write_file`。user-selected `.svg` / `.png`へ、20MiB以下のサニタイズ済みpreviewだけを原子的に書き込む |
 | `index_text` の対象 | `source` |
+
+SVGは現在sourceを`securityLevel: strict`で正常にrenderし、active contentと外部参照を除去した結果だけを扱う。PNGは同じSVGを白背景・2倍でlocal Canvasへ描画し、16,384px / 16,777,216画素を上限とする。構文error・再描画中・上限超過中は書出しを許可せず、書出し自体はpayloadや未保存判定を変更しない。
 
 ### 12.8 M-Diagram
 
@@ -727,6 +729,7 @@ src/modules/<id>/
 | `index_text` の対象 | editorから取得した`text` |
 
 draw.io iframeはmodule UIの実装詳細だが、親との境界は`postMessage`に限定する。親はsource / origin / event順序 / request ID / sizeを検証し、editor originへTauri IPC permissionを追加しない。ファイル書込みはtemp fileのflush / sync後にatomic replaceする。
+editor URLは`lang=ja`を固定し、同梱済み日本語resourceだけをsame-originから読む。PNG export requestは`currentPage: true`を必須とし、現在表示中のpageだけを画像化する。`.drawio`は全page、SVGは現在の編集pageを対象とする。
 
 ### 12.9 Stateless 開発ツール
 
@@ -785,4 +788,5 @@ draw.io iframeはmodule UIの実装詳細だが、親との境界は`postMessage
 | 2026-08-22 | 0.7 | §12.5 に stateful な M-Palette 契約を追加。共通 items CRUD を使い、固有 IPC とコア DB スキーマ変更を持たないことを確定 |
 | 2026-08-23 | 0.8 | ADR-0014 / ADR-0015を反映。`ModuleDefinition.category`をoptional metadataとして追加し、stateless開発ツール11種とHTTP IPC境界を§12.6へ追加 |
 | 2026-08-25 | 0.9 | ADR-0016を反映。M-Link payloadから単独Memoを除外し、共通items APIのみを使うM-Memoと4つのFrontend routeを追加。公開Storage / ModuleDefinition契約は不変 |
+| 2026-09-01 | 1.1 | MermaidのSVG / 白背景2倍PNG書出しIPC、draw.io日本語固定、現在page PNG契約を追加 |
 | 2026-08-31 | 1.0 | ADR-0017を反映。M-Mermaid / M-Diagramのstateful payload、route、検索、local file IPC、postMessage隔離契約を追加 |

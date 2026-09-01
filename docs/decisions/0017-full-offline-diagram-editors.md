@@ -74,6 +74,13 @@ Windowsの最終ZIP実測はWindows release workflowで行い、両OSの検査�
 - MermaidのMIT licenseとdraw.ioのApache License 2.0全文、固定version、source linkを配布assetとAboutへ含める。
 - Mermaid / draw.ioの公式logoは使用しない。
 
+### 6. 2026-09-01追補: ローカル画像書出しと言語・ページ契約
+
+- Mermaidは現在sourceのrenderに成功している場合だけ、サニタイズ済みpreviewをSVGまたは白背景・2倍のPNGとしてuser-selected pathへ書き出せる。構文error中に保持している直前previewは書出し対象にしない。
+- `mermaid_write_file`は`.svg` / `.png`、20MiB以下だけを扱い、SVG active content / 外部参照とPNG署名をbackendでも検証して原子的に置換する。画像書出しはitems payloadと未保存stateを変更しない。
+- draw.io UIは同梱済み`resources/dia_ja.txt`を`lang=ja`で読み込み、日本語へ固定する。言語変更や追加downloadは提供しない。
+- draw.ioのPNG書出しはembed export protocolの`currentPage: true`を指定し、現在表示中の1ページだけを画像化する。`.drawio`は全ページ、SVGは現在の編集ページという既存契約を維持する。
+
 ## Consequences
 
 - 図編集はネットワーク断でも同じ機能・資産で動き、図データ送信のオンライン経路を持たない。
@@ -83,14 +90,16 @@ Windowsの最終ZIP実測はWindows release workflowで行い、両OSの検査�
 
 ## Validation Criteria
 
-- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（51,252,478 bytes）
+- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（51,244,151 bytes）
 - [ ] Windowsの実portable ZIPが80,000,000 bytes以下
 - [ ] Windows 10 / 11、macOS 12最新patch、現行macOSで編集、全asset、保存、再読込、SVG / PNG書出しが成功
 - [ ] 代表操作中の外向き通信0件、全asset requestがlocal originで解決
 - [ ] editorから親DOM、Tauri core IPC、外部URLへアクセス不能
 - [ ] draw.io moduleを開くまでeditor assetを初期化せず、起動直後memory 100MB目標を維持
 - [ ] Mermaidの成功／失敗／連続入力／theme／保存制御／検索／未保存遷移testが成功
+- [x] MermaidのSVG／白背景2倍PNG、構文error時の書出し拒否、容量・active content検証が成功
 - [ ] DiagramのXML検証／不正message／init-load-save-export／file I/O／text検索／破損／容量testが成功
+- [ ] draw.io UIが完全offlineで日本語表示され、複数ページ図のPNGが現在pageと一致
 
 ## References
 

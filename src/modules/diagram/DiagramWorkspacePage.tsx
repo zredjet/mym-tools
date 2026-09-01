@@ -19,19 +19,20 @@ import { modulePath } from "@/modules/registry";
 
 import {
   drawioEditorUrl,
+  drawioExportMessage,
   drawioLoadMessage,
   drawioTargetOrigin,
   isTrustedDrawioOrigin,
   parseDrawioMessage,
+  type DrawioExportFormat,
 } from "./drawioBridge";
 
 const MAX_DIAGRAM_BYTES = 1024 * 1024;
+export const DIAGRAM_EXPORT_TIMEOUT_MS = 30_000;
 const EMPTY_DIAGRAM =
   '<mxfile host="MyMyTools"><diagram name="Page-1"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>';
 
 type LoadKind = "initial" | "import";
-type ExportFormat = "svg" | "png";
-
 interface PendingTextRequest {
   id: string;
   xml: string;
@@ -39,7 +40,7 @@ interface PendingTextRequest {
 
 interface PendingExportRequest {
   id: string;
-  format: ExportFormat;
+  format: DrawioExportFormat;
   path: string;
 }
 
@@ -89,6 +90,8 @@ export function DiagramWorkspacePage() {
   const loadKind = useRef<LoadKind>("initial");
   const pendingText = useRef<PendingTextRequest | null>(null);
   const pendingExport = useRef<PendingExportRequest | null>(null);
+  const exportTimeoutId = useRef<number | null>(null);
+  const exportInFlight = useRef(false);
   const [editorUrl, setEditorUrl] = useState<string | null>(null);
   const [editorOrigin, setEditorOrigin] = useState<string | null>(null);
   const [documents, setDocuments] = useState<Item[]>([]);
@@ -101,6 +104,7 @@ export function DiagramWorkspacePage() {
   const [loading, setLoading] = useState(itemId != null);
   const [editorReady, setEditorReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<DrawioExportFormat | null>(null);
   const [status, setStatus] = useState("エディタを起動しています...");
   const [error, setError] = useState<string | null>(null);
 
@@ -181,6 +185,29 @@ export function DiagramWorkspacePage() {
       );
     },
     [editorOrigin],
+  );
+
+  const clearExportTimeout = useCallback(() => {
+    if (exportTimeoutId.current != null) {
+      window.clearTimeout(exportTimeoutId.current);
+      exportTimeoutId.current = null;
+    }
+  }, []);
+
+  const releaseExport = useCallback(() => {
+    clearExportTimeout();
+    pendingExport.current = null;
+    exportInFlight.current = false;
+    setExportingFormat(null);
+  }, [clearExportTimeout]);
+
+  useEffect(
+    () => () => {
+      clearExportTimeout();
+      pendingExport.current = null;
+      exportInFlight.current = false;
+    },
+    [clearExportTimeout],
   );
 
   const persist = useCallback(
@@ -328,9 +355,13 @@ export function DiagramWorkspacePage() {
           return;
         }
         pendingExport.current = null;
+        clearExportTimeout();
         void diagramWriteFile({ path: pending.path, format: pending.format, data: message.data })
           .then(() => setStatus(`${pending.format.toUpperCase()}を書き出しました`))
-          .catch((cause) => setError(formatInvokeError(cause)));
+          .catch((cause) => setError(formatInvokeError(cause)))
+          .finally(() => {
+            releaseExport();
+          });
         return;
       }
 
@@ -353,7 +384,16 @@ export function DiagramWorkspacePage() {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [editorOrigin, persist, postToEditor, tagsInput, title, xml]);
+  }, [
+    clearExportTimeout,
+    editorOrigin,
+    persist,
+    postToEditor,
+    releaseExport,
+    tagsInput,
+    title,
+    xml,
+  ]);
 
   const dirty = documentKey(title, tagsInput, xml) !== baseline;
   const blocker = useBlocker(
@@ -423,24 +463,30 @@ export function DiagramWorkspacePage() {
     }
   };
 
-  const exportImage = async (format: ExportFormat) => {
+  const exportImage = async (format: DrawioExportFormat) => {
+    if (exportInFlight.current) return;
+    exportInFlight.current = true;
+    setExportingFormat(format);
     try {
       const path = await saveDialog({
         defaultPath: `${safeFileName(title)}.${format}`,
         filters: [{ name: format.toUpperCase(), extensions: [format] }],
       });
-      if (path == null) return;
+      if (path == null) {
+        releaseExport();
+        return;
+      }
       const requestId = crypto.randomUUID();
       pendingExport.current = { id: requestId, format, path };
-      postToEditor({
-        action: "export",
-        format,
-        requestId,
-        ...(format === "svg" ? { asText: true, embedImages: true, embedFonts: true } : {}),
-        ...(format === "png" ? { scale: 1, border: 0, transparent: false } : {}),
-      });
+      postToEditor(drawioExportMessage(format, requestId));
       setStatus(`${format.toUpperCase()}を生成しています...`);
+      exportTimeoutId.current = window.setTimeout(() => {
+        if (pendingExport.current?.id !== requestId) return;
+        releaseExport();
+        setError(`${format.toUpperCase()}生成がタイムアウトしました。もう一度お試しください。`);
+      }, DIAGRAM_EXPORT_TIMEOUT_MS);
     } catch (cause) {
+      releaseExport();
       setError(formatInvokeError(cause));
     }
   };
@@ -481,14 +527,23 @@ export function DiagramWorkspacePage() {
         <Button disabled={!editorReady} onClick={() => void importDiagram()}>
           <FileInput size={14} /> 取込
         </Button>
-        <Button disabled={!editorReady} onClick={() => void exportDrawio()}>
+        <Button
+          disabled={!editorReady || exportingFormat != null}
+          onClick={() => void exportDrawio()}
+        >
           <Download size={14} /> .drawio
         </Button>
-        <Button disabled={!editorReady} onClick={() => void exportImage("svg")}>
-          SVG
+        <Button
+          disabled={!editorReady || exportingFormat != null}
+          onClick={() => void exportImage("svg")}
+        >
+          {exportingFormat === "svg" ? "SVG生成中..." : "SVG"}
         </Button>
-        <Button disabled={!editorReady} onClick={() => void exportImage("png")}>
-          PNG
+        <Button
+          disabled={!editorReady || exportingFormat != null}
+          onClick={() => void exportImage("png")}
+        >
+          {exportingFormat === "png" ? "PNG生成中..." : "PNG"}
         </Button>
         <span className="ml-auto text-xs text-[var(--fg-muted)]">{dirty ? "未保存" : status}</span>
         <Button
