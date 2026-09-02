@@ -150,6 +150,7 @@ jobs:
         if: always()
 
   build-tauri:
+    name: build-tauri (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:

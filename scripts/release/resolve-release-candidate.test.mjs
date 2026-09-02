@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import process from "node:process";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -50,6 +53,12 @@ function fixture() {
 }
 
 describe("selectCandidateMetadata", () => {
+  it("branch protection用のbuild-tauri check名を固定する", () => {
+    const workflow = readFileSync(resolve(process.cwd(), ".github/workflows/ci.yml"), "utf8");
+
+    expect(workflow).toContain("name: build-tauri (${{ matrix.os }})");
+  });
+
   it("同じrequired CI runの2成果物だけを選ぶ", () => {
     expect(selectCandidateMetadata(fixture())).toEqual({
       reuseCandidate: true,
