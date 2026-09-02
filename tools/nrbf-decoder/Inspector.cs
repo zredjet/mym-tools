@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Runtime.Serialization;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 
 namespace MyMyTools.NrbfDecoder;
 
@@ -277,9 +278,13 @@ internal static class Inspector
             }
             else _searchTextBytes += searchBytes;
 
-            long nodeProtocolBytes = 256 + searchBytes
-                + (typeName is null ? 0 : Encoding.UTF8.GetByteCount(typeName))
-                + (assemblyName is null ? 0 : Encoding.UTF8.GetByteCount(assemblyName));
+            long nodeProtocolBytes = 256
+                + JsonEncodedByteCount(displayName)
+                + JsonEncodedByteCount(rawName)
+                + JsonEncodedByteCount(kind)
+                + JsonEncodedByteCount(typeName)
+                + JsonEncodedByteCount(assemblyName)
+                + JsonEncodedByteCount(formattedValue);
             if (_estimatedProtocolBytes + nodeProtocolBytes > MaximumProtocolBytes - 1024 * 1024)
             {
                 if (!_protocolLimitWarned)
@@ -305,6 +310,9 @@ internal static class Inspector
                 formattedValue, record is null ? null : FormatRecordId(record.Id), referenceTargetId, shape));
             return id;
         }
+
+        private static int JsonEncodedByteCount(string? value) =>
+            value is null ? 0 : JsonEncodedText.Encode(value).EncodedUtf8Bytes.Length;
 
         private void AddUnsupported(int? parentId, string displayName, string rawName, string reason) =>
             AddNode(new(null, parentId, displayName, rawName), "unsupported", null, null,

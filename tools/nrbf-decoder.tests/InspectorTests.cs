@@ -266,6 +266,29 @@ public sealed class InspectorTests
     }
 
     [Fact]
+    public void OmitsRemainingNodesBeforeJsonEscapingExceedsTheProtocolLimit()
+    {
+        const int memberCount = 11;
+        string[] names = Enumerable.Range(0, memberCount).Select(index => $"f{index}").ToArray();
+        byte[] binaryTypes = Enumerable.Repeat((byte)1, memberCount).ToArray();
+        string escapedValue = new('\0', 1024 * 1024);
+        using MemoryStream payload = Header();
+        WriteLibrary(payload);
+        WriteClassHeader(payload, 1, "Sample.EscapedStrings", names, binaryTypes);
+        for (int index = 0; index < memberCount; index++)
+            WriteObjectString(payload, index + 20, escapedValue);
+        payload.WriteByte(11);
+        using TemporaryFile file = new(payload.ToArray());
+
+        InspectResponse response = Inspector.Inspect(file.Path);
+
+        Assert.True(response.Ok);
+        Assert.Contains(response.Nodes, node =>
+            node.Kind == "unsupported" && node.FormattedValue?.Contains("プロトコル出力上限") == true);
+        Assert.Contains(response.Summary!.Warnings, warning => warning.Contains("64 MiB"));
+    }
+
+    [Fact]
     public void ReservesTheFinalNodeForOmissionAtTheHundredThousandNodeLimit()
     {
         const int memberCount = 100_000;

@@ -139,6 +139,31 @@ describe("NrbfInspectorPage", () => {
     expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("$");
   });
 
+  it("clears an active search before jumping to a reference target outside the result", async () => {
+    const filteredReferenceNodes = [
+      makeNode({ id: 1, parentId: null, displayName: "$" }),
+      makeNode({ id: 2, parentId: 1, displayName: "Canonical", kind: "scalar" }),
+      makeNode({
+        id: 3,
+        parentId: 1,
+        displayName: "Needle reference",
+        kind: "reference",
+        referenceTargetId: 2,
+      }),
+    ];
+    resolveWith(filteredReferenceNodes, { ...summary, nodeCount: filteredReferenceNodes.length });
+    const user = userEvent.setup();
+    render(<NrbfInspectorPage />);
+    await user.click(screen.getByRole("button", { name: "ファイルを選択" }));
+    const search = await screen.findByRole("textbox", { name: "項目名または値を検索" });
+    await user.type(search, "Needle");
+    expect(screen.queryByText("Canonical")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("treeitem", { name: /Needle reference/ }));
+    await user.click(screen.getByRole("button", { name: "#2へ移動" }));
+    expect(search).toHaveValue("");
+    expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("Canonical");
+  });
+
   it("virtualizes a large expanded tree and supports arrow-key selection", async () => {
     const many = [
       makeNode({ id: 1, parentId: null, displayName: "$" }),

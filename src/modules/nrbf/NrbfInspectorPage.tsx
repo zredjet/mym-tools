@@ -44,6 +44,7 @@ export function NrbfInspectorPage() {
   const operationRef = useRef<ActiveOperation | null>(null);
   const mountedRef = useRef(true);
   const treeRef = useRef<HTMLDivElement>(null);
+  const pendingJumpIdRef = useRef<number | null>(null);
 
   const replaceOperation = useCallback((next: ActiveOperation | null) => {
     operationRef.current = next;
@@ -68,6 +69,7 @@ export function NrbfInspectorPage() {
       setSummary(null);
       setError(null);
       setQuery("");
+      pendingJumpIdRef.current = null;
       setExpandedIds(new Set());
       setSelectedId(null);
       setScrollTop(0);
@@ -166,6 +168,7 @@ export function NrbfInspectorPage() {
     setSummary(null);
     setError(null);
     setQuery("");
+    pendingJumpIdRef.current = null;
     setExpandedIds(new Set());
     setSelectedId(null);
   }, []);
@@ -212,21 +215,23 @@ export function NrbfInspectorPage() {
 
   const jumpToNode = useCallback(
     (nodeId: number) => {
+      pendingJumpIdRef.current = nodeId;
+      setQuery("");
       selectNode(nodeId);
-      const normalRows = buildVisibleRows(
-        presentationNodes,
-        new Set([...expandedIds, ...collectAncestorIds(presentationNodes, nodeId)]),
-        null,
-      );
-      const index = normalRows.findIndex((row) => row.node.id === nodeId);
-      if (index >= 0 && treeRef.current != null) {
-        if (typeof treeRef.current.scrollTo === "function")
-          treeRef.current.scrollTo({ top: index * ROW_HEIGHT, behavior: "smooth" });
-        else treeRef.current.scrollTop = index * ROW_HEIGHT;
-      }
     },
-    [expandedIds, presentationNodes, selectNode],
+    [selectNode],
   );
+
+  useEffect(() => {
+    const nodeId = pendingJumpIdRef.current;
+    if (nodeId == null) return;
+    const index = rows.findIndex((row) => row.node.id === nodeId);
+    if (index < 0 || treeRef.current == null) return;
+    pendingJumpIdRef.current = null;
+    if (typeof treeRef.current.scrollTo === "function")
+      treeRef.current.scrollTo({ top: index * ROW_HEIGHT, behavior: "smooth" });
+    else treeRef.current.scrollTop = index * ROW_HEIGHT;
+  }, [rows]);
 
   const onTreeKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
