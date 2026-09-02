@@ -150,10 +150,19 @@ jobs:
         if: always()
 
   build-tauri:
+    name: build-tauri (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        include:
+          - os: macos-latest
+            platform: macos
+            archive_suffix: macos_aarch64
+            rust_targets: aarch64-apple-darwin
+          - os: windows-latest
+            platform: windows
+            archive_suffix: windows_x64
+            rust_targets: ""
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -162,6 +171,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master HEAD pinned
         with:
           toolchain: stable
+          targets: ${{ matrix.rust_targets }}
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: build-${{ matrix.os }}
@@ -172,10 +182,95 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      # tauri-cli は taiki-e/install-action の managed manifest 外のため
-      # 既定 fallback の cargo-binstall で取得される (ADR-0010 §2.3 / Round 8 C-1)
-      - uses: taiki-e/install-action@7ea35f098a7369cd23488403f58be9c491a6c55f # v2.77.0
+
+      - name: Verify release candidate version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/release/release-contract.mjs check-version "${VERSION}" .
+
+      # package-lock.jsonで固定したTauri CLIとCargo.lockで再現可能な配布物を作る。
+      - name: Build macOS app bundle
+        if: matrix.platform == 'macos'
+        run: npm run tauri -- build --target aarch64-apple-darwin --bundles app -- --locked
+
+      - name: Package macOS portable ZIP
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          APP_PATH: src-tauri/target/aarch64-apple-darwin/release/bundle/macos/MyMyTools.app
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          ARCHIVE_NAME="MyMyTools_${VERSION}_${{ matrix.archive_suffix }}.zip"
+          test -d "${APP_PATH}"
+          ditto -c -k --sequesterRsrc --keepParent "${APP_PATH}" "${ARCHIVE_NAME}"
+          unzip -t "${ARCHIVE_NAME}"
+
+      - name: Build Windows executable
+        if: matrix.platform == 'windows'
+        run: npm run tauri -- build --no-bundle -- --locked
+
+      - name: Package Windows portable ZIP
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = node -p "require('./package.json').version"
+          $archiveName = "MyMyTools_${version}_${{ matrix.archive_suffix }}.zip"
+          $source = Join-Path $env:GITHUB_WORKSPACE "src-tauri/target/release/mym-tools.exe"
+          if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw "Windows executable not found: $source"
+          }
+
+          $staging = Join-Path $env:RUNNER_TEMP "mym-tools-ci-portable"
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item -LiteralPath $source -Destination (Join-Path $staging "MyMyTools.exe")
+          Compress-Archive `
+            -LiteralPath (Join-Path $staging "MyMyTools.exe") `
+            -DestinationPath (Join-Path $env:GITHUB_WORKSPACE $archiveName) `
+            -CompressionLevel Optimal
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead(
+            (Join-Path $env:GITHUB_WORKSPACE $archiveName)
+          )
+          try {
+            if ($zip.Entries.Count -ne 1 -or $zip.Entries[0].FullName -ne "MyMyTools.exe") {
+              throw "Unexpected Windows portable ZIP contents"
+            }
+          }
+          finally {
+            $zip.Dispose()
+          }
+
+      - name: Create release candidate manifest
+        shell: bash
+        env:
+          CANDIDATE_REPOSITORY: ${{ github.repository }}
+          CANDIDATE_RUN_ID: ${{ github.run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          ARCHIVE_NAME="MyMyTools_${VERSION}_${{ matrix.archive_suffix }}.zip"
+          export CANDIDATE_VERSION="${VERSION}"
+          export CANDIDATE_SOURCE_COMMIT="$(git rev-parse HEAD)"
+          export CANDIDATE_SOURCE_TREE="$(git rev-parse 'HEAD^{tree}')"
+          export CANDIDATE_TAURI_CLI_VERSION="$(npx --no-install tauri --version)"
+          export CANDIDATE_RUST_VERSION="$(rustc --version)"
+          node scripts/release/release-candidate.mjs create \
+            "${{ matrix.platform }}" \
+            "${ARCHIVE_NAME}" \
+            "release-candidate-${{ matrix.platform }}.json"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          tool: tauri-cli
-      # ADR-0010 §2.1: --no-bundle で「ビルドが通る」ことのみ確認 (DMG/NSIS は CD ADR で扱う)
-      - run: cargo tauri build --no-bundle
+          name: release-candidate-${{ matrix.platform }}
+          path: |
+            MyMyTools_*_${{ matrix.archive_suffix }}.zip
+            release-candidate-${{ matrix.platform }}.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0

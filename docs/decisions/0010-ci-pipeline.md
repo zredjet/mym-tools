@@ -799,3 +799,7 @@ Day 2 完了直後の運用で実際に発覚した 2 件。本 ADR §2.8 の規
 | 2026-05-05 | 2.1 | Day 2 で発覚した 5 件目の罠を §7.15.5 として追記: paths-ignore で skip された required check は GitHub 上で「Expected」のまま BLOCKED になり、§2.2 / Round 2 M-4 の「skip = success」前提は誤り。public 化済で課金懸念解消したため `.github/workflows/ci.yml` から paths-ignore を撤廃、全 PR で 6 ジョブ走らせる方針に変更 |
 | 2026-05-02 | 2.0 | Day 1 実装で発覚した 4 件の罠を §7.15 として追記 (実装ノート、決定変更ではない): (1) `dtolnay/rust-toolchain` の `toolchain` input 必須化 / (2) Linux runner で Tauri compile に apt deps が必要 / (3) dependabot は Tauri のような cross-language dep pair を同期 bump できない / (4) dependabot は Rust pre-1.0 の minor=breaking 慣例を区別しない。§7.16 として branch protection 設定値の運用ノートも追加 (Web UI 設定の保管責任) |
 | 2026-04-30 | 1.9 | **Accepted 化**: §2.11 受理判定 checklist の 3 項目すべてを満たすコミットで Status を Proposed → Accepted に昇格。同コミットで `decisions/0008-distribution-no-autoupdate.md` §2.5 / §7.8 を「CI ADR (ADR-0010) + CD ADR (将来) の 2 本立て」に書き換え / `decisions/0009-cancellation-and-spawn-blocking.md` §6.2 受入条件 checklist 最終項目を ADR-0010 §2.4.1 / §2.5 / §6.2 ベースに差し替え / `architecture.md` §13 「未確定」を「CI 確定 (ADR-0010) / CD は将来」に分離、をすべて更新済み |
+
+## 10. ADR-0019による一部置換（2026-09-02追記）
+
+`build-tauri`を`--no-bundle`のビルド確認だけに限定する決定と、CI用Tauri CLIを`taiki-e/install-action`で別途導入する決定は、ADR-0019で置換した。required check名は維持したまま、lockfile固定のTauri CLIで配布用portable ZIPとcandidate manifestを生成し、手動Releaseから厳格検証後に再利用する。その他のCI境界とbranch protection決定は引き続き有効とする。

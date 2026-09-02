@@ -31,6 +31,7 @@ describe("frontend module registry", () => {
       "cron",
       "a11y",
       "http",
+      "pdfmerge",
     ]);
     expect(() => validateModuleDefinitions(modules)).not.toThrow();
     for (const module of modules) expect(module.routes.length).toBeGreaterThan(0);
@@ -141,6 +142,7 @@ describe("frontend module registry", () => {
       "web",
       "generate",
       "time",
+      "other",
     ]);
     expect(
       groups.find((group) => group.category.id === "web")?.modules.map((module) => module.id),

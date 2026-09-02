@@ -20,7 +20,7 @@
 | [docs/ui-design.md](docs/ui-design.md) | UI トークン、画面スケルトン、キーボードショートカット |
 | [docs/developer-tools-plan.md](docs/developer-tools-plan.md) | 開発ツール11モジュールの範囲、段階、品質条件 |
 | [docs/release-process.md](docs/release-process.md) | 担当者向けの手動リリース手順、公開後検証、失敗時対応 |
-| [docs/decisions/](docs/decisions/) | ADR-0001〜0017 (モジュール化 / HTTP通信境界 / 完全オフライン図編集) |
+| [docs/decisions/](docs/decisions/) | ADR-0001〜0019 (モジュール化 / ローカル処理境界 / リリース方式) |
 | [CLAUDE.md](CLAUDE.md) | 作業時の不変条件と参照優先順位 |
 
 ## 開発
@@ -74,11 +74,11 @@ cargo test --workspace --lib --all-features --locked
 
 ## 開発状況
 
-**Phase 1 の主要機能を実装済み (`0.1.0-alpha.9`)**。
+**Phase 1 の主要機能を実装済み (`0.1.0-alpha.10`)**。
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
-rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing の Rust バックエンドで構成。
-プロジェクト管理、カテゴリ表示付き19モジュール、横断検索、`settings.json`、バックアップ、
+rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing / lopdf の Rust バックエンドで構成。
+プロジェクト管理、カテゴリ表示付き20モジュール、横断検索、`settings.json`、バックアップ、
 アプリ全体／プロジェクト単位の JSON export / import を備える。
 
 CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2)

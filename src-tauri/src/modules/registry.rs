@@ -26,6 +26,7 @@ use crate::modules::linkmemo::LinkMemoModule;
 use crate::modules::memo::MemoModule;
 use crate::modules::mermaid::MermaidModule;
 use crate::modules::palette::PaletteModule;
+use crate::modules::pdfmerge::PdfMergeModule;
 use crate::modules::prompt::PromptModule;
 use crate::modules::regex::RegexModule;
 use crate::modules::secretgen::SecretGeneratorModule;
@@ -46,6 +47,7 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
         Arc::new(DiagramModule),
         Arc::new(PromptModule),
         Arc::new(PaletteModule),
+        Arc::new(PdfMergeModule),
         Arc::new(CodecModule),
         Arc::new(UrlQueryModule),
         Arc::new(DateTimeModule),
@@ -120,6 +122,9 @@ pub fn register_invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Bu
         crate::modules::diagram::commands::diagram_write_file,
         // M-Mermaid: user-selected local SVG / PNG files only
         crate::modules::mermaid::commands::mermaid_write_file,
+        // M-PDF Merge: user-selected local PDF files only
+        crate::modules::pdfmerge::commands::pdfmerge_inspect_files,
+        crate::modules::pdfmerge::commands::pdfmerge_merge_files,
         // M-Prompt
         crate::modules::prompt::commands::prompt_render_template,
         // M-Color / M-Palette はフロントだけで完結 (固有 IPC コマンドなし)
@@ -141,7 +146,7 @@ mod tests {
     fn module_backends_build_into_app_state() {
         let storage: Arc<dyn StorageService> = Arc::new(SqliteStorage::open(":memory:").unwrap());
         let backends = module_backends();
-        assert_eq!(backends.len(), 19);
+        assert_eq!(backends.len(), 20);
         let dir = tempfile::tempdir().unwrap();
         let backup: Arc<dyn crate::backup::BackupService> = Arc::new(
             crate::backup::LocalBackupService::new(dir.path().to_path_buf(), Arc::clone(&storage)),
@@ -155,6 +160,7 @@ mod tests {
         assert!(state.module("diagram").is_some());
         assert!(state.module("prompt").is_some());
         assert!(state.module("palette").is_some());
+        assert!(state.module("pdfmerge").is_some());
         for id in [
             "codec",
             "urlquery",

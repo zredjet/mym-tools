@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -32,6 +33,23 @@ function writeProjectVersions(root, versions) {
     resolve(root, "src-tauri", "tauri.conf.json"),
     JSON.stringify({ version: versions.tauri }),
   );
+}
+
+function writePortableArchives(root, version = "0.2.0") {
+  const [macArchive, windowsArchive] = expectedPortableArchives(version);
+  const macRoot = resolve(root, "mac-source");
+  const windowsRoot = resolve(root, "windows-source");
+  mkdirSync(resolve(macRoot, "MyMyTools.app", "Contents", "MacOS"), { recursive: true });
+  mkdirSync(windowsRoot, { recursive: true });
+  writeFileSync(resolve(macRoot, "MyMyTools.app", "Contents", "MacOS", "MyMyTools"), "app");
+  writeFileSync(resolve(windowsRoot, "MyMyTools.exe"), "exe");
+  execFileSync("zip", ["-q", "-r", resolve(root, macArchive), "MyMyTools.app"], {
+    cwd: macRoot,
+  });
+  execFileSync("zip", ["-q", resolve(root, windowsArchive), "MyMyTools.exe"], {
+    cwd: windowsRoot,
+  });
+  return [macArchive, windowsArchive];
 }
 
 afterEach(() => {
@@ -82,17 +100,15 @@ describe("assertConfiguredVersion", () => {
 describe("assertPortableArchives", () => {
   it("macOSとWindowsの有効なZIPが1件ずつある場合だけ通す", () => {
     const root = createTemporaryDirectory();
-    for (const archive of expectedPortableArchives("0.2.0")) {
-      writeFileSync(resolve(root, archive), Buffer.from("PK\u0003\u0004content"));
-    }
+    writePortableArchives(root);
 
     expect(assertPortableArchives("0.2.0", root)).toEqual(expectedPortableArchives("0.2.0").sort());
   });
 
   it("成果物不足を成功扱いにしない", () => {
     const root = createTemporaryDirectory();
-    const [macArchive] = expectedPortableArchives("0.2.0");
-    writeFileSync(resolve(root, macArchive), Buffer.from("PK\u0003\u0004content"));
+    const [, windowsArchive] = writePortableArchives(root);
+    rmSync(resolve(root, windowsArchive));
 
     expect(() => assertPortableArchives("0.2.0", root)).toThrow("2件ちょうど必要");
   });
@@ -108,10 +124,8 @@ describe("assertPortableArchives", () => {
 
   it("80,000,000 bytesを超えるportable ZIPを拒否する", () => {
     const root = createTemporaryDirectory();
-    const [macArchive, windowsArchive] = expectedPortableArchives("0.2.0");
-    writeFileSync(resolve(root, macArchive), Buffer.from("PK\u0003\u0004content"));
+    const [macArchive] = writePortableArchives(root);
     truncateSync(resolve(root, macArchive), MAX_PORTABLE_ARCHIVE_BYTES + 1);
-    writeFileSync(resolve(root, windowsArchive), Buffer.from("PK\u0003\u0004content"));
 
     expect(() => assertPortableArchives("0.2.0", root)).toThrow("80000000");
   });
@@ -141,6 +155,29 @@ describe("assertPortableArchives", () => {
           delta: -2,
         }),
       ]),
+    );
+  });
+
+  it("Windows ZIPに余分なファイルがある場合は拒否する", () => {
+    const root = createTemporaryDirectory();
+    const [, windowsArchive] = writePortableArchives(root);
+    writeFileSync(resolve(root, "extra.txt"), "extra");
+    execFileSync("zip", ["-q", resolve(root, windowsArchive), "extra.txt"], { cwd: root });
+    rmSync(resolve(root, "extra.txt"));
+
+    expect(() => assertPortableArchives("0.2.0", root)).toThrow("Windows portable ZIPの内容が不正");
+  });
+
+  it("macOS ZIPにMyMyTools.appがない場合は拒否する", () => {
+    const root = createTemporaryDirectory();
+    const [macArchive] = writePortableArchives(root);
+    rmSync(resolve(root, macArchive));
+    writeFileSync(resolve(root, "wrong.txt"), "wrong");
+    execFileSync("zip", ["-q", resolve(root, macArchive), "wrong.txt"], { cwd: root });
+    rmSync(resolve(root, "wrong.txt"));
+
+    expect(() => assertPortableArchives("0.2.0", root)).toThrow(
+      "macOS portable ZIPにMyMyTools.appがありません",
     );
   });
 });

@@ -1,6 +1,6 @@
 # モジュール契約 (Module Contract)
 
-最終更新: 2026-08-25 / ステータス: Draft (Phase 1)
+最終更新: 2026-09-02 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**モジュールがコアと交わす契約**」を定義する。
 モジュールが提供するもの / コアが提供するもの / 両者がしてはいけないことを具体 API レベルで決めて、
@@ -731,7 +731,22 @@ SVGは現在sourceを`securityLevel: strict`で正常にrenderし、active conte
 draw.io iframeはmodule UIの実装詳細だが、親との境界は`postMessage`に限定する。親はsource / origin / event順序 / request ID / sizeを検証し、editor originへTauri IPC permissionを追加しない。ファイル書込みはtemp fileのflush / sync後にatomic replaceする。
 editor URLは`lang=ja`を固定し、同梱済み日本語resourceだけをsame-originから読む。PNG export requestは`currentPage: true`を必須とし、現在表示中のpageだけを画像化する。`.drawio`は全page、SVGは現在の編集pageを対象とする。
 
-### 12.9 Stateless 開発ツール
+### 12.9 M-PDF Merge
+
+| 項目 | 値 |
+|------|----|
+| `id` | `pdfmerge` |
+| `category` / 既定 | `other` / enabled |
+| `is_stateless` | true |
+| frontend route | `/` |
+| 固有 IPC コマンド | `pdfmerge_inspect_files` / `pdfmerge_merge_files`。進捗はTauri Channelの`PdfMergeProgress`、キャンセルは`core_cancel_operation` |
+| 入力上限 | 2〜50ファイル、合計200 MiB。展開済みstreamは1個64 MiB。同一pathの重複は許可 |
+| 出力契約 | user-selected `.pdf`へ同一directoryの一時ファイル経由でatomic replace。入力自身への上書きは禁止 |
+| `index_text` の対象 | なし |
+
+入力一覧と順序はfrontend stateだけに保持し、items、検索、export / importの対象外とする。各実行はUUIDのoperation IDを持ち、遅延した別operationの進捗をUIへ反映しない。結合開始時に全入力を再検証し、暗号化、署名、AcroForm / Widget、Outlines、embedded files、portfolioを検出したPDFは拒否する。
+
+### 12.10 Stateless 開発ツール
 
 | ID | 固有 IPC | 実行境界 |
 |---|---|---|
@@ -790,3 +805,4 @@ editor URLは`lang=ja`を固定し、同梱済み日本語resourceだけをsame-
 | 2026-08-25 | 0.9 | ADR-0016を反映。M-Link payloadから単独Memoを除外し、共通items APIのみを使うM-Memoと4つのFrontend routeを追加。公開Storage / ModuleDefinition契約は不変 |
 | 2026-09-01 | 1.1 | MermaidのSVG / 白背景2倍PNG書出しIPC、draw.io日本語固定、現在page PNG契約を追加 |
 | 2026-08-31 | 1.0 | ADR-0017を反映。M-Mermaid / M-Diagramのstateful payload、route、検索、local file IPC、postMessage隔離契約を追加 |
+| 2026-09-02 | 1.2 | ADR-0018を反映。M-PDF Mergeのstateless契約、固有IPC、進捗・cancel、入力上限、通常PDF限定、atomic outputを追加 |

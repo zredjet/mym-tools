@@ -96,3 +96,7 @@ Phase 1のリリースは、リリースしたいタイミングで担当者がG
 - Tauri Distribution: https://v2.tauri.app/distribute/
 - Tauri macOS Application Bundle: https://v2.tauri.app/distribute/macos-application-bundle/
 - GitHub Actions Artifacts: https://docs.github.com/actions/using-workflows/storing-workflow-data-as-artifacts
+
+## 6. ADR-0019による一部置換（2026-09-02追記）
+
+§2.3のうち、Release workflowが毎回macOS / Windowsを新規ビルドする手順はADR-0019で置換した。通常は直前のrequired CIが生成したportable ZIPを、PR・run / attempt・commit tree・artifact digest・manifest・inner ZIP SHA-256・ZIP内部構造の一致確認後に再利用する。候補がない場合は検証済みtag commitから従来どおり2 OSをビルドする。手動version入力、事前push済みtag、2成果物が揃ってからの公開、draft cleanup、公開済みReleaseの不変性は変更しない。

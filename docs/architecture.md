@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-08-25 / ステータス: Draft (Phase 1)
+最終更新: 2026-09-02 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -444,6 +444,15 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 - local file I/Oは`diagram_read_file` / `diagram_write_file`だけが担当し、拡張子、XML root、DTD/entity、PNG signatureを検証して同一directory内temp fileからatomic replaceする
 - project export/importは共通items経路を使い、diagram binary添付やDB schemaを追加しない
 
+### 10.5 PDF結合境界
+
+- `pdfmerge` は既定有効のstatelessモジュールとし、入力一覧、順序、結果、履歴をitemsや設定へ保存しない
+- PDF本体はWebViewへ渡さず、Rustの `pdfmerge_inspect_files` / `pdfmerge_merge_files` がuser-selected pathを読み書きする
+- `lopdf 0.44`で入力順のpage treeを再構築し、page固有resource、回転、用紙サイズを維持する。出力は最小Catalogとし、文書level metadataや高度構造を引き継がない
+- 暗号化、電子署名、AcroForm / Widget、Outlines、embedded files、portfolioを事前検出してファイル単位で拒否する
+- 2〜50ファイル、入力合計200 MiB、展開済みstream 1個64 MiBを上限とし、結合開始時に全入力を再検証する
+- `spawn_blocking`とTauri Channelを使い、`OperationRegistry`で読み込み・統合・書込み境界をキャンセル可能にする。出力は同一directoryの一時ファイルをflush / sync後、最終cancel確認を通過した場合だけatomic replaceする
+
 ---
 
 ## 11. 重い処理の扱い
@@ -451,6 +460,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 処理 | 方針 |
 |------|------|
 | ファイルハッシュ (大ファイル) | Rust の `tauri::async_runtime::spawn_blocking` で非同期実行、進捗は **Tauri Channel** で通知、キャンセルは `tokio_util::sync::CancellationToken` + `core_cancel_operation`。詳細は ADR-0009 |
+| PDF結合 | Rustの`spawn_blocking`で再検証・page tree統合・原子的書込みを実行し、Tauri Channelで`reading / merging / writing / done / cancelled`を通知する。`OperationRegistry`でキャンセルし、WebViewへPDF本体を渡さない (ADR-0018) |
 | 全文検索 | SQLite FTS5 (インメモリインデックス不要) |
 | Markdown レンダリング | フロント側で同期実行。長文時の体感劣化が出たら Web Worker 化を検討 |
 | エクスポート | Rust 側で生成し、UI は処理中の二重送信を防ぐ。実測で必要になった時点で件数進捗 Event / Channel を追加 |
@@ -488,6 +498,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` (ADR-0002 で確定) |
 | Mermaid図 | Mermaid 11.17.2、strict security、dynamic import |
 | 自由図編集 | draw.io 31.4.1固定submodule、IPC権限なしloopback origin、sandboxed iframe |
+| PDF結合 | `lopdf 0.44`（MSRV 1.88、`aes 0.9.2`固定、展開済みstream 64 MiB上限） |
 
 **確定済**:
 - **CI パイプライン (検証)**: ADR-0010 で確定 — GitHub Actions / lint-rust / test-rust / lint-frontend / test-frontend / build-tauri matrix (macOS + Windows) / branch protection / `clippy.toml` `disallowed-methods` 連携
@@ -527,3 +538,4 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-08-23 | 0.7 | ADR-0014 / ADR-0015を反映。表示専用category metadata、一機能一モジュールのstateless開発ツール、HTTPのRust IPC・非ログ通信境界を追記 |
 | 2026-08-25 | 0.8 | ADR-0016を反映。公開ID `linkmemo` のM-Linkと新規 `memo` backend/UIを分離し、共通items APIを維持した起動時所属移行を追加 |
 | 2026-08-31 | 0.9 | ADR-0017を反映。Mermaid dynamic import、draw.io固定asset / loopback origin / Tauri ACL / postMessage隔離、file I/O、80MB release契約を追加 |
+| 2026-09-02 | 1.0 | ADR-0018を反映。PDF結合のRust処理、対応範囲、size上限、進捗・cancel、atomic replace、MSRV 1.88を追加 |

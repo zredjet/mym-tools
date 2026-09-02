@@ -1,4 +1,4 @@
-# ref: ADR-0013 — 手動実行したバージョンのportable ZIPを、全OSビルド成功後に公開する。
+# ref: ADR-0013 / ADR-0019 — 手動versionのportable ZIPをrequired CI再利用またはfallback build後に公開する。
 #
 # 第三者 action はすべてcommit SHAでpinし、右側にバージョンコメントを併記する。
 # 第三者Actionのmutable tag / branch直参照は禁止。dependabotがSHA更新PRを作成する。
@@ -24,11 +24,22 @@ jobs:
   validate-release:
     name: Validate release request
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
       prerelease: ${{ steps.release.outputs.prerelease }}
       release_sha: ${{ steps.source.outputs.release_sha }}
+      release_tree: ${{ steps.source.outputs.release_tree }}
+      reuse_candidate: ${{ steps.candidate.outputs.reuse_candidate }}
+      candidate_reason: ${{ steps.candidate.outputs.candidate_reason }}
+      candidate_run_id: ${{ steps.candidate.outputs.candidate_run_id }}
+      candidate_run_attempt: ${{ steps.candidate.outputs.candidate_run_attempt }}
+      macos_artifact_id: ${{ steps.candidate.outputs.macos_artifact_id }}
+      windows_artifact_id: ${{ steps.candidate.outputs.windows_artifact_id }}
     steps:
       # workflow_dispatchで選択したrefの検証スクリプトを取得する。
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -65,6 +76,7 @@ jobs:
           set -euo pipefail
           node scripts/release/release-contract.mjs check-version "${RELEASE_VERSION}" release-source
           echo "release_sha=$(git -C release-source rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          echo "release_tree=$(git -C release-source rev-parse 'HEAD^{tree}')" >> "${GITHUB_OUTPUT}"
 
       - name: Reject an existing release
         shell: bash
@@ -81,9 +93,22 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve required CI release candidate
+        id: candidate
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ steps.source.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/release/resolve-release-candidate.mjs "${RELEASE_SHA}"
+
   build-portable:
     name: Build portable ZIP (${{ matrix.os }})
     needs: validate-release
+    if: needs.validate-release.outputs.reuse_candidate != 'true'
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -113,7 +138,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          shared-key: release-portable-${{ matrix.os }}
+          shared-key: build-${{ matrix.os }}
           workspaces: src-tauri
           save-if: "true"
 
@@ -124,15 +149,10 @@ jobs:
 
       - run: npm ci
 
-      - uses: taiki-e/install-action@7ea35f098a7369cd23488403f58be9c491a6c55f # v2.77.0
-        with:
-          tool: tauri-cli
-
       # macOSは.app bundleだけを生成し、DMGは作らない。
       - name: Build macOS app bundle
         if: matrix.platform == 'macos'
-        working-directory: src-tauri
-        run: cargo tauri build --target aarch64-apple-darwin --bundles app
+        run: npm run tauri -- build --target aarch64-apple-darwin --bundles app -- --locked
 
       - name: Package macOS portable ZIP
         if: matrix.platform == 'macos'
@@ -149,8 +169,7 @@ jobs:
       # Windowsはinstallerを生成せず、release executableをZIP化する。
       - name: Build Windows executable
         if: matrix.platform == 'windows'
-        working-directory: src-tauri
-        run: cargo tauri build --no-bundle
+        run: npm run tauri -- build --no-bundle -- --locked
 
       - name: Package Windows portable ZIP
         if: matrix.platform == 'windows'
@@ -190,17 +209,25 @@ jobs:
           path: ${{ env.ARCHIVE_NAME }}
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0
 
   publish-release:
     name: Publish GitHub Release
     needs: [validate-release, build-portable]
+    if: >-
+      ${{ always() &&
+          needs.validate-release.result == 'success' &&
+          (needs.validate-release.outputs.reuse_candidate == 'true' ||
+           needs.build-portable.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     env:
       RELEASE_VERSION: ${{ needs.validate-release.outputs.version }}
       RELEASE_TAG: ${{ needs.validate-release.outputs.tag }}
       RELEASE_SHA: ${{ needs.validate-release.outputs.release_sha }}
+      RELEASE_TREE: ${{ needs.validate-release.outputs.release_tree }}
       IS_PRERELEASE: ${{ needs.validate-release.outputs.prerelease }}
     steps:
       # 検証スクリプトはmain、release notesとtag再検証はtag commitから取得する。
@@ -212,7 +239,56 @@ jobs:
           fetch-depth: 0
           path: release-source
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Download macOS required CI candidate by artifact ID
+        if: needs.validate-release.outputs.reuse_candidate == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.validate-release.outputs.macos_artifact_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.validate-release.outputs.candidate_run_id }}
+          path: candidate-assets/macos
+          digest-mismatch: error
+
+      - name: Download Windows required CI candidate by artifact ID
+        if: needs.validate-release.outputs.reuse_candidate == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.validate-release.outputs.windows_artifact_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.validate-release.outputs.candidate_run_id }}
+          path: candidate-assets/windows
+          digest-mismatch: error
+
+      - name: Verify and stage required CI candidates
+        if: needs.validate-release.outputs.reuse_candidate == 'true'
+        shell: bash
+        env:
+          CANDIDATE_REPOSITORY: ${{ github.repository }}
+          CANDIDATE_RUN_ID: ${{ needs.validate-release.outputs.candidate_run_id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ needs.validate-release.outputs.candidate_run_attempt }}
+          CANDIDATE_SOURCE_TREE: ${{ needs.validate-release.outputs.release_tree }}
+          CANDIDATE_VERSION: ${{ needs.validate-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          MAC_ARCHIVE="MyMyTools_${RELEASE_VERSION}_macos_aarch64.zip"
+          WINDOWS_ARCHIVE="MyMyTools_${RELEASE_VERSION}_windows_x64.zip"
+          node scripts/release/release-candidate.mjs verify \
+            macos \
+            "candidate-assets/macos/${MAC_ARCHIVE}" \
+            candidate-assets/macos/release-candidate-macos.json
+          node scripts/release/release-candidate.mjs verify \
+            windows \
+            "candidate-assets/windows/${WINDOWS_ARCHIVE}" \
+            candidate-assets/windows/release-candidate-windows.json
+          mkdir -p release-assets
+          cp "candidate-assets/macos/${MAC_ARCHIVE}" release-assets/
+          cp "candidate-assets/windows/${WINDOWS_ARCHIVE}" release-assets/
+
+      - name: Download fallback portable ZIPs
+        if: needs.validate-release.outputs.reuse_candidate != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: portable-*
           path: release-assets

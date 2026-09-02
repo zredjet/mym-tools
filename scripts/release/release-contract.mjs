@@ -1,5 +1,6 @@
 import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import { Buffer } from "node:buffer";
+import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
@@ -123,9 +124,42 @@ export function assertPortableArchives(input, assetsDirectory) {
         `portable ZIPが上限 ${MAX_PORTABLE_ARCHIVE_BYTES} bytesを超えています: ${archive} (${stat.size} bytes)`,
       );
     }
+
+    assertPortableArchiveLayout(archivePath, archive);
   }
 
   return expected;
+}
+
+export function assertPortableArchiveLayout(archivePath, archiveName) {
+  let entries;
+  try {
+    execFileSync("unzip", ["-t", archivePath], { stdio: "pipe" });
+    entries = execFileSync("unzip", ["-Z1", archivePath], { encoding: "utf8" })
+      .split(/\r?\n/)
+      .filter(Boolean);
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    throw new Error(`ZIPの展開検査に失敗しました: ${archiveName}: ${details}`, {
+      cause: error,
+    });
+  }
+
+  if (archiveName.endsWith("_macos_aarch64.zip")) {
+    if (!entries.some((entry) => entry.startsWith("MyMyTools.app/"))) {
+      throw new Error(`macOS portable ZIPにMyMyTools.appがありません: ${archiveName}`);
+    }
+    return entries;
+  }
+
+  if (archiveName.endsWith("_windows_x64.zip")) {
+    if (entries.length !== 1 || entries[0] !== "MyMyTools.exe") {
+      throw new Error(`Windows portable ZIPの内容が不正です: ${archiveName}`);
+    }
+    return entries;
+  }
+
+  throw new Error(`未知のportable ZIP名です: ${archiveName}`);
 }
 
 export function portableArchiveSizeReport(input, assetsDirectory, previousSizes = {}) {
