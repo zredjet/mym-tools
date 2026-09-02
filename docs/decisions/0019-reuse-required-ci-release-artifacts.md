@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-02
 - **Deciders**: zredjet
-- **Related**: ADR-0010 (CIパイプライン) / ADR-0013 (手動portable ZIPリリース) / ADR-0017 (配布サイズ上限)
+- **Related**: ADR-0010 (CIパイプライン) / ADR-0013 (手動portable ZIPリリース) / ADR-0017 (配布サイズ上限) / ADR-0020 (NRBF sidecar)
 - **Supersedes**: ADR-0010の`build-tauri`をビルド確認だけに限定する決定、ADR-0013 §2.3のRelease workflow内で常に2 OSを再ビルドする決定
 
 ---
@@ -53,7 +53,7 @@ Release workflowはtag commitに対応するcandidateを次の順で解決する
 
 - candidateが存在しない、期限切れ、required checkを一意に解決できない、またはGitHub APIを利用できない場合は、検証済みtag commitから2 OSを再ビルドする
 - fallback buildもlockfile固定のTauri CLIとCargo `--locked`を使う
-- candidate再利用とfallbackのどちらでも、publish jobはRelease作成前にtag SHA、ZIP 2件、80,000,000 bytes上限、展開可能性、macOSの`MyMyTools.app/`、Windowsの`MyMyTools.exe`単独構造を検証する
+- candidate再利用とfallbackのどちらでも、publish jobはRelease作成前にtag SHA、ZIP 2件、80,000,000 bytes上限、展開可能性、macOSの`MyMyTools.app/`、Windowsの`MyMyTools.exe` / `nrbf-decoder.exe` 2ファイル構造を検証する (ADR-0020)
 - candidate再利用時は外側artifactのdigest検証に加え、manifest内のinner ZIP SHA-256を独立に検証する
 - draft作成後の失敗時は、そのrunが作ったdraftだけを削除する。公開済みReleaseの不変性はADR-0013どおり維持する
 

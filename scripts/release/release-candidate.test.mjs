@@ -25,7 +25,10 @@ function createTemporaryDirectory() {
 function createWindowsArchive(root, version = "0.2.0") {
   const archivePath = resolve(root, `MyMyTools_${version}_windows_x64.zip`);
   writeFileSync(resolve(root, "MyMyTools.exe"), "binary");
-  execFileSync("zip", ["-q", archivePath, "MyMyTools.exe"], { cwd: root });
+  writeFileSync(resolve(root, "nrbf-decoder.exe"), "sidecar");
+  execFileSync("zip", ["-q", archivePath, "MyMyTools.exe", "nrbf-decoder.exe"], {
+    cwd: root,
+  });
   return archivePath;
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "mym-tools"
-version = "0.1.0-alpha.10"
+version = "0.1.0-alpha.11"
 description = "MyMyTools — 軽量なクロスプラットフォーム多目的 GUI ツール"
 authors = ["zredjet"]
 edition = "2021"
@@ -22,6 +22,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"   # ADR-0008 §2.7: 「最新版を確認」で OS 既定ブラウザ起動
 tauri-plugin-dialog = "2"   # PR-Z: Export/Import の save / open ファイルダイアログ (D-05)
 tauri-plugin-os = "2"       # PR-AF: About 画面の Platform 表示 (OS 名 / arch / version)
+tauri-plugin-shell = "2"    # M-NRBF: 専用NativeAOT sidecarをRustバックエンドからのみ起動
 
 # DB (ADR-0003)
 # 注: bundled feature が SQLite を `SQLITE_ENABLE_FTS5` 等を有効化してビルドするため、
@@ -29,7 +30,7 @@ tauri-plugin-os = "2"       # PR-AF: About 画面の Platform 表示 (OS 名 / a
 rusqlite = { version = "0.39", features = ["bundled", "trace", "backup"] }
 
 # 非同期 (Tauri 同梱、ADR-0009)
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7", default-features = false }   # ADR-0009: CancellationToken
 
 # シリアライズ

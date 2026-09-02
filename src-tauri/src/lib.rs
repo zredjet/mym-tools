@@ -45,6 +45,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             // ユーザーデータディレクトリ解決 (`architecture.md` §8 / `data-model.md` §2)
             let data_dir = app

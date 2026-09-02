@@ -159,10 +159,16 @@ jobs:
             platform: macos
             archive_suffix: macos_aarch64
             rust_targets: aarch64-apple-darwin
+            dotnet_rid: osx-arm64
+            tauri_target: aarch64-apple-darwin
+            alpha10_bytes: 51390662
           - os: windows-latest
             platform: windows
             archive_suffix: windows_x64
             rust_targets: ""
+            dotnet_rid: win-x64
+            tauri_target: x86_64-pc-windows-msvc
+            alpha10_bytes: 51105964
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -181,7 +187,35 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
+        with:
+          global-json-file: global.json
       - run: npm ci
+
+      - name: Restore locked .NET dependencies
+        run: dotnet restore tools/nrbf-decoder.tests/NrbfDecoder.Tests.csproj --locked-mode
+
+      - name: Test NRBF decoder
+        run: dotnet test tools/nrbf-decoder.tests/NrbfDecoder.Tests.csproj --no-restore
+
+      - name: Reject unsafe BinaryFormatter APIs
+        if: always()
+        shell: bash
+        run: |
+          ! grep -rn --include='*.cs' \
+              -e 'System.Runtime.Serialization.Formatters.Binary' \
+              -e 'BinaryFormatter[.(]' \
+              -e '\.Deserialize(' \
+              tools/nrbf-decoder tools/nrbf-decoder.tests
+
+      - name: Build NativeAOT NRBF sidecar
+        run: >-
+          npm run prepare:nrbf --
+          --rid ${{ matrix.dotnet_rid }}
+          --target ${{ matrix.tauri_target }}
+
+      - name: Start NativeAOT NRBF sidecar
+        run: npm run test:nrbf:smoke -- --target ${{ matrix.tauri_target }}
 
       - name: Verify release candidate version
         shell: bash
@@ -220,15 +254,22 @@ jobs:
           $version = node -p "require('./package.json').version"
           $archiveName = "MyMyTools_${version}_${{ matrix.archive_suffix }}.zip"
           $source = Join-Path $env:GITHUB_WORKSPACE "src-tauri/target/release/mym-tools.exe"
+          $sidecar = Join-Path $env:GITHUB_WORKSPACE "src-tauri/binaries/nrbf-decoder-x86_64-pc-windows-msvc.exe"
           if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
             throw "Windows executable not found: $source"
+          }
+          if (-not (Test-Path -LiteralPath $sidecar -PathType Leaf)) {
+            throw "NRBF sidecar not found: $sidecar"
           }
 
           $staging = Join-Path $env:RUNNER_TEMP "mym-tools-ci-portable"
           New-Item -ItemType Directory -Path $staging -Force | Out-Null
-          Copy-Item -LiteralPath $source -Destination (Join-Path $staging "MyMyTools.exe")
+          $mainDestination = Join-Path $staging "MyMyTools.exe"
+          $sidecarDestination = Join-Path $staging "nrbf-decoder.exe"
+          Copy-Item -LiteralPath $source -Destination $mainDestination
+          Copy-Item -LiteralPath $sidecar -Destination $sidecarDestination
           Compress-Archive `
-            -LiteralPath (Join-Path $staging "MyMyTools.exe") `
+            -LiteralPath @($mainDestination, $sidecarDestination) `
             -DestinationPath (Join-Path $env:GITHUB_WORKSPACE $archiveName) `
             -CompressionLevel Optimal
 
@@ -237,13 +278,22 @@ jobs:
             (Join-Path $env:GITHUB_WORKSPACE $archiveName)
           )
           try {
-            if ($zip.Entries.Count -ne 1 -or $zip.Entries[0].FullName -ne "MyMyTools.exe") {
+            $entries = @($zip.Entries | ForEach-Object { $_.FullName } | Sort-Object)
+            if ($entries.Count -ne 2 -or $entries[0] -ne "MyMyTools.exe" -or $entries[1] -ne "nrbf-decoder.exe") {
               throw "Unexpected Windows portable ZIP contents"
             }
           }
           finally {
             $zip.Dispose()
           }
+
+      - name: Check NativeAOT ZIP size gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          ARCHIVE_NAME="MyMyTools_${VERSION}_${{ matrix.archive_suffix }}.zip"
+          node scripts/nrbf/check-size-gate.mjs "${ARCHIVE_NAME}" "${{ matrix.alpha10_bytes }}"
 
       - name: Create release candidate manifest
         shell: bash

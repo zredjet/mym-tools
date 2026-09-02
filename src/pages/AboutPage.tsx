@@ -31,6 +31,8 @@ const RELEASES_URL = "https://github.com/zredjet/mym-tools/releases";
 const REPO_URL = "https://github.com/zredjet/mym-tools";
 const MERMAID_URL = "https://github.com/mermaid-js/mermaid/tree/v11.17.2";
 const DRAWIO_URL = "https://github.com/jgraph/drawio/tree/fea5e877f3e6f849331ad09894f7edb9771708fa";
+const NRBF_URL =
+  "https://github.com/dotnet/runtime/tree/v10.0.11/src/libraries/System.Formats.Nrbf";
 
 interface ModuleVersionInfo {
   module_id: string;
@@ -190,7 +192,7 @@ export function AboutPage() {
 
         <section className="border-t border-[var(--border)] pt-4">
           <h3 className="mb-2 text-[11px] font-semibold tracking-[0.05em] text-[var(--fg-subtle)] uppercase">
-            Offline diagram components
+            Bundled components
           </h3>
           <ul className="space-y-1 text-[12px] text-[var(--fg-muted)]">
             <li>
@@ -213,9 +215,19 @@ export function AboutPage() {
               </button>{" "}
               — Apache License 2.0
             </li>
+            <li>
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-[var(--fg)]"
+                onClick={() => void openExternal(NRBF_URL)}
+              >
+                System.Formats.Nrbf 10.0.11 / .NET NativeAOT
+              </button>{" "}
+              — MIT License
+            </li>
           </ul>
           <p className="mt-2 text-[11px] text-[var(--fg-subtle)]">
-            編集資産はアプリに同梱され、図データや利用状況を外部へ送信しません。
+            編集資産とNRBFデコーダーはアプリに同梱され、図データ、NRBFファイル、利用状況を外部へ送信しません。
           </p>
         </section>
 

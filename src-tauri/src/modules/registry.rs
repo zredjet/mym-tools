@@ -25,6 +25,7 @@ use crate::modules::jwt::JwtModule;
 use crate::modules::linkmemo::LinkMemoModule;
 use crate::modules::memo::MemoModule;
 use crate::modules::mermaid::MermaidModule;
+use crate::modules::nrbf::NrbfModule;
 use crate::modules::palette::PaletteModule;
 use crate::modules::pdfmerge::PdfMergeModule;
 use crate::modules::prompt::PromptModule;
@@ -48,6 +49,7 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
         Arc::new(PromptModule),
         Arc::new(PaletteModule),
         Arc::new(PdfMergeModule),
+        Arc::new(NrbfModule),
         Arc::new(CodecModule),
         Arc::new(UrlQueryModule),
         Arc::new(DateTimeModule),
@@ -125,6 +127,8 @@ pub fn register_invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Bu
         // M-PDF Merge: user-selected local PDF files only
         crate::modules::pdfmerge::commands::pdfmerge_inspect_files,
         crate::modules::pdfmerge::commands::pdfmerge_merge_files,
+        // M-NRBF: BinaryFormatter NRBFインスペクター
+        crate::modules::nrbf::commands::nrbf_inspect_file,
         // M-Prompt
         crate::modules::prompt::commands::prompt_render_template,
         // M-Color / M-Palette はフロントだけで完結 (固有 IPC コマンドなし)
@@ -146,7 +150,7 @@ mod tests {
     fn module_backends_build_into_app_state() {
         let storage: Arc<dyn StorageService> = Arc::new(SqliteStorage::open(":memory:").unwrap());
         let backends = module_backends();
-        assert_eq!(backends.len(), 20);
+        assert_eq!(backends.len(), 21);
         let dir = tempfile::tempdir().unwrap();
         let backup: Arc<dyn crate::backup::BackupService> = Arc::new(
             crate::backup::LocalBackupService::new(dir.path().to_path_buf(), Arc::clone(&storage)),
@@ -173,6 +177,7 @@ mod tests {
             "cron",
             "a11y",
             "http",
+            "nrbf",
         ] {
             assert!(state.module(id).is_some(), "missing backend: {id}");
         }

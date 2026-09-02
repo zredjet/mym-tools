@@ -13,6 +13,7 @@ import { jwtModule } from "@/modules/jwt";
 import { linkMemoModule } from "@/modules/linkmemo";
 import { memoModule } from "@/modules/memo";
 import { mermaidModule } from "@/modules/mermaid";
+import { nrbfModule } from "@/modules/nrbf";
 import { paletteModule } from "@/modules/palette";
 import { pdfMergeModule } from "@/modules/pdfmerge";
 import { promptModule } from "@/modules/prompt";
@@ -57,6 +58,7 @@ export const modules: readonly ModuleDefinition[] = [
   a11yModule,
   httpModule,
   pdfMergeModule,
+  nrbfModule,
 ];
 
 export function validateModuleDefinitions(definitions: readonly ModuleDefinition[]): void {

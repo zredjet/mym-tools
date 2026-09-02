@@ -2,7 +2,7 @@
 
 MyMyToolsのmacOS / Windows向けportable ZIPを、GitHub Actionsから手動公開する担当者向けrunbook。
 
-- リリース方式の設計判断は[ADR-0013](decisions/0013-manual-portable-zip-release.md)、required CI成果物の再利用は[ADR-0019](decisions/0019-reuse-required-ci-release-artifacts.md)を正典とする
+- リリース方式の設計判断は[ADR-0013](decisions/0013-manual-portable-zip-release.md)、required CI成果物の再利用は[ADR-0019](decisions/0019-reuse-required-ci-release-artifacts.md)、NRBF sidecarの同梱境界は[ADR-0020](decisions/0020-nrbf-inspector-boundary.md)を正典とする
 - 実装は[`.github/workflows/release.yml`](../.github/workflows/release.yml)を正典とする
 - Release本文と利用者向け更新方法は[`scripts/release/release-notes.md`](../scripts/release/release-notes.md)を正典とする
 - 本書は、上記の方針を変更せずにリリース担当者が行う操作を定める
@@ -209,7 +209,7 @@ node scripts/release/release-contract.mjs check-assets "${RELEASE_VERSION}" "${V
 unzip -t "${VERIFY_DIR}/MyMyTools_${RELEASE_VERSION}_macos_aarch64.zip"
 unzip -Z1 "${VERIFY_DIR}/MyMyTools_${RELEASE_VERSION}_macos_aarch64.zip" | grep -q '^MyMyTools.app/'
 
-test "$(unzip -Z1 "${VERIFY_DIR}/MyMyTools_${RELEASE_VERSION}_windows_x64.zip")" = 'MyMyTools.exe'
+test "$(unzip -Z1 "${VERIFY_DIR}/MyMyTools_${RELEASE_VERSION}_windows_x64.zip" | sort)" = $'MyMyTools.exe\nnrbf-decoder.exe'
 unzip -t "${VERIFY_DIR}/MyMyTools_${RELEASE_VERSION}_windows_x64.zip"
 
 shasum -a 256 "${VERIFY_DIR}"/*.zip

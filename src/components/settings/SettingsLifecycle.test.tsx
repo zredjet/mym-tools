@@ -37,6 +37,7 @@ describe("SettingsLifecycle", () => {
       "linkmemo",
       "memo",
       "mermaid",
+      "nrbf",
       "palette",
       "pdfmerge",
       "prompt",
