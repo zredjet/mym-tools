@@ -18,6 +18,7 @@ pub mod jwt;
 pub mod linkmemo;
 pub mod memo;
 pub mod mermaid;
+pub mod nrbf;
 pub mod palette;
 pub mod pdfmerge;
 pub mod prompt;

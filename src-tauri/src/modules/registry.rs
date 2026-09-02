@@ -125,6 +125,8 @@ pub fn register_invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Bu
         // M-PDF Merge: user-selected local PDF files only
         crate::modules::pdfmerge::commands::pdfmerge_inspect_files,
         crate::modules::pdfmerge::commands::pdfmerge_merge_files,
+        // M-NRBF: NativeAOTサイズゲート用の最小疎通
+        crate::modules::nrbf::commands::nrbf_native_aot_probe,
         // M-Prompt
         crate::modules::prompt::commands::prompt_render_template,
         // M-Color / M-Palette はフロントだけで完結 (固有 IPC コマンドなし)

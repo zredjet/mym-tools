@@ -43,10 +43,11 @@ function writePortableArchives(root, version = "0.2.0") {
   mkdirSync(windowsRoot, { recursive: true });
   writeFileSync(resolve(macRoot, "MyMyTools.app", "Contents", "MacOS", "MyMyTools"), "app");
   writeFileSync(resolve(windowsRoot, "MyMyTools.exe"), "exe");
+  writeFileSync(resolve(windowsRoot, "nrbf-decoder.exe"), "sidecar");
   execFileSync("zip", ["-q", "-r", resolve(root, macArchive), "MyMyTools.app"], {
     cwd: macRoot,
   });
-  execFileSync("zip", ["-q", resolve(root, windowsArchive), "MyMyTools.exe"], {
+  execFileSync("zip", ["-q", resolve(root, windowsArchive), "MyMyTools.exe", "nrbf-decoder.exe"], {
     cwd: windowsRoot,
   });
   return [macArchive, windowsArchive];

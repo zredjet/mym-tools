@@ -8,6 +8,7 @@
   },
   "scripts": {
     "prepare:drawio": "node scripts/drawio/prepare-assets.mjs",
+    "prepare:nrbf": "node scripts/nrbf/prepare-sidecar.mjs",
     "predev": "npm run prepare:drawio",
     "dev": "vite",
     "prebuild": "npm run prepare:drawio",

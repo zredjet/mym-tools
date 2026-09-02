@@ -117,10 +117,14 @@ jobs:
             platform: macos
             archive_suffix: macos_aarch64
             rust_targets: aarch64-apple-darwin
+            dotnet_rid: osx-arm64
+            tauri_target: aarch64-apple-darwin
           - os: windows-latest
             platform: windows
             archive_suffix: windows_x64
             rust_targets: ""
+            dotnet_rid: win-x64
+            tauri_target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     env:
       ARCHIVE_NAME: MyMyTools_${{ needs.validate-release.outputs.version }}_${{ matrix.archive_suffix }}.zip
@@ -147,7 +151,17 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
+        with:
+          global-json-file: global.json
+
       - run: npm ci
+
+      - name: Build NativeAOT NRBF sidecar
+        run: >-
+          npm run prepare:nrbf --
+          --rid ${{ matrix.dotnet_rid }}
+          --target ${{ matrix.tauri_target }}
 
       # macOSは.app bundleだけを生成し、DMGは作らない。
       - name: Build macOS app bundle
@@ -177,24 +191,32 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $source = Join-Path $env:GITHUB_WORKSPACE "src-tauri/target/release/mym-tools.exe"
+          $sidecar = Join-Path $env:GITHUB_WORKSPACE "src-tauri/binaries/nrbf-decoder-x86_64-pc-windows-msvc.exe"
           if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
             throw "Windows executable not found: $source"
+          }
+          if (-not (Test-Path -LiteralPath $sidecar -PathType Leaf)) {
+            throw "NRBF sidecar not found: $sidecar"
           }
 
           $staging = Join-Path $env:RUNNER_TEMP "mym-tools-portable"
           New-Item -ItemType Directory -Path $staging -Force | Out-Null
-          Copy-Item -LiteralPath $source -Destination (Join-Path $staging "MyMyTools.exe")
+          $mainDestination = Join-Path $staging "MyMyTools.exe"
+          $sidecarDestination = Join-Path $staging "nrbf-decoder.exe"
+          Copy-Item -LiteralPath $source -Destination $mainDestination
+          Copy-Item -LiteralPath $sidecar -Destination $sidecarDestination
 
           $archive = Join-Path $env:GITHUB_WORKSPACE $env:ARCHIVE_NAME
           Compress-Archive `
-            -LiteralPath (Join-Path $staging "MyMyTools.exe") `
+            -LiteralPath @($mainDestination, $sidecarDestination) `
             -DestinationPath $archive `
             -CompressionLevel Optimal
 
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zip = [System.IO.Compression.ZipFile]::OpenRead($archive)
           try {
-            if ($zip.Entries.Count -ne 1 -or $zip.Entries[0].FullName -ne "MyMyTools.exe") {
+            $entries = @($zip.Entries | ForEach-Object { $_.FullName } | Sort-Object)
+            if ($entries.Count -ne 2 -or $entries[0] -ne "MyMyTools.exe" -or $entries[1] -ne "nrbf-decoder.exe") {
               throw "Unexpected Windows portable ZIP contents"
             }
           }

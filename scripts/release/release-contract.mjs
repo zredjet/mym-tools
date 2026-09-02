@@ -153,7 +153,12 @@ export function assertPortableArchiveLayout(archivePath, archiveName) {
   }
 
   if (archiveName.endsWith("_windows_x64.zip")) {
-    if (entries.length !== 1 || entries[0] !== "MyMyTools.exe") {
+    const sortedEntries = entries.toSorted();
+    if (
+      sortedEntries.length !== 2 ||
+      sortedEntries[0] !== "MyMyTools.exe" ||
+      sortedEntries[1] !== "nrbf-decoder.exe"
+    ) {
       throw new Error(`Windows portable ZIPの内容が不正です: ${archiveName}`);
     }
     return entries;
