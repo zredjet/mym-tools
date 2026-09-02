@@ -2,6 +2,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
+    <RuntimeFrameworkVersion>10.0.11</RuntimeFrameworkVersion>
     <AssemblyName>nrbf-decoder</AssemblyName>
     <RootNamespace>MyMyTools.NrbfDecoder</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>

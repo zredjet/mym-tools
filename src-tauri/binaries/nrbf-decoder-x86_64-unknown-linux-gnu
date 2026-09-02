@@ -1,0 +1,3 @@
+#!/bin/sh
+# Linuxは配布対象外。Tauriのbuild scriptがexternalBinの存在を検証するためのCI専用stub。
+exit 1
