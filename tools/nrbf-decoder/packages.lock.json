@@ -16,7 +16,7 @@
       },
       "System.Formats.Nrbf": {
         "type": "Direct",
-        "requested": "[10.0.11, )",
+        "requested": "[10.0.11, 10.0.11]",
         "resolved": "10.0.11",
         "contentHash": "6w8KQTESA2HyNt/cyuIfvKBpQuBHd2e0EwAYoWQ7f+cWE0kCQCAGz4bQdATTH3jhDLvoqlf0vgPXK0Ml5qeVjg=="
       }

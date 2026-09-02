@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-09-02 / ステータス: Draft (Phase 1)
+最終更新: 2026-09-03 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -374,8 +374,9 @@ D-01 により Hash もプロジェクト配下に置かれる。Phase 1 では 
 ### 8.1 アプリ本体 (差し替え対象)
 
 ```
-mym-tools.app / mym-tools.exe (Tauri ビルド成果物)
-└── 同梱リソースは内部に閉じる
+macOS: MyMyTools.app/              # Tauri app。nrbf-decoderを内部へ同梱
+Windows: MyMyTools.exe             # Tauri app
+         nrbf-decoder.exe          # 同じフォルダに置くNativeAOT sidecar
 ```
 
 ### 8.2 ユーザーデータ (差し替えで失わない)
@@ -407,7 +408,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 
 - インストーラを必須としない
   - macOS: Apple Silicon向け`.app`をportable ZIPに格納し、Applicationsへの移動 / 上書きで更新完了
-  - Windows: x64 `.exe`をportable ZIPに格納し、任意フォルダへの展開 / 上書きで更新完了
+  - Windows: x64 `MyMyTools.exe`と`nrbf-decoder.exe`をportable ZIPに格納し、同じ任意フォルダへの展開 / 上書きで更新完了
 - GitHub Releaseは`workflow_dispatch`からversionを入力して手動実行し、tag commitの3設定と一致する場合だけ作成する (ADR-0013)
 - macOS / Windowsの両portable ZIPが揃ってからdraft Releaseを作成し、アップロード成功後に公開する
 - アプリ起動時に DB の `schema_version` を読み、想定外なら**起動を停止しエラー画面**を出す (黙って壊さない)
@@ -453,6 +454,16 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 - 2〜50ファイル、入力合計200 MiB、展開済みstream 1個64 MiBを上限とし、結合開始時に全入力を再検証する
 - `spawn_blocking`とTauri Channelを使い、`OperationRegistry`で読み込み・統合・書込み境界をキャンセル可能にする。出力は同一directoryの一時ファイルをflush / sync後、最終cancel確認を通過した場合だけatomic replaceする
 
+### 10.6 NRBF解析境界
+
+- `nrbf`は既定有効・`text` categoryのstatelessモジュールとし、入力path、解析結果、検索条件、履歴をitems、設定、横断検索、export / importへ保存しない
+- Rustの`nrbf_inspect_file(operationId, path, onProgress)`だけを公開し、開始、500件単位のノード、完了、キャンセルをTauri Channelで通知する。`OperationRegistry`でcancelし、60秒timeout・遅延operation event破棄を保証する
+- Rust wrapperは入力64 MiB、sidecar stdout 64 MiB、stderr 64 KiBを検証し、sidecar終了・破損header・上限・非対応形式を日本語`AppError::Validation { module_id: "nrbf", ... }`または`AppError::Internal`へ変換する
+- .NET 10 NativeAOT sidecarは`System.Formats.Nrbf 10.0.11`の`NrbfDecoder`だけを使い、assembly / 型をロードしない。`BinaryFormatter`、`Deserialize`、任意型生成はソース検査で禁止する
+- record graphは反復走査する。最初のrecordを正規ノードとし、共有参照・循環参照は参照ノードにして再展開しない。巨大byte配列は長さだけ、多次元配列は安全に展開できない場合shapeだけを返す
+- sidecar内の上限は100,000ノード、1配列50,000展開要素、1スカラー1 MiB、検索対象文字列32 MiB、protocol出力64 MiB、55秒とする。部分超過では可能な解析結果を維持し、省略ノードとwarningを返す。Rust側60秒をhard timeoutとする
+- 対象は先頭にNRBF headerを持つ既定`FormatterTypeStyle.TypesAlways` payloadであり、圧縮、暗号化、独自header、非ゼロ下限配列を扱わない。読み取り専用とし、編集・再シリアライズ・JSON出力を提供しない
+
 ---
 
 ## 11. 重い処理の扱い
@@ -461,6 +472,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 |------|------|
 | ファイルハッシュ (大ファイル) | Rust の `tauri::async_runtime::spawn_blocking` で非同期実行、進捗は **Tauri Channel** で通知、キャンセルは `tokio_util::sync::CancellationToken` + `core_cancel_operation`。詳細は ADR-0009 |
 | PDF結合 | Rustの`spawn_blocking`で再検証・page tree統合・原子的書込みを実行し、Tauri Channelで`reading / merging / writing / done / cancelled`を通知する。`OperationRegistry`でキャンセルし、WebViewへPDF本体を渡さない (ADR-0018) |
+| NRBF解析 | RustがNativeAOT sidecarを起動し、60秒timeout・出力量上限・cancelを管理する。sidecarは型非生成で反復走査し、RustからTauri Channelでノードbatchを通知する (ADR-0020) |
 | 全文検索 | SQLite FTS5 (インメモリインデックス不要) |
 | Markdown レンダリング | フロント側で同期実行。長文時の体感劣化が出たら Web Worker 化を検討 |
 | エクスポート | Rust 側で生成し、UI は処理中の二重送信を防ぐ。実測で必要になった時点で件数進捗 Event / Channel を追加 |
@@ -499,9 +511,10 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | Mermaid図 | Mermaid 11.17.2、strict security、dynamic import |
 | 自由図編集 | draw.io 31.4.1固定submodule、IPC権限なしloopback origin、sandboxed iframe |
 | PDF結合 | `lopdf 0.44`（MSRV 1.88、`aes 0.9.2`固定、展開済みstream 64 MiB上限） |
+| NRBF解析 | .NET 10 NativeAOT sidecar + `System.Formats.Nrbf 10.0.11`（NuGet lock、型非生成） |
 
 **確定済**:
-- **CI パイプライン (検証)**: ADR-0010 で確定 — GitHub Actions / lint-rust / test-rust / lint-frontend / test-frontend / build-tauri matrix (macOS + Windows) / branch protection / `clippy.toml` `disallowed-methods` 連携
+- **CI パイプライン (検証)**: ADR-0010 で確定 — GitHub Actions / lint-rust / test-rust / lint-frontend / test-frontend / build-tauri matrix (macOS + Windows) / branch protection / `clippy.toml` `disallowed-methods` 連携。NRBFは既存build-tauri 2 job内で.NET test、禁止API検査、NativeAOT起動試験も行いrequired check 6件を維持する
 - **Phase 1 CD パイプライン (無署名portable ZIP)**: ADR-0013で確定 — 手動version入力 / tag commit固定 / macOS + Windows全成功後のRelease作成 / 既存Release上書き禁止
 - **図編集asset / size契約**: ADR-0017で確定 — 完全オフライン同梱 / local origin隔離 / portable ZIP各80,000,000 bytes上限
 
@@ -539,3 +552,4 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-08-25 | 0.8 | ADR-0016を反映。公開ID `linkmemo` のM-Linkと新規 `memo` backend/UIを分離し、共通items APIを維持した起動時所属移行を追加 |
 | 2026-08-31 | 0.9 | ADR-0017を反映。Mermaid dynamic import、draw.io固定asset / loopback origin / Tauri ACL / postMessage隔離、file I/O、80MB release契約を追加 |
 | 2026-09-02 | 1.0 | ADR-0018を反映。PDF結合のRust処理、対応範囲、size上限、進捗・cancel、atomic replace、MSRV 1.88を追加 |
+| 2026-09-03 | 1.1 | ADR-0020を反映。NRBFの型非生成NativeAOT sidecar、IPC・上限・cancel境界、配布構成、CI検査を追加 |

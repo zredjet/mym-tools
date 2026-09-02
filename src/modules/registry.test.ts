@@ -32,6 +32,7 @@ describe("frontend module registry", () => {
       "a11y",
       "http",
       "pdfmerge",
+      "nrbf",
     ]);
     expect(() => validateModuleDefinitions(modules)).not.toThrow();
     for (const module of modules) expect(module.routes.length).toBeGreaterThan(0);

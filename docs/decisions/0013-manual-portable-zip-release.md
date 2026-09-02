@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-08-22
 - **Deciders**: zredjet
-- **Related**: ADR-0008 (配布 / 自動更新なし) / ADR-0010 (CIパイプライン) / `requirements.md` §3.8 / `architecture.md` §9・§13
+- **Related**: ADR-0008 (配布 / 自動更新なし) / ADR-0010 (CIパイプライン) / ADR-0020 (NRBF sidecar) / `requirements.md` §3.8 / `architecture.md` §9・§13
 - **Supersedes**: ADR-0008 §2のうち配布形式に関する決定、§2.1・§2.2のDMG / NSIS / installer記述
 
 ---
@@ -38,10 +38,10 @@ Phase 1のリリースは、リリースしたいタイミングで担当者がG
 | OS | build | ZIP内容 | Release asset |
 |----|-------|---------|---------------|
 | macOS | `cargo tauri build --target aarch64-apple-darwin --bundles app` | `MyMyTools.app` | `MyMyTools_<version>_macos_aarch64.zip` |
-| Windows | `cargo tauri build --no-bundle` | `MyMyTools.exe` | `MyMyTools_<version>_windows_x64.zip` |
+| Windows | `cargo tauri build --no-bundle` + NRBF NativeAOT publish | `MyMyTools.exe` / `nrbf-decoder.exe` | `MyMyTools_<version>_windows_x64.zip` |
 
 - macOSは`ditto`で`.app`の構造とmetadataを保持してZIP化する
-- Windowsはrelease executableだけをZIP化し、NSIS / MSIを生成しない
+- Windowsはrelease executableと自己完結NRBF sidecarの2ファイルだけをZIP化し、NSIS / MSIを生成しない (ADR-0020)
 - `tauri.conf.json`の共通設定ではbundleを無効化し、`tauri.macos.conf.json`だけ`.app` bundleを有効化する
 - 各build jobはZIPの内部検査を行い、`actions/upload-artifact`の`if-no-files-found: error`で欠落を失敗にする
 

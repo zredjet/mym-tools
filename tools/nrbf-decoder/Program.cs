@@ -1,64 +1,50 @@
-using System.Formats.Nrbf;
 using System.Runtime.Serialization;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace MyMyTools.NrbfDecoder;
 
 internal static class Program
 {
-    private const long MaximumInputBytes = 64L * 1024 * 1024;
-
     public static int Main(string[] args)
     {
-        ProbeResult result;
+        InspectResponse response = InspectArgs(args);
+
+        byte[] output = JsonSerializer.SerializeToUtf8Bytes(response, NrbfJsonContext.Default.InspectResponse);
+        if (output.LongLength > Inspector.MaximumProtocolBytes)
+        {
+            response = InspectResponse.Failure("解析結果が64 MiBの出力上限を超えました。");
+            output = JsonSerializer.SerializeToUtf8Bytes(response, NrbfJsonContext.Default.InspectResponse);
+        }
+
+        using Stream stdout = Console.OpenStandardOutput();
+        stdout.Write(output);
+        stdout.WriteByte((byte)'\n');
+        return response.Ok ? 0 : 1;
+    }
+
+    internal static InspectResponse InspectArgs(string[] args)
+    {
         try
         {
-            result = Probe(args);
+            return args.Length == 2 && args[0] == "--inspect"
+                ? Inspector.Inspect(args[1])
+                : InspectResponse.Failure("使用方法: nrbf-decoder --inspect <path>");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            result = new(false, null, null, $"ファイルを読み込めません: {exception.Message}");
+            return InspectResponse.Failure($"ファイルを読み込めません: {exception.Message}");
         }
         catch (Exception exception) when (exception is SerializationException or InvalidDataException)
         {
-            result = new(false, null, null, $"NRBFデータを解析できません: {exception.Message}");
+            return InspectResponse.Failure($"NRBFデータを解析できません: {exception.Message}");
         }
-
-        Console.Out.WriteLine(JsonSerializer.Serialize(result, NrbfJsonContext.Default.ProbeResult));
-        return result.Ok ? 0 : 1;
-    }
-
-    private static ProbeResult Probe(string[] args)
-    {
-        if (args.Length != 2 || args[0] != "--probe")
+        catch (Exception exception) when (exception is NotSupportedException or ArgumentException)
         {
-            return new(false, null, null, "使用方法: nrbf-decoder --probe <path>");
+            return InspectResponse.Failure($"対応していないNRBF形式です: {exception.Message}");
         }
-
-        FileInfo file = new(args[1]);
-        if (!file.Exists)
+        catch (Exception exception)
         {
-            return new(false, null, null, "指定されたファイルがありません。");
+            return InspectResponse.Failure($"NRBFデコーダーで予期しないエラーが発生しました: {exception.Message}");
         }
-
-        if (file.Length > MaximumInputBytes)
-        {
-            return new(false, null, null, "ファイルサイズが64 MiBの上限を超えています。");
-        }
-
-        using FileStream stream = file.OpenRead();
-        if (!global::System.Formats.Nrbf.NrbfDecoder.StartsWithPayloadHeader(stream))
-        {
-            return new(false, null, null, "BinaryFormatter NRBFのヘッダーではありません。");
-        }
-
-        SerializationRecord root = global::System.Formats.Nrbf.NrbfDecoder.Decode(stream);
-        return new(true, root.RecordType.ToString(), root.TypeName?.FullName, null);
     }
 }
-
-internal sealed record ProbeResult(bool Ok, string? RecordType, string? RootType, string? Error);
-
-[JsonSerializable(typeof(ProbeResult))]
-internal sealed partial class NrbfJsonContext : JsonSerializerContext;

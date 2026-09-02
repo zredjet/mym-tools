@@ -20,7 +20,7 @@
 | [docs/ui-design.md](docs/ui-design.md) | UI トークン、画面スケルトン、キーボードショートカット |
 | [docs/developer-tools-plan.md](docs/developer-tools-plan.md) | 開発ツール11モジュールの範囲、段階、品質条件 |
 | [docs/release-process.md](docs/release-process.md) | 担当者向けの手動リリース手順、公開後検証、失敗時対応 |
-| [docs/decisions/](docs/decisions/) | ADR-0001〜0019 (モジュール化 / ローカル処理境界 / リリース方式) |
+| [docs/decisions/](docs/decisions/) | ADR-0001〜0020 (モジュール化 / ローカル処理境界 / リリース方式) |
 | [CLAUDE.md](CLAUDE.md) | 作業時の不変条件と参照優先順位 |
 
 ## 開発

@@ -19,7 +19,7 @@
 
 1. このページのAssetsから自分のOSのZIPをダウンロード
 2. **macOS**: ZIPを展開し、`MyMyTools.app`をApplicationsへ移動または既存版と差し替え
-3. **Windows**: ZIPを任意のフォルダへ展開し、`MyMyTools.exe`を起動または既存版と差し替え
+3. **Windows**: ZIP内の`MyMyTools.exe`と`nrbf-decoder.exe`を同じ任意フォルダへ展開し、`MyMyTools.exe`を起動または2ファイルとも既存版と差し替え
 
 ユーザーデータはアプリ本体と別の場所に保存されるため、アプリを差し替えても維持されます。
 

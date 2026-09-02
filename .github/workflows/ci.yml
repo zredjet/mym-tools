@@ -192,11 +192,30 @@ jobs:
           global-json-file: global.json
       - run: npm ci
 
+      - name: Restore locked .NET dependencies
+        run: dotnet restore tools/nrbf-decoder.tests/NrbfDecoder.Tests.csproj --locked-mode
+
+      - name: Test NRBF decoder
+        run: dotnet test tools/nrbf-decoder.tests/NrbfDecoder.Tests.csproj --no-restore
+
+      - name: Reject unsafe BinaryFormatter APIs
+        if: always()
+        shell: bash
+        run: |
+          ! grep -rn --include='*.cs' \
+              -e 'System.Runtime.Serialization.Formatters.Binary' \
+              -e 'BinaryFormatter[.(]' \
+              -e '\.Deserialize(' \
+              tools/nrbf-decoder tools/nrbf-decoder.tests
+
       - name: Build NativeAOT NRBF sidecar
         run: >-
           npm run prepare:nrbf --
           --rid ${{ matrix.dotnet_rid }}
           --target ${{ matrix.tauri_target }}
+
+      - name: Start NativeAOT NRBF sidecar
+        run: npm run test:nrbf:smoke -- --target ${{ matrix.tauri_target }}
 
       - name: Verify release candidate version
         shell: bash

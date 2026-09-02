@@ -30,7 +30,7 @@ tauri-plugin-shell = "2"    # M-NRBF: 専用NativeAOT sidecarをRustバックエ
 rusqlite = { version = "0.39", features = ["bundled", "trace", "backup"] }
 
 # 非同期 (Tauri 同梱、ADR-0009)
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7", default-features = false }   # ADR-0009: CancellationToken
 
 # シリアライズ

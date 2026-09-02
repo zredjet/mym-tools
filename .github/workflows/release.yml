@@ -163,6 +163,9 @@ jobs:
           --rid ${{ matrix.dotnet_rid }}
           --target ${{ matrix.tauri_target }}
 
+      - name: Start NativeAOT NRBF sidecar
+        run: npm run test:nrbf:smoke -- --target ${{ matrix.tauri_target }}
+
       # macOSは.app bundleだけを生成し、DMGは作らない。
       - name: Build macOS app bundle
         if: matrix.platform == 'macos'
@@ -180,7 +183,7 @@ jobs:
             "${APP_PATH}" "${GITHUB_WORKSPACE}/${ARCHIVE_NAME}"
           unzip -t "${GITHUB_WORKSPACE}/${ARCHIVE_NAME}"
 
-      # Windowsはinstallerを生成せず、release executableをZIP化する。
+      # Windowsはinstallerを生成せず、release executableとNRBF sidecarをZIP化する。
       - name: Build Windows executable
         if: matrix.platform == 'windows'
         run: npm run tauri -- build --no-bundle -- --locked

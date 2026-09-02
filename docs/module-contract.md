@@ -1,6 +1,6 @@
 # モジュール契約 (Module Contract)
 
-最終更新: 2026-09-02 / ステータス: Draft (Phase 1)
+最終更新: 2026-09-03 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**モジュールがコアと交わす契約**」を定義する。
 モジュールが提供するもの / コアが提供するもの / 両者がしてはいけないことを具体 API レベルで決めて、
@@ -746,7 +746,28 @@ editor URLは`lang=ja`を固定し、同梱済み日本語resourceだけをsame-
 
 入力一覧と順序はfrontend stateだけに保持し、items、検索、export / importの対象外とする。各実行はUUIDのoperation IDを持ち、遅延した別operationの進捗をUIへ反映しない。結合開始時に全入力を再検証し、暗号化、署名、AcroForm / Widget、Outlines、embedded files、portfolioを検出したPDFは拒否する。
 
-### 12.10 Stateless 開発ツール
+### 12.10 M-NRBF BinaryFormatter解析
+
+| 項目 | 値 |
+|------|----|
+| `id` | `nrbf` |
+| `category` / 既定 | `text` / enabled |
+| `is_stateless` | true |
+| frontend route | `/` |
+| 固有 IPC コマンド | `nrbf_inspect_file(operationId, path, onProgress)`。cancelは`core_cancel_operation` |
+| Channel | `started { fileSizeBytes }` / `nodes { nodes }` / `done { summary }` / `cancelled`。nodesは最大500件のbatch |
+| 入力上限 | 1ファイル64 MiB、60秒、100,000ノード、1配列50,000展開要素、1スカラー1 MiB、検索文字列32 MiB、protocol出力64 MiB |
+| `index_text` の対象 | なし。画面内検索だけが読みやすい名前、Raw名、整形済みscalar値を対象とする |
+
+`NrbfNode`は連番`id`、`parentId`、`displayName`、`rawName`、`kind`（`object / array / scalar / null / reference / unsupported`）、`typeName`、`assemblyName`、`formattedValue`、`recordId`、`referenceTargetId`、`shape`を持つ。`NrbfSummary`はpath、file name / size、root type、node count、warnings、durationを持つ。
+
+同一operation内で最初に現れたrecordだけを正規ノードとし、共有参照と循環参照は`referenceTargetId`を持つ参照ノードにする。UIは参照先へ移動できるが再帰展開しない。遅延Channel eventは現在のoperation IDと一致する場合だけ反映する。
+
+sidecarは`System.Formats.Nrbf`で型を生成せずに読み、`BinaryFormatter.Deserialize`とassembly / 型ロードを禁止する。読みやすい表示とRaw表示は同じnode集合から導出し、表示切替で再解析しない。内部構造が厳密に一致しない`List<T>` / `Dictionary<TKey,TValue>`はRaw構造へフォールバックする。
+
+入力、node、summary、検索条件はfrontend stateだけに保持し、items、設定、履歴、横断検索、export / importへ保存しない。DB schemaと既存ModuleBackend / ModuleDefinition契約は変更しない。
+
+### 12.11 Stateless 開発ツール
 
 | ID | 固有 IPC | 実行境界 |
 |---|---|---|
@@ -806,3 +827,4 @@ editor URLは`lang=ja`を固定し、同梱済み日本語resourceだけをsame-
 | 2026-09-01 | 1.1 | MermaidのSVG / 白背景2倍PNG書出しIPC、draw.io日本語固定、現在page PNG契約を追加 |
 | 2026-08-31 | 1.0 | ADR-0017を反映。M-Mermaid / M-Diagramのstateful payload、route、検索、local file IPC、postMessage隔離契約を追加 |
 | 2026-09-02 | 1.2 | ADR-0018を反映。M-PDF Mergeのstateless契約、固有IPC、進捗・cancel、入力上限、通常PDF限定、atomic outputを追加 |
+| 2026-09-03 | 1.3 | ADR-0020を反映。M-NRBFのnode / summary / Channel契約、解析上限、型非生成sidecar、画面内検索と非永続境界を追加 |
