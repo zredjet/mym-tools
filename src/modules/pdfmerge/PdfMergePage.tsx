@@ -212,7 +212,7 @@ export function PdfMergePage() {
       if (mountedRef.current) setError(formatPdfMergeError(cause));
       return;
     }
-    if (outputPath == null || !mountedRef.current) return;
+    if (outputPath == null || !mountedRef.current || operationRef.current != null) return;
 
     const operationId = crypto.randomUUID();
     replaceOperation({ id: operationId, kind: "merge", progress: null, cancelling: false });

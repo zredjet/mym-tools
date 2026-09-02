@@ -130,6 +130,39 @@ describe("PdfMergePage", () => {
     expect(mergeMock).not.toHaveBeenCalled();
   });
 
+  it("does not replace an operation started while the save dialog is open", async () => {
+    const user = userEvent.setup();
+    let resolveSave: (value: string | null) => void = () => undefined;
+    saveDialog.mockImplementationOnce(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    render(<PdfMergePage />);
+    await user.click(screen.getByRole("button", { name: "PDFを追加" }));
+    await screen.findByText("a.pdf");
+    await waitFor(() => expect(dragDropHandler).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: "結合して保存" }));
+    await waitFor(() => expect(saveDialog).toHaveBeenCalledTimes(1));
+
+    inspectMock.mockImplementationOnce(() => new Promise(() => undefined));
+    act(() => {
+      dragDropHandler?.({
+        payload: { type: "drop", paths: ["/docs/c.pdf"] },
+      });
+    });
+    await waitFor(() => expect(inspectMock).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      resolveSave("/docs/merged.pdf");
+    });
+
+    expect(mergeMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "キャンセル" })).toBeInTheDocument();
+  });
+
   it("accepts multiple paths from an OS file drop", async () => {
     render(<PdfMergePage />);
     await waitFor(() => expect(dragDropHandler).toBeDefined());
