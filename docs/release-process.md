@@ -2,7 +2,7 @@
 
 MyMyToolsのmacOS / Windows向けportable ZIPを、GitHub Actionsから手動公開する担当者向けrunbook。
 
-- リリース方式の設計判断は[ADR-0013](decisions/0013-manual-portable-zip-release.md)を正典とする
+- リリース方式の設計判断は[ADR-0013](decisions/0013-manual-portable-zip-release.md)、required CI成果物の再利用は[ADR-0019](decisions/0019-reuse-required-ci-release-artifacts.md)を正典とする
 - 実装は[`.github/workflows/release.yml`](../.github/workflows/release.yml)を正典とする
 - Release本文と利用者向け更新方法は[`scripts/release/release-notes.md`](../scripts/release/release-notes.md)を正典とする
 - 本書は、上記の方針を変更せずにリリース担当者が行う操作を定める
@@ -14,6 +14,7 @@ MyMyToolsのmacOS / Windows向けportable ZIPを、GitHub Actionsから手動公
 - リリース対象は、必須CIを通して`main`へマージしたcommitに固定する
 - tagはRelease workflow実行前にpushする。一度pushしたtagは移動・再利用しない
 - macOS / Windowsの両portable ZIPが成功した場合だけGitHub Releaseを公開する
+- 原則として直前のrequired CIが生成したportable ZIPを厳格検証して再利用し、候補がない場合だけtagから再ビルドする
 - 公開済みReleaseのassetを差し替えない。修正が必要なら新しいversionを発行する
 - GitHub Actions画面と`gh`コマンドのどちらからでも起動できるが、同じversionで両方を実行しない
 
@@ -117,6 +118,8 @@ gh pr create --base main --head "release/v${RELEASE_VERSION}"
 - `build-tauri (macos-latest)`
 - `build-tauri (windows-latest)`
 
+2つの`build-tauri`はRelease用portable ZIPとcandidate manifestも生成する。Release workflowが再利用できる期間はartifact保持期間の1日なので、短縮効果を得るにはPRマージ・tag push・Release実行を同日中に行う。
+
 ```bash
 gh pr checks "${PR_NUMBER}" --watch
 gh pr merge "${PR_NUMBER}" --auto --squash --delete-branch
@@ -171,11 +174,16 @@ gh run watch <RUN_ID> --exit-status
 実行中は次の順で処理される。
 
 1. `Validate release request`: main実行、SemVer、tag、3設定のversion、既存Releaseを検証
-2. `Build portable ZIP (macos-latest)`: Apple Silicon向け`.app`をZIP化・展開検査・artifact upload
-3. `Build portable ZIP (windows-latest)`: x64 `.exe`をZIP化・内容検査・artifact upload
-4. `Publish GitHub Release`: tag SHAと2成果物を再検証し、draft作成、upload、公開
+2. tag commitに対応するmerged PR、同一runのrequired check 6件、run attempt、2つのcandidate artifact IDを解決
+3. candidate成立時は2つの`Build portable ZIP` jobをskip。不成立・期限切れ・API利用不能時だけ、検証済みtag SHAからmacOS / Windowsを再ビルド
+4. `Publish GitHub Release`: candidate成立時はartifact ID指定でdownloadし、manifestのrepository / run / attempt / commit tree / version / platform / filename / size / SHA-256を検証
+5. tag SHA、2 ZIP、展開可能性、内部構造、サイズ上限を再検証してからdraft作成、upload、公開
 
 publish直前の`check-assets`は各ZIPが80,000,000 bytes以下であることを検査し、現在sizeと直前Releaseからの増減をStep Summaryへ出す。上限超過時はdraw.io assetを縮小せずReleaseを停止し、ADR-0017に従って再判断する。
+
+通常の再利用経路では`Build portable ZIP`がskippedになることが正しい。`Validate release request`の`candidate_reason`で再利用 / fallbackの理由を確認する。candidateを選択した後にmanifest、digest、tree、ZIP検証が失敗した場合は安全上fallbackせず、Release作成前に停止する。
+
+最初の実リリースでは、PR CI開始から6 checks完了、Release run開始から公開、両者を合わせた開始から公開、fallback時のRelease run開始から公開を分けて記録する。cache hit時の目標は順に10分、2分、12分、10分以内とする。
 
 ## 8. 公開後の確認
 
@@ -220,6 +228,8 @@ gh release view "v${RELEASE_VERSION}"
 
 | 状況 | 対応 |
 |------|------|
+| candidateが見つからない、期限切れ、required checkを一意に解決できない | workflowがtagから自動fallback buildする。手動でartifactを指定しない |
+| candidate選択後にmanifest / digest / tree / ZIP検証が失敗 | Releaseは作成されない。fallbackへ切り替えず、候補の生成元と契約不一致を修正して新しいrequired CIを通す |
 | 一時的なrunner / network障害で、tagのソースに変更がなくReleaseも存在しない | 同じversionでworkflowを再実行してよい |
 | workflowだけを修正し、tagのアプリソースは変更しない | workflow修正をPRで`main`へ入れ、Releaseが存在しないことを確認して同じversionを再実行してよい |
 | アプリソース、version設定、release notesの修正が必要 | push済みtagを動かさず、新しいversionで手順を最初から行う |
@@ -238,6 +248,7 @@ gh release view "v${RELEASE_VERSION}"
 - release準備PRが6つのrequired check成功後に`main`へマージされている
 - `v<version>` tagが確認済みmerge SHAを指している
 - Release workflowの全jobが成功している
+- 通常経路はrequired CI candidateを再利用してfallback buildがskip、候補不成立時はfallback buildが両OS成功している
 - GitHub Releaseが公開済みで、draftではない
 - macOS / Windowsのportable ZIPが2件ちょうど存在する
 - 公開済みZIPの展開、内部構造、SHA-256を確認している
