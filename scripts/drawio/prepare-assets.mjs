@@ -17,6 +17,7 @@ const TARGET_ROOT = resolve(GENERATED_ROOT, "drawio");
 const STAMP_PATH = resolve(GENERATED_ROOT, ".drawio-stamp.json");
 const PRECONFIG_PATH = resolve(SCRIPT_DIR, "PreConfig.js");
 const MERMAID_LICENSE_PATH = resolve(PROJECT_ROOT, "node_modules/mermaid/LICENSE");
+const LOPDF_LICENSE_PATH = resolve(PROJECT_ROOT, "third_party/lopdf-LICENSE.txt");
 
 // ブラウザ版エディタがローカル編集に使う全 client asset。Java servlet、cloud provider
 // bridge、service worker はオフライン Tauri runtime では利用しないため含めない。
@@ -52,9 +53,10 @@ export function drawioAssetStamp() {
   return {
     commit: DRAWIO_COMMIT,
     version: DRAWIO_VERSION,
-    layout: 4,
+    layout: 5,
     preConfigSha256: sha256(PRECONFIG_PATH),
     mermaidLicenseSha256: sha256(MERMAID_LICENSE_PATH),
+    lopdfLicenseSha256: sha256(LOPDF_LICENSE_PATH),
   };
 }
 
@@ -106,6 +108,7 @@ export function prepareDrawioAssets() {
   mkdirSync(licenses, { recursive: true });
   cpSync(resolve(DRAWIO_ROOT, "LICENSE"), resolve(licenses, "drawio-LICENSE.txt"));
   cpSync(MERMAID_LICENSE_PATH, resolve(licenses, "mermaid-LICENSE.txt"));
+  cpSync(LOPDF_LICENSE_PATH, resolve(licenses, "lopdf-LICENSE.txt"));
 
   const stamp = drawioAssetStamp();
   writeFileSync(STAMP_PATH, `${JSON.stringify(stamp, null, 2)}\n`);

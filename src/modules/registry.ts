@@ -14,6 +14,7 @@ import { linkMemoModule } from "@/modules/linkmemo";
 import { memoModule } from "@/modules/memo";
 import { mermaidModule } from "@/modules/mermaid";
 import { paletteModule } from "@/modules/palette";
+import { pdfMergeModule } from "@/modules/pdfmerge";
 import { promptModule } from "@/modules/prompt";
 import { secretGeneratorModule } from "@/modules/secretgen";
 import { regexModule } from "@/modules/regex";
@@ -55,6 +56,7 @@ export const modules: readonly ModuleDefinition[] = [
   cronModule,
   a11yModule,
   httpModule,
+  pdfMergeModule,
 ];
 
 export function validateModuleDefinitions(definitions: readonly ModuleDefinition[]): void {

@@ -1,4 +1,4 @@
-//! Mermaid / Diagram が共有するローカル画像書出し境界。
+//! Mermaid / Diagramの画像書出しとPDF結合が共有する原子的ローカル保存境界。
 
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -55,6 +55,30 @@ pub(crate) fn decode_and_validate_image(
 }
 
 pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
+    write_atomically_with(path, |file| {
+        file.write_all(bytes)?;
+        Ok(())
+    })
+}
+
+/// 同一ディレクトリの一時ファイルへ書き込み、成功したときだけ出力先を置換する。
+///
+/// PDF のように出力全体を `Vec<u8>` へ保持したくないモジュールも、同じ原子的保存境界を
+/// 利用できるよう writer closure を受け取る。closure がエラーを返した場合は一時ファイルを
+/// 削除し、既存の出力先には触れない。
+pub(crate) fn write_atomically_with(
+    path: &Path,
+    write: impl FnOnce(&mut File) -> Result<(), AppError>,
+) -> Result<(), AppError> {
+    write_atomically_with_guard(path, write, || Ok(()))
+}
+
+/// flush / fsync 後、出力先を置換する直前に最終確認を挟める原子的保存。
+pub(crate) fn write_atomically_with_guard(
+    path: &Path,
+    write: impl FnOnce(&mut File) -> Result<(), AppError>,
+    before_replace: impl FnOnce() -> Result<(), AppError>,
+) -> Result<(), AppError> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -69,10 +93,11 @@ pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), AppError
     let temp_path = temporary_path(path);
     let result = (|| -> Result<(), AppError> {
         let mut file = File::create(&temp_path)?;
-        file.write_all(bytes)?;
+        write(&mut file)?;
         file.flush()?;
         file.sync_all()?;
         drop(file);
+        before_replace()?;
         replace_atomically(&temp_path, path)?;
         sync_parent_directory(parent)?;
         Ok(())
@@ -238,5 +263,25 @@ mod tests {
             &format!("<svg>{}</svg>", "x".repeat(MAX_IMAGE_EXPORT_BYTES))
         )
         .is_err());
+    }
+
+    #[test]
+    fn guarded_write_keeps_existing_destination_when_guard_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("existing.bin");
+        fs::write(&path, b"old").unwrap();
+
+        let result = write_atomically_with_guard(
+            &path,
+            |file| {
+                file.write_all(b"new")?;
+                Ok(())
+            },
+            || Err(AppError::Internal("stop before replace".into())),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"old");
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 }

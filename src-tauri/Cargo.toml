@@ -4,7 +4,7 @@ version = "0.1.0-alpha.9"
 description = "MyMyTools — 軽量なクロスプラットフォーム多目的 GUI ツール"
 authors = ["zredjet"]
 edition = "2021"
-rust-version = "1.85"  # edition2024 が stable 化したバージョン。依存の最低要件 (hashbrown 0.17 等)
+rust-version = "1.88"  # lopdf 0.44 の MSRV。rust-toolchain.toml は stable を追従する。
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
@@ -62,6 +62,11 @@ digest = "0.10"
 md-5 = "0.10"
 sha1 = "0.10"
 sha2 = "0.10"
+
+# M-PDF Merge: 非暗号化PDFの検査・ページツリー結合。展開サイズ上限を使うため0.44以上。
+lopdf = { version = "0.44", default-features = false }
+# lopdf 0.44の許容範囲でaes 0.9.3を選ぶとRust 1.89が必要になるため、MSRV 1.88対応版へ固定する。
+aes = "=0.9.2"
 
 [dev-dependencies]
 # 一時ファイル / 一時ディレクトリ (M-Hash ファイルハッシュテストで使う)。

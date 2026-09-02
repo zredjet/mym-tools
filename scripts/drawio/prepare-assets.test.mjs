@@ -42,9 +42,10 @@ describe("draw.io offline asset contract", () => {
     expect(drawioAssetStamp()).toMatchObject({
       commit: DRAWIO_COMMIT,
       version: DRAWIO_VERSION,
-      layout: 4,
+      layout: 5,
       preConfigSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
       mermaidLicenseSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      lopdfLicenseSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
   });
 });

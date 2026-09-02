@@ -19,6 +19,7 @@ pub mod linkmemo;
 pub mod memo;
 pub mod mermaid;
 pub mod palette;
+pub mod pdfmerge;
 pub mod prompt;
 pub mod regex;
 pub mod registry;

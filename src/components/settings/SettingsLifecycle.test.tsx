@@ -38,6 +38,7 @@ describe("SettingsLifecycle", () => {
       "memo",
       "mermaid",
       "palette",
+      "pdfmerge",
       "prompt",
       "regex",
       "secretgen",
