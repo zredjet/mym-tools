@@ -37,5 +37,8 @@ permissions = [
   "allow-diagram-read-file",
   "allow-diagram-write-file",
   "allow-mermaid-write-file",
+  "allow-pdfmerge-inspect-files",
+  "allow-pdfmerge-merge-files",
+  "allow-nrbf-inspect-file",
   "allow-prompt-render-template",
 ]
