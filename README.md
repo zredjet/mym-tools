@@ -74,7 +74,7 @@ cargo test --workspace --lib --all-features --locked
 
 ## 開発状況
 
-**Phase 1 の主要機能を実装済み (`0.1.0-alpha.11`)**。
+**Phase 1 の主要機能を実装済み (`0.1.0-alpha.12`)**。
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
 rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing / lopdf の Rust バックエンドで構成。
