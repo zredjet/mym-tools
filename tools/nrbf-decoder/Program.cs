@@ -12,7 +12,7 @@ internal static class Program
         byte[] output = JsonSerializer.SerializeToUtf8Bytes(response, NrbfJsonContext.Default.InspectResponse);
         if (output.LongLength > Inspector.MaximumProtocolBytes)
         {
-            response = InspectResponse.Failure("解析結果が64 MiBの出力上限を超えました。");
+            response = InspectResponse.Failure("解析結果が256 MiBの出力上限を超えました。");
             output = JsonSerializer.SerializeToUtf8Bytes(response, NrbfJsonContext.Default.InspectResponse);
         }
 
@@ -26,9 +26,13 @@ internal static class Program
     {
         try
         {
-            return args.Length == 2 && args[0] == "--inspect"
-                ? Inspector.Inspect(args[1])
-                : InspectResponse.Failure("使用方法: nrbf-decoder --inspect <path>");
+            bool valid = args.Length is 2 or 3
+                && args[0] == "--inspect"
+                && (args.Length == 2 || args[2] == "--expand-byte-arrays");
+            return valid
+                ? Inspector.Inspect(args[1], expandByteArrays: args.Length == 3)
+                : InspectResponse.Failure(
+                    "使用方法: nrbf-decoder --inspect <path> [--expand-byte-arrays]");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

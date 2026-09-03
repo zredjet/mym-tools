@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { ToolError, ToolPage, ToolPanel, inputClass } from "@/components/ui/ToolPage";
 import { type NrbfNode, type NrbfSummary, cancelNrbfOperation, nrbfInspectFile } from "@/ipc/nrbf";
 import { cn } from "@/lib/cn";
-import { buildVisibleRows, collectAncestorIds, searchNodes } from "@/modules/nrbf/tree";
+import { buildVisibleRows, searchNodes } from "@/modules/nrbf/tree";
 import { createPresentationNodes } from "@/modules/nrbf/presentation";
 
 const ROW_HEIGHT = 32;
@@ -27,6 +27,8 @@ interface ActiveOperation {
   cancelling: boolean;
 }
 
+type SearchMode = "filter" | "jump";
+
 export function NrbfInspectorPage() {
   const [path, setPath] = useState<string | null>(null);
   const [nodes, setNodes] = useState<NrbfNode[]>([]);
@@ -34,10 +36,11 @@ export function NrbfInspectorPage() {
   const [operation, setOperation] = useState<ActiveOperation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [expandByteArrays, setExpandByteArrays] = useState(false);
   const [rawMode, setRawMode] = useState(false);
-  const [query, setQuery] = useState("");
-  const [includeNames, setIncludeNames] = useState(true);
-  const [includeValues, setIncludeValues] = useState(true);
+  const [nameQuery, setNameQuery] = useState("");
+  const [valueQuery, setValueQuery] = useState("");
+  const [searchMode, setSearchMode] = useState<SearchMode>("filter");
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -68,7 +71,8 @@ export function NrbfInspectorPage() {
       setNodes([]);
       setSummary(null);
       setError(null);
-      setQuery("");
+      setNameQuery("");
+      setValueQuery("");
       pendingJumpIdRef.current = null;
       setExpandedIds(new Set());
       setSelectedId(null);
@@ -79,12 +83,12 @@ export function NrbfInspectorPage() {
         const completed = await nrbfInspectFile({
           operationId,
           path: nextPath,
+          expandByteArrays,
           onProgress: (progress) => {
             if (!mountedRef.current || !isCurrentOperation(operationRef.current, operationId))
               return;
             if (progress.type === "nodes") {
               receivedNodes.push(...progress.nodes);
-              setNodes([...receivedNodes]);
             } else if (progress.type === "done") setSummary(progress.summary);
           },
         });
@@ -107,7 +111,7 @@ export function NrbfInspectorPage() {
           replaceOperation(null);
       }
     },
-    [replaceOperation],
+    [expandByteArrays, replaceOperation],
   );
 
   useEffect(() => {
@@ -167,7 +171,8 @@ export function NrbfInspectorPage() {
     setNodes([]);
     setSummary(null);
     setError(null);
-    setQuery("");
+    setNameQuery("");
+    setValueQuery("");
     pendingJumpIdRef.current = null;
     setExpandedIds(new Set());
     setSelectedId(null);
@@ -177,23 +182,26 @@ export function NrbfInspectorPage() {
     () => createPresentationNodes(nodes, rawMode),
     [nodes, rawMode],
   );
+  const nodesById = useMemo(() => {
+    const result = new Map<number, NrbfNode>();
+    for (const node of presentationNodes) result.set(node.id, node);
+    return result;
+  }, [presentationNodes]);
   const search = useMemo(
-    () => searchNodes(presentationNodes, query, includeNames, includeValues),
-    [includeNames, includeValues, presentationNodes, query],
+    () => searchNodes(presentationNodes, { name: nameQuery, value: valueQuery }),
+    [nameQuery, presentationNodes, valueQuery],
   );
+  const filteredSearch = searchMode === "filter" ? search : null;
   const rows = useMemo(
-    () => buildVisibleRows(presentationNodes, expandedIds, search),
-    [expandedIds, presentationNodes, search],
+    () => buildVisibleRows(presentationNodes, expandedIds, filteredSearch),
+    [expandedIds, filteredSearch, presentationNodes],
   );
-  const parentIds = useMemo(
-    () =>
-      new Set(presentationNodes.flatMap((node) => (node.parentId == null ? [] : [node.parentId]))),
-    [presentationNodes],
-  );
-  const selected = useMemo(
-    () => presentationNodes.find((node) => node.id === selectedId) ?? null,
-    [presentationNodes, selectedId],
-  );
+  const parentIds = useMemo(() => {
+    const result = new Set<number>();
+    for (const node of presentationNodes) if (node.parentId != null) result.add(node.parentId);
+    return result;
+  }, [presentationNodes]);
+  const selected = selectedId == null ? null : (nodesById.get(selectedId) ?? null);
   const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
   const endIndex = Math.min(
     rows.length,
@@ -206,21 +214,51 @@ export function NrbfInspectorPage() {
       setSelectedId(nodeId);
       setExpandedIds((current) => {
         const next = new Set(current);
-        for (const ancestor of collectAncestorIds(presentationNodes, nodeId)) next.add(ancestor);
+        const seen = new Set<number>();
+        let parentId = nodesById.get(nodeId)?.parentId ?? null;
+        while (parentId != null && !seen.has(parentId)) {
+          seen.add(parentId);
+          next.add(parentId);
+          parentId = nodesById.get(parentId)?.parentId ?? null;
+        }
         return next;
       });
     },
-    [presentationNodes],
+    [nodesById],
   );
 
   const jumpToNode = useCallback(
     (nodeId: number) => {
       pendingJumpIdRef.current = nodeId;
-      setQuery("");
+      if (searchMode === "filter") {
+        setNameQuery("");
+        setValueQuery("");
+      }
       selectNode(nodeId);
     },
-    [selectNode],
+    [searchMode, selectNode],
   );
+
+  const jumpToSearchMatch = useCallback(
+    (direction: -1 | 1) => {
+      const matches = search?.orderedMatchIds ?? [];
+      if (matches.length === 0) return;
+      const currentIndex = selectedId == null ? -1 : matches.indexOf(selectedId);
+      const nextIndex =
+        currentIndex < 0
+          ? direction === 1
+            ? 0
+            : matches.length - 1
+          : (currentIndex + direction + matches.length) % matches.length;
+      const nodeId = matches[nextIndex]!;
+      pendingJumpIdRef.current = nodeId;
+      selectNode(nodeId);
+    },
+    [search, selectNode, selectedId],
+  );
+
+  const currentMatchIndex =
+    search == null || selectedId == null ? -1 : search.orderedMatchIds.indexOf(selectedId);
 
   useEffect(() => {
     const nodeId = pendingJumpIdRef.current;
@@ -296,6 +334,17 @@ export function NrbfInspectorPage() {
             </div>
           }
         >
+          <div className="mb-3">
+            <Check
+              label="byte配列を展開（最大50,000要素）"
+              checked={expandByteArrays}
+              onChange={setExpandByteArrays}
+              disabled={operation != null}
+            />
+            <p className="mt-1 text-[11px] text-[var(--fg-muted)]">
+              有効にすると、次回の読込・再読込でbyte配列の各要素を表示します。
+            </p>
+          </div>
           <button
             type="button"
             onClick={() => void chooseFile()}
@@ -335,25 +384,87 @@ export function NrbfInspectorPage() {
         {nodes.length > 0 ? (
           <>
             <ToolPanel title="検索と表示">
-              <div className="flex flex-wrap items-center gap-4">
-                <label className="flex min-w-56 flex-1 flex-col gap-1 text-[11px] text-[var(--fg-muted)]">
-                  項目名または値を検索
-                  <input
-                    aria-label="項目名または値を検索"
+              <div className="grid gap-3 md:grid-cols-[140px_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+                <label className="flex flex-col gap-1 text-[11px] text-[var(--fg-muted)]">
+                  検索方法
+                  <select
+                    aria-label="検索方法"
                     className={cn(inputClass, "w-full")}
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
+                    value={searchMode}
+                    onChange={(event) => setSearchMode(event.target.value as SearchMode)}
+                  >
+                    <option value="filter">絞り込み</option>
+                    <option value="jump">ジャンプ</option>
+                  </select>
+                </label>
+                <label className="flex min-w-0 flex-col gap-1 text-[11px] text-[var(--fg-muted)]">
+                  項目名
+                  <input
+                    aria-label="項目名を検索"
+                    className={cn(inputClass, "w-full")}
+                    value={nameQuery}
+                    onChange={(event) => setNameQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && searchMode === "jump") {
+                        event.preventDefault();
+                        jumpToSearchMatch(1);
+                      }
+                    }}
                   />
                 </label>
-                <Check label="項目名" checked={includeNames} onChange={setIncludeNames} />
-                <Check label="値" checked={includeValues} onChange={setIncludeValues} />
-                <Check label="Raw表示" checked={rawMode} onChange={setRawMode} />
+                <label className="flex min-w-0 flex-col gap-1 text-[11px] text-[var(--fg-muted)]">
+                  値
+                  <input
+                    aria-label="値を検索"
+                    className={cn(inputClass, "w-full")}
+                    value={valueQuery}
+                    onChange={(event) => setValueQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && searchMode === "jump") {
+                        event.preventDefault();
+                        jumpToSearchMatch(1);
+                      }
+                    }}
+                  />
+                </label>
+                <div className="pb-2">
+                  <Check label="Raw表示" checked={rawMode} onChange={setRawMode} />
+                </div>
               </div>
               {search != null ? (
-                <p className="mt-2 text-[11px] text-[var(--fg-muted)]" role="status">
-                  {search.totalMatches.toLocaleString()}件一致
-                  {search.truncated ? "（先頭1,000件まで表示。検索語を絞り込んでください）" : ""}
-                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--fg-muted)]">
+                  <p role="status">
+                    {search.totalMatches.toLocaleString()}件一致
+                    {searchMode === "jump" && search.orderedMatchIds.length > 0
+                      ? ` · ${currentMatchIndex < 0 ? "—" : currentMatchIndex + 1} / ${search.orderedMatchIds.length.toLocaleString()}`
+                      : ""}
+                    {search.truncated
+                      ? "（先頭1,000件まで対象。検索条件を絞り込んでください）"
+                      : ""}
+                  </p>
+                  {searchMode === "jump" ? (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => jumpToSearchMatch(-1)}
+                        disabled={search.orderedMatchIds.length === 0}
+                        aria-label="前の一致へ"
+                      >
+                        前へ
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => jumpToSearchMatch(1)}
+                        disabled={search.orderedMatchIds.length === 0}
+                        aria-label="次の一致へ"
+                      >
+                        次へ
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
               ) : null}
             </ToolPanel>
 
@@ -373,7 +484,7 @@ export function NrbfInspectorPage() {
                     {virtualRows.map((row, offset) => {
                       const index = startIndex + offset;
                       const expandable = parentIds.has(row.node.id);
-                      const expanded = search != null || expandedIds.has(row.node.id);
+                      const expanded = filteredSearch != null || expandedIds.has(row.node.id);
                       return (
                         <button
                           key={row.node.id}
@@ -402,7 +513,7 @@ export function NrbfInspectorPage() {
                           <span
                             className="inline-flex size-4 shrink-0 items-center justify-center"
                             onClick={(event) => {
-                              if (!expandable || search != null) return;
+                              if (!expandable || filteredSearch != null) return;
                               event.stopPropagation();
                               setExpandedIds((ids) => toggleSet(ids, row.node.id));
                             }}
@@ -421,7 +532,7 @@ export function NrbfInspectorPage() {
                           <span className="truncate">
                             <Highlight
                               text={rawMode ? row.node.rawName : row.node.displayName}
-                              query={query}
+                              query={nameQuery}
                               active={search?.matchIds.has(row.node.id) ?? false}
                             />
                           </span>
@@ -430,7 +541,7 @@ export function NrbfInspectorPage() {
                               :{" "}
                               <Highlight
                                 text={row.node.formattedValue}
-                                query={query}
+                                query={valueQuery}
                                 active={search?.matchIds.has(row.node.id) ?? false}
                               />
                             </span>
@@ -512,16 +623,24 @@ function Check({
   label,
   checked,
   onChange,
+  disabled = false,
 }: {
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
-    <label className="flex items-center gap-2 text-[12px] text-[var(--fg)]">
+    <label
+      className={cn(
+        "flex items-center gap-2 text-[12px] text-[var(--fg)]",
+        disabled && "opacity-60",
+      )}
+    >
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
       />
       {label}

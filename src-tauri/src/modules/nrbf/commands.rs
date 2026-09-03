@@ -12,7 +12,8 @@ use crate::operations::OperationGuard;
 use crate::state::AppState;
 
 const MAXIMUM_INPUT_BYTES: u64 = 64 * 1024 * 1024;
-const MAXIMUM_PROTOCOL_BYTES: usize = 64 * 1024 * 1024;
+const MAXIMUM_PROTOCOL_BYTES: usize = 256 * 1024 * 1024;
+const MAXIMUM_NODES: usize = 500_000;
 const NODE_BATCH_SIZE: usize = 500;
 
 /// 選択された単一NRBFファイルを専用NativeAOT sidecarで解析する。
@@ -22,6 +23,7 @@ pub async fn nrbf_inspect_file(
     state: State<'_, AppState>,
     operation_id: String,
     path: String,
+    expand_byte_arrays: bool,
     on_progress: Channel<NrbfProgress>,
 ) -> Result<NrbfSummary, AppError> {
     let registry = Arc::clone(&state.operations);
@@ -43,11 +45,15 @@ pub async fn nrbf_inspect_file(
         },
     );
 
+    let mut arguments = vec!["--inspect", path.as_str()];
+    if expand_byte_arrays {
+        arguments.push("--expand-byte-arrays");
+    }
     let command = app
         .shell()
         .sidecar("nrbf-decoder")
         .map_err(|error| AppError::Internal(format!("NRBFデコーダーを開始できません: {error}")))?
-        .args(["--inspect", path.as_str()]);
+        .args(arguments);
     let (mut receiver, child) = command.spawn().map_err(|error| {
         AppError::Internal(format!("NRBFデコーダーの起動に失敗しました: {error}"))
     })?;
@@ -77,7 +83,7 @@ pub async fn nrbf_inspect_file(
                     CommandEvent::Stdout(bytes) => {
                         if stdout.len().saturating_add(bytes.len()) > MAXIMUM_PROTOCOL_BYTES {
                             if let Some(process) = child.take() { let _ = process.kill(); }
-                            return Err(AppError::Internal("NRBF解析結果が64 MiBの出力上限を超えました。".into()));
+                            return Err(AppError::Internal("NRBF解析結果が256 MiBの出力上限を超えました。".into()));
                         }
                         stdout.extend_from_slice(&bytes);
                     }
@@ -131,7 +137,7 @@ fn validate_sidecar_payload(
     nodes: &[crate::modules::nrbf::protocol::NrbfNode],
     summary: &NrbfSummary,
 ) -> Result<(), String> {
-    if summary.node_count as usize != nodes.len() || nodes.len() > 100_000 {
+    if summary.node_count as usize != nodes.len() || nodes.len() > MAXIMUM_NODES {
         return Err("NRBFデコーダーのノード件数が契約と一致しません。".into());
     }
     for (index, node) in nodes.iter().enumerate() {
@@ -213,5 +219,11 @@ mod tests {
         nodes[1].reference_target_id = Some(2);
         assert!(validate_sidecar_payload(&nodes, &summary(2)).is_err());
         assert!(validate_sidecar_payload(&nodes[..1], &summary(2)).is_err());
+    }
+
+    #[test]
+    fn node_limit_matches_the_decoder_contract() {
+        assert_eq!(MAXIMUM_NODES, 500_000);
+        assert_eq!(MAXIMUM_PROTOCOL_BYTES, 256 * 1024 * 1024);
     }
 }

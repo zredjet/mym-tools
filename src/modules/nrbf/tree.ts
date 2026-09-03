@@ -8,8 +8,14 @@ export interface TreeRow {
 export interface SearchResult {
   includedIds: Set<number>;
   matchIds: Set<number>;
+  orderedMatchIds: number[];
   totalMatches: number;
   truncated: boolean;
+}
+
+export interface NrbfSearchQuery {
+  name: string;
+  value: string;
 }
 
 export function normalizeSearchText(value: string): string {
@@ -18,31 +24,35 @@ export function normalizeSearchText(value: string): string {
 
 export function searchNodes(
   nodes: readonly NrbfNode[],
-  query: string,
-  includeNames: boolean,
-  includeValues: boolean,
+  query: NrbfSearchQuery,
   limit = 1000,
 ): SearchResult | null {
-  const normalizedQuery = normalizeSearchText(query.trim());
-  if (normalizedQuery === "") return null;
-  const byId = new Map(nodes.map((node) => [node.id, node]));
-  const allMatches: NrbfNode[] = [];
+  const normalizedName = normalizeSearchText(query.name.trim());
+  const normalizedValue = normalizeSearchText(query.value.trim());
+  if (normalizedName === "" && normalizedValue === "") return null;
+  const byId = new Map<number, NrbfNode>();
+  const limitedMatches: NrbfNode[] = [];
+  let totalMatches = 0;
   for (const node of nodes) {
+    byId.set(node.id, node);
     const nameMatch =
-      includeNames &&
+      normalizedName === "" ||
       [node.displayName, node.rawName].some((value) =>
-        normalizeSearchText(value).includes(normalizedQuery),
+        normalizeSearchText(value).includes(normalizedName),
       );
     const valueMatch =
-      includeValues &&
-      node.kind === "scalar" &&
-      node.formattedValue != null &&
-      normalizeSearchText(node.formattedValue).includes(normalizedQuery);
-    if (nameMatch || valueMatch) allMatches.push(node);
+      normalizedValue === "" ||
+      (node.kind === "scalar" &&
+        node.formattedValue != null &&
+        normalizeSearchText(node.formattedValue).includes(normalizedValue));
+    if (nameMatch && valueMatch) {
+      totalMatches += 1;
+      if (limitedMatches.length < limit) limitedMatches.push(node);
+    }
   }
 
-  const limitedMatches = allMatches.slice(0, limit);
-  const matchIds = new Set(limitedMatches.map((node) => node.id));
+  const orderedMatchIds = limitedMatches.map((node) => node.id);
+  const matchIds = new Set(orderedMatchIds);
   const includedIds = new Set<number>(matchIds);
   for (const match of limitedMatches) {
     let parentId = match.parentId;
@@ -56,8 +66,9 @@ export function searchNodes(
   return {
     includedIds,
     matchIds,
-    totalMatches: allMatches.length,
-    truncated: allMatches.length > limit,
+    orderedMatchIds,
+    totalMatches,
+    truncated: totalMatches > limit,
   };
 }
 

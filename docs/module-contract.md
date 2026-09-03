@@ -754,16 +754,18 @@ editor URLは`lang=ja`を固定し、同梱済み日本語resourceだけをsame-
 | `category` / 既定 | `text` / enabled |
 | `is_stateless` | true |
 | frontend route | `/` |
-| 固有 IPC コマンド | `nrbf_inspect_file(operationId, path, onProgress)`。cancelは`core_cancel_operation` |
+| 固有 IPC コマンド | `nrbf_inspect_file(operationId, path, expandByteArrays, onProgress)`。cancelは`core_cancel_operation`。`expandByteArrays`は読込単位の明示許可で既定false |
 | Channel | `started { fileSizeBytes }` / `nodes { nodes }` / `done { summary }` / `cancelled`。nodesは最大500件のbatch |
-| 入力上限 | 1ファイル64 MiB、60秒、100,000ノード、1配列50,000展開要素、1スカラー1 MiB、検索文字列32 MiB、protocol出力64 MiB |
-| `index_text` の対象 | なし。画面内検索だけが読みやすい名前、Raw名、整形済みscalar値を対象とする |
+| 入力上限 | 1ファイル64 MiB、60秒、500,000ノード、1配列50,000展開要素、1スカラー1 MiB、検索文字列32 MiB、protocol出力256 MiB |
+| `index_text` の対象 | なし。画面内検索だけが読みやすい名前、Raw名、整形済みscalar値を対象とする。項目名と値の両方を指定した場合は同一nodeに対するAND条件とし、絞り込み／ジャンプを選べる |
 
 `NrbfNode`は連番`id`、`parentId`、`displayName`、`rawName`、`kind`（`object / array / scalar / null / reference / unsupported`）、`typeName`、`assemblyName`、`formattedValue`、`recordId`、`referenceTargetId`、`shape`を持つ。`NrbfSummary`はpath、file name / size、root type、node count、warnings、durationを持つ。
 
 同一operation内で最初に現れたrecordだけを正規ノードとし、共有参照と循環参照は`referenceTargetId`を持つ参照ノードにする。UIは参照先へ移動できるが再帰展開しない。遅延Channel eventは現在のoperation IDと一致する場合だけ反映する。
 
 sidecarは`System.Formats.Nrbf`で型を生成せずに読み、`BinaryFormatter.Deserialize`とassembly / 型ロードを禁止する。読みやすい表示とRaw表示は同じnode集合から導出し、表示切替で再解析しない。内部構造が厳密に一致しない`List<T>` / `Dictionary<TKey,TValue>`はRaw構造へフォールバックする。
+
+byte配列は`expandByteArrays = false`では長さだけを表示する。trueの場合だけ各byteをscalar nodeとして展開し、50,000要素を超える配列は他の配列と同様に省略nodeとwarningへ変換する。
 
 入力、node、summary、検索条件はfrontend stateだけに保持し、items、設定、履歴、横断検索、export / importへ保存しない。DB schemaと既存ModuleBackend / ModuleDefinition契約は変更しない。
 
@@ -828,3 +830,4 @@ sidecarは`System.Formats.Nrbf`で型を生成せずに読み、`BinaryFormatter
 | 2026-08-31 | 1.0 | ADR-0017を反映。M-Mermaid / M-Diagramのstateful payload、route、検索、local file IPC、postMessage隔離契約を追加 |
 | 2026-09-02 | 1.2 | ADR-0018を反映。M-PDF Mergeのstateless契約、固有IPC、進捗・cancel、入力上限、通常PDF限定、atomic outputを追加 |
 | 2026-09-03 | 1.3 | ADR-0020を反映。M-NRBFのnode / summary / Channel契約、解析上限、型非生成sidecar、画面内検索と非永続境界を追加 |
+| 2026-09-03 | 1.4 | M-NRBFのIPCへbyte配列展開許可を追加し、500,000ノード／256 MiB protocolへ上限を変更。項目名＋値のAND条件と絞り込み／ジャンプ検索を追加 |

@@ -36,21 +36,21 @@ BinaryFormatterで作成されたNRBF payloadの内容を、項目名・値で�
 |------|------|
 | 入力 | 1 file / 64 MiB |
 | 実行 | sidecar 55秒で省略、Rust wrapper 60秒で強制終了 |
-| node | 100,000 |
+| node | 500,000 |
 | 1 arrayの展開 | 50,000要素 |
 | 1 scalar | UTF-8 1 MiB |
 | 検索対象文字列 | UTF-8合計32 MiB |
-| protocol stdout | 64 MiB |
+| protocol stdout | 256 MiB |
 | protocol stderr | 64 KiB |
 
-部分的な上限超過は、解析済み結果を捨てずに省略nodeとwarningで表す。巨大byte配列は長さだけを表示する。破損header、非対応形式、上限、sidecar異常終了を日本語errorへ変換する。
+部分的な上限超過は、解析済み結果を捨てずに省略nodeとwarningで表す。byte配列は既定で長さだけを表示し、利用者が読込前に明示的に許可した場合だけ50,000要素まで展開する。500,000個の最小nodeだけでも見積り上約128 MiBとなるため、protocol stdoutは256 MiBとする。破損header、非対応形式、上限、sidecar異常終了を日本語errorへ変換する。
 
 ### 2.3 IPC・状態・UI
 
-- 公開commandは`nrbf_inspect_file(operationId, path, onProgress)`とし、Tauri Channelで`started / nodes / done / cancelled`を通知する。nodeは500件ずつ送る
+- 公開commandは`nrbf_inspect_file(operationId, path, expandByteArrays, onProgress)`とし、Tauri Channelで`started / nodes / done / cancelled`を通知する。nodeは500件ずつ送る
 - `OperationRegistry`の`CancellationToken`を使い、cancel・60秒timeout時はsidecarを終了する。UIはcurrent operation IDと一致しない遅延eventを破棄する
 - node契約はID、親ID、表示名、Raw名、kind、型名、assembly名、整形値、record ID、参照先ID、配列shapeを持つ。summaryはfile情報、root型、node数、warning、所要時間を持つ
-- 検索は読みやすい名前・Raw名・整形済みscalar値に対するNFKC正規化・case-insensitive部分一致とし、項目名／値を個別に絞れる。一致nodeと祖先だけを表示し、1,000件で打ち切る
+- 検索は読みやすい名前・Raw名・整形済みscalar値に対するNFKC正規化・case-insensitive部分一致とする。項目名と値は独立入力とし、両方を指定した場合は同一nodeへのAND条件とする。一致nodeと祖先だけを表示する絞り込みと、通常tree上の前後の一致へ移動するジャンプを提供し、対象は先頭1,000件で打ち切る
 - treeは32px固定行高で仮想化し、矢印key操作、展開／折りたたみ、参照先移動を提供する。Raw切替は受信済みnodeから導出し、再解析しない
 - `nrbf`は既定有効・`text` category・statelessとする。入力、結果、検索、履歴をDB、設定、横断検索、export / importへ保存しない。編集・再シリアライズ・JSON出力は対象外とする
 
@@ -86,8 +86,8 @@ BinaryFormatterで作成されたNRBF payloadの内容を、項目名・値で�
 ## 5. Validation Criteria
 
 - [ ] primitive、Unicode、nested class、List / Dictionary、一次元・多次元・jagged array、null、共有参照、循環参照、DateTime / TimeSpan / Decimalを固定fixtureで検証する
-- [ ] 破損入力、巨大null圧縮、各resource limit、非対応形式を検証する
-- [ ] 名称／値検索、Raw切替、参照移動、virtualization、keyboard、cancel、古いevent破棄をfrontend testで検証する
+- [ ] 破損入力、巨大null圧縮、許可あり／なしのbyte配列、各resource limit、非対応形式を検証する
+- [ ] 名称／値の単独・AND検索、絞り込み／ジャンプ、Raw切替、参照移動、virtualization、keyboard、cancel、古いevent破棄をfrontend testで検証する
 - [ ] sidecar protocol、Rust wrapper、両OS NativeAOT起動を検証する
 - [ ] .NET / Rust / frontendの全gate、両OS Tauri build、ZIP layout・展開・size検査が成功する
 

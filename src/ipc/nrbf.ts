@@ -35,6 +35,7 @@ export type NrbfProgress =
 export function nrbfInspectFile(input: {
   operationId: string;
   path: string;
+  expandByteArrays: boolean;
   onProgress: (progress: NrbfProgress) => void;
 }): Promise<NrbfSummary> {
   const channel = new Channel<NrbfProgress>();
@@ -42,6 +43,7 @@ export function nrbfInspectFile(input: {
   return invoke<NrbfSummary>("nrbf_inspect_file", {
     operationId: input.operationId,
     path: input.path,
+    expandByteArrays: input.expandByteArrays,
     onProgress: channel,
   });
 }
