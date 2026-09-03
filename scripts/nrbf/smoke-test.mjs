@@ -84,15 +84,33 @@ try {
       response.nodes?.some((node) => node.formattedValue === "7"),
   );
 
+  runFixture(
+    "bytes.bin",
+    Buffer.concat([
+      header(),
+      Buffer.from([15]),
+      int32(1),
+      int32(3),
+      Buffer.from([2, 1, 2, 255, 11]),
+    ]),
+    (response) =>
+      response.nodes?.map((node) => node.kind).join(",") === "array,scalar,scalar,scalar" &&
+      response.nodes
+        ?.slice(1)
+        .map((node) => node.formattedValue)
+        .join(",") === "1,2,255",
+    ["--expand-byte-arrays"],
+  );
+
   process.stdout.write(`NativeAOT NRBF smoke test passed: ${target}\n`);
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 }
 
-function runFixture(fileName, payload, validate) {
+function runFixture(fileName, payload, validate, extraArguments = []) {
   const payloadPath = join(temporaryDirectory, fileName);
   writeFileSync(payloadPath, payload);
-  const result = spawnSync(sidecar, ["--inspect", payloadPath], {
+  const result = spawnSync(sidecar, ["--inspect", payloadPath, ...extraArguments], {
     encoding: "utf8",
     timeout: 10_000,
     maxBuffer: 4 * 1024 * 1024,

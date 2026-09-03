@@ -12,15 +12,19 @@ namespace MyMyTools.NrbfDecoder;
 
 internal static class Inspector
 {
-    internal const long MaximumProtocolBytes = 64L * 1024 * 1024;
+    internal const long MaximumProtocolBytes = 256L * 1024 * 1024;
+    internal const int MaximumNodes = 500_000;
     private const long MaximumInputBytes = 64L * 1024 * 1024;
-    private const int MaximumNodes = 100_000;
     private const int MaximumArrayElements = 50_000;
     private const int MaximumScalarBytes = 1024 * 1024;
     private const long MaximumSearchTextBytes = 32L * 1024 * 1024;
     private static readonly TimeSpan MaximumDuration = TimeSpan.FromSeconds(55);
 
-    internal static InspectResponse Inspect(string path)
+    internal static InspectResponse Inspect(
+        string path,
+        bool expandByteArrays = false,
+        int maximumNodes = MaximumNodes,
+        long maximumProtocolBytes = MaximumProtocolBytes)
     {
         FileInfo file = new(path);
         if (!file.Exists) return InspectResponse.Failure("指定されたファイルがありません。");
@@ -34,14 +38,18 @@ internal static class Inspector
 
         SerializationRecord root = global::System.Formats.Nrbf.NrbfDecoder.Decode(
             stream, out _, new PayloadOptions { UndoTruncatedTypeNames = false }, leaveOpen: false);
-        Builder builder = new(stopwatch);
+        Builder builder = new(stopwatch, expandByteArrays, maximumNodes, maximumProtocolBytes);
         builder.Build(root);
         NrbfSummary summary = new(file.FullName, file.Name, file.Length, root.TypeName?.FullName,
             builder.Nodes.Count, builder.Warnings, stopwatch.ElapsedMilliseconds);
         return new(true, builder.Nodes, summary, null);
     }
 
-    private sealed class Builder(Stopwatch stopwatch)
+    private sealed class Builder(
+        Stopwatch stopwatch,
+        bool expandByteArrays,
+        int maximumNodes,
+        long maximumProtocolBytes)
     {
         private readonly Dictionary<SerializationRecordId, int> _canonicalRecords = new();
         private readonly Stack<PendingValue> _pending = new();
@@ -66,12 +74,12 @@ internal static class Inspector
                     AddUnsupported(null, "省略", "省略", "解析時間上限");
                     break;
                 }
-                if (Nodes.Count >= MaximumNodes - 1)
+                if (Nodes.Count >= maximumNodes - 1)
                 {
                     if (!_nodeLimitWarned)
                     {
                         _nodeLimitWarned = true;
-                        AddWarning("ノード数が100,000件に達したため、残りを省略しました。");
+                        AddWarning($"ノード数が{maximumNodes.ToString("N0", CultureInfo.InvariantCulture)}件に達したため、残りを省略しました。");
                     }
                     PendingValue omitted = _pending.Pop();
                     _pending.Clear();
@@ -161,7 +169,7 @@ internal static class Inspector
                 _pending.Push(new(null, id, "省略", "省略", "配列要素数上限"));
                 return;
             }
-            if (record is SZArrayRecord<byte>)
+            if (record is SZArrayRecord<byte> && !expandByteArrays)
             {
                 AddWarning($"byte配列 {pending.RawName} は安全のため内容を展開せず、長さだけ表示します。");
                 return;
@@ -285,12 +293,12 @@ internal static class Inspector
                 + JsonEncodedByteCount(typeName)
                 + JsonEncodedByteCount(assemblyName)
                 + JsonEncodedByteCount(formattedValue);
-            if (_estimatedProtocolBytes + nodeProtocolBytes > MaximumProtocolBytes - 1024 * 1024)
+            if (_estimatedProtocolBytes + nodeProtocolBytes > maximumProtocolBytes - 1024 * 1024)
             {
                 if (!_protocolLimitWarned)
                 {
                     _protocolLimitWarned = true;
-                    AddWarning("プロトコル出力が64 MiBに近づいたため、残りを省略しました。");
+                    AddWarning($"プロトコル出力が{maximumProtocolBytes / 1024 / 1024} MiBに近づいたため、残りを省略しました。");
                 }
                 displayName = "省略";
                 rawName = "省略";

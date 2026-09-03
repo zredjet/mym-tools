@@ -44,6 +44,41 @@ public sealed class InspectorTests
     }
 
     [Fact]
+    public void ExpandsByteArraysOnlyWhenExplicitlyAllowed()
+    {
+        using TemporaryFile file = new(BuildByteArrayPayload([1, 2, 255]));
+
+        InspectResponse defaultResponse = Inspector.Inspect(file.Path);
+        InspectResponse expandedResponse = Program.InspectArgs(
+            ["--inspect", file.Path, "--expand-byte-arrays"]);
+
+        Assert.Single(defaultResponse.Nodes);
+        Assert.Contains(defaultResponse.Summary!.Warnings, warning => warning.Contains("byte配列"));
+        Assert.Equal(["array", "scalar", "scalar", "scalar"],
+            expandedResponse.Nodes.Select(node => node.Kind));
+        Assert.Equal(["1", "2", "255"], expandedResponse.Nodes.Skip(1)
+            .Select(node => node.FormattedValue));
+    }
+
+    [Fact]
+    public void UsesTheFiveHundredThousandNodeLimit()
+    {
+        Assert.Equal(500_000, Inspector.MaximumNodes);
+        Assert.Equal(256L * 1024 * 1024, Inspector.MaximumProtocolBytes);
+    }
+
+    [Fact]
+    public void KeepsTheFiftyThousandElementLimitForExpandedByteArrays()
+    {
+        using TemporaryFile file = new(BuildByteArrayPayload(new byte[50_001]));
+
+        InspectResponse response = Inspector.Inspect(file.Path, expandByteArrays: true);
+
+        Assert.Equal(["array", "unsupported"], response.Nodes.Select(node => node.Kind));
+        Assert.Contains("配列要素数上限", response.Nodes[1].FormattedValue);
+    }
+
+    [Fact]
     public void ReadsNestedClassMembersAndBreaksCyclesIntoReferences()
     {
         using MemoryStream payload = Header();
@@ -280,18 +315,20 @@ public sealed class InspectorTests
         payload.WriteByte(11);
         using TemporaryFile file = new(payload.ToArray());
 
-        InspectResponse response = Inspector.Inspect(file.Path);
+        InspectResponse response = Inspector.Inspect(
+            file.Path, maximumProtocolBytes: 8L * 1024 * 1024);
 
         Assert.True(response.Ok);
         Assert.Contains(response.Nodes, node =>
             node.Kind == "unsupported" && node.FormattedValue?.Contains("プロトコル出力上限") == true);
-        Assert.Contains(response.Summary!.Warnings, warning => warning.Contains("64 MiB"));
+        Assert.Contains(response.Summary!.Warnings, warning => warning.Contains("8 MiB"));
     }
 
     [Fact]
-    public void ReservesTheFinalNodeForOmissionAtTheHundredThousandNodeLimit()
+    public void ReservesTheFinalNodeForOmissionAtTheConfiguredNodeLimit()
     {
-        const int memberCount = 100_000;
+        const int maximumNodes = 100;
+        const int memberCount = maximumNodes;
         string[] names = Enumerable.Range(0, memberCount).Select(index => $"f{index}").ToArray();
         byte[] binaryTypes = Enumerable.Repeat((byte)0, memberCount).ToArray();
         byte[] primitiveTypes = Enumerable.Repeat((byte)8, memberCount).ToArray();
@@ -302,13 +339,13 @@ public sealed class InspectorTests
         payload.WriteByte(11);
         using TemporaryFile file = new(payload.ToArray());
 
-        InspectResponse response = Inspector.Inspect(file.Path);
+        InspectResponse response = Inspector.Inspect(file.Path, maximumNodes: maximumNodes);
 
         Assert.True(response.Ok);
-        Assert.Equal(100_000, response.Nodes.Count);
+        Assert.Equal(maximumNodes, response.Nodes.Count);
         Assert.Equal("unsupported", response.Nodes[^1].Kind);
         Assert.Contains("ノード数上限", response.Nodes[^1].FormattedValue);
-        Assert.Contains(response.Summary!.Warnings, warning => warning.Contains("100,000"));
+        Assert.Contains(response.Summary!.Warnings, warning => warning.Contains("100"));
     }
 
     [Fact]
@@ -368,6 +405,18 @@ public sealed class InspectorTests
         Write7BitEncodedInt(payload, text.Length);
         payload.Write(text);
         payload.WriteByte(11); // MessageEnd
+        return payload.ToArray();
+    }
+
+    private static byte[] BuildByteArrayPayload(byte[] values)
+    {
+        using MemoryStream payload = Header();
+        payload.WriteByte(15); // ArraySinglePrimitive
+        WriteInt32(payload, 1);
+        WriteInt32(payload, values.Length);
+        payload.WriteByte(2); // Byte
+        payload.Write(values);
+        payload.WriteByte(11);
         return payload.ToArray();
     }
 

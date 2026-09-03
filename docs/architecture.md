@@ -457,11 +457,11 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 ### 10.6 NRBF解析境界
 
 - `nrbf`は既定有効・`text` categoryのstatelessモジュールとし、入力path、解析結果、検索条件、履歴をitems、設定、横断検索、export / importへ保存しない
-- Rustの`nrbf_inspect_file(operationId, path, onProgress)`だけを公開し、開始、500件単位のノード、完了、キャンセルをTauri Channelで通知する。`OperationRegistry`でcancelし、60秒timeout・遅延operation event破棄を保証する
-- Rust wrapperは入力64 MiB、sidecar stdout 64 MiB、stderr 64 KiBを検証し、sidecar終了・破損header・上限・非対応形式を日本語`AppError::Validation { module_id: "nrbf", ... }`または`AppError::Internal`へ変換する
+- Rustの`nrbf_inspect_file(operationId, path, expandByteArrays, onProgress)`だけを公開し、開始、500件単位のノード、完了、キャンセルをTauri Channelで通知する。`OperationRegistry`でcancelし、60秒timeout・遅延operation event破棄を保証する
+- Rust wrapperは入力64 MiB、sidecar stdout 256 MiB、stderr 64 KiBを検証し、sidecar終了・破損header・上限・非対応形式を日本語`AppError::Validation { module_id: "nrbf", ... }`または`AppError::Internal`へ変換する
 - .NET 10 NativeAOT sidecarは`System.Formats.Nrbf 10.0.11`の`NrbfDecoder`だけを使い、assembly / 型をロードしない。`BinaryFormatter`、`Deserialize`、任意型生成はソース検査で禁止する
-- record graphは反復走査する。最初のrecordを正規ノードとし、共有参照・循環参照は参照ノードにして再展開しない。巨大byte配列は長さだけ、多次元配列は安全に展開できない場合shapeだけを返す
-- sidecar内の上限は100,000ノード、1配列50,000展開要素、1スカラー1 MiB、検索対象文字列32 MiB、protocol出力64 MiB、55秒とする。部分超過では可能な解析結果を維持し、省略ノードとwarningを返す。Rust側60秒をhard timeoutとする
+- record graphは反復走査する。最初のrecordを正規ノードとし、共有参照・循環参照は参照ノードにして再展開しない。byte配列は既定で長さだけを返し、`expandByteArrays`がtrueの場合だけ最大50,000要素を展開する。多次元配列は安全に展開できない場合shapeだけを返す
+- sidecar内の上限は500,000ノード、1配列50,000展開要素、1スカラー1 MiB、検索対象文字列32 MiB、protocol出力256 MiB、55秒とする。500,000個の最小ノードだけでも見積り上約128 MiBとなるため、protocol上限は256 MiBとする。部分超過では可能な解析結果を維持し、省略ノードとwarningを返す。Rust側60秒をhard timeoutとする
 - 対象は先頭にNRBF headerを持つ既定`FormatterTypeStyle.TypesAlways` payloadであり、圧縮、暗号化、独自header、非ゼロ下限配列を扱わない。読み取り専用とし、編集・再シリアライズ・JSON出力を提供しない
 
 ---
@@ -553,3 +553,4 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-08-31 | 0.9 | ADR-0017を反映。Mermaid dynamic import、draw.io固定asset / loopback origin / Tauri ACL / postMessage隔離、file I/O、80MB release契約を追加 |
 | 2026-09-02 | 1.0 | ADR-0018を反映。PDF結合のRust処理、対応範囲、size上限、進捗・cancel、atomic replace、MSRV 1.88を追加 |
 | 2026-09-03 | 1.1 | ADR-0020を反映。NRBFの型非生成NativeAOT sidecar、IPC・上限・cancel境界、配布構成、CI検査を追加 |
+| 2026-09-03 | 1.2 | NRBF IPCへbyte配列展開許可を追加し、node上限を500,000、protocol stdout上限を256 MiBへ変更。byte配列は許可時だけ50,000要素まで展開する契約を追加 |

@@ -96,6 +96,16 @@ describe("NrbfInspectorPage", () => {
     expect(await screen.findByText(/Alice/)).toBeInTheDocument();
     expect(screen.getByText(/4ノード/)).toBeInTheDocument();
     expect(screen.getByText("Name")).toBeInTheDocument();
+    expect(inspectMock).toHaveBeenCalledWith(expect.objectContaining({ expandByteArrays: false }));
+  });
+
+  it("expands byte arrays only when explicitly allowed for the next read", async () => {
+    const user = userEvent.setup();
+    render(<NrbfInspectorPage />);
+    await user.click(screen.getByRole("checkbox", { name: /byte配列を展開/ }));
+    await user.click(screen.getByRole("button", { name: "ファイルを選択" }));
+    await screen.findByText(/Alice/);
+    expect(inspectMock).toHaveBeenCalledWith(expect.objectContaining({ expandByteArrays: true }));
   });
 
   it("loads the first path from an operating-system file drop", async () => {
@@ -112,12 +122,34 @@ describe("NrbfInspectorPage", () => {
     const user = userEvent.setup();
     render(<NrbfInspectorPage />);
     await user.click(screen.getByRole("button", { name: "ファイルを選択" }));
-    const search = await screen.findByRole("textbox", { name: "項目名または値を検索" });
-    await user.click(screen.getByRole("checkbox", { name: "項目名" }));
-    await user.type(search, "東京");
+    const valueSearch = await screen.findByRole("textbox", { name: "値を検索" });
+    await user.type(valueSearch, "東京");
     expect(screen.getByText("City")).toBeInTheDocument();
     expect(screen.queryByText("Alice")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("1件一致");
+  });
+
+  it("filters by the combination of a name and value on the same node", async () => {
+    const user = userEvent.setup();
+    render(<NrbfInspectorPage />);
+    await user.click(screen.getByRole("button", { name: "ファイルを選択" }));
+    await user.type(await screen.findByRole("textbox", { name: "項目名を検索" }), "City");
+    await user.type(screen.getByRole("textbox", { name: "値を検索" }), "東京");
+    expect(screen.getByText("City")).toBeInTheDocument();
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("1件一致");
+  });
+
+  it("jumps through matches without filtering the normal tree", async () => {
+    const user = userEvent.setup();
+    render(<NrbfInspectorPage />);
+    await user.click(screen.getByRole("button", { name: "ファイルを選択" }));
+    await user.selectOptions(await screen.findByRole("combobox", { name: "検索方法" }), "jump");
+    await user.type(screen.getByRole("textbox", { name: "項目名を検索" }), "City");
+    expect(screen.getByText(/Alice/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "次の一致へ" }));
+    expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("City");
+    expect(screen.getByRole("status")).toHaveTextContent("1 / 1");
   });
 
   it("switches to raw field names without re-reading the file", async () => {
@@ -155,7 +187,7 @@ describe("NrbfInspectorPage", () => {
     const user = userEvent.setup();
     render(<NrbfInspectorPage />);
     await user.click(screen.getByRole("button", { name: "ファイルを選択" }));
-    const search = await screen.findByRole("textbox", { name: "項目名または値を検索" });
+    const search = await screen.findByRole("textbox", { name: "項目名を検索" });
     await user.type(search, "Needle");
     expect(screen.queryByText("Canonical")).not.toBeInTheDocument();
     await user.click(screen.getByRole("treeitem", { name: /Needle reference/ }));

@@ -1,6 +1,6 @@
 [package]
 name = "mym-tools"
-version = "0.1.0-alpha.12"
+version = "0.1.0-alpha.13"
 description = "MyMyTools — 軽量なクロスプラットフォーム多目的 GUI ツール"
 authors = ["zredjet"]
 edition = "2021"
