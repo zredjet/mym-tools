@@ -2,13 +2,11 @@
 
 個人用ローカルツールの集合体 — 保存系ツールと、変換・解析・生成・通信の開発ツール。
 
-## v0.1.0-alpha.11 の主な変更
+## v0.1.0-alpha.12 の主な変更
 
-- BinaryFormatterで作成されたNRBFファイルを、型を生成せずにツリー表示する解析モジュールを追加
-- 項目名と値の部分一致検索、Raw表示、共有参照・循環参照の確認、参照先への移動に対応
-- 大きなツリーの仮想化表示、キーボード操作、ドラッグ＆ドロップ、読込みキャンセルを追加
-- `BinaryFormatter.Deserialize`を使わず、Microsoft公式`System.Formats.Nrbf`をNativeAOT sidecarとして同梱
-- ファイルサイズ、処理時間、ノード数、配列、文字列、プロトコル出力に上限を設け、解析結果を保存しない安全境界を追加
+- BinaryFormatter解析で、ファイル選択時にTauri ACLに拒否されていた問題を修正
+- PDF結合の検査・結合コマンドにも不足していたTauri ACL許可を追加
+- 公開native commandのbuild manifestとdefault permission登録を検証する回帰テストを追加
 
 ## 含まれるportable ZIP
 

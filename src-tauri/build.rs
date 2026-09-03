@@ -36,6 +36,9 @@ fn main() {
         "diagram_read_file",
         "diagram_write_file",
         "mermaid_write_file",
+        "pdfmerge_inspect_files",
+        "pdfmerge_merge_files",
+        "nrbf_inspect_file",
         "prompt_render_template",
     ];
 
