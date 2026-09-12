@@ -46,6 +46,33 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_shell::init())
+        .menu(|app| {
+            let menu = tauri::menu::Menu::default(app)?;
+            // The default macOS Quit action terminates without requesting a
+            // window close. Route Cmd+Q through the same unsaved-document guard.
+            #[cfg(target_os = "macos")]
+            if let Some(tauri::menu::MenuItemKind::Submenu(application)) = menu.items()?.first() {
+                let count = application.items()?.len();
+                if count > 0 {
+                    application.remove_at(count - 1)?;
+                    application.append(&tauri::menu::MenuItem::with_id(
+                        app,
+                        "mym-close",
+                        "終了",
+                        true,
+                        Some("CmdOrCtrl+Q"),
+                    )?)?;
+                }
+            }
+            Ok(menu)
+        })
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "mym-close" {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.close();
+                }
+            }
+        })
         .setup(|app| {
             // ユーザーデータディレクトリ解決 (`architecture.md` §8 / `data-model.md` §2)
             let data_dir = app

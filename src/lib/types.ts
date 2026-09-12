@@ -21,6 +21,14 @@ export interface Project {
  */
 export type ModuleId = string;
 
+export type ItemSummary = Omit<Item, "payload" | "payload_schema_version">;
+/** Search presentation only: payload may be a module-declared projection. */
+export type SearchPreview = Omit<Item, "payload"> & { payload: unknown };
+export interface VectorPayloadV1 {
+  svg: string;
+  text: string;
+}
+
 /**
  * `Item` (`storage/types.rs::Item`)。`payload` はモジュール固有の JSON で、コアからは
  * 不透明に扱う (`module-contract.md` §3.2)。各モジュールが TS 側で `payload` を

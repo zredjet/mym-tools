@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ベクター描画</title>
+    <link rel="stylesheet" href="./svgedit.css" />
+    <style>
+      body {
+        margin: 0;
+        background: #fff;
+      }
+      #container {
+        width: 100%;
+        height: 100vh;
+      }
+      #host-error {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 8px;
+        background: #fee2e2;
+        color: #991b1b;
+        z-index: 99999;
+      }
+      #tool_export,
+      #tool_export_pdf,
+      #tool_open,
+      #tool_save,
+      #tool_save_as,
+      #tool_clear,
+      #tool_import,
+      #tool_image,
+      #tool_prefs,
+      #tool_editor_prefs,
+      #tool_about {
+        display: none !important;
+      }
+      #tool_editor_homepage {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="container"></div>
+    <div id="host-error" role="alert" hidden></div>
+    <script type="module" src="./host.js"></script>
+  </body>
+</html>

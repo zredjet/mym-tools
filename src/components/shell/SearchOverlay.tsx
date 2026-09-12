@@ -1,7 +1,7 @@
 /**
  * ⌘K 検索オーバーレイ (`docs/ui-design.md` §6.7 / §8.3)。
  *
- * バックエンド `core_search` に接続し、Scope (project/global) と有効な stateful module の
+ * バックエンド `core_search_previews` に接続し、Scope (project/global) と有効な stateful module の
  * フィルタを提供する。結果表示と遷移先は registry の SearchAdapter から導出する。
  *
  * ## 状態リセットパターン
@@ -15,10 +15,10 @@ import { Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { Modal } from "@/components/ui/Modal";
-import { search as runSearch } from "@/ipc/search";
+import { searchPreviews as runSearch } from "@/ipc/search";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
-import type { Item, ModuleId, SearchScope } from "@/lib/types";
+import type { SearchPreview, ModuleId, SearchScope } from "@/lib/types";
 import { enabledModules, getModuleDefinition, modulePath } from "@/modules/registry";
 import { useAppStore } from "@/store/useAppStore";
 
@@ -69,7 +69,7 @@ function SearchOverlayContent({
     searchDefaultScope === "project" && currentProjectId == null ? "global" : searchDefaultScope,
   );
   const [moduleFilter, setModuleFilter] = useState<ModuleId | "all">("all");
-  const [results, setResults] = useState<Item[]>([]);
+  const [results, setResults] = useState<SearchPreview[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -114,7 +114,7 @@ function SearchOverlayContent({
     };
   }, [query, scope, moduleFilter, currentProjectId, searchableModules]);
 
-  const handleResultClick = (item: Item) => {
+  const handleResultClick = (item: SearchPreview) => {
     onClose();
     const definition = getModuleDefinition(item.module_id);
     if (definition?.searchAdapter == null) return;

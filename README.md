@@ -78,7 +78,7 @@ cargo test --workspace --lib --all-features --locked
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
 rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing / lopdf の Rust バックエンドで構成。
-プロジェクト管理、カテゴリ表示付き21モジュール、横断検索、`settings.json`、バックアップ、
+プロジェクト管理、カテゴリ表示付き22モジュール、横断検索、`settings.json`、バックアップ、
 アプリ全体／プロジェクト単位の JSON export / import を備える。
 
 CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2)
@@ -89,3 +89,5 @@ PR 経由マージのみ受付け、6 ジョブ全 green が必須。
 
 - [Tauri 2 公式](https://v2.tauri.app/)
 - リリース告知・配布: GitHub Releases (portable ZIP / 手動更新)
+
+ベクター描画はSVG-Edit 7.4.2を同梱し、作品のプロジェクト保存とSVG/PNG入出力に対応します。[設計境界](docs/decisions/0021-offline-vector-editor.md)と[検証・実機受入](docs/vector-editor-verification.md)を参照してください。

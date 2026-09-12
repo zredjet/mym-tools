@@ -46,6 +46,7 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
         Arc::new(MemoModule),
         Arc::new(MermaidModule),
         Arc::new(DiagramModule),
+        Arc::new(crate::modules::vector::VectorModule),
         Arc::new(PromptModule),
         Arc::new(PaletteModule),
         Arc::new(PdfMergeModule),
@@ -122,6 +123,12 @@ pub fn register_invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Bu
         crate::modules::diagram::protocol::diagram_editor_url,
         crate::modules::diagram::commands::diagram_read_file,
         crate::modules::diagram::commands::diagram_write_file,
+        crate::modules::vector::protocol::vector_editor_url,
+        crate::modules::vector::commands::vector_read_file,
+        crate::modules::vector::commands::vector_read_image,
+        crate::modules::vector::commands::vector_write_file,
+        crate::commands::items::core_list_item_summaries,
+        crate::commands::search::core_search_previews,
         // M-Mermaid: user-selected local SVG / PNG files only
         crate::modules::mermaid::commands::mermaid_write_file,
         // M-PDF Merge: user-selected local PDF files only
@@ -150,7 +157,7 @@ mod tests {
     fn module_backends_build_into_app_state() {
         let storage: Arc<dyn StorageService> = Arc::new(SqliteStorage::open(":memory:").unwrap());
         let backends = module_backends();
-        assert_eq!(backends.len(), 21);
+        assert_eq!(backends.len(), 22);
         let dir = tempfile::tempdir().unwrap();
         let backup: Arc<dyn crate::backup::BackupService> = Arc::new(
             crate::backup::LocalBackupService::new(dir.path().to_path_buf(), Arc::clone(&storage)),

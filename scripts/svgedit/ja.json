@@ -1,0 +1,381 @@
+{
+  "connector": {
+    "name": "接続線",
+    "langListTitle": "2つの図形を接続",
+    "langList": [
+      {
+        "id": "mode_connect",
+        "title": "2つの図形を接続"
+      }
+    ],
+    "buttons": [
+      {
+        "title": "2つの図形を接続"
+      }
+    ]
+  },
+  "eyedropper": {
+    "name": "スポイト",
+    "buttons": [
+      {
+        "title": "スポイト",
+        "key": "I"
+      }
+    ]
+  },
+  "grid": {
+    "name": "グリッド",
+    "buttons": [
+      {
+        "title": "グリッドの表示切替"
+      }
+    ]
+  },
+  "markers": {
+    "name": "マーカー",
+    "langList": [
+      {
+        "id": "nomarker",
+        "title": "なし"
+      },
+      {
+        "id": "leftarrow",
+        "title": "左矢印"
+      },
+      {
+        "id": "rightarrow",
+        "title": "右矢印"
+      },
+      {
+        "id": "textmarker",
+        "title": "文字"
+      },
+      {
+        "id": "forwardslash",
+        "title": "斜線 /"
+      },
+      {
+        "id": "reverseslash",
+        "title": "斜線 \\"
+      },
+      {
+        "id": "verticalslash",
+        "title": "縦線"
+      },
+      {
+        "id": "box",
+        "title": "四角"
+      },
+      {
+        "id": "star",
+        "title": "星"
+      },
+      {
+        "id": "xmark",
+        "title": "交差"
+      },
+      {
+        "id": "triangle",
+        "title": "三角"
+      },
+      {
+        "id": "mcircle",
+        "title": "円"
+      },
+      {
+        "id": "leftarrow_o",
+        "title": "左矢印（枠）"
+      },
+      {
+        "id": "rightarrow_o",
+        "title": "右矢印（枠）"
+      },
+      {
+        "id": "box_o",
+        "title": "四角（枠）"
+      },
+      {
+        "id": "star_o",
+        "title": "星（枠）"
+      },
+      {
+        "id": "triangle_o",
+        "title": "三角（枠）"
+      },
+      {
+        "id": "mcircle_o",
+        "title": "円（枠）"
+      }
+    ],
+    "contextTools": [
+      {
+        "title": "始点マーカー",
+        "label": "始"
+      },
+      {
+        "title": "始点マーカーの種類"
+      },
+      {
+        "title": "中間マーカー",
+        "label": "中"
+      },
+      {
+        "title": "中間マーカーの種類"
+      },
+      {
+        "title": "終点マーカー",
+        "label": "終"
+      },
+      {
+        "title": "終点マーカーの種類"
+      }
+    ]
+  },
+  "panning": {
+    "name": "パン移動",
+    "buttons": [
+      {
+        "title": "パン移動",
+        "key": "[Space / mouse wheel + drag]"
+      }
+    ]
+  },
+  "shapes": {
+    "loading": "読み込み中…",
+    "categories": {
+      "basic": "基本",
+      "object": "物体",
+      "symbol": "記号",
+      "arrow": "矢印",
+      "flowchart": "フローチャート",
+      "animal": "動物",
+      "game": "トランプ・チェス",
+      "dialog_balloon": "吹き出し",
+      "electronics": "電子回路",
+      "math": "数式",
+      "music": "音楽",
+      "misc": "その他",
+      "raphael_1": "Raphaël 図形集 1",
+      "raphael_2": "Raphaël 図形集 2"
+    },
+    "buttons": [
+      {
+        "title": "図形ライブラリ"
+      }
+    ]
+  },
+  "polystar": {
+    "name": "星",
+    "title": "多角形・星",
+    "buttons": [
+      {
+        "title": "星"
+      },
+      {
+        "title": "多角形"
+      }
+    ],
+    "contextTools": [
+      {
+        "title": "頂点の数",
+        "label": "頂点数"
+      },
+      {
+        "title": "先端の長さ",
+        "label": "先端の長さ"
+      },
+      {
+        "title": "星のひねり",
+        "label": "回転量"
+      },
+      {
+        "title": "頂点の数",
+        "label": "辺の数"
+      }
+    ]
+  },
+  "layer_view": {
+    "name": "レイヤー表示",
+    "buttons": [
+      {
+        "title": "レイヤー表示の切替",
+        "key": "Ctrl+Shift+L"
+      }
+    ]
+  },
+  "core": {
+    "common": {
+      "key_down": "下",
+      "key_up": "上",
+      "more_opts": "詳細設定",
+      "width": "幅",
+      "height": "高さ"
+    },
+    "misc": {
+      "powered_by": "使用エンジン"
+    },
+    "ui": {
+      "toggle_stroke_tools": "線の詳細設定の表示切替",
+      "panel_action": "サイドパネルを開く",
+      "quality": "品質:",
+      "pathNodeTooltip": "ドラッグでノードを移動、ダブルクリックで線分の種類を変更",
+      "pathCtrlPtTooltip": "制御点をドラッグして曲線を調整",
+      "pick_stroke_paint_opacity": "線の色と不透明度を選択",
+      "pick_fill_paint_opacity": "塗りの色と不透明度を選択",
+      "group_identify_label": "グループの識別ラベル",
+      "export_type_label": "書出す画像の形式:"
+    },
+    "properties": {
+      "id": "要素の識別子",
+      "linecap_butt": "線端: 平型",
+      "linecap_round": "線端: 丸型",
+      "linecap_square": "線端: 角型",
+      "linejoin_bevel": "角: 面取り",
+      "linejoin_miter": "角: 鋭角",
+      "linejoin_round": "角: 丸型",
+      "blur": "ぼかしの強さ",
+      "text_decoration_underline": "下線",
+      "text_decoration_linethrough": "取り消し線",
+      "text_decoration_overline": "上線",
+      "text_anchor_start": "文字を始端に揃える",
+      "text_anchor_middle": "文字を中央に揃える",
+      "text_anchor_end": "文字を終端に揃える",
+      "text_letter_spacing": "文字間隔を変更",
+      "text_word_spacing": "単語間隔を変更",
+      "text_length": "文字列を描画する幅",
+      "text_length_adjust": "幅の調整方法",
+      "text_length_adjust_spacing": "間隔",
+      "text_length_adjust_spacing_and_glyphs": "間隔と字形",
+      "class": "要素のクラス",
+      "serif": "明朝体（serif）",
+      "sans_serif": "ゴシック体（sans-serif）",
+      "cursive": "筆記体",
+      "fantasy": "装飾体",
+      "monospace": "等幅",
+      "prefs_and_content": "設定と作品を端末に保存",
+      "prefs_only": "設定だけを端末に保存",
+      "no_prefs_or_content": "設定と作品を端末に保存しない",
+      "jgraduate_pad": "端の色で塗る",
+      "jgraduate_reflect": "反転して繰り返す",
+      "jgraduate_repeat": "繰り返す"
+    },
+    "tools": {
+      "main_menu": "メニュー",
+      "connector_no_arrow": "矢印なし",
+      "export_img": "書出し",
+      "import_doc": "SVG取込",
+      "align_to_page": "ページを基準に整列",
+      "mode_rect": "長方形",
+      "mode_square": "正方形",
+      "no_embed": "この画像は埋め込めません。画像の挿入から追加してください。",
+      "clone": "複製",
+      "del": "削除",
+      "make_link": "内部参照を作成",
+      "set_link_url": "内部参照を指定（空欄で解除）",
+      "editor_homepage": "SVG-Editの公式サイト",
+      "add_subpath": "サブパスを追加",
+      "openclose_path": "サブパスを開く／閉じる",
+      "cut": "切り取り",
+      "copy": "コピー",
+      "paste": "貼り付け",
+      "paste_in_place": "同じ位置に貼り付け",
+      "group": "グループ化",
+      "move_front": "最前面へ",
+      "move_up": "前面へ",
+      "move_down": "背面へ",
+      "move_back": "最背面へ",
+      "tool_unlink_use": "参照を解除して独立した要素にする",
+      "ellipse_circle_tool": "楕円・円",
+      "square_rect_tool": "長方形・正方形",
+      "remember_this_choice": "選択を記憶する",
+      "remember_this_choice_title": "次回からこの選択を使用する"
+    },
+    "layers": {
+      "layers": "レイヤー",
+      "dupe": "レイヤーを複製",
+      "merge_down": "下のレイヤーと結合",
+      "merge_all": "すべて結合"
+    },
+    "config": {
+      "editor_img_url": "画像URL",
+      "units_and_rulers": "単位と定規",
+      "show_rulers": "定規を表示",
+      "base_unit": "基本単位:",
+      "grid": "グリッド",
+      "snapping_onoff": "吸着の有効／無効",
+      "snapping_stepsize": "吸着間隔:",
+      "grid_color": "グリッドの色",
+      "done": "完了",
+      "change_xxx_color": "色を変更",
+      "pick_paint_opavity": "{{newValue}}の色と不透明度",
+      "open_color_picker": "色の選択を開く",
+      "jpicker_title": "マーカーを動かして色を選択",
+      "jpicker_new_color": "新しい色",
+      "jpicker_current_color": "現在の色",
+      "jpicker_tooltip_colors_new_color": "OKで新しい色を適用",
+      "jpicker_tooltip_colors_current_color": "元の色に戻す",
+      "jpicker_tooltip_buttons_ok": "選択した色を適用",
+      "jpicker_tooltip_buttons_cancel": "元の色に戻して閉じる",
+      "jgraduate_solid_color": "単色",
+      "jgraduate_linear_gradient": "線形グラデーション",
+      "jgraduate_radial_gradient": "放射グラデーション",
+      "jgraduate_begin_point": "始点",
+      "jgraduate_end_point": "終点",
+      "jgraduate_center_point": "中心",
+      "jgraduate_focal_point": "焦点",
+      "jgraduate_match_center": "中心と一致:",
+      "jgraduate_spread_method": "範囲外の塗り方",
+      "jgraduate_radius": "半径:",
+      "jgraduate_set_radius": "半径を設定",
+      "jgraduate_ellip": "楕円率:",
+      "jgraduate_set_ellip": "楕円率を設定",
+      "jgraduate_angle": "角度:",
+      "jgraduate_set_angle": "角度を設定",
+      "jgraduate_deg": "度:",
+      "jgraduate_opac": "不透明度:",
+      "jgraduate_set_opac": "不透明度を設定",
+      "jpicker_tooltip_hue_radio": "色相で調整",
+      "jpicker_tooltip_hue_textbox": "色相を入力（0〜360°）",
+      "jpicker_tooltip_saturation_radio": "彩度で調整",
+      "jpicker_tooltip_saturation_textbox": "彩度を入力（0〜100%）",
+      "jpicker_tooltip_value_radio": "明度で調整",
+      "jpicker_tooltip_value_textbox": "明度を入力（0〜100%）",
+      "jpicker_tooltip_red_radio": "赤で調整",
+      "jpicker_tooltip_red_textbox": "赤を入力（0〜255）",
+      "jpicker_tooltip_green_radio": "緑で調整",
+      "jpicker_tooltip_green_textbox": "緑を入力（0〜255）",
+      "jpicker_tooltip_blue_radio": "青で調整",
+      "jpicker_tooltip_blue_textbox": "青を入力（0〜255）",
+      "jpicker_tooltip_alpha_radio": "不透明度で調整",
+      "jpicker_tooltip_alpha_textbox": "不透明度を入力（0〜100）",
+      "jpicker_tooltip_hex_textbox": "16進数の色（#000000〜#ffffff）",
+      "jpicker_tooltip_hex_alpha": "16進数の不透明度（#00〜#ff）",
+      "jgraduate_enter_starting_x": "X座標を0〜1で入力",
+      "jgraduate_enter_starting_y": "Y座標を0〜1で入力",
+      "jgraduate_enter_ending_x": "X座標を0〜1で入力",
+      "jgraduate_enter_ending_y": "Y座標を0〜1で入力",
+      "jgraduate_enter_value_x": "X座標を0〜1で入力",
+      "jgraduate_enter_value_y": "Y座標を0〜1で入力",
+      "jgraduate_enter_focal_x": "X座標を0〜1で入力",
+      "jgraduate_enter_focal_y": "Y座標を0〜1で入力"
+    },
+    "notification": {
+      "defsFailOnSave": "描画に問題があります。グラデーションや要素を確認してください。",
+      "loadingImage": "画像を読み込み中…",
+      "saveFromBrowser": "{{type}}で書き出してください。",
+      "noteTheseIssues": "次の問題を確認してください:",
+      "unsavedChanges": "未保存の変更があります。",
+      "enterNewLinkURL": "内部参照を入力してください。",
+      "errorLoadingSVG": "SVGを読み込めません。",
+      "URLLoadFail": "URLから読み込めません。",
+      "retrieving": "'%s'を読み込み中…",
+      "popupWindowBlocked": "ポップアップは使用できません。",
+      "exportNoBlur": "ぼかしは反映されません。",
+      "exportNoforeignObject": "foreignObjectは表示されません。",
+      "exportNoDashArray": "破線が実線として表示されます。",
+      "exportNoText": "文字が正しく表示されない場合があります。",
+      "editorPreferencesMsg": "設定の保存方法を選択してください。",
+      "source_dialog_note": "SVGソースを編集し「適用」で反映してください。プロジェクトへの保存は外側の保存操作で行います。"
+    }
+  }
+}

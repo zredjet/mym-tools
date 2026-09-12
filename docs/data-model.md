@@ -1298,3 +1298,11 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-08-23 | 1.1 | ADR-0014を反映し、`core.collapsed_module_categories`を追加。開発ツール11種はstatelessのためDB schema、payload、export / importを変更しないことを確認 |
 | 2026-08-25 | 1.2 | ADR-0016を反映。M-Link / M-Memo payload、設定継承、旧export正規化、新export分離、`db_schema_version`を変えない起動時所属移行とT-41〜T-46を追加 |
 | 2026-08-31 | 1.3 | ADR-0017を反映。M-Mermaid / M-Diagram payload v1、1MiB境界、検索、共通export/import、T-47〜T-50を追加 |
+
+## ベクター作品と軽量な参照API（ADR-0021）
+
+`vector`のpayload schema v1は`{ svg: string, text: string }`。UTF-8でsvg ≤20MiB、text ≤1MiBとする。textはSVG内のtext/title/desc配下の文字列を空白で区切り、連続空白を正規化した検索用データで、Rust側の抽出結果との一致を保存・JSON取込時に確認する。画像はPNG/JPEG/WebPのdata URLとしてSVG内へ埋め込み、別添付テーブルは作らない。DB schema v2とJSON export schema v1を維持する。
+
+`ItemSummary`はid/project_id/module_id/title/tags/position/created_at/updated_atだけを持つ。`core_list_item_summaries`はproject_id/module_idで絞り、updated_at DESC・id DESC、最大100件ずつ返す。SQLはpayloadを選択しない。
+
+`SearchPreview`はItemSummaryとpayload_schema_version、表示専用payloadを返す。`core_search_previews`はFTS/LIKEの既存検索規約を維持し、vectorではSQL内で`text`の先頭120文字だけを投影する。完全なSVG本文を行デコードやIPCへ渡さない。他モジュールの投影未指定時は既存の検索表示用payloadを保持する。プレビューから保存しない。編集画面はIDから`core_get_item`で完全な文書を取得する。旧一覧／検索APIの返却形は変更しない。

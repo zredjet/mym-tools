@@ -6,6 +6,7 @@ import { codecModule } from "@/modules/codec";
 import { dateTimeModule } from "@/modules/datetime";
 import { cronModule } from "@/modules/cron";
 import { diagramModule } from "@/modules/diagram";
+import { vectorModule } from "@/modules/vector";
 import { hashModule } from "@/modules/hash";
 import { httpModule } from "@/modules/http";
 import { idGeneratorModule } from "@/modules/idgen";
@@ -46,6 +47,7 @@ export const modules: readonly ModuleDefinition[] = [
   paletteModule,
   mermaidModule,
   diagramModule,
+  vectorModule,
   codecModule,
   urlQueryModule,
   dateTimeModule,
