@@ -848,3 +848,5 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 `ModuleBackend::search_preview_field()`は`Option<&'static str>`を返し、デフォルトNoneは従来の検索表示データを維持する。指定フィールドはモジュール契約で定義したトップレベルの検索用文字列だけに使う。コアはこの定義からSQL投影を作り、モジュールIDをハードコードしない。`core_search_previews`のSearchPreviewは保存payloadではない。本文の大きいモジュールの一覧は`core_list_item_summaries`、編集は`core_get_item`を使う。
 
 SVG入力ポリシーは`policy.json`を共有し、DOM/XML両方で検証する。拒否理由を表示し、黙って除去しない。画像挿入と貼り付けは追加前に合計容量を確認する。変更通知はrevisionのみで、保存要求時のsnapshotだけを共通ストレージへ送る。要求ID・文書ID・source/origin/sessionの照合、30秒timeout、unmount時の解除を必須とする。
+
+変更通知にはレイヤーの表示・順序、SVG文書内タイトル、Undo/Redoも含む。レイヤー名入力はsandbox内のHTML dialogで行い、空名・重複名を拒否する。取消と同名への改名では文書を変更しない。入力中のsnapshotを拒否し、文書切替で入力を取り消す。IME変換中のEnterでは入力を確定しない。

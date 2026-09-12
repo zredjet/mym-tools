@@ -8,6 +8,7 @@ import {
   MAX_PNG_PIXELS,
   MAX_PNG_SIDE,
 } from "./svg-policy.js";
+import { installLayerDialogs } from "./layer-dialog.js";
 
 // The iframe has its own origin and no Tauri capability. Clipboard and editor
 // preferences last only for this editor instance, never across app sessions.
@@ -50,6 +51,8 @@ let revision = 0;
 let loading = false;
 const translations = await (await fetch("./ja.json")).json();
 const editor = new Editor(document.getElementById("container"));
+// Install before init(): SVG-Edit binds these panel methods to its buttons.
+const layerDialog = installLayerDialogs(editor, () => documentId, showError);
 // Install missing Japanese core strings before UI components first render.
 Object.defineProperty(editor, "i18next", {
   configurable: true,
@@ -155,6 +158,41 @@ try {
     revision += 1;
     post("changed", { documentId, revision });
   };
+  // Layer visibility/order and document title only add history; they do not
+  // emit elementChanged. Keep the normal events for live edits and Undo/Redo.
+  const addHistory = canvas.undoMgr.addCommandToHistory.bind(canvas.undoMgr);
+  canvas.undoMgr.addCommandToHistory = (...args) => {
+    const result = addHistory(...args);
+    changed();
+    return result;
+  };
+  // The bundled UndoManager can leave its layer index stale after a batch
+  // inserts/removes a layer. Reconcile only when the SVG and index differ.
+  for (const method of ["undo", "redo"]) {
+    const original = canvas.undoMgr[method].bind(canvas.undoMgr);
+    canvas.undoMgr[method] = (...args) => {
+      const result = original(...args);
+      const drawing = canvas.getCurrentDrawing();
+      const groups = [...canvas.getSvgContent().children].filter((element) =>
+        canvas.isLayer(element),
+      );
+      const current = drawing.getCurrentLayer();
+      if (
+        groups.length !== drawing.getNumLayers() ||
+        groups.some((group, index) => {
+          const name = drawing.getLayerName(index);
+          const title = [...group.children].find((element) => element.localName === "title");
+          return drawing.getLayerByName(name) !== group || title?.textContent !== name;
+        })
+      ) {
+        drawing.identifyLayers();
+        const index = groups.indexOf(current);
+        if (index >= 0) drawing.setCurrentLayer(drawing.getLayerName(index));
+        editor.layersPanel.populateLayers();
+      }
+      return result;
+    };
+  }
   document.getElementById("se-svg-editor-dialog")?.shadowRoot?.addEventListener("input", changed);
   const pasteElements = canvas.pasteElements.bind(canvas);
   canvas.pasteElements = (...args) => {
@@ -203,6 +241,7 @@ try {
   document.addEventListener(
     "keydown",
     (event) => {
+      if (layerDialog.isOpen()) return;
       if ((event.metaKey || event.ctrlKey) && ["s", "o", "n"].includes(event.key.toLowerCase())) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -240,6 +279,7 @@ try {
     const source = document.getElementById("se-svg-editor-dialog");
     if (source?.getAttribute("dialog") === "open")
       throw new Error("SVGソースの編集を確定してから保存してください。");
+    if (layerDialog.isOpen()) throw new Error("レイヤー名の入力を確定または取り消してください。");
     const payload = validateSvg(canvas.getSvgString(), policy);
     return { ...payload, revision };
   };
@@ -270,6 +310,7 @@ try {
       errorBox.hidden = true;
       if (message.action === "load") {
         validateSvg(message.svg, policy);
+        layerDialog.cancel();
         loading = true;
         editor.hideSourceEditor();
         editor.loadSvgString(message.svg);

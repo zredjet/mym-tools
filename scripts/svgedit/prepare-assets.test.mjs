@@ -26,6 +26,7 @@ test("vector distribution is pinned, reproducible, local and limited to the sele
     assert.equal(readFileSync(resolve(root, "drawio/sentinel"), "utf8"), "preserved");
     assert.ok(a.some((f) => f.path === "extensions/_virtual/_vite/preload-helper.js"));
     assert.ok(a.some((f) => f.path === "ja.json"));
+    assert.ok(a.some((f) => f.path === "layer-dialog.js"));
     assert.ok(a.every((f) => !/\.map$|iife|(^|\/)(tests?|examples|archive)\//i.test(f.path)));
     assert.ok(!a.some((f) => /ext-opensave|ext-storage/.test(f.path)));
     assert.ok(existsSync(resolve(root, "licenses/svgedit/NOTICES.txt")));

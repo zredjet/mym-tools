@@ -8,6 +8,7 @@ import { once } from "node:events";
 import assert from "node:assert/strict";
 import process from "node:process";
 import { prepareVectorAssets } from "./prepare-assets.mjs";
+import { verifyEditorRegressions } from "./browser-regressions.mjs";
 
 prepareVectorAssets();
 const assets = resolve(".generated/public/svgedit");
@@ -61,6 +62,10 @@ try {
     errors.push(`${request.url()} ${request.failure()?.errorText}`),
   );
   page.on("pageerror", (error) => errors.push(error.message));
+  page.on("dialog", async (dialog) => {
+    errors.push(`unexpected native dialog: ${dialog.type()}`);
+    await dialog.dismiss();
+  });
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text().slice(0, 220));
   });
@@ -91,6 +96,9 @@ try {
   assert.equal(initial.event, "snapshot", JSON.stringify(initial));
   assert.ok(initial.svg.includes("linearGradient"));
   assert.ok(initial.text.includes("ベクター描画 A&B"));
+  const frame = page.frames().find((f) => f.url().startsWith(origin));
+  mkdirSync(".generated/vector-verification", { recursive: true });
+  await verifyEditorRegressions({ frame, call, svg });
   const image = await page.evaluate(() => {
     const c = document.createElement("canvas");
     c.width = 32;
@@ -103,7 +111,6 @@ try {
   assert.equal((await call("insertImage", { data: image })).event, "inserted");
   const inserted = await call("snapshot");
   assert.ok(inserted.svg.includes("data:image/png;base64,"));
-  const frame = page.frames().find((f) => f.url().startsWith(origin));
   await frame.evaluate(() => window.svgEditor.svgCanvas.undoMgr.undo());
   assert.ok(!(await call("snapshot")).svg.includes("data:image/png;base64,"));
   await frame.evaluate(() => window.svgEditor.svgCanvas.undoMgr.redo());

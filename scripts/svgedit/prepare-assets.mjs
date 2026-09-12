@@ -33,7 +33,14 @@ export function prepareVectorAssets(outputRoot = resolve(root, ".generated/publi
   for (const path of ["Editor.js", "svgedit.css", "images", "components", "extensions/_virtual"])
     copy(path);
   for (const name of SVGEDIT_EXTENSIONS) copy(`extensions/ext-${name}`);
-  for (const name of ["index.html", "host.js", "svg-policy.js", "policy.json", "ja.json"])
+  for (const name of [
+    "index.html",
+    "host.js",
+    "layer-dialog.js",
+    "svg-policy.js",
+    "policy.json",
+    "ja.json",
+  ])
     cpSync(resolve(here, name), resolve(target, name));
   const licenses = resolve(outputRoot, "licenses/svgedit");
   rmSync(licenses, { recursive: true, force: true });
