@@ -466,6 +466,68 @@ public sealed class InspectorTests
     }
 
     [Fact]
+    public void ReadsRepeatedlySerializedPayloadsAsIndexedRoots()
+    {
+        byte[] file = [.. BuildItemPayload(10), .. BuildItemPayload(20), .. BuildItemPayload(30)];
+        using TemporaryFile temporary = new(file);
+
+        InspectResponse response = Inspector.Inspect(temporary.Path);
+
+        Assert.True(response.Ok);
+        NrbfNode container = response.Nodes[0];
+        Assert.Equal(("$", "array", null), (container.RawName, container.Kind, container.ParentId));
+        Assert.Equal([3], container.Shape!);
+        NrbfNode[] roots = response.Nodes.Where(node => node.ParentId == container.Id).ToArray();
+        Assert.Equal(["[0]", "[1]", "[2]"], roots.Select(node => node.RawName));
+        // 各payloadのrecord IDはどれも1なので、payload間で参照nodeにしてはならない。
+        Assert.All(roots, node => Assert.Equal("object", node.Kind));
+        Assert.Equal(["10", "20", "30"], roots.Select(root =>
+            response.Nodes.Single(node => node.ParentId == root.Id).FormattedValue));
+        Assert.Equal("連結ペイロード ×3（先頭: Sample.Item）", response.Summary!.RootType);
+        Assert.Contains(response.Summary.Warnings, warning => warning.Contains("3個連結"));
+    }
+
+    [Fact]
+    public void KeepsASinglePayloadAsTheRoot()
+    {
+        using TemporaryFile temporary = new(BuildItemPayload(10));
+
+        InspectResponse response = Inspector.Inspect(temporary.Path);
+
+        Assert.True(response.Ok);
+        Assert.Equal(("$", "object"), (response.Nodes[0].RawName, response.Nodes[0].Kind));
+        Assert.Equal("Sample.Item", response.Summary!.RootType);
+        Assert.Empty(response.Summary.Warnings);
+    }
+
+    [Fact]
+    public void WarnsAboutTrailingBytesThatAreNotNrbf()
+    {
+        using TemporaryFile temporary = new([.. BuildItemPayload(10), 1, 2, 3]);
+
+        InspectResponse response = Inspector.Inspect(temporary.Path);
+
+        Assert.True(response.Ok);
+        Assert.Equal("object", response.Nodes[0].Kind);
+        Assert.Contains(response.Summary!.Warnings,
+            warning => warning.Contains("3 バイトのNRBFとして解釈できないデータ"));
+    }
+
+    [Fact]
+    public void KeepsEarlierPayloadsWhenALaterPayloadIsCorrupt()
+    {
+        byte[] second = BuildItemPayload(20);
+        using TemporaryFile temporary = new([.. BuildItemPayload(10), .. BuildItemPayload(15), .. second[..^2]]);
+
+        InspectResponse response = Inspector.Inspect(temporary.Path);
+
+        Assert.True(response.Ok);
+        Assert.Equal([2], response.Nodes[0].Shape!);
+        Assert.Contains(response.Summary!.Warnings,
+            warning => warning.Contains("3個目のペイロード") && warning.Contains("EndOfStreamException"));
+    }
+
+    [Fact]
     public void RejectsAnInvalidHeaderInJapanese()
     {
         using TemporaryFile file = new([1, 2, 3, 4]);
@@ -489,6 +551,16 @@ public sealed class InspectorTests
         {
             File.Delete(path);
         }
+    }
+
+    private static byte[] BuildItemPayload(int value)
+    {
+        using MemoryStream payload = Header();
+        WriteLibrary(payload);
+        WriteClassHeader(payload, 1, "Sample.Item", ["Value"], [0], [8]);
+        WriteInt32(payload, value);
+        payload.WriteByte(11);
+        return payload.ToArray();
     }
 
     private static byte[] BuildStringPayload(string value)
