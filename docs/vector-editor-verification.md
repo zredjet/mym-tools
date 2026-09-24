@@ -1,6 +1,6 @@
 # ベクター描画の検証と実機受入
 
-最終確認: 2026-09-13。仕様は[ADR-0021](decisions/0021-offline-vector-editor.md)。実装とローカル検証は完了。以下の未実施項目を含むため、両OSの配布受入完了とは扱わない。
+最終確認: 2026-09-24。仕様は[ADR-0021](decisions/0021-offline-vector-editor.md)。実装とローカル検証は完了し、`v0.1.0-alpha.14`として公開した。macOSの実IME受入は公開版で完了した。Windowsの実機受入が未実施のため、両OSの配布受入完了とは扱わない。
 
 ## ローカル自動検証
 
@@ -42,7 +42,7 @@
 | レイヤー表示だけを変更した後のCmd+Q | 未保存表示と終了確認、取消後の再保存に成功 |
 | レイヤー順序だけを変更した後の画面移動 | 未保存確認、取消後の再保存に成功 |
 | レイヤー名入力のEscape取消 | 保存済み状態を維持し、確認なしで終了できることを確認 |
-| 実際のIMEによる日本語変換・確定 | **未実施**。貼付入力と区別する |
+| 実際のIMEによる日本語変換・確定 | 成功。2026-09-24に公開版`v0.1.0-alpha.14`のportable ZIPで確認 |
 
 新規IPCのACLとSDKの`onCloseRequested`が使用するclose/destroy権限は親ウィンドウのlocal capabilityだけに付与し、iframe originへは付与しない。macOSメニューのCmd+Qもwindow close経路を使う。2026-09-13の修正版ではレイヤー操作・入力dialog・未保存確認・保存・終了を再検証した。外部cursor/color-profile拒否、文書ID付き操作要求、画像デコード後の容量再判定は自動テストとChromiumで検証済みだが、修正版のネイティブ受入一式は繰り返していない。
 
@@ -55,11 +55,22 @@
 | macOS arm64、通常identifier `com.zredjet.mymtools` | **54,756,523 bytes**、上限80,000,000 bytesまで25,243,477 bytes |
 | ZIP CRC・内部パス | 成功。MyMyTools.app、実行ファイル、NRBF sidecarを確認 |
 | SHA-256 | `c7cbb23434e8fbcb2f282bd6c2599c455761948a252018441828f00ddb9b9f03` |
-| Windows x64 | **未実施**。ZIP容量・構造・実行動作の判定なし |
+| Windows x64（ローカル） | 未作成。公開版で判定する |
 
 macOS成果物は`.generated/vector-verification/MyMyTools_vector-local_macos_aarch64.zip`。NRBF/UIの既存未コミット変更を含む作業ツリーのローカル検証用ZIPであり、公開用リリースではない。JSON実測結果を同フォルダの`portable-result.json`に記録している。
 
-Windows検証を試みたが、Parallelsのサービスへ接続できず、Computer UseでもParallels Desktopの利用が許可されなかった。Windows側のビルド・IME・ショートカット・ネイティブダイアログ・終了確認・画像出力・portable ZIPを未実施として残す。
+### 公開版 `v0.1.0-alpha.14`
+
+Release workflowはrequired CIのcandidateを再利用し、fallback buildはskipした。公開後にassetを再ダウンロードし、release contractの`check-assets`、ZIP CRC、内部構造、SHA-256とRelease digestの一致を確認した。
+
+| 対象 | サイズ | alpha.13からの増分 | SHA-256 |
+|---|---:|---:|---|
+| macOS arm64 | 54,528,926 bytes | +975,324 | `520a1a1adc0e0693338bdd9dc96c01ef7dffa0683962ca92b8272cce31296f6b` |
+| Windows x64 | 54,205,156 bytes | +955,081 | `547a1a79f4253b691ba8fd51c364c9ac86caa549f4bac012bba67ec117f0acfc` |
+
+macOS ZIPは`MyMyTools.app`とNRBF sidecar、Windows ZIPは`MyMyTools.exe`と`nrbf-decoder.exe`の2ファイルだけを含む。SVG-Edit資産はアプリ本体へ埋め込まれる。
+
+Windowsの実行受入（IME・ショートカット・ネイティブダイアログ・終了確認・メニューバーが表示されないこと・画像出力）は未実施として残す。ローカルでのWindows検証は、Parallelsのサービスへ接続できず実施できなかった。
 
 ## 再実行
 
@@ -81,4 +92,4 @@ npm run tauri -- build --bundles app -- --locked --offline
 
 ブラウザ検証はユーザーのアプリDBを使わず、独立した同梱資産サーバーを起動する。Chromiumのローカルネットワーク権限は検証用contextだけに指定する。assetテストは生成フォルダを更新するため、同じ生成フォルダを使うビルドと同時実行しない。
 
-Windows受入では、画像入り作品を複数保存した一覧／検索の返却データにSVG本文がないこと、JSON往復、未保存確認、SVG/PNG書出しを確認し、既存release contractで最終ZIPを検査する。両OSのIMEとWindows結果が揃うまで未実施欄を成功へ変更しない。
+Windows受入では、画像入り作品を複数保存した一覧／検索の返却データにSVG本文がないこと、JSON往復、未保存確認、SVG/PNG書出しを確認し、既存release contractで最終ZIPを検査する。Windows結果が揃うまで未実施欄を成功へ変更しない。
