@@ -28,7 +28,7 @@
 ### 必要環境
 
 - Node.js **22 系** LTS (`.nvmrc` 参照)
-- Rust **1.85+** stable (`rust-toolchain.toml` / `src-tauri/Cargo.toml` 参照)
+- Rust **1.88+** stable (`rust-toolchain.toml` / `src-tauri/Cargo.toml` の `rust-version` 参照)
 - macOS は Xcode CLT、Windows は MSVC build tools
 
 ### セットアップ
