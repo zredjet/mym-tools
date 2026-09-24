@@ -38,6 +38,7 @@ export function VectorWorkspaceRoute() {
       projectId={projectId}
       itemId={itemId}
       landing={!location.pathname.endsWith("/new") && !itemId}
+      navigationKey={location.key}
     />
   );
 }
@@ -46,10 +47,12 @@ function VectorWorkspacePage({
   projectId,
   itemId,
   landing,
+  navigationKey,
 }: {
   projectId: string | undefined;
   itemId: string | undefined;
   landing: boolean;
+  navigationKey: string;
 }) {
   const navigate = useNavigate();
   const iframe = useRef<HTMLIFrameElement>(null);
@@ -79,6 +82,25 @@ function VectorWorkspacePage({
   );
   const dirty =
     ready && (revision !== baseline.revision || title !== baseline.title || tags !== baseline.tags);
+  // New/import/delete and first saves keep the URL, so a later navigation to
+  // that URL does not remount this page. Reopen the route's document instead.
+  const [handledNavigation, setHandledNavigation] = useState(navigationKey);
+  if (handledNavigation !== navigationKey) {
+    setHandledNavigation(navigationKey);
+    if (currentId !== itemId) {
+      const reopen = () => {
+        setReady(false);
+        setUrl("");
+        setError(null);
+        setStatus("");
+        setCurrentId(itemId);
+        setAttempt((value) => value + 1);
+      };
+      if (dirty || busy)
+        setConfirmation({ message: "未保存の変更を破棄しますか？", action: reopen });
+      else reopen();
+    }
+  }
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
@@ -361,6 +383,9 @@ function VectorWorkspacePage({
           }}
         >
           <option value="">新しい作品</option>
+          {currentId && !documents.some((item) => item.id === currentId) && (
+            <option value={currentId}>{baseline.title}</option>
+          )}
           {documents.map((item) => (
             <option key={item.id} value={item.id}>
               {item.title}

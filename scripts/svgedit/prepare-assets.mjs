@@ -3,21 +3,14 @@ import { createHash } from "node:crypto";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import process from "node:process";
+import { SVGEDIT_EXTENSIONS } from "./extensions.js";
+
+export { SVGEDIT_EXTENSIONS };
 
 export const SVGEDIT_VERSION = "7.4.2";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "../..");
 const upstream = resolve(root, "node_modules/svgedit");
-export const SVGEDIT_EXTENSIONS = [
-  "connector",
-  "eyedropper",
-  "grid",
-  "markers",
-  "panning",
-  "shapes",
-  "polystar",
-  "layer_view",
-];
 
 export function prepareVectorAssets(outputRoot = resolve(root, ".generated/public")) {
   const version = JSON.parse(readFileSync(resolve(upstream, "package.json"), "utf8")).version;
@@ -36,6 +29,7 @@ export function prepareVectorAssets(outputRoot = resolve(root, ".generated/publi
   for (const name of [
     "index.html",
     "host.js",
+    "extensions.js",
     "layer-dialog.js",
     "svg-policy.js",
     "policy.json",

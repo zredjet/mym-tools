@@ -32,16 +32,22 @@ pub fn validate_svg(svg: &str) -> Result<String, AppError> {
     if svg.trim().is_empty() || svg.len() > MAX_SVG_BYTES {
         return Err(error("SVGは空でなく20MiB以下にしてください。"));
     }
+    // Mirror the browser pre-scan, which also covers comments and CDATA.
+    if has_markup_declaration(svg) {
+        return Err(error("DTD・実体宣言・処理命令は使用できません。"));
+    }
     let mut reader = NsReader::from_str(svg);
     let mut stack: Vec<bool> = vec![];
     let mut roots = 0;
-    let mut declarations = 0;
+    let mut seen_content = false;
     let mut parts = Vec::new();
     let mut text = String::new();
     loop {
         let (namespace, event) = reader
             .read_resolved_event()
             .map_err(|e| error(format!("SVGのXMLが不正です: {e}")))?;
+        let first_event = !seen_content;
+        seen_content = true;
         let svg_namespace =
             matches!(namespace, ResolveResult::Bound(ref ns) if ns.as_ref() == SVG_NS);
         match event {
@@ -108,8 +114,8 @@ pub fn validate_svg(svg: &str) -> Result<String, AppError> {
                 return Err(error("DTD・実体宣言・処理命令は使用できません。"))
             }
             Event::Decl(declaration) => {
-                declarations += 1;
-                if roots != 0 || declarations > 1 {
+                // DOMParser accepts the declaration only as the very first content.
+                if !first_event {
                     return Err(error("XML宣言の位置が不正です。"));
                 }
                 if let Some(encoding) = declaration.encoding() {
@@ -138,6 +144,16 @@ pub fn validate_svg(svg: &str) -> Result<String, AppError> {
         return Err(error("検索用テキストは1MiB以下にしてください。"));
     }
     Ok(text)
+}
+fn has_markup_declaration(svg: &str) -> bool {
+    let lower = svg.to_ascii_lowercase();
+    if lower.contains("<!doctype") || lower.contains("<!entity") {
+        return true;
+    }
+    lower.match_indices("<?").any(|(index, _)| {
+        let target = &lower[index + 2..];
+        !(target.starts_with("xml") && target[3..].starts_with(js_whitespace))
+    })
 }
 fn js_whitespace(c: char) -> bool {
     matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')
@@ -214,6 +230,8 @@ fn validate_css(value: &str) -> Result<(), AppError> {
     if value.contains(['\\', '@', '<', '>']) || value.contains("/*") {
         return Err(error("外部CSS・エスケープ・コメントは使用できません。"));
     }
+    // Scheme checks apply only outside the allowed #fragment references.
+    let mut outside = String::new();
     let mut remaining = value.as_str();
     while let Some(start) = remaining.find("url") {
         let rest = remaining[start + 3..].trim_start();
@@ -231,14 +249,17 @@ fn validate_css(value: &str) -> Result<(), AppError> {
             if !fragment(target) {
                 return Err(error("外部参照は使用できません。"));
             }
+            outside.push_str(&remaining[..start]);
             remaining = &rest[end + 1..];
         } else {
+            outside.push_str(&remaining[..start + 3]);
             remaining = &remaining[start + 3..];
         }
     }
+    outside.push_str(remaining);
     if ["http:", "https:", "file:", "data:", "javascript:", "//"]
         .iter()
-        .any(|s| value.contains(s))
+        .any(|s| outside.contains(s))
     {
         return Err(error("外部参照は使用できません。"));
     }

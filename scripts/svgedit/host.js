@@ -9,6 +9,7 @@ import {
   MAX_PNG_SIDE,
 } from "./svg-policy.js";
 import { installLayerDialogs } from "./layer-dialog.js";
+import { SVGEDIT_EXTENSIONS } from "./extensions.js";
 
 // The iframe has its own origin and no Tauri capability. Clipboard and editor
 // preferences last only for this editor instance, never across app sessions.
@@ -80,16 +81,6 @@ editor.setConfig({
 // Configuration is session-only. Do not offer background URLs/language reloads.
 editor.configObj.loadFromStorage = () => {};
 editor.exportHandler = () => post("action", { documentId, action: "exportPng" });
-const extensions = [
-  "connector",
-  "eyedropper",
-  "grid",
-  "markers",
-  "panning",
-  "shapes",
-  "polystar",
-  "layer_view",
-];
 try {
   await editor.init();
   const addResources = editor.i18next.addResourceBundle.bind(editor.i18next);
@@ -102,7 +93,7 @@ try {
     );
   // init() doesn't await default extension loading. Load our explicit allowlist
   // sequentially and signal ready only when every extension is initialized.
-  for (const name of extensions) {
+  for (const name of SVGEDIT_EXTENSIONS) {
     const module = await import(`./extensions/ext-${name}/ext-${name}.js`);
     await editor.addExtension(
       module.default.name ?? `ext-${name}`,

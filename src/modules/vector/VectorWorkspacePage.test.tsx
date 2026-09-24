@@ -48,6 +48,9 @@ async function start(strict = false) {
     ),
   );
   await flush();
+  return { router, ...(await connect()) };
+}
+async function connect() {
   const iframe = screen.getByTitle("SVG-Edit オフラインエディタ") as HTMLIFrameElement;
   const session = new URLSearchParams(new URL(iframe.src).hash.slice(1)).get("session");
   const post = vi.spyOn(iframe.contentWindow!, "postMessage");
@@ -66,7 +69,7 @@ async function start(strict = false) {
   const load = post.mock.calls[post.mock.calls.length - 1]![0];
   send({ ...load, event: "loaded", revision: 0 });
   await flush();
-  return { router, post, send, documentId: load.documentId };
+  return { post, send, documentId: load.documentId };
 }
 beforeEach(() => {
   vi.useFakeTimers();
@@ -86,6 +89,46 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 describe("Vector workspace lifecycle", () => {
+  it("reopens the route document when its URL is revisited after 新規", async () => {
+    const summary = {
+      id: "a1",
+      project_id: "p1",
+      module_id: "vector",
+      title: "既存",
+      tags: [],
+      position: 0,
+      created_at: "2026-09-24T00:00:00.000+09:00",
+      updated_at: "2026-09-24T00:00:00.000+09:00",
+    };
+    vi.mocked(items.listItemSummaries).mockResolvedValue([summary]);
+    vi.mocked(items.getItem).mockResolvedValue({
+      ...summary,
+      payload_schema_version: 1,
+      payload: { svg, text: "作品" },
+    });
+    const path = "/projects/p1/m/vector/edit/a1";
+    const router = createMemoryRouter(
+      [{ path: "/projects/:projectId/m/vector/edit/:itemId", element: <VectorWorkspaceRoute /> }],
+      { initialEntries: [path] },
+    );
+    render(<RouterProvider router={router} />);
+    await flush();
+    const { post, send } = await connect();
+    expect(screen.getByLabelText("タイトル")).toHaveValue("既存");
+    fireEvent.click(screen.getByRole("button", { name: "新規" }));
+    await flush();
+    const load = post.mock.calls[post.mock.calls.length - 1]![0];
+    send({ ...load, event: "loaded", revision: 0 });
+    await flush();
+    expect(screen.getByLabelText("タイトル")).toHaveValue("新しいベクター描画");
+    await act(() => router.navigate(path));
+    await flush();
+    const reopened = await connect();
+    expect(items.getItem).toHaveBeenCalledTimes(2);
+    expect(reopened.post.mock.calls[0]![0]).toMatchObject({ action: "load", svg });
+    expect(screen.getByLabelText("タイトル")).toHaveValue("既存");
+    expect(screen.getByLabelText("作品を切り替え")).toHaveValue("a1");
+  });
   it("initializes once after StrictMode cleanup and uses metadata lists", async () => {
     const { post } = await start(true);
     expect(post.mock.calls.filter(([m]) => m.action === "load")).toHaveLength(1);

@@ -1333,9 +1333,9 @@ impl SqliteStorage {
         offset: u32,
         projection: &str,
     ) -> Result<Vec<Item>, AppError> {
-        let mut sql = String::from(
+        let mut sql = format!(
             "SELECT i.id, i.project_id, i.module_id, i.title, i.tags, i.payload_schema_version, \
-             i.payload, i.position, i.created_at, i.updated_at \
+             {projection}, i.position, i.created_at, i.updated_at \
              FROM items_fts f JOIN items i ON i.id = f.item_id \
              WHERE items_fts MATCH ?",
         );
@@ -1343,12 +1343,7 @@ impl SqliteStorage {
         push_scope_filter(&mut sql, &mut bindings, scope, "f");
         push_module_filter(&mut sql, &mut bindings, module_filter, "f");
         sql.push_str(" ORDER BY rank LIMIT ? OFFSET ?");
-        self.run_search_query(
-            &sql.replace("i.payload,", &format!("{projection},")),
-            &bindings,
-            limit,
-            offset,
-        )
+        self.run_search_query(&sql, &bindings, limit, offset)
     }
 
     /// LIKE フォールバック (3 文字未満の query)。
@@ -1369,9 +1364,9 @@ impl SqliteStorage {
                 .replace('%', "\\%")
                 .replace('_', "\\_")
         );
-        let mut sql = String::from(
+        let mut sql = format!(
             "SELECT i.id, i.project_id, i.module_id, i.title, i.tags, i.payload_schema_version, \
-             i.payload, i.position, i.created_at, i.updated_at \
+             {projection}, i.position, i.created_at, i.updated_at \
              FROM items i \
              WHERE (i.title LIKE ? ESCAPE '\\' OR i.tags LIKE ? ESCAPE '\\' \
                     OR i.search_text LIKE ? ESCAPE '\\')",
@@ -1380,12 +1375,7 @@ impl SqliteStorage {
         push_scope_filter(&mut sql, &mut bindings, scope, "i");
         push_module_filter(&mut sql, &mut bindings, module_filter, "i");
         sql.push_str(" ORDER BY i.updated_at DESC, i.id DESC LIMIT ? OFFSET ?");
-        self.run_search_query(
-            &sql.replace("i.payload,", &format!("{projection},")),
-            &bindings,
-            limit,
-            offset,
-        )
+        self.run_search_query(&sql, &bindings, limit, offset)
     }
 
     /// FTS5 / LIKE 共通の SQL 実行ヘルパ。

@@ -138,5 +138,31 @@
     "name": "multiple roots",
     "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"/><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
     "valid": false
+  },
+  {
+    "name": "fragment id with scheme-like text",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><defs><linearGradient id=\"data:paint\"/></defs><rect width=\"1\" height=\"1\" fill=\"url(#data:paint)\"/></svg>",
+    "valid": true,
+    "text": ""
+  },
+  {
+    "name": "declaration after comment",
+    "svg": "<!-- first --><?xml version=\"1.0\" encoding=\"UTF-8\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    "valid": false
+  },
+  {
+    "name": "declaration after whitespace",
+    "svg": " <?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    "valid": false
+  },
+  {
+    "name": "processing instruction in comment",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><!-- <?php ?> --></svg>",
+    "valid": false
+  },
+  {
+    "name": "DTD in CDATA",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text><![CDATA[<!DOCTYPE svg>]]></text></svg>",
+    "valid": false
   }
 ]

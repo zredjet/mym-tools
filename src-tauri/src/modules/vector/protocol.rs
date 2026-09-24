@@ -67,6 +67,10 @@ async fn serve(listener: TcpListener, app: AppHandle, port: u16) {
             }
         }
     }
+    // Let the next editor open start a new server instead of reusing a dead port.
+    if let Ok(mut server_port) = SERVER_PORT.lock() {
+        *server_port = None;
+    }
 }
 
 async fn handle_connection(
