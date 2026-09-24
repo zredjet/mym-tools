@@ -67,7 +67,7 @@ const summary: NrbfSummary = {
   durationMs: 5,
 };
 
-function resolveWith(nodes = sampleNodes, completed = summary) {
+function resolveWith(nodes = sampleNodes, completed = { ...summary, nodeCount: nodes.length }) {
   inspectMock.mockImplementation(async (input) => {
     input.onProgress({ type: "started", fileSizeBytes: completed.fileSizeBytes });
     input.onProgress({ type: "nodes", nodes });
@@ -112,6 +112,18 @@ describe("NrbfInspectorPage", () => {
     expect(alert).toHaveClass("whitespace-pre-wrap");
     await user.click(screen.getByRole("button", { name: "エラー詳細をコピー" }));
     await expect(navigator.clipboard.readText()).resolves.toBe(reason);
+  });
+
+  it("reports an incomplete delivery instead of showing an empty or partial tree", async () => {
+    resolveWith(sampleNodes.slice(0, 2), { ...summary, nodeCount: 405 });
+    const user = userEvent.setup();
+    render(<NrbfInspectorPage />);
+    await user.click(screen.getByRole("button", { name: "ファイルを選択" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "NRBF解析結果の受信が不完全です（受信 2 / 解析 405 ノード）",
+    );
+    expect(screen.queryByText("Name")).not.toBeInTheDocument();
   });
 
   it("expands byte arrays only when explicitly allowed for the next read", async () => {

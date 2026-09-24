@@ -108,6 +108,13 @@ export function NrbfInspectorPage() {
         });
         if (!mountedRef.current || !isCurrentOperation(operationRef.current, operationId)) return;
         setSummary(completed);
+        if (receivedNodes.length !== completed.nodeCount) {
+          // 一部だけのtreeを完全な結果として見せない。
+          setError(
+            `NRBF解析結果の受信が不完全です（受信 ${receivedNodes.length.toLocaleString()} / 解析 ${completed.nodeCount.toLocaleString()} ノード）。再読込してください。`,
+          );
+          return;
+        }
         setNodes([...receivedNodes]);
         if (receivedNodes.length > 0) {
           setSelectedId(receivedNodes[0]!.id);

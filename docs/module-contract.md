@@ -755,7 +755,7 @@ editor URLは`lang=ja`を固定し、同梱済み日本語resourceだけをsame-
 | `is_stateless` | true |
 | frontend route | `/` |
 | 固有 IPC コマンド | `nrbf_inspect_file(operationId, path, expandByteArrays, onProgress)`。cancelは`core_cancel_operation`。`expandByteArrays`は読込単位の明示許可で既定false |
-| Channel | `started { fileSizeBytes }` / `nodes { nodes }` / `done { summary }` / `cancelled`。nodesは最大500件のbatch |
+| Channel | `started { fileSizeBytes }` / `nodes { nodes }` / `done { summary }` / `cancelled`。nodesは最大500件のbatch。`done`は全nodes batchの後に送る。frontendはcommand応答後も`done`の配送を待ち（8 KiB以上のmessageは追加IPCで遅れて届くため）、受信node数と`nodeCount`の一致を確認してからtreeを表示する |
 | 入力上限 | 1ファイル64 MiB、60秒、500,000ノード、1配列50,000展開要素、1スカラー1 MiB、検索文字列32 MiB、protocol出力256 MiB |
 | `index_text` の対象 | なし。画面内検索だけが読みやすい名前、Raw名、整形済みscalar値を対象とする。項目名と値の両方を指定した場合は同一nodeに対するAND条件とし、絞り込み／ジャンプを選べる |
 
