@@ -458,6 +458,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 
 - `nrbf`は既定有効・`text` categoryのstatelessモジュールとし、入力path、解析結果、検索条件、履歴をitems、設定、横断検索、export / importへ保存しない
 - Rustの`nrbf_inspect_file(operationId, path, expandByteArrays, onProgress)`だけを公開し、開始、500件単位のノード、完了、キャンセルをTauri Channelで通知する。`OperationRegistry`でcancelし、60秒timeout・遅延operation event破棄を保証する
+- Tauriは8 KiB以上のChannel messageを追加IPCで取得するため、command応答がnodes batchより先に届くことがある。frontendのIPC wrapperはcommand応答後、最後に送られる`done`（Channelは送信順に配送する）の到着を最大30秒待ってから結果を返し、受信node数が`summary.nodeCount`と一致しない場合はtreeを表示せずerrorにする
 - Rust wrapperは入力64 MiB、sidecar stdout 256 MiB、stderr 64 KiBを検証し、sidecar終了・破損header・上限・非対応形式を日本語`AppError::Validation { module_id: "nrbf", ... }`または`AppError::Internal`へ変換する
 - .NET 10 NativeAOT sidecarは`System.Formats.Nrbf 10.0.11`の`NrbfDecoder`だけを使い、assembly / 型をロードしない。`BinaryFormatter`、`Deserialize`、任意型生成はソース検査で禁止する
 - record graphは反復走査する。最初のrecordを正規ノードとし、共有参照・循環参照は参照ノードにして再展開しない。byte配列は既定で長さだけを返し、`expandByteArrays`がtrueの場合だけ最大50,000要素を展開する。多次元配列は安全に展開できない場合shapeだけを返す
