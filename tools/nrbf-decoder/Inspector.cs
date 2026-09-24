@@ -48,12 +48,69 @@ internal static class Inspector
             long position = Diagnostics.SafePosition(stream);
             return InspectResponse.Failure(Diagnostics.DecodeFailure(file, exception, position, stopwatch));
         }
+        List<string> payloadWarnings = [];
+        List<SerializationRecord> roots = DecodeFollowingPayloads(stream, root, stopwatch, payloadWarnings);
+
         Builder builder = new(stopwatch, expandByteArrays, maximumNodes, maximumProtocolBytes,
             beforeExpandForTesting);
-        builder.Build(root);
-        NrbfSummary summary = new(file.FullName, file.Name, file.Length, root.TypeName?.FullName,
+        foreach (string warning in payloadWarnings) builder.Warnings.Add(warning);
+        builder.Build(roots);
+        string? rootType = roots.Count == 1
+            ? root.TypeName?.FullName
+            : $"連結ペイロード ×{roots.Count.ToString("N0", CultureInfo.InvariantCulture)}（先頭: {root.TypeName?.FullName ?? "不明"}）";
+        NrbfSummary summary = new(file.FullName, file.Name, file.Length, rootType,
             builder.Nodes.Count, builder.Warnings, stopwatch.ElapsedMilliseconds);
         return new(true, builder.Nodes, summary, null);
+    }
+
+    /// <summary>
+    /// BinaryFormatterのSerializeを同じstreamへ繰り返したファイルは、header〜MessageEndの
+    /// payloadが連続する。NrbfDecoderは最初のMessageEndで止まるため、残りを順に読み取る。
+    /// 読めなくなった時点で打ち切り、解析済みpayloadは維持する。
+    /// </summary>
+    private static List<SerializationRecord> DecodeFollowingPayloads(FileStream stream,
+        SerializationRecord first, Stopwatch stopwatch, List<string> warnings)
+    {
+        List<SerializationRecord> roots = [first];
+        while (stream.Position < stream.Length)
+        {
+            long position = stream.Position;
+            long remaining = stream.Length - position;
+            if (roots.Count >= MaximumArrayElements)
+            {
+                warnings.Add($"連結されたペイロードが{MaximumArrayElements.ToString("N0", CultureInfo.InvariantCulture)}個を超えるため、"
+                    + $"位置 {position.ToString("N0", CultureInfo.InvariantCulture)} 以降の {remaining.ToString("N0", CultureInfo.InvariantCulture)} バイトを省略しました。");
+                break;
+            }
+            if (stopwatch.Elapsed > MaximumDuration)
+            {
+                warnings.Add($"解析時間が55秒を超えたため、位置 {position.ToString("N0", CultureInfo.InvariantCulture)} 以降のペイロードを省略しました。");
+                break;
+            }
+            if (!global::System.Formats.Nrbf.NrbfDecoder.StartsWithPayloadHeader(stream))
+            {
+                warnings.Add($"{roots.Count.ToString("N0", CultureInfo.InvariantCulture)}個目のペイロードの後、位置 {position.ToString("N0", CultureInfo.InvariantCulture)} から "
+                    + $"{remaining.ToString("N0", CultureInfo.InvariantCulture)} バイトのNRBFとして解釈できないデータがあります。");
+                break;
+            }
+            try
+            {
+                roots.Add(global::System.Formats.Nrbf.NrbfDecoder.Decode(
+                    stream, out _, Diagnostics.ApplicationOptions(), leaveOpen: true));
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                warnings.Add($"{(roots.Count + 1).ToString("N0", CultureInfo.InvariantCulture)}個目のペイロード（位置 {position.ToString("N0", CultureInfo.InvariantCulture)}）を解析できないため、"
+                    + $"以降を省略しました: {Diagnostics.Describe(exception)}");
+                break;
+            }
+        }
+        if (roots.Count > 1)
+        {
+            warnings.Insert(0, $"BinaryFormatterのペイロードが{roots.Count.ToString("N0", CultureInfo.InvariantCulture)}個連結されていたため、"
+                + $"それぞれを [0]〜[{(roots.Count - 1).ToString(CultureInfo.InvariantCulture)}] として表示しています。");
+        }
+        return roots;
     }
 
     private sealed class Builder(
@@ -64,7 +121,8 @@ internal static class Inspector
         Action<string>? beforeExpandForTesting)
     {
         private const int MaximumExpansionFailureWarnings = 20;
-        private readonly Dictionary<SerializationRecordId, int> _canonicalRecords = new();
+        // record IDはpayloadごとに1から振られるため、payload番号と組にして正規nodeを引く。
+        private readonly Dictionary<(int Payload, SerializationRecordId Id), int> _canonicalRecords = new();
         private readonly Stack<PendingValue> _pending = new();
         private long _searchTextBytes;
         private long _estimatedProtocolBytes;
@@ -77,9 +135,22 @@ internal static class Inspector
         internal List<NrbfNode> Nodes { get; } = [];
         internal List<string> Warnings { get; } = [];
 
-        internal void Build(SerializationRecord root)
+        internal void Build(IReadOnlyList<SerializationRecord> roots)
         {
-            _pending.Push(new(root, null, "$", "$"));
+            if (roots.Count == 1)
+            {
+                _pending.Push(new(roots[0], null, "$", "$"));
+            }
+            else
+            {
+                int containerId = AddNode(new(null, null, "$", "$"), "array", null, [roots.Count],
+                    $"[{roots.Count.ToString(CultureInfo.InvariantCulture)} ペイロード]", null, null);
+                for (int index = roots.Count - 1; index >= 0; index--)
+                {
+                    string name = $"[{index.ToString(CultureInfo.InvariantCulture)}]";
+                    _pending.Push(new(roots[index], containerId, name, name, Payload: index));
+                }
+            }
             while (_pending.Count > 0 && !_stopExpansion)
             {
                 if (stopwatch.Elapsed > MaximumDuration)
@@ -187,7 +258,7 @@ internal static class Inspector
             }
 
             SerializationRecordId recordId = record.Id;
-            if (_canonicalRecords.TryGetValue(recordId, out int targetNodeId))
+            if (_canonicalRecords.TryGetValue((pending.Payload, recordId), out int targetNodeId))
             {
                 AddNode(pending, "reference", record, null, $"→ #{targetNodeId}", targetNodeId, null);
                 return;
@@ -195,19 +266,20 @@ internal static class Inspector
             if (record is PrimitiveTypeRecord primitive)
             {
                 int id = AddScalar(pending, primitive.Value, record);
-                _canonicalRecords[recordId] = id;
+                _canonicalRecords[(pending.Payload, recordId)] = id;
                 return;
             }
             if (record is ClassRecord classRecord)
             {
                 int id = AddNode(pending, "object", record, null, null, null, null);
-                _canonicalRecords[recordId] = id;
+                _canonicalRecords[(pending.Payload, recordId)] = id;
                 if (_stopExpansion) return;
                 string[] memberNames = classRecord.MemberNames.ToArray();
                 for (int index = memberNames.Length - 1; index >= 0; index--)
                 {
                     string rawName = memberNames[index];
-                    _pending.Push(new(GetMemberValue(classRecord, rawName), id, FriendlyName(rawName), rawName));
+                    _pending.Push(new(GetMemberValue(classRecord, rawName), id, FriendlyName(rawName), rawName,
+                        Payload: pending.Payload));
                 }
                 return;
             }
@@ -219,7 +291,7 @@ internal static class Inspector
 
             int unsupportedId = AddNode(pending, "unsupported", record, null,
                 $"非対応レコード: {record.RecordType}", null, null);
-            _canonicalRecords[recordId] = unsupportedId;
+            _canonicalRecords[(pending.Payload, recordId)] = unsupportedId;
         }
 
         private void AddArray(PendingValue pending, ArrayRecord record)
@@ -238,13 +310,13 @@ internal static class Inspector
 
             int id = AddNode(pending, "array", record, shape,
                 $"[{string.Join(" × ", shape)}]", null, null);
-            _canonicalRecords[record.Id] = id;
+            _canonicalRecords[(pending.Payload, record.Id)] = id;
             if (_stopExpansion) return;
 
             if (elementCount > MaximumArrayElements)
             {
                 AddWarning($"配列 {pending.RawName} は50,000要素を超えるため、内容を省略しました。");
-                _pending.Push(new(null, id, "省略", "省略", "配列要素数上限"));
+                _pending.Push(new(null, id, "省略", "省略", "配列要素数上限", pending.Payload));
                 return;
             }
             if (record is SZArrayRecord<byte> && !expandByteArrays)
@@ -265,7 +337,7 @@ internal static class Inspector
             for (int index = values.Count - 1; index >= 0; index--)
             {
                 string name = $"[{index}]";
-                _pending.Push(new(values[index], id, name, name));
+                _pending.Push(new(values[index], id, name, name, Payload: pending.Payload));
             }
         }
 
@@ -469,5 +541,5 @@ internal static class Inspector
     }
 
     private sealed record PendingValue(object? Value, int? ParentId, string DisplayName,
-        string RawName, string? OmittedReason = null);
+        string RawName, string? OmittedReason = null, int Payload = 0);
 }

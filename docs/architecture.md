@@ -466,6 +466,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 - 解析失敗は1行目に日本語の分類、続く「【詳細】」に例外型・メッセージ・内部例外、読込位置（FileStreamのbuffer単位の概算）、非対応record種別、非NRBF fileの先頭16 byteと推定形式を返す。`EndOfStreamException`は途中切れ、`DecoderFallbackException`は不正UTF-8として分類する
 - 既定の`TypeNameParseOptions.MaxNodes`（20）超過などで`SerializationException`になった場合だけ、上限1,024・`UndoTruncatedTypeNames=true`で1回だけ再decodeし、上限を超えた型名（最大10件）または切り詰め型名の可能性を報告する。再decodeの結果treeは返さず、通常解析の上限は変更しない。初回decodeが20秒以上かかった場合は再decodeを省略する
 - tree構築中に1 recordの展開が例外になった場合は解析済みtreeを維持し、そのnodeを`unsupported`（展開失敗）にしてpath・record種別・型名・例外をwarningへ記録する（先頭20件、以降は件数のみ）
+- `BinaryFormatter.Serialize`を同じstreamへ繰り返したファイル（header〜MessageEndのpayloadが連続）は、最初のpayloadの後もfile末尾までheaderを確認して順にdecodeする。2個以上なら合成のroot `$`（`array`、shape `[N]`）の下に各payloadを`[i]`として並べ、warningで連結を明示する。record IDはpayloadごとに振り直されるため、正規node・参照の判定はpayload単位で行う。NRBFとして解釈できない末尾データ、途中payloadのdecode失敗、50,000 payload超、55秒超では解析済みpayloadを維持して打ち切り、位置付きwarningを返す
 - 対象は先頭にNRBF headerを持つ既定`FormatterTypeStyle.TypesAlways` payloadであり、圧縮、暗号化、独自header、非ゼロ下限配列を扱わない。読み取り専用とし、編集・再シリアライズ・JSON出力を提供しない
 
 ---

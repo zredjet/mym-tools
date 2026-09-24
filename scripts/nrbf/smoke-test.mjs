@@ -102,6 +102,31 @@ try {
     ["--expand-byte-arrays"],
   );
 
+  const itemPayload = (value) =>
+    Buffer.concat([
+      header(),
+      Buffer.from([12]),
+      int32(10),
+      nrbfString("Sample.Assembly"),
+      Buffer.from([5]),
+      int32(1),
+      nrbfString("Sample.Item"),
+      int32(1),
+      nrbfString("Value"),
+      Buffer.from([0, 8]),
+      int32(10),
+      int32(value),
+      Buffer.from([11]),
+    ]);
+  runFixture(
+    "concatenated.bin",
+    Buffer.concat([itemPayload(1), itemPayload(2)]),
+    (response) =>
+      response.nodes?.[0]?.kind === "array" &&
+      response.nodes?.[0]?.shape?.[0] === 2 &&
+      response.nodes?.filter((node) => node.parentId === 1 && node.kind === "object").length === 2,
+  );
+
   const genericArguments = Array.from(
     { length: 22 },
     (_, index) => `[Sample.T${index}, Sample.Assembly]`,

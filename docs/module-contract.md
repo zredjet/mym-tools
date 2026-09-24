@@ -769,6 +769,8 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 
 解析失敗時の`error`は1行目の日本語分類に続けて「【詳細】」ブロックを持つ複数行文字列とし、例外型・メッセージ・読込位置・非対応record種別・非NRBF fileの先頭byteを含める。型名の上限超過が疑われる`SerializationException`では、結果を返さない診断用の再decodeで該当型名を列挙する。tree構築中の個別record失敗は`unsupported`の展開失敗nodeとwarningにし、他のnodeを返す。UIはerrorを改行どおりに表示し、errorとwarningをコピーできる。
 
+1ファイルに複数のNRBF payloadが連結されている場合は、合成root `$`（`kind: array`、`shape: [N]`、`typeName: null`）の子に各payloadのrootを`[i]`として返し、`summary.rootType`を「連結ペイロード ×N（先頭: <型>）」、warningsの先頭に連結の旨を入れる。record IDの共有参照判定はpayload内に閉じる。
+
 入力、node、summary、検索条件はfrontend stateだけに保持し、items、設定、履歴、横断検索、export / importへ保存しない。DB schemaと既存ModuleBackend / ModuleDefinition契約は変更しない。
 
 ### 12.11 Stateless 開発ツール
