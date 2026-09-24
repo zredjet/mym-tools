@@ -21,6 +21,7 @@ import {
   drawioEditorUrl,
   drawioExportMessage,
   drawioLoadMessage,
+  drawioMenuExportTarget,
   drawioTargetOrigin,
   isTrustedDrawioOrigin,
   parseDrawioMessage,
@@ -265,6 +266,37 @@ export function DiagramWorkspacePage() {
     [itemId, navigate, projectId, refreshDocuments, submitting, tagsInput, title],
   );
 
+  const saveMenuExport = useCallback(
+    async (message: { data: string; format?: string; filename?: string }) => {
+      const target = drawioMenuExportTarget(message.format);
+      if (target == null) {
+        setError("draw.ioの書出しはPNG / SVG / XMLだけに対応しています。");
+        return;
+      }
+      if (exportInFlight.current) {
+        setError("前の書出しが完了してから、もう一度お試しください。");
+        return;
+      }
+      exportInFlight.current = true;
+      setError(null);
+      try {
+        const base = (message.filename ?? title).replace(/(?:\.drawio)?\.[^.]*$/i, "");
+        const path = await saveDialog({
+          defaultPath: `${safeFileName(base || title)}.${target.extensions[0]}`,
+          filters: [{ name: target.label, extensions: target.extensions }],
+        });
+        if (path == null) return;
+        await diagramWriteFile({ path, format: target.format, data: message.data });
+        setStatus(`${target.label}を書き出しました`);
+      } catch (cause) {
+        setError(formatInvokeError(cause));
+      } finally {
+        exportInFlight.current = false;
+      }
+    },
+    [title],
+  );
+
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (
@@ -344,6 +376,12 @@ export function DiagramWorkspacePage() {
         return;
       }
 
+      if (message.event === "export" && message.requestId == null) {
+        // draw.io's own export dialog (scale, border, transparency, ...).
+        void saveMenuExport(message);
+        return;
+      }
+
       if (message.event === "export") {
         const pending = pendingExport.current;
         if (
@@ -390,6 +428,7 @@ export function DiagramWorkspacePage() {
     persist,
     postToEditor,
     releaseExport,
+    saveMenuExport,
     tagsInput,
     title,
     xml,

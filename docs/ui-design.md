@@ -1,6 +1,6 @@
 # UI デザイン方針 (Phase 1)
 
-最終更新: 2026-09-24 / ステータス: Draft v1.9
+最終更新: 2026-09-24 / ステータス: Draft v1.10
 
 このドキュメントは「アプリの見た目と画面構成」を確定するためのもの。
 具体実装 (CSS / JSX) は別途。本書は方針 + テキスト・ベースのスケルトンに留める。
@@ -34,6 +34,8 @@
 > **v1.8 の主な変更**: NRBFの隠れた参照先へのRaw切替、仮想化treeの選択・フォーカス・スクロール連動、正規化検索と一致する強調表示を明確化。
 >
 > **v1.9 の主な変更**: ADR-0021のベクター描画を§5.2 VEC-1 / §6.23へ正式に収録。作品の直接表示、SVG-Edit日本語UI、Cmd/Ctrl+S保存、未保存確認を定義。
+>
+> **v1.10 の主な変更**: DG-1の上部PNG書出しを2倍へ変更。draw.ioの「形式を指定してエクスポート」からのPNG / SVG / XMLを親の保存dialog経由で書き出せるようにした。
 
 ---
 
@@ -772,7 +774,8 @@ Memoは`/`一覧、`/new`作成、`/:itemId`詳細、`/edit/:itemId`編集のペ
 - module選択時は一覧を挟まず、直近itemまたは空canvasを直接開く
 - 上部にdocument selector、新規、`.drawio` / `.xml`取込、保存、`.drawio` / SVG / PNG書出し、title、tagsを置く
 - editor本体は残り領域を占めるsandboxed iframeとし、moduleを開くまで生成しない。外部serviceのlogo / cloud storage UIは出さない
-- editor UIは同梱済みlanguage resourceを使う日本語固定とし、言語切替を提供しない。PNGは現在表示中のpageだけ、SVGは現在の編集page、`.drawio`は全pageを書き出す
+- editor UIは同梱済みlanguage resourceを使う日本語固定とし、言語切替を提供しない。PNGは現在表示中のpageだけ、SVGは現在の編集page、`.drawio`は全pageを書き出す。上部のPNGは2倍・余白なし・白背景とする
+- draw.ioの「形式を指定してエクスポート」は、倍率・余白・透過などをeditor側のdialogで選べる。PNG / SVG / XMLだけを受け付け、親の保存dialogで利用者が選んだpathへ既存の`diagram_write_file`検証を通して書き出す。JPEG / PDF / HTMLなど他形式は理由を表示して拒否する。editor自身のダウンロードや保存先選択は使わない
 - editorからのautosave eventは未保存stateの更新にだけ使い、itemsへの永続化は明示保存 / `Cmd/Ctrl+S`時にXMLとtextを取得して行う
 - 図内linkはeditorで直接開かず、親側の確認後にOS browserへ渡す
 
@@ -1045,6 +1048,7 @@ H-1 は stateless モジュールのため空状態は無し。代わりに「�
 | 2026-09-03 | 1.7 | NRBFへ許可制のbyte配列展開と、項目名＋値のAND条件に対応する絞り込み／ジャンプ検索を追加 |
 | 2026-09-12 | 1.8 | NRBFの隠れた参照先への移動、Raw切替後の選択、仮想化treeのキー操作・フォーカス・スクロール、書記素を保つ検索強調とRaw名一致の詳細表示を明確化 |
 | 2026-09-24 | 1.9 | ADR-0021を反映。ベクター描画VEC-1を画面一覧・§6.23・アイコン対応表へ追加 (付録末尾の暫定節を移設) |
+| 2026-09-24 | 1.10 | DG-1の上部PNG書出しを2倍へ変更し、draw.ioの書出しdialogからのPNG / SVG / XMLを親の保存dialog経由で受け付け |
 
 ---
 

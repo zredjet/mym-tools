@@ -7,7 +7,7 @@ export type DrawioEvent =
   | { event: "autosave"; xml: string }
   | { event: "save"; xml: string }
   | { event: "textContent"; data: string; requestId?: string }
-  | { event: "export"; data: string; format?: string; requestId?: string }
+  | { event: "export"; data: string; format?: string; filename?: string; requestId?: string }
   | { event: "openLink"; href: string };
 
 export function drawioEditorUrl(baseUrl: string): string {
@@ -81,6 +81,7 @@ export function parseDrawioMessage(data: unknown): DrawioEvent | null {
         event: "export",
         data: value.data,
         ...(typeof value.format === "string" ? { format: value.format } : {}),
+        ...(typeof value.filename === "string" ? { filename: value.filename } : {}),
         ...(requestId == null ? {} : { requestId }),
       };
     }
@@ -110,8 +111,31 @@ export function drawioExportMessage(format: DrawioExportFormat, requestId: strin
     format,
     requestId,
     ...(format === "svg" ? { asText: true, embedImages: true, embedFonts: true } : {}),
-    ...(format === "png" ? { scale: 1, border: 0, transparent: false, currentPage: true } : {}),
+    ...(format === "png" ? { scale: 2, border: 0, transparent: false, currentPage: true } : {}),
   };
+}
+
+export interface DrawioMenuExportTarget {
+  format: "drawio" | "svg" | "png";
+  extensions: string[];
+  label: string;
+}
+
+/**
+ * Formats that draw.io's own export dialog may hand to the parent. Only the
+ * formats accepted by `diagram_write_file` (ADR-0017) are saved.
+ */
+export function drawioMenuExportTarget(format: string | undefined): DrawioMenuExportTarget | null {
+  switch (format) {
+    case "png":
+      return { format: "png", extensions: ["png"], label: "PNG" };
+    case "svg":
+      return { format: "svg", extensions: ["svg"], label: "SVG" };
+    case "xml":
+      return { format: "drawio", extensions: ["drawio", "xml"], label: "XML" };
+    default:
+      return null;
+  }
 }
 
 function nestedRequestId(value: unknown): string | undefined {

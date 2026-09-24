@@ -5,6 +5,7 @@ import {
   drawioEditorUrl,
   drawioExportMessage,
   drawioLoadMessage,
+  drawioMenuExportTarget,
   drawioTargetOrigin,
   isTrustedDrawioOrigin,
   parseDrawioMessage,
@@ -83,12 +84,33 @@ describe("draw.io parent bridge", () => {
     });
   });
 
+  it("maps draw.io menu exports to the writable formats only", () => {
+    expect(drawioMenuExportTarget("png")).toEqual({
+      format: "png",
+      extensions: ["png"],
+      label: "PNG",
+    });
+    expect(drawioMenuExportTarget("svg")?.format).toBe("svg");
+    expect(drawioMenuExportTarget("xml")).toEqual({
+      format: "drawio",
+      extensions: ["drawio", "xml"],
+      label: "XML",
+    });
+    for (const format of ["jpg", "pdf", "html", "vsdx", undefined])
+      expect(drawioMenuExportTarget(format)).toBeNull();
+    expect(
+      parseDrawioMessage(
+        JSON.stringify({ event: "export", format: "png", filename: "図.png", data: "data:x" }),
+      ),
+    ).toEqual({ event: "export", format: "png", filename: "図.png", data: "data:x" });
+  });
+
   it("exports only PNG from the currently visible page", () => {
     expect(drawioExportMessage("png", "png-1")).toEqual({
       action: "export",
       format: "png",
       requestId: "png-1",
-      scale: 1,
+      scale: 2,
       border: 0,
       transparent: false,
       currentPage: true,

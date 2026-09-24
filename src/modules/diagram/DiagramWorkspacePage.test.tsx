@@ -93,4 +93,43 @@ describe("DiagramWorkspacePage", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("PNG生成がタイムアウトしました");
     expect(diagramWriteFile).not.toHaveBeenCalled();
   });
+
+  it("saves draw.io menu exports through the native dialog and rejects other formats", async () => {
+    renderWorkspace();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const iframe = screen.getByTitle("draw.io オフラインエディタ") as HTMLIFrameElement;
+    act(() => sendEditorEvent(iframe, { event: "init" }));
+    act(() => sendEditorEvent(iframe, { event: "load" }));
+
+    const png = "data:image/png;base64,iVBORw0KGgo=";
+    act(() =>
+      sendEditorEvent(iframe, {
+        event: "export",
+        format: "png",
+        filename: "図.drawio.png",
+        data: png,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(dialog.save).toHaveBeenCalledWith({
+      defaultPath: "図.png",
+      filters: [{ name: "PNG", extensions: ["png"] }],
+    });
+    expect(diagramWriteFile).toHaveBeenCalledWith({
+      path: "/tmp/diagram.png",
+      format: "png",
+      data: png,
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    act(() => sendEditorEvent(iframe, { event: "export", format: "jpg", data: "data:x" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("PNG / SVG / XMLだけ");
+    expect(diagramWriteFile).toHaveBeenCalledTimes(1);
+  });
 });
