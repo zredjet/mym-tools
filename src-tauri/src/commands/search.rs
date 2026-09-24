@@ -8,7 +8,38 @@ use tauri::State;
 
 use crate::error::AppError;
 use crate::state::AppState;
-use crate::storage::types::{Item, SearchScope};
+use crate::storage::types::{Item, SearchPreview, SearchScope};
+
+#[tauri::command]
+pub fn core_search_previews(
+    state: State<'_, AppState>,
+    scope: SearchScope,
+    query: String,
+    module_filter: Option<Vec<String>>,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<SearchPreview>, AppError> {
+    let projections = state
+        .modules
+        .values()
+        .filter_map(|module| {
+            module
+                .search_preview_field()
+                .map(|field| (module.id().to_string(), field.to_string()))
+        })
+        .collect::<Vec<_>>();
+    state
+        .storage
+        .search_previews(
+            &scope,
+            &query,
+            module_filter.as_deref(),
+            limit.min(100),
+            offset,
+            &projections,
+        )
+        .map(|items| items.into_iter().map(SearchPreview::from).collect())
+}
 
 /// 検索 API。3 文字未満は LIKE フォールバック (`data-model.md` §8.1)。
 #[tauri::command]

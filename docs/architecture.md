@@ -554,3 +554,13 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-09-02 | 1.0 | ADR-0018を反映。PDF結合のRust処理、対応範囲、size上限、進捗・cancel、atomic replace、MSRV 1.88を追加 |
 | 2026-09-03 | 1.1 | ADR-0020を反映。NRBFの型非生成NativeAOT sidecar、IPC・上限・cancel境界、配布構成、CI検査を追加 |
 | 2026-09-03 | 1.2 | NRBF IPCへbyte配列展開許可を追加し、node上限を500,000、protocol stdout上限を256 MiBへ変更。byte配列は許可時だけ50,000要素まで展開する契約を追加 |
+
+## SVG-Edit統合（ADR-0021）
+
+`VectorWorkspacePage`がメタデータ、文書切替、未保存確認、ファイルダイアログを担当する。`VectorBridge`は文書ID・要求ID・セッションを持つ限定postMessageを担当する。専用loopback originの`host.js`がSVG-Edit 7.4.2の標準UIを初期化し、共通SVG検証とMyMyToolsのファイル操作へ接続する。ReactのDOMへ取り込んだSVG本文を挿入しない。
+
+アダプターは標準の変更イベントとUndo履歴への追加を監視する。レイヤーの表示・順序、SVG文書内タイトルなど、`elementChanged`を発火しない編集もrevisionを更新する。Undo/Redo後にレイヤーのDOMと標準エディタの一覧キャッシュが異なる場合は再同期する。レイヤーの作成・複製・改名はiframe内のHTML dialogを使い、ネイティブpromptや追加のsandbox権限を必要としない。入力中の保存要求は理由を表示して拒否し、文書読込時には入力を取り消して古い文書への変更を防ぐ。
+
+`modules/vector`のRustバックエンドはpayloadと検索テキストを検証し、ファイルの容量・形式・出力先拡張子を確認して原子的に書き出す。軽量な一覧は共通ストレージからmetadataだけをSELECTし、検索はモジュール宣言から表示用payloadをSQL投影する。既存moduleの検索結果表示と遷移先は変更しない。
+
+`prepare:drawio`と`prepare:vector`は独立して自身の生成資産を更新し、ViteのpublicDirを共有する。SVG-Edit資産はnpm固定配布物からコピーするため、通常ビルドで外部サイトへ接続しない。source mapはライセンス監査にだけ使用し、実行資産には含めない。

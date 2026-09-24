@@ -3,6 +3,8 @@ import type { NrbfNode } from "@/ipc/nrbf";
 export interface TreeRow {
   node: NrbfNode;
   depth: number;
+  positionInSet: number;
+  setSize: number;
 }
 
 export interface SearchResult {
@@ -80,6 +82,7 @@ export function buildVisibleRows(
   const depths = new Map<number, number>();
   const branchVisible = new Map<number, boolean>();
   const rows: TreeRow[] = [];
+  const siblingCounts = new Map<number | null, number>();
   for (const node of nodes) {
     const parentDepth = node.parentId == null ? -1 : (depths.get(node.parentId) ?? -1);
     const depth = parentDepth + 1;
@@ -90,9 +93,31 @@ export function buildVisibleRows(
         : node.parentId == null ||
           ((branchVisible.get(node.parentId) ?? false) && expandedIds.has(node.parentId));
     branchVisible.set(node.id, visible);
-    if (visible) rows.push({ node, depth });
+    if (visible) {
+      const positionInSet = (siblingCounts.get(node.parentId) ?? 0) + 1;
+      siblingCounts.set(node.parentId, positionInSet);
+      rows.push({ node, depth, positionInSet, setSize: 0 });
+    }
   }
+  for (const row of rows) row.setSize = siblingCounts.get(row.node.parentId)!;
   return rows;
+}
+
+/** 表示切替や折りたたみで選択が隠れたら、表示中の最寄りの祖先へ戻す。 */
+export function resolveVisibleSelection(
+  selectedId: number | null,
+  rowIndexes: ReadonlyMap<number, number>,
+  presentationById: ReadonlyMap<number, NrbfNode>,
+  allById: ReadonlyMap<number, NrbfNode>,
+): number | null {
+  const seen = new Set<number>();
+  let id = selectedId;
+  while (id != null && !seen.has(id)) {
+    if (rowIndexes.has(id)) return id;
+    seen.add(id);
+    id = (presentationById.get(id) ?? allById.get(id))?.parentId ?? null;
+  }
+  return null;
 }
 
 export function collectAncestorIds(nodes: readonly NrbfNode[], nodeId: number): number[] {

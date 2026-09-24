@@ -831,3 +831,22 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-09-02 | 1.2 | ADR-0018を反映。M-PDF Mergeのstateless契約、固有IPC、進捗・cancel、入力上限、通常PDF限定、atomic outputを追加 |
 | 2026-09-03 | 1.3 | ADR-0020を反映。M-NRBFのnode / summary / Channel契約、解析上限、型非生成sidecar、画面内検索と非永続境界を追加 |
 | 2026-09-03 | 1.4 | M-NRBFのIPCへbyte配列展開許可を追加し、500,000ノード／256 MiB protocolへ上限を変更。項目名＋値のAND条件と絞り込み／ジャンプ検索を追加 |
+
+## ベクター描画と検索投影の追加契約（ADR-0021）
+
+| 項目 | 契約 |
+|---|---|
+| id / 表示名 / カテゴリ | `vector` / ベクター描画 / `design` |
+| 状態 | stateful、既定有効、プロジェクト所属 |
+| payload | v1 `{ svg: string, text: string }`、UTF-8 20MiB / 1MiB以下 |
+| ルート | `/projects/:projectId/m/vector`、`/new`、`/edit/:itemId` |
+| 保存 | 共通CRUD、タイトル・タグ、明示保存・Cmd/Ctrl+S |
+| 固有IPC | `vector_editor_url`、`vector_read_file`、`vector_read_image`、`vector_write_file` |
+| 取込／出力 | SVG取込、PNG/JPEG/WebP埋込、SVG/PNG原子書出し |
+| 検索 | `search_preview_field() = Some("text")`、先頭120文字、編集先`/edit/:id` |
+
+`ModuleBackend::search_preview_field()`は`Option<&'static str>`を返し、デフォルトNoneは従来の検索表示データを維持する。指定フィールドはモジュール契約で定義したトップレベルの検索用文字列だけに使う。コアはこの定義からSQL投影を作り、モジュールIDをハードコードしない。`core_search_previews`のSearchPreviewは保存payloadではない。本文の大きいモジュールの一覧は`core_list_item_summaries`、編集は`core_get_item`を使う。
+
+SVG入力ポリシーは`policy.json`を共有し、DOM/XML両方で検証する。拒否理由を表示し、黙って除去しない。画像挿入と貼り付けは追加前に合計容量を確認する。変更通知はrevisionのみで、保存要求時のsnapshotだけを共通ストレージへ送る。要求ID・文書ID・source/origin/sessionの照合、30秒timeout、unmount時の解除を必須とする。
+
+変更通知にはレイヤーの表示・順序、SVG文書内タイトル、Undo/Redoも含む。レイヤー名入力はsandbox内のHTML dialogで行い、空名・重複名を拒否する。取消と同名への改名では文書を変更しない。入力中のsnapshotを拒否し、文書切替で入力を取り消す。IME変換中のEnterでは入力を確定しない。

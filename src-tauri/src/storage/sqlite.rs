@@ -194,6 +194,59 @@ fn verify_schema_version(conn: &Connection) -> Result<(), AppError> {
 }
 
 impl StorageService for SqliteStorage {
+    fn list_item_summaries(
+        &self,
+        project_id: &ProjectId,
+        module_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<crate::storage::types::ItemSummary>, AppError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare("SELECT id, project_id, module_id, title, tags, position, created_at, updated_at FROM items WHERE project_id=?1 AND module_id=?2 ORDER BY updated_at DESC, id DESC LIMIT ?3 OFFSET ?4")?;
+            let rows = stmt.query_map(params![project_id.as_str(), module_id, limit, offset], |row| {
+                let tags: String = row.get(4)?;
+                Ok((crate::storage::types::ItemSummary { id: ItemId::new(row.get::<_,String>(0)?), project_id: ProjectId::new(row.get::<_,String>(1)?), module_id: row.get(2)?, title: row.get(3)?, tags: vec![], position: row.get(5)?, created_at: row.get(6)?, updated_at: row.get(7)? }, tags))
+            })?;
+            rows.map(|result| { let (mut summary, tags) = result?; summary.tags = serde_json::from_str(&tags).map_err(|e| AppError::Io(e.to_string()))?; Ok(summary) }).collect()
+        })
+    }
+
+    fn search_previews(
+        &self,
+        scope: &SearchScope,
+        query: &str,
+        module_filter: Option<&[String]>,
+        limit: u32,
+        offset: u32,
+        projections: &[(String, String)],
+    ) -> Result<Vec<Item>, AppError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(vec![]);
+        }
+        // Identifiers come from compiled module contracts, never user SQL.
+        let mut projection = String::from("CASE");
+        for (module, field) in projections {
+            if !module.chars().all(|c| c.is_ascii_alphanumeric())
+                || field.is_empty()
+                || !field.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                return Err(AppError::Io("invalid search preview projection".into()));
+            }
+            projection.push_str(&format!(" WHEN i.module_id='{module}' THEN json_object('{field}', substr(json_extract(i.payload, '$.{field}'), 1, 120))"));
+        }
+        if projections.is_empty() {
+            projection = "i.payload".into();
+        } else {
+            projection.push_str(" ELSE i.payload END");
+        }
+        if query.chars().count() >= 3 {
+            self.search_fts(scope, query, module_filter, limit, offset, &projection)
+        } else {
+            self.search_like(scope, query, module_filter, limit, offset, &projection)
+        }
+    }
+
     fn create_project(&self, name: &str, description: Option<&str>) -> Result<Project, AppError> {
         if name.trim().is_empty() {
             return Err(AppError::Validation {
@@ -809,9 +862,9 @@ impl StorageService for SqliteStorage {
             return Ok(Vec::new());
         }
         if query_chars < 3 {
-            self.search_like(scope, query, module_filter, limit, offset)
+            self.search_like(scope, query, module_filter, limit, offset, "i.payload")
         } else {
-            self.search_fts(scope, query, module_filter, limit, offset)
+            self.search_fts(scope, query, module_filter, limit, offset, "i.payload")
         }
     }
 
@@ -1278,10 +1331,11 @@ impl SqliteStorage {
         module_filter: Option<&[String]>,
         limit: u32,
         offset: u32,
+        projection: &str,
     ) -> Result<Vec<Item>, AppError> {
-        let mut sql = String::from(
+        let mut sql = format!(
             "SELECT i.id, i.project_id, i.module_id, i.title, i.tags, i.payload_schema_version, \
-             i.payload, i.position, i.created_at, i.updated_at \
+             {projection}, i.position, i.created_at, i.updated_at \
              FROM items_fts f JOIN items i ON i.id = f.item_id \
              WHERE items_fts MATCH ?",
         );
@@ -1300,6 +1354,7 @@ impl SqliteStorage {
         module_filter: Option<&[String]>,
         limit: u32,
         offset: u32,
+        projection: &str,
     ) -> Result<Vec<Item>, AppError> {
         // SQL LIKE escape を簡易的に行う (% _ \ をエスケープ)
         let pattern = format!(
@@ -1309,9 +1364,9 @@ impl SqliteStorage {
                 .replace('%', "\\%")
                 .replace('_', "\\_")
         );
-        let mut sql = String::from(
+        let mut sql = format!(
             "SELECT i.id, i.project_id, i.module_id, i.title, i.tags, i.payload_schema_version, \
-             i.payload, i.position, i.created_at, i.updated_at \
+             {projection}, i.position, i.created_at, i.updated_at \
              FROM items i \
              WHERE (i.title LIKE ? ESCAPE '\\' OR i.tags LIKE ? ESCAPE '\\' \
                     OR i.search_text LIKE ? ESCAPE '\\')",
@@ -1482,6 +1537,148 @@ mod tests {
 
     fn in_memory_storage() -> SqliteStorage {
         SqliteStorage::open(":memory:").expect("in-memory storage")
+    }
+
+    #[test]
+    fn vector_summaries_and_previews_never_return_svg_and_keep_other_modules() {
+        let storage = Arc::new(in_memory_storage());
+        let p = storage.create_project("Vectors", None).unwrap();
+        let module: Arc<dyn ModuleBackend> = Arc::new(crate::modules::vector::VectorModule);
+        let scoped = storage.clone().scoped_for(module);
+        let text = format!("検索 sample {}", "文字".repeat(200));
+        let svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>{text}</text><!--{}--></svg>",
+            "large embedded document".repeat(10000)
+        );
+        for _ in 0..3 {
+            scoped
+                .create_item(
+                    &p.id,
+                    "作品",
+                    &["design".into()],
+                    serde_json::json!({"svg":svg,"text":text}),
+                )
+                .unwrap();
+        }
+        let list = storage
+            .list_item_summaries(&p.id, "vector", 100, 0)
+            .unwrap();
+        assert_eq!(list.len(), 3);
+        let encoded = serde_json::to_string(&list).unwrap();
+        assert!(!encoded.contains("payload"));
+        assert!(!encoded.contains("svg"));
+        assert!(encoded.len() < 2000);
+        let projections = vec![("vector".into(), "text".into())];
+        for query in ["検索", "sample"] {
+            let hits = storage
+                .search_previews(&SearchScope::Global, query, None, 100, 0, &projections)
+                .unwrap();
+            assert_eq!(hits.len(), 3);
+            for hit in hits {
+                assert!(hit.payload.get("svg").is_none());
+                assert_eq!(hit.payload["text"].as_str().unwrap().chars().count(), 120);
+            }
+        }
+        assert!(storage
+            .search(&SearchScope::Global, "sample", None, 100, 0)
+            .unwrap()[0]
+            .payload
+            .get("svg")
+            .is_some());
+        seed_search_data(&storage);
+        let old = storage
+            .search(&SearchScope::Global, "Red", None, 100, 0)
+            .unwrap();
+        let new = storage
+            .search_previews(&SearchScope::Global, "Red", None, 100, 0, &projections)
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(old).unwrap(),
+            serde_json::to_value(new).unwrap()
+        );
+        assert!(storage
+            .search_previews(
+                &SearchScope::Project {
+                    project_id: ProjectId::new("other")
+                },
+                "sample",
+                None,
+                100,
+                0,
+                &projections
+            )
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn vector_project_app_json_and_backup_roundtrip_validate_payloads() {
+        use crate::exchange::{
+            export::{build_export_data, build_project_export_data},
+            import::{apply_import, parse_export_json},
+        };
+        let storage: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+        let modules = crate::modules::registry::module_backends();
+        let registry = modules
+            .iter()
+            .map(|m| (m.id().to_owned(), m.clone()))
+            .collect();
+        let module = modules.iter().find(|m| m.id() == "vector").unwrap().clone();
+        let p = storage.create_project("図", None).unwrap();
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../scripts/svgedit/validation-fixtures.json"
+        ))
+        .unwrap();
+        let svg = fixtures[1]["svg"].as_str().unwrap();
+        let scoped = storage.clone().scoped_for(module.clone());
+        let id = scoped
+            .create_item(
+                &p.id,
+                "画像作品",
+                &["tag".into()],
+                serde_json::json!({"svg":svg,"text":""}),
+            )
+            .unwrap();
+        for exported in [
+            build_export_data(&storage, &modules, "test").unwrap(),
+            build_project_export_data(&storage, &modules, "test", &p.id).unwrap(),
+        ] {
+            let parsed = parse_export_json(&serde_json::to_string(&exported).unwrap()).unwrap();
+            let target: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+            let result = apply_import(&target, &registry, &parsed);
+            assert_eq!(result.items_inserted, 1);
+            assert_eq!(
+                target
+                    .clone()
+                    .scoped_for(module.clone())
+                    .get_item(&id)
+                    .unwrap()
+                    .payload["svg"],
+                svg
+            );
+            let mut bad = parsed;
+            bad.projects[0].items[0].payload = serde_json::json!({"svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"evil()\"/>","text":""});
+            let rejected: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+            assert_eq!(apply_import(&rejected, &registry, &bad).items_failed, 1);
+            assert!(rejected
+                .list_item_summaries(&p.id, "vector", 100, 0)
+                .unwrap()
+                .is_empty());
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let backup = dir.path().join("backup.sqlite");
+        storage.take_online_backup_to(&backup).unwrap();
+        scoped.delete_item(&id).unwrap();
+        storage.restore_online_backup_from(&backup).unwrap();
+        assert_eq!(scoped.get_item(&id).unwrap().payload["svg"], svg);
+        assert!(scoped
+            .create_item(
+                &p.id,
+                "invalid index",
+                &[],
+                serde_json::json!({"svg":svg,"text":"forged"})
+            )
+            .is_err());
     }
 
     // -------- schema initialization --------

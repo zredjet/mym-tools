@@ -30,6 +30,7 @@ describe("SettingsLifecycle", () => {
       "cron",
       "datetime",
       "diagram",
+      "vector",
       "hash",
       "http",
       "idgen",

@@ -314,7 +314,7 @@ export function PdfMergePage() {
             className={cn(
               "mb-3 flex min-h-20 items-center justify-center rounded-[var(--radius)] border border-dashed px-4 text-center transition-colors",
               dragOver
-                ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                ? "border-[var(--accent)] bg-[var(--bg-accent-soft)] text-[var(--accent)]"
                 : "border-[var(--border)] bg-[var(--bg-muted)] text-[var(--fg-muted)]",
             )}
             aria-label="PDFファイルのドロップ領域"
@@ -479,7 +479,7 @@ function SortablePdfRow({
       >
         <GripVertical size={15} aria-hidden />
       </button>
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-[var(--accent-soft)] text-[11px] font-semibold text-[var(--accent)]">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-[var(--bg-accent-soft)] text-[11px] font-semibold text-[var(--accent)]">
         {index + 1}
       </span>
       <div className="min-w-0 flex-1">

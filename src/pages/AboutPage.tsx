@@ -26,6 +26,7 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 
 import { Button } from "@/components/ui/Button";
 import { formatInvokeError } from "@/lib/error";
+import vectorNotices from "../../third_party/svgedit-NOTICES.txt?raw";
 
 const RELEASES_URL = "https://github.com/zredjet/mym-tools/releases";
 const REPO_URL = "https://github.com/zredjet/mym-tools";
@@ -199,6 +200,22 @@ export function AboutPage() {
               <button
                 type="button"
                 className="underline underline-offset-2 hover:text-[var(--fg)]"
+                onClick={() => void openExternal("https://github.com/SVG-Edit/svgedit/tree/v7.4.2")}
+              >
+                SVG-Edit 7.4.2
+              </button>{" "}
+              — MIT / Apache-2.0 ほか
+              <details className="mt-1">
+                <summary className="cursor-pointer">同梱部品のライセンス全文</summary>
+                <pre className="mt-2 max-h-64 overflow-auto text-[11px] whitespace-pre-wrap">
+                  {vectorNotices}
+                </pre>
+              </details>
+            </li>
+            <li>
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-[var(--fg)]"
                 onClick={() => void openExternal(MERMAID_URL)}
               >
                 Mermaid 11.17.2
@@ -271,6 +288,7 @@ function canonicalModuleLabel(moduleId: string): string {
     hash: "M-Hash",
     mermaid: "M-Mermaid",
     diagram: "M-Diagram",
+    vector: "ベクター描画",
   };
   return canonical[moduleId] ?? `M-${moduleId.charAt(0).toUpperCase()}${moduleId.slice(1)}`;
 }

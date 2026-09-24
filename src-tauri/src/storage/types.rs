@@ -117,6 +117,19 @@ pub struct Item {
     pub updated_at: String,
 }
 
+/// List metadata without an item's potentially large payload.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ItemSummary {
+    pub id: ItemId,
+    pub project_id: ProjectId,
+    pub module_id: String,
+    pub title: String,
+    pub tags: Vec<String>,
+    pub position: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// インポート 1 件の結果 (`data-model.md` §3.3 / §12.3)。
 ///
 /// 部分成功方式のため、`StorageService::import_project` / `import_item` は
@@ -145,6 +158,34 @@ pub enum SearchScope {
     },
     /// 全プロジェクト横断検索。
     Global,
+}
+
+/// Search-only DTO. `payload` is the module-declared projection, never suitable
+/// for saving. Fetch the item by ID when opening an editor.
+#[derive(Debug, Clone, Serialize)]
+pub struct SearchPreview {
+    #[serde(flatten)]
+    pub summary: ItemSummary,
+    pub payload_schema_version: u32,
+    pub payload: serde_json::Value,
+}
+impl From<Item> for SearchPreview {
+    fn from(item: Item) -> Self {
+        Self {
+            summary: ItemSummary {
+                id: item.id,
+                project_id: item.project_id,
+                module_id: item.module_id,
+                title: item.title,
+                tags: item.tags,
+                position: item.position,
+                created_at: item.created_at,
+                updated_at: item.updated_at,
+            },
+            payload_schema_version: item.payload_schema_version,
+            payload: item.payload,
+        }
+    }
 }
 
 #[cfg(test)]

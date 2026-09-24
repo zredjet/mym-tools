@@ -13,6 +13,27 @@ use crate::error::AppError;
 use crate::state::AppState;
 use crate::storage::types::{Item, ItemId, ProjectId};
 
+#[tauri::command]
+pub fn core_list_item_summaries(
+    state: State<'_, AppState>,
+    module_id: String,
+    project_id: String,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<crate::storage::types::ItemSummary>, AppError> {
+    state
+        .module(&module_id)
+        .ok_or_else(|| AppError::ModuleNotFound {
+            module_id: module_id.clone(),
+        })?;
+    state.storage.list_item_summaries(
+        &ProjectId::new(project_id),
+        &module_id,
+        limit.min(100),
+        offset,
+    )
+}
+
 /// プロジェクト内の `module_id` 配下 items を `updated_at DESC, id DESC` 順で取得
 /// (`StorageService::list_items`)。Eager-on-Read は発火させない。
 #[tauri::command]

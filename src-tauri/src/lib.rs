@@ -45,63 +45,91 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
-        .plugin(tauri_plugin_shell::init())
-        .setup(|app| {
-            // ユーザーデータディレクトリ解決 (`architecture.md` §8 / `data-model.md` §2)
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .map_err(|e| format!("failed to resolve app_data_dir: {e}"))?;
-            std::fs::create_dir_all(&data_dir)
-                .map_err(|e| format!("failed to create data dir {}: {e}", data_dir.display()))?;
-            let db_path = data_dir.join("data.sqlite");
-            let backups_root = data_dir.join("backups");
-            let settings_path = data_dir.join("settings.json");
-
-            // DB schema migration を **SqliteStorage::open の外** で実行する
-            // (ADR-0011 §2.4 bootstrap 経路 — `LocalBackupService` は完成済 storage を要求するため、
-            // 鶏卵問題を回避するために独立ヘルパで pre-migration backup を取得 + 適用)。
-            // 新規 DB / 既に最新版 / 未来版 (= unsupported) は no-op。失敗時は起動停止。
-            storage::bootstrap::migrate_if_needed(&db_path, &backups_root).map_err(|e| {
-                format!("DB schema migration failed for {}: {e}", db_path.display())
-            })?;
-
-            // SQLite を開いて schema 整合性チェック (`data-model.md` §4 / §13)
-            // migration が走った後なので、`verify_schema_version` は CURRENT と一致する想定
-            let sqlite_storage = Arc::new(
-                SqliteStorage::open(&db_path)
-                    .map_err(|e| format!("failed to open SQLite at {}: {e}", db_path.display()))?,
-            );
-            let storage: Arc<dyn StorageService> = sqlite_storage.clone();
-
-            // バックアップサービス (ADR-0007)
-            let backup: Arc<dyn BackupService> =
-                Arc::new(LocalBackupService::new(backups_root, Arc::clone(&storage)));
-
-            // Link / Memo 分離前の単独 Memo がある場合だけ pre-op backup を取得し、
-            // 成功後に所属移行する。失敗は既存の setup 起動失敗経路へ返す。
-            migrate_linkmemo_split_with_backup(sqlite_storage.as_ref(), || {
-                backup
-                    .take(BackupKind::PreOp {
-                        prefix: "pre-split-linkmemo".into(),
-                    })
-                    .map(|_| ())
-            })
-            .map_err(|e| format!("Link / Memo data migration failed: {e}"))?;
-
-            // 起動時 auto バックアップ判定 (`data-model.md` §13.3): 24h 経過 + revision 変化
-            // 取得は短時間 (~数百 ms) のため起動 setup 内で同期実行。失敗してもアプリは
-            // 起動し、エラーは tracing で残す (UI には次回起動時に再判定で再試行される)
-            try_take_auto_backup(backup.as_ref());
-
-            // モジュールレジストリ + storage + backup → AppState (`module-contract.md` §2)
-            let backends = modules::registry::module_backends();
-            let app_state = AppState::build(backends, storage, backup)
-                .map_err(|e| format!("AppState::build failed: {e}"))?;
-            app.manage(app_state);
-            app.manage(SettingsState::new(settings_path));
-            Ok(())
+        .plugin(tauri_plugin_shell::init());
+    // Tauri installs a default menu only on macOS. Keep Windows without a menu bar.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .menu(|app| {
+            let menu = tauri::menu::Menu::default(app)?;
+            // The default macOS Quit action terminates without requesting a
+            // window close. Route Cmd+Q through the same unsaved-document guard.
+            if let Some(tauri::menu::MenuItemKind::Submenu(application)) = menu.items()?.first() {
+                let count = application.items()?.len();
+                if count > 0 {
+                    application.remove_at(count - 1)?;
+                    application.append(&tauri::menu::MenuItem::with_id(
+                        app,
+                        "mym-close",
+                        "終了",
+                        true,
+                        Some("CmdOrCtrl+Q"),
+                    )?)?;
+                }
+            }
+            Ok(menu)
+        })
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "mym-close" {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.close();
+                }
+            }
         });
+    let builder = builder.setup(|app| {
+        // ユーザーデータディレクトリ解決 (`architecture.md` §8 / `data-model.md` §2)
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("failed to resolve app_data_dir: {e}"))?;
+        std::fs::create_dir_all(&data_dir)
+            .map_err(|e| format!("failed to create data dir {}: {e}", data_dir.display()))?;
+        let db_path = data_dir.join("data.sqlite");
+        let backups_root = data_dir.join("backups");
+        let settings_path = data_dir.join("settings.json");
+
+        // DB schema migration を **SqliteStorage::open の外** で実行する
+        // (ADR-0011 §2.4 bootstrap 経路 — `LocalBackupService` は完成済 storage を要求するため、
+        // 鶏卵問題を回避するために独立ヘルパで pre-migration backup を取得 + 適用)。
+        // 新規 DB / 既に最新版 / 未来版 (= unsupported) は no-op。失敗時は起動停止。
+        storage::bootstrap::migrate_if_needed(&db_path, &backups_root)
+            .map_err(|e| format!("DB schema migration failed for {}: {e}", db_path.display()))?;
+
+        // SQLite を開いて schema 整合性チェック (`data-model.md` §4 / §13)
+        // migration が走った後なので、`verify_schema_version` は CURRENT と一致する想定
+        let sqlite_storage = Arc::new(
+            SqliteStorage::open(&db_path)
+                .map_err(|e| format!("failed to open SQLite at {}: {e}", db_path.display()))?,
+        );
+        let storage: Arc<dyn StorageService> = sqlite_storage.clone();
+
+        // バックアップサービス (ADR-0007)
+        let backup: Arc<dyn BackupService> =
+            Arc::new(LocalBackupService::new(backups_root, Arc::clone(&storage)));
+
+        // Link / Memo 分離前の単独 Memo がある場合だけ pre-op backup を取得し、
+        // 成功後に所属移行する。失敗は既存の setup 起動失敗経路へ返す。
+        migrate_linkmemo_split_with_backup(sqlite_storage.as_ref(), || {
+            backup
+                .take(BackupKind::PreOp {
+                    prefix: "pre-split-linkmemo".into(),
+                })
+                .map(|_| ())
+        })
+        .map_err(|e| format!("Link / Memo data migration failed: {e}"))?;
+
+        // 起動時 auto バックアップ判定 (`data-model.md` §13.3): 24h 経過 + revision 変化
+        // 取得は短時間 (~数百 ms) のため起動 setup 内で同期実行。失敗してもアプリは
+        // 起動し、エラーは tracing で残す (UI には次回起動時に再判定で再試行される)
+        try_take_auto_backup(backup.as_ref());
+
+        // モジュールレジストリ + storage + backup → AppState (`module-contract.md` §2)
+        let backends = modules::registry::module_backends();
+        let app_state = AppState::build(backends, storage, backup)
+            .map_err(|e| format!("AppState::build failed: {e}"))?;
+        app.manage(app_state);
+        app.manage(SettingsState::new(settings_path));
+        Ok(())
+    });
     let builder = modules::registry::register_invoke_handler(builder);
     builder
         .run(tauri::generate_context!())

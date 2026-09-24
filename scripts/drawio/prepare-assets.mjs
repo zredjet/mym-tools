@@ -89,7 +89,8 @@ export function prepareDrawioAssets() {
     return;
   }
 
-  rmSync(GENERATED_ROOT, { recursive: true, force: true });
+  // Other offline editors share GENERATED_ROOT; only replace our own assets.
+  rmSync(TARGET_ROOT, { recursive: true, force: true });
   mkdirSync(TARGET_ROOT, { recursive: true });
 
   for (const name of CLIENT_DIRECTORIES) {

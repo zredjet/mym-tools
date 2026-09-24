@@ -27,3 +27,5 @@ pub mod registry;
 pub mod secretgen;
 pub mod textdiff;
 pub mod urlquery;
+
+pub mod vector;

@@ -1,0 +1,168 @@
+[
+  {
+    "name": "editing features",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><defs><linearGradient id=\"paint\"><stop offset=\"0\" stop-color=\"#123456\"/></linearGradient><clipPath id=\"clip\"><rect width=\"20\" height=\"20\"/></clipPath></defs><g><title>レイヤー 1</title><rect width=\"20\" height=\"20\" fill=\"url(#paint)\"/><path d=\"M0 0L10 10\"/><text>日本語 A&amp;B<tspan>文字</tspan></text><use href=\"#clip\"/></g></svg>",
+    "valid": true,
+    "text": "レイヤー 1 日本語 A&B 文字"
+  },
+  {
+    "name": "embedded PNG",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><image href=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZuoAAAAASUVORK5CYII=\" width=\"1\" height=\"1\"/></svg>",
+    "valid": true,
+    "text": ""
+  },
+  {
+    "name": "CDATA and comment",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>A<![CDATA[B]]>C<!-- separator -->D&#x20;E&#xfeff;F</text></svg>",
+    "valid": true,
+    "text": "A B C D E F"
+  },
+  {
+    "name": "prefixed namespace",
+    "svg": "<s:svg xmlns:s=\"http://www.w3.org/2000/svg\"><s:text>日本語</s:text></s:svg>",
+    "valid": true,
+    "text": "日本語"
+  },
+  {
+    "name": "internal CSS",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect style=\"fill: url('#p'); stroke: #abc\"/></svg>",
+    "valid": true,
+    "text": ""
+  },
+  {
+    "name": "script",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>",
+    "valid": false
+  },
+  {
+    "name": "event",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect onload=\"alert(1)\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "foreign object",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><foreignObject/></svg>",
+    "valid": false
+  },
+  {
+    "name": "remote image",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><image href=\"https://example.com/x.png\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "remote CSS",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect fill=\"url(https://example.com/x.svg)\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "external cursor",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect cursor=\"url(https://example.com/cursor.cur), auto\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "external color profile",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><image color-profile=\"url(https://example.com/profile.icc)\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "escaped CSS",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect fill=\"u\\72l(https://example.com/a)\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "broken CSS quote",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect fill=\"url(')\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "external use",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><use href=\"//example.com/x.svg#id\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "SVG image",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><image href=\"data:image/svg+xml;base64,PHN2Zy8+\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "mime mismatch",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><image href=\"data:image/png;base64,/9j/4A==\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "unsupported CSS",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect style=\"background-image: url(x)\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "XML base",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><g xml:base=\"https://example.com\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "animation",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><animate attributeName=\"href\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "unknown entity",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>&missing;</text></svg>",
+    "valid": false
+  },
+  {
+    "name": "foreign namespace",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect xmlns=\"https://example.com\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "DTD",
+    "svg": "<!DOCTYPE svg [<!ENTITY x \"text\">]><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    "valid": false
+  },
+  {
+    "name": "processing instruction",
+    "svg": "<?xml-stylesheet href=\"x.css\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    "valid": false
+  },
+  {
+    "name": "non UTF8",
+    "svg": "<?xml version=\"1.0\" encoding=\"shift_jis\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    "valid": false
+  },
+  {
+    "name": "root trailing entity",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"/>&amp;",
+    "valid": false
+  },
+  {
+    "name": "multiple roots",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"/><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    "valid": false
+  },
+  {
+    "name": "fragment id with scheme-like text",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><defs><linearGradient id=\"data:paint\"/></defs><rect width=\"1\" height=\"1\" fill=\"url(#data:paint)\"/></svg>",
+    "valid": true,
+    "text": ""
+  },
+  {
+    "name": "declaration after comment",
+    "svg": "<!-- first --><?xml version=\"1.0\" encoding=\"UTF-8\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    "valid": false
+  },
+  {
+    "name": "declaration after whitespace",
+    "svg": " <?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    "valid": false
+  },
+  {
+    "name": "processing instruction in comment",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><!-- <?php ?> --></svg>",
+    "valid": false
+  },
+  {
+    "name": "DTD in CDATA",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text><![CDATA[<!DOCTYPE svg>]]></text></svg>",
+    "valid": false
+  }
+]

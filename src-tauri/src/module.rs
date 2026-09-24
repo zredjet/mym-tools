@@ -54,6 +54,11 @@ impl ModuleError {
 /// 呼ばれないため)。永続データを持つモジュールは少なくとも `validate_payload` /
 /// `index_text` を override する必要がある。
 pub trait ModuleBackend: Send + Sync {
+    /// Optional text field projected by the preview API, before crossing IPC.
+    /// None preserves the existing module's complete search presentation data.
+    fn search_preview_field(&self) -> Option<&'static str> {
+        None
+    }
     /// モジュール識別子 (`module-contract.md` §3.2 `id()`)。英小文字 / 数字のみ、3〜32 文字。
     /// `items.module_id` / Tauri コマンド prefix `<id>_*` / settings 名前空間 `modules.<id>.*`
     /// で使われる。一度公開した id は変更不可。

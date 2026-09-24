@@ -10,6 +10,19 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { Item, ModuleId } from "@/lib/types";
 
+export function listItemSummaries(input: {
+  moduleId: ModuleId;
+  projectId: string;
+  limit?: number;
+  offset?: number;
+}) {
+  return invoke<import("@/lib/types").ItemSummary[]>("core_list_item_summaries", {
+    ...input,
+    limit: input.limit ?? 100,
+    offset: input.offset ?? 0,
+  });
+}
+
 export function listItems(input: {
   moduleId: ModuleId;
   projectId: string;

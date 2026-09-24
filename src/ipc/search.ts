@@ -26,3 +26,15 @@ export function search(input: {
     offset: input.offset ?? 0,
   });
 }
+
+export function searchPreviews(
+  input: Parameters<typeof search>[0],
+): Promise<import("@/lib/types").SearchPreview[]> {
+  return invoke("core_search_previews", {
+    scope: input.scope,
+    query: input.query,
+    moduleFilter: input.moduleFilter?.length ? input.moduleFilter : null,
+    limit: input.limit ?? 50,
+    offset: input.offset ?? 0,
+  });
+}

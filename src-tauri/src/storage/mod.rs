@@ -44,6 +44,25 @@ pub use types::{ImportOutcome, Item, ItemId, Project, ProjectId, SearchScope};
 /// - **メソッド追加は OK** (既存実装に default impl で済むなら)
 /// - **メソッド削除 / シグネチャ変更は ADR**(`module-contract.md` §13.1 の精神)
 pub trait StorageService: Send + Sync + std::fmt::Debug {
+    fn list_item_summaries(
+        &self,
+        project_id: &ProjectId,
+        module_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<types::ItemSummary>, AppError>;
+
+    /// Module-declared text projections keep large documents out of IPC.
+    #[allow(clippy::too_many_arguments)]
+    fn search_previews(
+        &self,
+        scope: &SearchScope,
+        query: &str,
+        module_filter: Option<&[String]>,
+        limit: u32,
+        offset: u32,
+        projections: &[(String, String)],
+    ) -> Result<Vec<Item>, AppError>;
     // -------- Project CRUD --------
 
     /// 新規プロジェクトを作成する。`id` は UUID v4 で自動生成、`created_at` / `updated_at`

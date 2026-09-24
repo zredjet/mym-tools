@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ベクター描画</title>
+    <link rel="stylesheet" href="./svgedit.css" />
+    <style>
+      body {
+        margin: 0;
+        background: #fff;
+      }
+      #container {
+        width: 100%;
+        height: 100vh;
+      }
+      #host-error {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 8px;
+        background: #fee2e2;
+        color: #991b1b;
+        z-index: 99999;
+      }
+      #tool_export,
+      #tool_export_pdf,
+      #tool_open,
+      #tool_save,
+      #tool_save_as,
+      #tool_clear,
+      #tool_import,
+      #tool_image,
+      #tool_prefs,
+      #tool_editor_prefs,
+      #tool_about {
+        display: none !important;
+      }
+      #tool_editor_homepage {
+        display: none !important;
+      }
+      #host-layer-dialog {
+        box-sizing: border-box;
+        width: min(420px, calc(100vw - 32px));
+        padding: 20px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        background: #fff;
+        color: #111827;
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
+      }
+      #host-layer-dialog::backdrop {
+        background: rgb(0 0 0 / 35%);
+      }
+      #host-layer-title {
+        margin: 0 0 16px;
+        font-size: 18px;
+      }
+      #host-layer-name {
+        box-sizing: border-box;
+        display: block;
+        width: 100%;
+        margin-top: 4px;
+        padding: 6px 8px;
+        border: 1px solid #94a3b8;
+        border-radius: 4px;
+        font: inherit;
+      }
+      #host-layer-error {
+        min-height: 21px;
+        margin: 8px 0;
+        color: #b91c1c;
+      }
+      .host-layer-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      #host-layer-dialog button {
+        padding: 6px 14px;
+        border: 1px solid #94a3b8;
+        border-radius: 4px;
+        background: #fff;
+        color: #111827;
+        font: inherit;
+        cursor: pointer;
+      }
+      #host-layer-dialog #host-layer-accept {
+        border-color: #1d4ed8;
+        background: #1d4ed8;
+        color: #fff;
+      }
+      #host-layer-dialog :focus-visible {
+        outline: 2px solid #1d4ed8;
+        outline-offset: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="container"></div>
+    <div id="host-error" role="alert" hidden></div>
+    <dialog id="host-layer-dialog" aria-labelledby="host-layer-title">
+      <h2 id="host-layer-title">レイヤー名</h2>
+      <label for="host-layer-name">レイヤー名</label>
+      <input
+        id="host-layer-name"
+        type="text"
+        aria-describedby="host-layer-error"
+        autocomplete="off"
+      />
+      <p id="host-layer-error" role="alert"></p>
+      <div class="host-layer-actions">
+        <button id="host-layer-cancel" type="button">取消</button>
+        <button id="host-layer-accept" type="button">作成</button>
+      </div>
+    </dialog>
+    <script type="module" src="./host.js"></script>
+  </body>
+</html>

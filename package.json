@@ -1,7 +1,7 @@
 {
   "name": "mym-tools",
   "private": true,
-  "version": "0.1.0-alpha.13",
+  "version": "0.1.0-alpha.14",
   "type": "module",
   "engines": {
     "node": ">=22 <23"
@@ -10,9 +10,9 @@
     "prepare:drawio": "node scripts/drawio/prepare-assets.mjs",
     "prepare:nrbf": "node scripts/nrbf/prepare-sidecar.mjs",
     "test:nrbf:smoke": "node scripts/nrbf/smoke-test.mjs",
-    "predev": "npm run prepare:drawio",
+    "predev": "npm run prepare:drawio && npm run prepare:vector",
     "dev": "vite",
-    "prebuild": "npm run prepare:drawio",
+    "prebuild": "npm run prepare:drawio && npm run prepare:vector",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -22,7 +22,10 @@
     "lint:fix": "eslint . --fix && prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepare:vector": "node scripts/svgedit/prepare-assets.mjs",
+    "test:vector:browser": "node scripts/svgedit/browser-smoke.mjs",
+    "test:vector:assets": "vitest run scripts/svgedit/prepare-assets.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -45,6 +48,7 @@
     "react-router-dom": "^7.15.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
+    "svgedit": "7.4.2",
     "temporal-polyfill": "^1.0.4",
     "ulid": "^3.0.2",
     "uuid": "^14.0.2",
@@ -52,6 +56,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.61.1",
     "@tailwindcss/vite": "^4.2.4",
     "@tauri-apps/cli": "^2.11.0",
     "@testing-library/jest-dom": "^6.9.1",

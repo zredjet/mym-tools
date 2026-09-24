@@ -20,6 +20,7 @@ describe("frontend module registry", () => {
       "palette",
       "mermaid",
       "diagram",
+      "vector",
       "codec",
       "urlquery",
       "datetime",
