@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -150,6 +150,11 @@ describe("NrbfInspectorPage", () => {
     await user.click(screen.getByRole("button", { name: "次の一致へ" }));
     expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("City");
     expect(screen.getByRole("status")).toHaveTextContent("1 / 1");
+    expect(screen.getByRole("button", { name: "次の一致へ" })).toHaveFocus();
+    const nameSearch = screen.getByRole("textbox", { name: "項目名を検索" });
+    await user.click(nameSearch);
+    await user.keyboard("{Enter}");
+    expect(nameSearch).toHaveFocus();
   });
 
   it("switches to raw field names without re-reading the file", async () => {
@@ -217,6 +222,187 @@ describe("NrbfInspectorPage", () => {
     expect(screen.getAllByRole("treeitem").length).toBeLessThan(50);
     fireEvent.keyDown(tree, { key: "ArrowDown" });
     expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("Item 0");
+    tree.focus();
+    for (let index = 0; index < 40; index++) fireEvent.keyDown(tree, { key: "ArrowDown" });
+    expect(tree.scrollTop).toBe(42 * 32 - 464);
+    const selected = screen.getByRole("treeitem", { selected: true });
+    expect(selected).toHaveTextContent("Item 40");
+    expect(tree).toHaveAttribute("aria-activedescendant", selected.id);
+    expect(selected).toHaveAttribute("aria-posinset", "41");
+    expect(selected).toHaveAttribute("aria-setsize", "5000");
+    expect(screen.getAllByRole("treeitem").every((item) => item.tabIndex === -1)).toBe(true);
+    expect(tree).toHaveFocus();
+
+    fireEvent.keyDown(tree, { key: "End" });
+    expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("Item 4999");
+    expect(tree.scrollTop).toBe(5001 * 32 - 464);
+    fireEvent.scroll(tree, { target: { scrollTop: 0 } });
+    expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("Item 4999");
+    expect(tree.scrollTop).toBe(0);
+    expect(screen.getAllByRole("treeitem").length).toBeLessThan(50);
+    fireEvent.keyDown(tree, { key: "Home" });
+    expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("$");
+    await user.tab();
+    expect(tree).not.toHaveFocus();
+    expect(screen.getAllByRole("treeitem")).not.toContain(document.activeElement);
+  });
+
+  it.each(["list", "dictionary"])(
+    "reveals hidden %s reference targets without decoding again",
+    async (kind) => {
+      const container = makeNode({
+        id: 2,
+        parentId: 1,
+        displayName: "Container",
+        typeName:
+          kind === "list"
+            ? "System.Collections.Generic.List`1[[System.String]]"
+            : "System.Collections.Generic.Dictionary`2[[System.String],[System.String]]",
+      });
+      const fields =
+        kind === "list"
+          ? [
+              makeNode({ id: 3, parentId: 2, displayName: "_items", kind: "array", shape: [1] }),
+              makeNode({
+                id: 4,
+                parentId: 3,
+                displayName: "[0]",
+                kind: "scalar",
+                formattedValue: "value",
+              }),
+              makeNode({
+                id: 5,
+                parentId: 2,
+                displayName: "_size",
+                kind: "scalar",
+                formattedValue: "1",
+              }),
+              makeNode({
+                id: 6,
+                parentId: 2,
+                displayName: "_version",
+                kind: "scalar",
+                formattedValue: "1",
+              }),
+            ]
+          : [
+              makeNode({ id: 3, parentId: 2, displayName: "Comparer" }),
+              makeNode({
+                id: 4,
+                parentId: 2,
+                displayName: "Version",
+                kind: "scalar",
+                formattedValue: "1",
+              }),
+              makeNode({
+                id: 5,
+                parentId: 2,
+                displayName: "HashSize",
+                kind: "scalar",
+                formattedValue: "0",
+              }),
+              makeNode({
+                id: 6,
+                parentId: 2,
+                displayName: "KeyValuePairs",
+                kind: "array",
+                shape: [0],
+              }),
+            ];
+      const fixture = [
+        makeNode({ id: 1, parentId: null, displayName: "$" }),
+        container,
+        ...fields,
+        makeNode({
+          id: 7,
+          parentId: 1,
+          displayName: "Shared",
+          kind: "reference",
+          referenceTargetId: 3,
+        }),
+      ];
+      resolveWith(fixture, { ...summary, nodeCount: fixture.length });
+      const user = userEvent.setup();
+      render(<NrbfInspectorPage />);
+      await user.click(screen.getByRole("button", { name: "ファイルを選択" }));
+      await user.type(await screen.findByRole("textbox", { name: "項目名を検索" }), "Shared");
+      await user.click(await screen.findByRole("treeitem", { name: /Shared/ }));
+      await user.click(screen.getByRole("button", { name: "#3へ移動" }));
+      expect(screen.getByRole("checkbox", { name: "Raw表示" })).toBeChecked();
+      expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent(
+        fields[0]!.rawName,
+      );
+      expect(screen.getByRole("tree")).toHaveFocus();
+      expect(screen.getByRole("textbox", { name: "項目名を検索" })).toHaveValue("");
+      await user.click(screen.getByRole("checkbox", { name: "Raw表示" }));
+      expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("Container");
+      expect(inspectMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("navigates parent and child rows, and reconciles a selection after collapsing", async () => {
+    const fixture = [
+      makeNode({ id: 1, parentId: null, displayName: "$" }),
+      makeNode({ id: 2, parentId: 1, displayName: "Branch" }),
+      makeNode({
+        id: 3,
+        parentId: 2,
+        displayName: "Leaf",
+        kind: "scalar",
+        formattedValue: "value",
+      }),
+    ];
+    resolveWith(fixture, { ...summary, nodeCount: fixture.length });
+    const user = userEvent.setup();
+    render(<NrbfInspectorPage />);
+    await user.click(screen.getByRole("button", { name: "ファイルを選択" }));
+    const tree = await screen.findByRole("tree");
+    tree.focus();
+    fireEvent.keyDown(tree, { key: "ArrowRight" });
+    expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("Branch");
+    fireEvent.keyDown(tree, { key: "ArrowRight" });
+    expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("Branch");
+    fireEvent.keyDown(tree, { key: "ArrowRight" });
+    expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("Leaf");
+    fireEvent.doubleClick(screen.getByRole("treeitem", { name: /Branch/ }));
+    expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("Branch");
+    expect(screen.queryByRole("treeitem", { name: /Leaf/ })).not.toBeInTheDocument();
+    fireEvent.keyDown(tree, { key: "ArrowLeft" });
+    expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("$");
+
+    await user.type(screen.getByRole("textbox", { name: "項目名を検索" }), "Leaf");
+    fireEvent.keyDown(tree, { key: "ArrowRight" });
+    fireEvent.keyDown(tree, { key: "ArrowRight" });
+    expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("Leaf");
+    fireEvent.keyDown(tree, { key: "ArrowLeft" });
+    fireEvent.keyDown(tree, { key: "ArrowLeft" });
+    expect(screen.getByRole("treeitem", { selected: true })).toHaveTextContent("$");
+    expect(screen.getAllByRole("treeitem")).toHaveLength(3);
+    expect(screen.getByRole("treeitem", { name: /Branch/ })).toHaveAttribute("aria-setsize", "1");
+
+    await user.clear(screen.getByRole("textbox", { name: "項目名を検索" }));
+    await user.type(screen.getByRole("textbox", { name: "項目名を検索" }), "absent");
+    expect(screen.queryByRole("treeitem")).not.toBeInTheDocument();
+    expect(tree).not.toHaveAttribute("aria-activedescendant");
+    expect(tree.scrollTop).toBe(0);
+  });
+
+  it("highlights only the matching original graphemes and explains raw-name-only matches", async () => {
+    resolveWith([sampleNodes[0]!, { ...sampleNodes[1]!, formattedValue: "前ｶﾞ後" }]);
+    const user = userEvent.setup();
+    render(<NrbfInspectorPage />);
+    await user.click(screen.getByRole("button", { name: "ファイルを選択" }));
+    await user.type(await screen.findByRole("textbox", { name: "値を検索" }), "ガ");
+    const row = screen.getByRole("treeitem", { name: /Name/ });
+    expect(row.querySelector("mark")).toHaveTextContent("ｶﾞ");
+    expect(row.querySelector("mark")).not.toHaveTextContent("前");
+    await user.clear(screen.getByRole("textbox", { name: "値を検索" }));
+    await user.type(screen.getByRole("textbox", { name: "項目名を検索" }), "backingfield");
+    await user.click(screen.getByRole("treeitem", { name: /Name/ }));
+    expect(row.querySelector("mark")).toBeNull();
+    expect(screen.getByText("Raw名")).toBeInTheDocument();
+    const rawValue = screen.getByText("Raw名").nextElementSibling! as HTMLElement;
+    expect(within(rawValue).getByText("BackingField", { exact: false }).tagName).toBe("MARK");
   });
 
   it("cancels an active parse", async () => {

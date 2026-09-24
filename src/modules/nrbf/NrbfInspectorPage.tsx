@@ -1,6 +1,8 @@
 import {
   useCallback,
   useEffect,
+  useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -15,7 +17,13 @@ import { Button } from "@/components/ui/Button";
 import { ToolError, ToolPage, ToolPanel, inputClass } from "@/components/ui/ToolPage";
 import { type NrbfNode, type NrbfSummary, cancelNrbfOperation, nrbfInspectFile } from "@/ipc/nrbf";
 import { cn } from "@/lib/cn";
-import { buildVisibleRows, searchNodes } from "@/modules/nrbf/tree";
+import {
+  buildVisibleRows,
+  normalizeSearchText,
+  resolveVisibleSelection,
+  searchNodes,
+} from "@/modules/nrbf/tree";
+import { findHighlightRange } from "@/modules/nrbf/highlight";
 import { createPresentationNodes } from "@/modules/nrbf/presentation";
 
 const ROW_HEIGHT = 32;
@@ -47,7 +55,13 @@ export function NrbfInspectorPage() {
   const operationRef = useRef<ActiveOperation | null>(null);
   const mountedRef = useRef(true);
   const treeRef = useRef<HTMLDivElement>(null);
-  const pendingJumpIdRef = useRef<number | null>(null);
+  const [pendingNavigation, setPendingNavigation] = useState<{
+    id: number;
+    focusTree: boolean;
+  } | null>(null);
+  const handledNavigationRef = useRef<typeof pendingNavigation>(null);
+  const previousSelectionRef = useRef<number | null>(null);
+  const treeId = useId();
 
   const replaceOperation = useCallback((next: ActiveOperation | null) => {
     operationRef.current = next;
@@ -73,7 +87,7 @@ export function NrbfInspectorPage() {
       setError(null);
       setNameQuery("");
       setValueQuery("");
-      pendingJumpIdRef.current = null;
+      setPendingNavigation(null);
       setExpandedIds(new Set());
       setSelectedId(null);
       setScrollTop(0);
@@ -173,11 +187,13 @@ export function NrbfInspectorPage() {
     setError(null);
     setNameQuery("");
     setValueQuery("");
-    pendingJumpIdRef.current = null;
+    setPendingNavigation(null);
     setExpandedIds(new Set());
     setSelectedId(null);
+    setScrollTop(0);
   }, []);
 
+  const allNodesById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
   const presentationNodes = useMemo(
     () => createPresentationNodes(nodes, rawMode),
     [nodes, rawMode],
@@ -201,27 +217,44 @@ export function NrbfInspectorPage() {
     for (const node of presentationNodes) if (node.parentId != null) result.add(node.parentId);
     return result;
   }, [presentationNodes]);
-  const selected = selectedId == null ? null : (nodesById.get(selectedId) ?? null);
+  const rowIndexes = useMemo(() => new Map(rows.map((row, index) => [row.node.id, index])), [rows]);
+  const visibleSelectedId = resolveVisibleSelection(
+    selectedId,
+    rowIndexes,
+    nodesById,
+    allNodesById,
+  );
+  if (selectedId !== visibleSelectedId) setSelectedId(visibleSelectedId);
+  const selected = visibleSelectedId == null ? null : (nodesById.get(visibleSelectedId) ?? null);
   const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
   const endIndex = Math.min(
     rows.length,
     Math.ceil((scrollTop + TREE_HEIGHT) / ROW_HEIGHT) + OVERSCAN,
   );
-  const virtualRows = rows.slice(startIndex, endIndex);
+  const virtualIndexes = Array.from(
+    { length: Math.max(0, endIndex - startIndex) },
+    (_, offset) => startIndex + offset,
+  );
+  const selectedIndex = visibleSelectedId == null ? undefined : rowIndexes.get(visibleSelectedId);
+  if (selectedIndex != null && (selectedIndex < startIndex || selectedIndex >= endIndex)) {
+    virtualIndexes.push(selectedIndex);
+    virtualIndexes.sort((a, b) => a - b);
+  }
 
   const selectNode = useCallback(
-    (nodeId: number) => {
+    (nodeId: number, focusTree = false, index = nodesById) => {
       setSelectedId(nodeId);
+      setPendingNavigation({ id: nodeId, focusTree });
       setExpandedIds((current) => {
         const next = new Set(current);
         const seen = new Set<number>();
-        let parentId = nodesById.get(nodeId)?.parentId ?? null;
+        let parentId = index.get(nodeId)?.parentId ?? null;
         while (parentId != null && !seen.has(parentId)) {
           seen.add(parentId);
           next.add(parentId);
-          parentId = nodesById.get(parentId)?.parentId ?? null;
+          parentId = index.get(parentId)?.parentId ?? null;
         }
-        return next;
+        return next.size === current.size ? current : next;
       });
     },
     [nodesById],
@@ -229,21 +262,23 @@ export function NrbfInspectorPage() {
 
   const jumpToNode = useCallback(
     (nodeId: number) => {
-      pendingJumpIdRef.current = nodeId;
+      if (!allNodesById.has(nodeId)) return;
+      const hidden = !nodesById.has(nodeId);
+      if (hidden) setRawMode(true);
       if (searchMode === "filter") {
         setNameQuery("");
         setValueQuery("");
       }
-      selectNode(nodeId);
+      selectNode(nodeId, true, hidden ? allNodesById : nodesById);
     },
-    [searchMode, selectNode],
+    [allNodesById, nodesById, searchMode, selectNode],
   );
 
   const jumpToSearchMatch = useCallback(
     (direction: -1 | 1) => {
       const matches = search?.orderedMatchIds ?? [];
       if (matches.length === 0) return;
-      const currentIndex = selectedId == null ? -1 : matches.indexOf(selectedId);
+      const currentIndex = visibleSelectedId == null ? -1 : matches.indexOf(visibleSelectedId);
       const nextIndex =
         currentIndex < 0
           ? direction === 1
@@ -251,42 +286,72 @@ export function NrbfInspectorPage() {
             : matches.length - 1
           : (currentIndex + direction + matches.length) % matches.length;
       const nodeId = matches[nextIndex]!;
-      pendingJumpIdRef.current = nodeId;
       selectNode(nodeId);
     },
-    [search, selectNode, selectedId],
+    [search, selectNode, visibleSelectedId],
   );
 
   const currentMatchIndex =
-    search == null || selectedId == null ? -1 : search.orderedMatchIds.indexOf(selectedId);
+    search == null || visibleSelectedId == null
+      ? -1
+      : search.orderedMatchIds.indexOf(visibleSelectedId);
 
-  useEffect(() => {
-    const nodeId = pendingJumpIdRef.current;
-    if (nodeId == null) return;
-    const index = rows.findIndex((row) => row.node.id === nodeId);
-    if (index < 0 || treeRef.current == null) return;
-    pendingJumpIdRef.current = null;
-    if (typeof treeRef.current.scrollTo === "function")
-      treeRef.current.scrollTo({ top: index * ROW_HEIGHT, behavior: "smooth" });
-    else treeRef.current.scrollTop = index * ROW_HEIGHT;
-  }, [rows]);
+  useLayoutEffect(() => {
+    const selectionChanged = previousSelectionRef.current !== visibleSelectedId;
+    previousSelectionRef.current = visibleSelectedId;
+    const navigation =
+      handledNavigationRef.current === pendingNavigation ? null : pendingNavigation;
+    handledNavigationRef.current = pendingNavigation;
+    const tree = treeRef.current;
+    if (tree == null) return;
+    // 行数が減った直後も、DOMと仮想表示のスクロール位置を一致させる。
+    const height = tree.clientHeight || TREE_HEIGHT;
+    let top = Math.min(tree.scrollTop, Math.max(0, rows.length * ROW_HEIGHT - height));
+    const target = navigation?.id ?? (selectionChanged ? visibleSelectedId : null);
+    const index = target == null ? undefined : rowIndexes.get(target);
+    if (index != null) {
+      const rowTop = index * ROW_HEIGHT;
+      if (rowTop < top) top = rowTop;
+      else if (rowTop + ROW_HEIGHT > top + height) top = rowTop + ROW_HEIGHT - height;
+    }
+    tree.scrollTop = top;
+    if (index != null) {
+      // ツリー自体がページ下端にかかる場合は、外側のscroll containerも補正する。
+      tree.ownerDocument.getElementById(`${treeId}-${target}`)?.scrollIntoView?.({
+        block: "nearest",
+        inline: "nearest",
+        behavior: "instant",
+      });
+    }
+    // DOMの実寸によるスクロール補正を、描画前に仮想行の範囲へ反映する。
+    // ブラウザーの非同期scrollイベントだけでは一瞬古い範囲が描画される。
+    setScrollTop(tree.scrollTop);
+    if (navigation?.focusTree) tree.focus({ preventScroll: true });
+  }, [pendingNavigation, rowIndexes, rows.length, treeId, visibleSelectedId]);
 
   const onTreeKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       if (rows.length === 0) return;
       const currentIndex = Math.max(
         0,
-        rows.findIndex((row) => row.node.id === selectedId),
+        visibleSelectedId == null ? 0 : (rowIndexes.get(visibleSelectedId) ?? 0),
       );
       const current = rows[currentIndex]!.node;
       let nextId: number | null = null;
       if (event.key === "ArrowDown")
         nextId = rows[Math.min(rows.length - 1, currentIndex + 1)]!.node.id;
       else if (event.key === "ArrowUp") nextId = rows[Math.max(0, currentIndex - 1)]!.node.id;
+      else if (event.key === "Home") nextId = rows[0]!.node.id;
+      else if (event.key === "End") nextId = rows[rows.length - 1]!.node.id;
       else if (event.key === "ArrowRight" && parentIds.has(current.id)) {
-        setExpandedIds((ids) => new Set(ids).add(current.id));
+        if (filteredSearch != null || expandedIds.has(current.id))
+          nextId =
+            rows[currentIndex + 1]?.node.parentId === current.id
+              ? rows[currentIndex + 1]!.node.id
+              : null;
+        else setExpandedIds((ids) => new Set(ids).add(current.id));
       } else if (event.key === "ArrowLeft") {
-        if (expandedIds.has(current.id)) {
+        if (filteredSearch == null && expandedIds.has(current.id)) {
           setExpandedIds((ids) => {
             const next = new Set(ids);
             next.delete(current.id);
@@ -299,7 +364,16 @@ export function NrbfInspectorPage() {
       event.preventDefault();
       if (nextId != null) selectNode(nextId);
     },
-    [expandedIds, jumpToNode, parentIds, rows, selectNode, selectedId],
+    [
+      expandedIds,
+      filteredSearch,
+      jumpToNode,
+      parentIds,
+      rowIndexes,
+      rows,
+      selectNode,
+      visibleSelectedId,
+    ],
   );
 
   return (
@@ -352,7 +426,7 @@ export function NrbfInspectorPage() {
             className={cn(
               "flex min-h-16 w-full items-center justify-center rounded-[var(--radius)] border border-dashed px-4 text-[12px] transition-colors",
               dragOver
-                ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                ? "border-[var(--accent)] bg-[var(--bg-accent-soft)] text-[var(--accent)]"
                 : "border-[var(--border)] bg-[var(--bg-muted)] text-[var(--fg-muted)]",
             )}
           >
@@ -474,15 +548,26 @@ export function NrbfInspectorPage() {
                   ref={treeRef}
                   role="tree"
                   aria-label="NRBFデータツリー"
+                  aria-activedescendant={
+                    visibleSelectedId == null ? undefined : `${treeId}-${visibleSelectedId}`
+                  }
                   tabIndex={0}
+                  onFocus={(event) => {
+                    if (
+                      event.target === event.currentTarget &&
+                      visibleSelectedId == null &&
+                      rows[0] != null
+                    )
+                      selectNode(rows[0].node.id);
+                  }}
                   onKeyDown={onTreeKeyDown}
                   onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
                   className="relative overflow-auto rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
                   style={{ height: TREE_HEIGHT }}
                 >
                   <div style={{ height: rows.length * ROW_HEIGHT, position: "relative" }}>
-                    {virtualRows.map((row, offset) => {
-                      const index = startIndex + offset;
+                    {virtualIndexes.map((index) => {
+                      const row = rows[index]!;
                       const expandable = parentIds.has(row.node.id);
                       const expanded = filteredSearch != null || expandedIds.has(row.node.id);
                       return (
@@ -490,18 +575,22 @@ export function NrbfInspectorPage() {
                           key={row.node.id}
                           type="button"
                           role="treeitem"
+                          id={`${treeId}-${row.node.id}`}
+                          tabIndex={-1}
                           aria-level={row.depth + 1}
-                          aria-selected={selectedId === row.node.id}
+                          aria-posinset={row.positionInSet}
+                          aria-setsize={row.setSize}
+                          aria-selected={visibleSelectedId === row.node.id}
                           aria-expanded={expandable ? expanded : undefined}
-                          onClick={() => selectNode(row.node.id)}
+                          onClick={() => selectNode(row.node.id, true)}
                           onDoubleClick={() => {
                             if (!expandable) return;
                             setExpandedIds((ids) => toggleSet(ids, row.node.id));
                           }}
                           className={cn(
                             "absolute left-0 flex w-full items-center gap-1 overflow-hidden border-b border-[var(--border)] px-2 text-left font-mono text-[12px]",
-                            selectedId === row.node.id
-                              ? "bg-[var(--accent-soft)] text-[var(--fg)]"
+                            visibleSelectedId === row.node.id
+                              ? "bg-[var(--bg-accent-soft)] text-[var(--fg)]"
                               : "bg-[var(--bg)] text-[var(--fg)] hover:bg-[var(--bg-muted)]",
                           )}
                           style={{
@@ -515,6 +604,7 @@ export function NrbfInspectorPage() {
                             onClick={(event) => {
                               if (!expandable || filteredSearch != null) return;
                               event.stopPropagation();
+                              treeRef.current?.focus({ preventScroll: true });
                               setExpandedIds((ids) => toggleSet(ids, row.node.id));
                             }}
                           >
@@ -557,7 +647,12 @@ export function NrbfInspectorPage() {
                 {selected == null ? (
                   <p className="text-[12px] text-[var(--fg-muted)]">ノードを選択してください。</p>
                 ) : (
-                  <NodeDetails node={selected} rawMode={rawMode} onJump={jumpToNode} />
+                  <NodeDetails
+                    node={selected}
+                    rawMode={rawMode}
+                    nameQuery={search?.matchIds.has(selected.id) ? nameQuery : ""}
+                    onJump={jumpToNode}
+                  />
                 )}
               </ToolPanel>
             </div>
@@ -580,19 +675,28 @@ export function NrbfInspectorPage() {
 function NodeDetails({
   node,
   rawMode,
+  nameQuery,
   onJump,
 }: {
   node: NrbfNode;
   rawMode: boolean;
+  nameQuery: string;
   onJump: (id: number) => void;
 }) {
+  const normalizedName = normalizeSearchText(nameQuery.trim());
+  const rawNameOnlyMatch =
+    normalizedName !== "" &&
+    normalizeSearchText(node.rawName).includes(normalizedName) &&
+    !normalizeSearchText(node.displayName).includes(normalizedName);
   return (
     <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-[12px]">
       <Detail label="名前" value={rawMode ? node.rawName : node.displayName} />
       <Detail label="種別" value={node.kind} />
       <Detail label="値" value={node.formattedValue ?? "—"} />
       <Detail label="型" value={node.typeName ?? "—"} />
-      {rawMode ? <Detail label="Raw名" value={node.rawName} /> : null}
+      {rawMode || rawNameOnlyMatch ? (
+        <Detail label="Raw名" value={<Highlight text={node.rawName} query={nameQuery} active />} />
+      ) : null}
       {rawMode ? <Detail label="Assembly" value={node.assemblyName ?? "—"} /> : null}
       {rawMode ? <Detail label="Record ID" value={node.recordId ?? "—"} /> : null}
       {rawMode ? <Detail label="Shape" value={node.shape?.join(" × ") ?? "—"} /> : null}
@@ -610,7 +714,7 @@ function NodeDetails({
   );
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
+function Detail({ label, value }: { label: string; value: ReactNode }) {
   return (
     <>
       <dt className="text-[var(--fg-muted)]">{label}</dt>
@@ -658,15 +762,15 @@ function Highlight({
   active: boolean;
 }): ReactNode {
   if (!active || query.trim() === "") return text;
-  const index = text.toLocaleLowerCase().indexOf(query.trim().toLocaleLowerCase());
-  if (index < 0) return <mark className="bg-[var(--warning)]/30 text-inherit">{text}</mark>;
+  const range = findHighlightRange(text, query);
+  if (range == null) return text;
   return (
     <>
-      {text.slice(0, index)}
-      <mark className="bg-[var(--warning)]/30 text-inherit">
-        {text.slice(index, index + query.trim().length)}
+      {text.slice(0, range.start)}
+      <mark className="bg-[var(--accent)] text-[var(--accent-fg)]">
+        {text.slice(range.start, range.end)}
       </mark>
-      {text.slice(index + query.trim().length)}
+      {text.slice(range.end)}
     </>
   );
 }
