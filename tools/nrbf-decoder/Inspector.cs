@@ -24,7 +24,8 @@ internal static class Inspector
         string path,
         bool expandByteArrays = false,
         int maximumNodes = MaximumNodes,
-        long maximumProtocolBytes = MaximumProtocolBytes)
+        long maximumProtocolBytes = MaximumProtocolBytes,
+        Action<string>? beforeExpandForTesting = null)
     {
         FileInfo file = new(path);
         if (!file.Exists) return InspectResponse.Failure("指定されたファイルがありません。");
@@ -34,11 +35,21 @@ internal static class Inspector
         Stopwatch stopwatch = Stopwatch.StartNew();
         using FileStream stream = file.OpenRead();
         if (!global::System.Formats.Nrbf.NrbfDecoder.StartsWithPayloadHeader(stream))
-            return InspectResponse.Failure("BinaryFormatter NRBFのヘッダーではありません。");
+            return InspectResponse.Failure(Diagnostics.InvalidHeader(stream));
 
-        SerializationRecord root = global::System.Formats.Nrbf.NrbfDecoder.Decode(
-            stream, out _, new PayloadOptions { UndoTruncatedTypeNames = false }, leaveOpen: false);
-        Builder builder = new(stopwatch, expandByteArrays, maximumNodes, maximumProtocolBytes);
+        SerializationRecord root;
+        try
+        {
+            root = global::System.Formats.Nrbf.NrbfDecoder.Decode(
+                stream, out _, Diagnostics.ApplicationOptions(), leaveOpen: true);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            long position = Diagnostics.SafePosition(stream);
+            return InspectResponse.Failure(Diagnostics.DecodeFailure(file, exception, position, stopwatch));
+        }
+        Builder builder = new(stopwatch, expandByteArrays, maximumNodes, maximumProtocolBytes,
+            beforeExpandForTesting);
         builder.Build(root);
         NrbfSummary summary = new(file.FullName, file.Name, file.Length, root.TypeName?.FullName,
             builder.Nodes.Count, builder.Warnings, stopwatch.ElapsedMilliseconds);
@@ -49,8 +60,10 @@ internal static class Inspector
         Stopwatch stopwatch,
         bool expandByteArrays,
         int maximumNodes,
-        long maximumProtocolBytes)
+        long maximumProtocolBytes,
+        Action<string>? beforeExpandForTesting)
     {
+        private const int MaximumExpansionFailureWarnings = 20;
         private readonly Dictionary<SerializationRecordId, int> _canonicalRecords = new();
         private readonly Stack<PendingValue> _pending = new();
         private long _searchTextBytes;
@@ -59,6 +72,7 @@ internal static class Inspector
         private bool _nodeLimitWarned;
         private bool _protocolLimitWarned;
         private bool _stopExpansion;
+        private int _expansionFailures;
 
         internal List<NrbfNode> Nodes { get; } = [];
         internal List<string> Warnings { get; } = [];
@@ -86,7 +100,71 @@ internal static class Inspector
                     AddUnsupported(omitted.ParentId, "省略", "省略", "ノード数上限");
                     break;
                 }
-                AddValue(_pending.Pop());
+                ExpandOrReportFailure(_pending.Pop());
+            }
+            if (_expansionFailures > MaximumExpansionFailureWarnings)
+            {
+                AddWarning($"展開できなかった項目は合計{_expansionFailures.ToString("N0", CultureInfo.InvariantCulture)}件です。"
+                    + $"警告には先頭{MaximumExpansionFailureWarnings}件だけを表示しています。");
+            }
+        }
+
+        /// <summary>
+        /// 1 recordの展開失敗で解析済みの木全体を捨てず、その項目だけを失敗nodeとwarningにする。
+        /// </summary>
+        private void ExpandOrReportFailure(PendingValue pending)
+        {
+            int nodesBefore = Nodes.Count;
+            try
+            {
+                beforeExpandForTesting?.Invoke(pending.RawName);
+                AddValue(pending);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                _expansionFailures++;
+                string path = DescribePath(pending);
+                string type = pending.Value is SerializationRecord record
+                    ? $"{record.RecordType} {TryFormatTypeName(record)}".TrimEnd()
+                    : pending.Value?.GetType().FullName ?? "null";
+                if (_expansionFailures <= MaximumExpansionFailureWarnings)
+                    AddWarning($"{path}（{type}）を展開できませんでした: {Diagnostics.Describe(exception)}");
+                // 親nodeだけ追加済みなら、その子として失敗理由を残す。
+                int? parentId = Nodes.Count > nodesBefore ? nodesBefore + 1 : pending.ParentId;
+                string name = Nodes.Count > nodesBefore ? "展開失敗" : pending.DisplayName;
+                string rawName = Nodes.Count > nodesBefore ? "展開失敗" : pending.RawName;
+                AddUnsupported(parentId, name, rawName,
+                    $"展開失敗 ({exception.GetType().Name}: {Diagnostics.Limit(exception.Message, 200)})");
+            }
+        }
+
+        private string DescribePath(PendingValue pending)
+        {
+            List<string> segments = [pending.RawName];
+            for (int? parentId = pending.ParentId; parentId is int id && segments.Count < 64;
+                parentId = Nodes[id - 1].ParentId)
+            {
+                segments.Add(Nodes[id - 1].RawName);
+            }
+            segments.Reverse();
+            StringBuilder path = new();
+            foreach (string segment in segments)
+            {
+                if (path.Length > 0 && !segment.StartsWith('[')) path.Append('.');
+                path.Append(segment);
+            }
+            return Diagnostics.Limit(path.ToString(), 300);
+        }
+
+        private static string TryFormatTypeName(SerializationRecord record)
+        {
+            try
+            {
+                return record.TypeName?.FullName ?? string.Empty;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                return string.Empty;
             }
         }
 

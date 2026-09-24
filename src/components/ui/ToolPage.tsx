@@ -71,7 +71,7 @@ export function ToolError({ message }: { message: string | null }) {
   return (
     <p
       role="alert"
-      className="rounded-[var(--radius)] border border-[var(--destructive)] bg-[var(--destructive)]/10 p-2 text-[12px] text-[var(--destructive)]"
+      className="rounded-[var(--radius)] border border-[var(--destructive)] bg-[var(--destructive)]/10 p-2 text-[12px] break-words whitespace-pre-wrap text-[var(--destructive)]"
     >
       {message}
     </p>

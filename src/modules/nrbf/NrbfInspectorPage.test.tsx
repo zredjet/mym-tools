@@ -99,6 +99,21 @@ describe("NrbfInspectorPage", () => {
     expect(inspectMock).toHaveBeenCalledWith(expect.objectContaining({ expandByteArrays: false }));
   });
 
+  it("shows multi-line sidecar error details and copies them", async () => {
+    const reason =
+      "NRBFデータを解析できません。\n\n【詳細】\n例外: System.Runtime.Serialization.SerializationException: Invalid type name.\n診断: 該当する型名 1件:\n  - 複雑さ 24: Sample.Many`22";
+    inspectMock.mockRejectedValue({ code: "validation", message: { module_id: "nrbf", reason } });
+    const user = userEvent.setup();
+    render(<NrbfInspectorPage />);
+    await user.click(screen.getByRole("button", { name: "ファイルを選択" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(reason);
+    expect(alert).toHaveClass("whitespace-pre-wrap");
+    await user.click(screen.getByRole("button", { name: "エラー詳細をコピー" }));
+    await expect(navigator.clipboard.readText()).resolves.toBe(reason);
+  });
+
   it("expands byte arrays only when explicitly allowed for the next read", async () => {
     const user = userEvent.setup();
     render(<NrbfInspectorPage />);

@@ -1,4 +1,4 @@
-using System.Runtime.Serialization;
+using System.Text;
 using System.Text.Json;
 
 namespace MyMyTools.NrbfDecoder;
@@ -22,6 +22,14 @@ internal static class Program
         return response.Ok ? 0 : 1;
     }
 
+    private static InspectResponse Failure(string headline, Exception exception)
+    {
+        StringBuilder message = new(headline);
+        message.Append("\n\n【詳細】");
+        Diagnostics.AppendException(message, exception);
+        return InspectResponse.Failure(message.ToString());
+    }
+
     internal static InspectResponse InspectArgs(string[] args)
     {
         try
@@ -36,19 +44,11 @@ internal static class Program
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return InspectResponse.Failure($"ファイルを読み込めません: {exception.Message}");
+            return Failure("ファイルを読み込めません。", exception);
         }
-        catch (Exception exception) when (exception is SerializationException or InvalidDataException)
+        catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            return InspectResponse.Failure($"NRBFデータを解析できません: {exception.Message}");
-        }
-        catch (Exception exception) when (exception is NotSupportedException or ArgumentException)
-        {
-            return InspectResponse.Failure($"対応していないNRBF形式です: {exception.Message}");
-        }
-        catch (Exception exception)
-        {
-            return InspectResponse.Failure($"NRBFデコーダーで予期しないエラーが発生しました: {exception.Message}");
+            return Failure("NRBFデコーダーで予期しないエラーが発生しました。", exception);
         }
     }
 }

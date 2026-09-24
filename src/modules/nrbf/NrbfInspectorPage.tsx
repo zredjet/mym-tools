@@ -14,7 +14,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
 import { Button } from "@/components/ui/Button";
-import { ToolError, ToolPage, ToolPanel, inputClass } from "@/components/ui/ToolPage";
+import { CopyButton, ToolError, ToolPage, ToolPanel, inputClass } from "@/components/ui/ToolPage";
 import { type NrbfNode, type NrbfSummary, cancelNrbfOperation, nrbfInspectFile } from "@/ipc/nrbf";
 import { cn } from "@/lib/cn";
 import {
@@ -446,6 +446,11 @@ export function NrbfInspectorPage() {
             </div>
           ) : null}
           <ToolError message={error} />
+          {error != null ? (
+            <div className="mt-2 flex justify-end">
+              <CopyButton text={error} label="エラー詳細をコピー" />
+            </div>
+          ) : null}
           {summary != null ? (
             <p className="mt-2 text-[11px] text-[var(--fg-muted)]">
               {formatBytes(summary.fileSizeBytes)} · {summary.nodeCount.toLocaleString()}ノード ·{" "}
@@ -657,7 +662,10 @@ export function NrbfInspectorPage() {
               </ToolPanel>
             </div>
             {summary != null && summary.warnings.length > 0 ? (
-              <ToolPanel title={`警告 · ${summary.warnings.length}`}>
+              <ToolPanel
+                title={`警告 · ${summary.warnings.length}`}
+                actions={<CopyButton text={summary.warnings.join("\n")} label="警告をコピー" />}
+              >
                 <ul className="list-disc space-y-1 pl-5 text-[12px] text-[var(--fg-muted)]">
                   {summary.warnings.map((warning) => (
                     <li key={warning}>{warning}</li>

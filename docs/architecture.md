@@ -462,6 +462,9 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 - .NET 10 NativeAOT sidecarは`System.Formats.Nrbf 10.0.11`の`NrbfDecoder`だけを使い、assembly / 型をロードしない。`BinaryFormatter`、`Deserialize`、任意型生成はソース検査で禁止する
 - record graphは反復走査する。最初のrecordを正規ノードとし、共有参照・循環参照は参照ノードにして再展開しない。byte配列は既定で長さだけを返し、`expandByteArrays`がtrueの場合だけ最大50,000要素を展開する。多次元配列は安全に展開できない場合shapeだけを返す
 - sidecar内の上限は500,000ノード、1配列50,000展開要素、1スカラー1 MiB、検索対象文字列32 MiB、protocol出力256 MiB、55秒とする。500,000個の最小ノードだけでも見積り上約128 MiBとなるため、protocol上限は256 MiBとする。部分超過では可能な解析結果を維持し、省略ノードとwarningを返す。Rust側60秒をhard timeoutとする
+- 解析失敗は1行目に日本語の分類、続く「【詳細】」に例外型・メッセージ・内部例外、読込位置（FileStreamのbuffer単位の概算）、非対応record種別、非NRBF fileの先頭16 byteと推定形式を返す。`EndOfStreamException`は途中切れ、`DecoderFallbackException`は不正UTF-8として分類する
+- 既定の`TypeNameParseOptions.MaxNodes`（20）超過などで`SerializationException`になった場合だけ、上限1,024・`UndoTruncatedTypeNames=true`で1回だけ再decodeし、上限を超えた型名（最大10件）または切り詰め型名の可能性を報告する。再decodeの結果treeは返さず、通常解析の上限は変更しない。初回decodeが20秒以上かかった場合は再decodeを省略する
+- tree構築中に1 recordの展開が例外になった場合は解析済みtreeを維持し、そのnodeを`unsupported`（展開失敗）にしてpath・record種別・型名・例外をwarningへ記録する（先頭20件、以降は件数のみ）
 - 対象は先頭にNRBF headerを持つ既定`FormatterTypeStyle.TypesAlways` payloadであり、圧縮、暗号化、独自header、非ゼロ下限配列を扱わない。読み取り専用とし、編集・再シリアライズ・JSON出力を提供しない
 
 ---

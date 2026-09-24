@@ -371,6 +371,101 @@ public sealed class InspectorTests
     }
 
     [Fact]
+    public void ReportsTruncatedPayloadsAsEndOfDataWithPosition()
+    {
+        byte[] complete = BuildStringPayload("途中で切れる");
+        using TemporaryFile file = new(complete[..^1]);
+
+        InspectResponse response = Program.InspectArgs(["--inspect", file.Path]);
+
+        Assert.False(response.Ok);
+        Assert.StartsWith("NRBFデータが途中で終わっています", response.Error);
+        Assert.Contains("System.IO.EndOfStreamException", response.Error);
+        Assert.Contains($"/ {complete.Length - 1} バイト", response.Error);
+    }
+
+    [Fact]
+    public void ListsTypeNamesAboveTheDefaultComplexityLimit()
+    {
+        string arguments = string.Join(",",
+            Enumerable.Range(0, 22).Select(index => $"[Sample.T{index}, Sample.Assembly]"));
+        string typeName = $"Sample.Many`22[{arguments}]";
+        using MemoryStream payload = Header();
+        WriteLibrary(payload);
+        WriteClassHeader(payload, 1, typeName, ["<Value>k__BackingField"], [0], [8]);
+        WriteInt32(payload, 42);
+        payload.WriteByte(11);
+        using TemporaryFile file = new(payload.ToArray());
+
+        InspectResponse response = Inspector.Inspect(file.Path);
+
+        Assert.False(response.Ok);
+        Assert.StartsWith("NRBFデータを解析できません。", response.Error);
+        Assert.Contains("SerializationException", response.Error);
+        Assert.Contains($"既定上限（{Diagnostics.DefaultTypeNameMaxNodes}）", response.Error);
+        Assert.Contains("複雑さ 24: Sample.Many`22[[Sample.T0, Sample.Assembly]", response.Error);
+    }
+
+    [Fact]
+    public void ExplainsRecordsWrittenWithoutMemberTypes()
+    {
+        using MemoryStream payload = Header();
+        WriteLibrary(payload);
+        payload.WriteByte(3); // ClassWithMembers
+        WriteInt32(payload, 1);
+        WriteString(payload, "Sample.Untyped");
+        WriteInt32(payload, 0);
+        WriteInt32(payload, 10);
+        payload.WriteByte(11);
+        using TemporaryFile file = new(payload.ToArray());
+
+        InspectResponse response = Inspector.Inspect(file.Path);
+
+        Assert.False(response.Ok);
+        Assert.StartsWith("対応していないNRBF形式です。", response.Error);
+        Assert.Contains("ClassWithMembers (3)", response.Error);
+        Assert.Contains("TypesAlways以外", response.Error);
+    }
+
+    [Fact]
+    public void ShowsLeadingBytesAndSignatureForNonNrbfFiles()
+    {
+        using TemporaryFile file = new([0x1F, 0x8B, 0x08, 0x00]);
+
+        InspectResponse response = Inspector.Inspect(file.Path);
+
+        Assert.False(response.Ok);
+        Assert.Contains("先頭4バイト: 1F8B0800", response.Error);
+        Assert.Contains("gzip", response.Error);
+    }
+
+    [Fact]
+    public void KeepsTheTreeWhenOneMemberFailsToExpand()
+    {
+        using MemoryStream payload = Header();
+        WriteLibrary(payload);
+        WriteClassHeader(payload, 1, "Sample.Pair", ["A", "B"], [0, 0], [8, 8]);
+        WriteInt32(payload, 1);
+        WriteInt32(payload, 2);
+        payload.WriteByte(11);
+        using TemporaryFile file = new(payload.ToArray());
+
+        InspectResponse response = Inspector.Inspect(file.Path, beforeExpandForTesting: rawName =>
+        {
+            if (rawName == "A") throw new InvalidOperationException("テスト用の失敗");
+        });
+
+        Assert.True(response.Ok);
+        Assert.Equal(["object", "unsupported", "scalar"], response.Nodes.Select(node => node.Kind));
+        Assert.Equal("A", response.Nodes[1].RawName);
+        Assert.Contains("展開失敗 (InvalidOperationException: テスト用の失敗)", response.Nodes[1].FormattedValue);
+        Assert.Equal("2", response.Nodes[2].FormattedValue);
+        string warning = Assert.Single(response.Summary!.Warnings);
+        Assert.Contains("$.A", warning);
+        Assert.Contains("System.InvalidOperationException: テスト用の失敗", warning);
+    }
+
+    [Fact]
     public void RejectsAnInvalidHeaderInJapanese()
     {
         using TemporaryFile file = new([1, 2, 3, 4]);
