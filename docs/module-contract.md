@@ -767,6 +767,8 @@ sidecarは`System.Formats.Nrbf`で型を生成せずに読み、`BinaryFormatter
 
 byte配列は`expandByteArrays = false`では長さだけを表示する。trueの場合だけ各byteをscalar nodeとして展開し、50,000要素を超える配列は他の配列と同様に省略nodeとwarningへ変換する。
 
+解析失敗時の`error`は1行目の日本語分類に続けて「【詳細】」ブロックを持つ複数行文字列とし、例外型・メッセージ・読込位置・非対応record種別・非NRBF fileの先頭byteを含める。型名の上限超過が疑われる`SerializationException`では、結果を返さない診断用の再decodeで該当型名を列挙する。tree構築中の個別record失敗は`unsupported`の展開失敗nodeとwarningにし、他のnodeを返す。UIはerrorを改行どおりに表示し、errorとwarningをコピーできる。
+
 入力、node、summary、検索条件はfrontend stateだけに保持し、items、設定、履歴、横断検索、export / importへ保存しない。DB schemaと既存ModuleBackend / ModuleDefinition契約は変更しない。
 
 ### 12.11 Stateless 開発ツール

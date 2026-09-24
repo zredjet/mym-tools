@@ -102,6 +102,32 @@ try {
     ["--expand-byte-arrays"],
   );
 
+  const genericArguments = Array.from(
+    { length: 22 },
+    (_, index) => `[Sample.T${index}, Sample.Assembly]`,
+  ).join(",");
+  runFailureFixture(
+    "complex-type-name.bin",
+    Buffer.concat([
+      header(),
+      Buffer.from([12]),
+      int32(10),
+      nrbfString("Sample.Assembly"),
+      Buffer.from([5]),
+      int32(1),
+      nrbfString(`Sample.Many\`22[${genericArguments}]`),
+      int32(1),
+      nrbfString("<Value>k__BackingField"),
+      Buffer.from([0, 8]),
+      int32(10),
+      int32(42),
+      Buffer.from([11]),
+    ]),
+    (error) =>
+      error.includes("System.Runtime.Serialization.SerializationException") &&
+      error.includes("複雑さ 24: Sample.Many`22"),
+  );
+
   process.stdout.write(`NativeAOT NRBF smoke test passed: ${target}\n`);
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
@@ -121,6 +147,21 @@ function runFixture(fileName, payload, validate, extraArguments = []) {
   const response = JSON.parse(result.stdout);
   if (response.ok !== true || !validate(response)) {
     throw new Error(`unexpected sidecar response for ${fileName}: ${result.stdout}`);
+  }
+}
+
+function runFailureFixture(fileName, payload, validateError) {
+  const payloadPath = join(temporaryDirectory, fileName);
+  writeFileSync(payloadPath, payload);
+  const result = spawnSync(sidecar, ["--inspect", payloadPath], {
+    encoding: "utf8",
+    timeout: 30_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  const response = JSON.parse(result.stdout);
+  if (result.status !== 1 || response.ok !== false || !validateError(response.error ?? "")) {
+    throw new Error(`unexpected sidecar failure response for ${fileName}: ${result.stdout}`);
   }
 }
 
