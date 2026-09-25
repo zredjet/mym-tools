@@ -23,19 +23,41 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use tokio_util::sync::CancellationToken;
 
 use crate::error::AppError;
 
+/// 登録前に届いたキャンセル要求を覚えておく時間。
+const PENDING_CANCEL_TTL: Duration = Duration::from_secs(30);
+/// 覚えておく未登録キャンセルの上限 (連打や完了済み ID のキャンセルで膨らまないように)。
+const PENDING_CANCEL_LIMIT: usize = 256;
+
 /// 操作レジストリ。`AppState.operations` で `Arc<Self>` として保持される。
 #[derive(Default)]
 pub struct OperationRegistry {
-    /// `operation_id` (フロント発行 UUID v4) → `CancellationToken` の対応表。
     /// `std::sync::Mutex` を選ぶ理由: ロック区間は HashMap 操作のみ (μs オーダ) /
     /// await をまたいで保持しない / spawn_blocking からも安全に取得できる
     /// (ADR-0009 §2.2)。
-    inner: Mutex<HashMap<String, CancellationToken>>,
+    inner: Mutex<RegistryInner>,
+}
+
+#[derive(Default)]
+struct RegistryInner {
+    /// `operation_id` (フロント発行 UUID v4) → `CancellationToken` の対応表。
+    active: HashMap<String, CancellationToken>,
+    /// まだ `register` されていない ID へのキャンセル要求 (受信時刻)。
+    /// フロントが開始直後にキャンセルし、`core_cancel_operation` が操作コマンドより先に
+    /// 処理された場合でも、後から `register` した時点でキャンセル済みにする。
+    pending_cancels: HashMap<String, Instant>,
+}
+
+impl RegistryInner {
+    fn prune_pending(&mut self, now: Instant) {
+        self.pending_cancels
+            .retain(|_, received| now.duration_since(*received) < PENDING_CANCEL_TTL);
+    }
 }
 
 impl OperationRegistry {
@@ -52,21 +74,33 @@ impl OperationRegistry {
     /// # Panics
     /// 内部 Mutex が poison していた場合に panic (ADR-0009 §2.2: 通常運用では理論上発生しない)。
     pub fn register(&self, id: String) -> Result<CancellationToken, AppError> {
-        let mut map = self.inner.lock().expect("operation registry poisoned");
-        if map.contains_key(&id) {
+        let mut inner = self.inner.lock().expect("operation registry poisoned");
+        if inner.active.contains_key(&id) {
             return Err(AppError::OperationAlreadyExists { operation_id: id });
         }
+        inner.prune_pending(Instant::now());
         let token = CancellationToken::new();
-        map.insert(id, token.clone());
+        if inner.pending_cancels.remove(&id).is_some() {
+            // 登録前にキャンセルが届いていた
+            token.cancel();
+        }
+        inner.active.insert(id, token.clone());
         Ok(token)
     }
 
     /// キャンセル。該当 ID なし / 既に完了済みでも no-op で何も返さない
     /// (ADR-0009 §2 表: `core_cancel_operation` の冪等性。フロントが連打しても安全)。
+    /// 未登録の ID は、登録前に届いた要求として `PENDING_CANCEL_TTL` の間だけ覚えておく。
     pub fn cancel(&self, id: &str) {
-        if let Ok(map) = self.inner.lock() {
-            if let Some(token) = map.get(id) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if let Some(token) = inner.active.get(id) {
                 token.cancel();
+                return;
+            }
+            let now = Instant::now();
+            inner.prune_pending(now);
+            if inner.pending_cancels.len() < PENDING_CANCEL_LIMIT {
+                inner.pending_cancels.insert(id.to_string(), now);
             }
         }
         // poison 時はログのみ。Drop 中の panic 二重化を避けるため (ADR-0009 §2.2)
@@ -76,8 +110,8 @@ impl OperationRegistry {
     /// poison 時もログのみで panic させない (Drop 中 panic 二重化回避、ADR-0009 §2.2)。
     pub fn deregister(&self, id: &str) {
         match self.inner.lock() {
-            Ok(mut map) => {
-                map.remove(id);
+            Ok(mut inner) => {
+                inner.active.remove(id);
             }
             Err(_) => {
                 tracing::error!(
@@ -90,7 +124,10 @@ impl OperationRegistry {
 
     /// 現在登録されているオペレーション数 (主にテスト用)。
     pub fn len(&self) -> usize {
-        self.inner.lock().map(|m| m.len()).unwrap_or(0)
+        self.inner
+            .lock()
+            .map(|inner| inner.active.len())
+            .unwrap_or(0)
     }
 
     /// `len() == 0` の便宜 (clippy::len_without_is_empty 抑止)。
@@ -270,5 +307,41 @@ mod tests {
         child.cancel();
         // child キャンセルは parent に伝播しない
         assert!(!parent.is_cancelled());
+    }
+
+    #[test]
+    fn cancel_before_register_is_applied_on_register() {
+        let r = OperationRegistry::new();
+        // フロントが開始直後にキャンセルし、キャンセルのコマンドが先に処理されたケース
+        r.cancel("op-early");
+        let token = r.register("op-early".into()).unwrap();
+        assert!(token.is_cancelled());
+        // 他の ID には影響しない
+        assert!(!r.register("op-other".into()).unwrap().is_cancelled());
+    }
+
+    #[test]
+    fn pending_cancel_expires_after_ttl() {
+        let r = OperationRegistry::new();
+        {
+            let mut inner = r.inner.lock().unwrap();
+            let old = Instant::now()
+                .checked_sub(PENDING_CANCEL_TTL + Duration::from_secs(1))
+                .unwrap();
+            inner.pending_cancels.insert("op-stale".into(), old);
+        }
+        assert!(!r.register("op-stale".into()).unwrap().is_cancelled());
+    }
+
+    #[test]
+    fn pending_cancels_are_capped() {
+        let r = OperationRegistry::new();
+        for i in 0..(PENDING_CANCEL_LIMIT + 50) {
+            r.cancel(&format!("unknown-{i}"));
+        }
+        assert_eq!(
+            r.inner.lock().unwrap().pending_cancels.len(),
+            PENDING_CANCEL_LIMIT
+        );
     }
 }

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
-use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
 use crate::error::AppError;
@@ -60,7 +60,8 @@ pub async fn nrbf_inspect_file(
     let (mut receiver, child) = command.spawn().map_err(|error| {
         AppError::Internal(format!("NRBFデコーダーの起動に失敗しました: {error}"))
     })?;
-    let mut child = Some(child);
+    // コマンドの future が途中で破棄されても (アプリ終了など) sidecar を残さない
+    let mut child = SidecarChild(Some(child));
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let timeout = tokio::time::sleep(Duration::from_secs(60));
@@ -69,23 +70,23 @@ pub async fn nrbf_inspect_file(
     loop {
         tokio::select! {
             _ = token.cancelled() => {
-                if let Some(process) = child.take() { let _ = process.kill(); }
+                child.kill();
                 send_progress(&on_progress, &operation_id, NrbfProgress::Cancelled);
                 return Err(AppError::Cancelled { operation_id });
             }
             _ = &mut timeout => {
-                if let Some(process) = child.take() { let _ = process.kill(); }
+                child.kill();
                 return Err(AppError::Internal("NRBF解析が60秒の上限を超えたため停止しました。".into()));
             }
             event = receiver.recv() => {
                 let Some(event) = event else {
-                    if let Some(process) = child.take() { let _ = process.kill(); }
+                    child.kill();
                     return Err(AppError::Internal("NRBFデコーダーとの通信が途中で終了しました。".into()));
                 };
                 match event {
                     CommandEvent::Stdout(bytes) => {
                         if stdout.len().saturating_add(bytes.len()) > MAXIMUM_PROTOCOL_BYTES {
-                            if let Some(process) = child.take() { let _ = process.kill(); }
+                            child.kill();
                             return Err(AppError::Internal("NRBF解析結果が256 MiBの出力上限を超えました。".into()));
                         }
                         stdout.extend_from_slice(&bytes);
@@ -95,11 +96,12 @@ pub async fn nrbf_inspect_file(
                         stderr.extend_from_slice(&bytes[..bytes.len().min(remaining)]);
                     }
                     CommandEvent::Error(error) => {
-                        if let Some(process) = child.take() { let _ = process.kill(); }
+                        child.kill();
                         return Err(AppError::Internal(format!("NRBFデコーダーとの通信に失敗しました: {error}")));
                     }
                     CommandEvent::Terminated(status) => {
-                        child.take();
+                        // 自然終了したので kill しない
+                        child.disarm();
                         // 最大 256 MiB の JSON 解析と 50 万ノードの検証は async worker を塞がないよう
                         // blocking thread で行う
                         let stdout = std::mem::take(&mut stdout);
@@ -132,6 +134,28 @@ pub async fn nrbf_inspect_file(
                 }
             }
         }
+    }
+}
+
+/// Drop 時に sidecar を kill するガード。キャンセル・タイムアウト・エラーでは明示的に
+/// `kill`、自然終了では `disarm` し、それ以外 (future の破棄) でも子プロセスを残さない。
+struct SidecarChild(Option<CommandChild>);
+
+impl SidecarChild {
+    fn kill(&mut self) {
+        if let Some(process) = self.0.take() {
+            let _ = process.kill();
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.0.take();
+    }
+}
+
+impl Drop for SidecarChild {
+    fn drop(&mut self) {
+        self.kill();
     }
 }
 
