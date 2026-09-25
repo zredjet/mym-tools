@@ -1,0 +1,46 @@
+zlib licence for the code adapted into shotq from zlib's adler32.c (adler32_combine_,
+now fn adler32_combine in src/main.rs). shotq's own code is MIT OR Apache-2.0; only the
+adapted portion is under this licence. The text below is reproduced verbatim from
+zlib 1.3.1, https://github.com/madler/zlib, tag v1.3.1
+(commit 51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf): first the file header of adler32.c,
+then the copyright notice in zlib.h that it refers to. What shotq changed is recorded
+in THIRD_PARTY_NOTICES.md.
+
+---------------------------------------------------------------- adler32.c, lines 1-4
+
+/* adler32.c -- compute the Adler-32 checksum of a data stream
+ * Copyright (C) 1995-2011, 2016 Mark Adler
+ * For conditions of distribution and use, see copyright notice in zlib.h
+ */
+
+---------------------------------------------------------------- zlib.h, lines 1-29
+
+/* zlib.h -- interface of the 'zlib' general purpose compression library
+  version 1.3.1, January 22nd, 2024
+
+  Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler
+
+  This software is provided 'as-is', without any express or implied
+  warranty.  In no event will the authors be held liable for any damages
+  arising from the use of this software.
+
+  Permission is granted to anyone to use this software for any purpose,
+  including commercial applications, and to alter it and redistribute it
+  freely, subject to the following restrictions:
+
+  1. The origin of this software must not be misrepresented; you must not
+     claim that you wrote the original software. If you use this software
+     in a product, an acknowledgment in the product documentation would be
+     appreciated but is not required.
+  2. Altered source versions must be plainly marked as such, and must not be
+     misrepresented as being the original software.
+  3. This notice may not be removed or altered from any source distribution.
+
+  Jean-loup Gailly        Mark Adler
+  jloup@gzip.org          madler@alumni.caltech.edu
+
+
+  The data format used by the zlib library is described by RFCs (Request for
+  Comments) 1950 to 1952 in the files http://tools.ietf.org/html/rfc1950
+  (zlib format), rfc1951 (deflate format) and rfc1952 (gzip format).
+*/

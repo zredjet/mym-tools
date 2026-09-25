@@ -6,10 +6,12 @@ MyMyTools includes the following third-party components in its distributed binar
 - draw.io 31.4.1, commit `fea5e877f3e6f849331ad09894f7edb9771708fa` — Apache License 2.0 — <https://github.com/jgraph/drawio/tree/fea5e877f3e6f849331ad09894f7edb9771708fa>
 - lopdf 0.44.0 — MIT License — <https://github.com/J-F-Liu/lopdf/tree/v0.44.0>
 - System.Formats.Nrbf 10.0.11 / .NET NativeAOT runtime — MIT License — <https://github.com/dotnet/runtime/tree/v10.0.11>
+- shotq 0.23.2 (library part, vendored in `src-tauri/crates/shotq`) — MIT License (shotq is MIT OR Apache-2.0) — includes code adapted from zlib (`adler32.c`, puff) and links libdeflate (MIT), libdeflater (Apache-2.0), zlib-rs (Zlib), qcms (MIT) and other crates listed in [shotq-NOTICES.txt](third_party/shotq-NOTICES.txt)
 
 The complete license texts are embedded in the application assets at
 `licenses/mermaid-LICENSE.txt`, `licenses/drawio-LICENSE.txt`,
-`licenses/lopdf-LICENSE.txt`, and `licenses/system-formats-nrbf-LICENSE.txt`.
+`licenses/lopdf-LICENSE.txt`, `licenses/system-formats-nrbf-LICENSE.txt`, and
+`licenses/shotq-NOTICES.txt`.
 MyMyTools does not use the official Mermaid or draw.io logos.
 
 ## SVG-Edit 7.4.2

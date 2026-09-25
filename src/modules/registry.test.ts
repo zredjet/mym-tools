@@ -33,6 +33,7 @@ describe("frontend module registry", () => {
       "a11y",
       "http",
       "pdfmerge",
+      "pngopt",
       "nrbf",
     ]);
     expect(() => validateModuleDefinitions(modules)).not.toThrow();

@@ -71,6 +71,11 @@ lopdf = { version = "0.44", default-features = false }
 # lopdf 0.44の許容範囲でaes 0.9.3を選ぶとRust 1.89が必要になるため、MSRV 1.88対応版へ固定する。
 aes = "=0.9.2"
 
+# M-PNG最適化 (ADR-0023): shotq のライブラリ部分を複製して path 依存にする。複製元は crates/shotq/UPSTREAM.md。
+# 出力のバイト列を shotq の CLI と一致させるため、出力に効く依存 (zlib-rs / flate2 / png / qcms / fdeflate) は
+# Cargo.lock で shotq と同じ版に固定し、契約テスト (modules/pngopt) で確かめる。
+shotq = { path = "crates/shotq" }
+
 [dev-dependencies]
 # 一時ファイル / 一時ディレクトリ (M-Hash ファイルハッシュテストで使う)。
 # 既に tauri 等の transitive dep として Cargo.lock に存在するため新規 dl は発生しない。
@@ -79,3 +84,9 @@ tempfile = "3"
 [target.'cfg(windows)'.dependencies]
 # `settings.json.tmp` を既存 `settings.json` へ原子的に置換するために使用する。
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+# ADR-0023: shotq は依存として使うとアプリのプロファイルに従う。LTO は crate 単位で指定できないので、
+# shotq の配布ビルド (lto = "fat") との速度差は ADR-0023 に実測を記録する。
+[profile.release.package.shotq]
+opt-level = 3
+codegen-units = 1

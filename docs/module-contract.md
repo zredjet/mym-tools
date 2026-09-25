@@ -785,6 +785,24 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 
 全11モジュールは `is_stateless = true`、`searchAdapter` なし、payloadなしとする。ローカル完結の10モジュールは `enabledByDefault = true`、ネットワーク通信する `http` のみ `false` とする。
 
+### 12.12 M-PNG最適化
+
+| 項目 | 値 |
+|------|----|
+| `id` / 表示名 | `pngopt` / PNG最適化 |
+| `category` / 既定 | `other` / enabled |
+| `is_stateless` | true |
+| frontend route | `/` |
+| 固有 IPC コマンド | `pngopt_optimize_file(operationId, inputPath, outputPath, qualityMin, qualityMax, speed)` / `pngopt_scan_folder(folderPath, outputMode, outputFolder?)` / `pngopt_optimize_folder(operationId, folderPath, outputMode, outputFolder?, qualityMin, qualityMax, speed, onProgress)`。cancelは`core_cancel_operation` |
+| Channel (フォルダ) | `started { total }` / `file { index, total, name, status, input_bytes, output_bytes, detail }` / `done { duration_ms }` / `cancelled` |
+| `status` | `optimized` / `quality_too_low` (CLIの99) / `not_smaller` (CLIの98) / `failed` (フォルダ処理の1ファイルだけ) |
+| `outputMode` | `separate` (別フォルダに同じ名前。入力フォルダと同じは不可) / `overwrite` |
+| 入力上限 | 1ファイル128 MiB、4,000万画素 (IHDRでデコード前に確認)、1回10,000ファイル。PNGだけ (シグネチャで確認) |
+| 出力契約 | 最適化できたらそのPNG、できなければ入力のバイト列を書く。出力先が入力と同じなら書かない。同じdirectoryの一時ファイルからatomic replace。出力先は拡張子`.png` |
+| `index_text` の対象 | なし |
+
+最適化は `src-tauri/crates/shotq` に複製した shotq の `shotq::optimize` だけで行い、結果は同じcommitのCLIとバイト単位で一致する (契約テスト `src-tauri/src/modules/pngopt/contract/`)。shotqは内部でrayonを使うため処理はアプリ全体で同時に1つとし、待機中もcancelを受け付ける。cancelは読込中 (1 MiBごと)、最適化の後、置換の直前、フォルダの各ファイルの前で確認し、最適化の途中では止めない (ADR-0023 §2.3 / §2.4)。フォルダ処理は1ファイルの失敗で止めず、`failed` として続ける。入力、設定、結果はfrontend stateだけに保持し、items、設定、検索、export / importの対象外とする。
+
 ---
 
 ## 13. 契約自体のバージョニング
@@ -837,6 +855,7 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-09-03 | 1.4 | M-NRBFのIPCへbyte配列展開許可を追加し、500,000ノード／256 MiB protocolへ上限を変更。項目名＋値のAND条件と絞り込み／ジャンプ検索を追加 |
 | 2026-09-25 | 1.5 | M-PDF Merge: OCProperties (レイヤー) を拒否、Lang の引き継ぎと引き継がないカタログ情報、ストリーム合計1 GiBの上限を明記 |
 | 2026-09-25 | 1.6 | M-Vector: draw.io の SVG を取込時に変換し、変換内容を `notices` で返す |
+| 2026-09-25 | 1.7 | ADR-0023を反映。M-PNG最適化 (§12.12) のstateless契約、固有IPC、Channel、status、入力上限、出力契約、cancel境界を追加 |
 
 ## ベクター描画と検索投影の追加契約（ADR-0021）
 

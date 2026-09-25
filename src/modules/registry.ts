@@ -17,6 +17,7 @@ import { mermaidModule } from "@/modules/mermaid";
 import { nrbfModule } from "@/modules/nrbf";
 import { paletteModule } from "@/modules/palette";
 import { pdfMergeModule } from "@/modules/pdfmerge";
+import { pngOptModule } from "@/modules/pngopt";
 import { promptModule } from "@/modules/prompt";
 import { secretGeneratorModule } from "@/modules/secretgen";
 import { regexModule } from "@/modules/regex";
@@ -60,6 +61,7 @@ export const modules: readonly ModuleDefinition[] = [
   a11yModule,
   httpModule,
   pdfMergeModule,
+  pngOptModule,
   nrbfModule,
 ];
 

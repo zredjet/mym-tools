@@ -46,6 +46,7 @@ describe("draw.io offline asset contract", () => {
       preConfigSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
       mermaidLicenseSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
       lopdfLicenseSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      shotqNoticesSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
   });
 });

@@ -19,6 +19,7 @@ const PRECONFIG_PATH = resolve(SCRIPT_DIR, "PreConfig.js");
 const MERMAID_LICENSE_PATH = resolve(PROJECT_ROOT, "node_modules/mermaid/LICENSE");
 const LOPDF_LICENSE_PATH = resolve(PROJECT_ROOT, "third_party/lopdf-LICENSE.txt");
 const NRBF_LICENSE_PATH = resolve(PROJECT_ROOT, "third_party/system-formats-nrbf-LICENSE.txt");
+const SHOTQ_NOTICES_PATH = resolve(PROJECT_ROOT, "third_party/shotq-NOTICES.txt");
 
 // ブラウザ版エディタがローカル編集に使う全 client asset。Java servlet、cloud provider
 // bridge、service worker はオフライン Tauri runtime では利用しないため含めない。
@@ -59,6 +60,7 @@ export function drawioAssetStamp() {
     mermaidLicenseSha256: sha256(MERMAID_LICENSE_PATH),
     lopdfLicenseSha256: sha256(LOPDF_LICENSE_PATH),
     nrbfLicenseSha256: sha256(NRBF_LICENSE_PATH),
+    shotqNoticesSha256: sha256(SHOTQ_NOTICES_PATH),
   };
 }
 
@@ -113,6 +115,7 @@ export function prepareDrawioAssets() {
   cpSync(MERMAID_LICENSE_PATH, resolve(licenses, "mermaid-LICENSE.txt"));
   cpSync(LOPDF_LICENSE_PATH, resolve(licenses, "lopdf-LICENSE.txt"));
   cpSync(NRBF_LICENSE_PATH, resolve(licenses, "system-formats-nrbf-LICENSE.txt"));
+  cpSync(SHOTQ_NOTICES_PATH, resolve(licenses, "shotq-NOTICES.txt"));
 
   const stamp = drawioAssetStamp();
   writeFileSync(STAMP_PATH, `${JSON.stringify(stamp, null, 2)}\n`);
