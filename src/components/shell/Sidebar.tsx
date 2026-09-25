@@ -63,7 +63,6 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
   const navigate = useNavigate();
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const setSidebarWidth = useAppStore((s) => s.setSidebarWidth);
-  const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
   const lastOpenedProjectId = useAppStore((s) => s.lastOpenedProjectId);
   const lastOpenedModuleId = useAppStore((s) => s.lastOpenedModuleId);
@@ -157,8 +156,8 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
       navigate("/settings");
       return;
     }
-    setLastProject(pid);
-    setLastModule(target.id);
+    // 「最後に開いた」状態は遷移先の画面 (ModuleAccess) が更新する。未保存確認で遷移が
+    // キャンセルされても、元の画面を指したままにするため、ここでは書き換えない
     navigate(modulePath(pid, target.id, target.defaultRoute));
   };
 
@@ -166,7 +165,6 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
     if (effectiveProjectId == null) return;
     const definition = getModuleDefinition(mid);
     if (definition == null) return;
-    setLastModule(mid);
     navigate(modulePath(effectiveProjectId, mid, definition.defaultRoute));
   };
 

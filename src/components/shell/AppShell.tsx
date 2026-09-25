@@ -11,6 +11,7 @@ import { useHotkeys } from "react-hotkeys-hook";
 import { Outlet, useNavigate, useParams } from "react-router-dom";
 
 import { ProjectSwitcher } from "@/components/projects/ProjectSwitcher";
+import { Button } from "@/components/ui/Button";
 import { SearchOverlay } from "@/components/shell/SearchOverlay";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { TopBar } from "@/components/shell/TopBar";
@@ -28,6 +29,8 @@ export interface AppShellOutletContext {
 export function AppShell() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // 一度でも一覧を取得できたか。取得後の再取得エラーでは Outlet (編集中の画面) を外さない
+  const [loaded, setLoaded] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const { projectId } = useParams<{ projectId?: string }>();
@@ -36,6 +39,7 @@ export function AppShell() {
     try {
       const list = await listProjects();
       setProjects(list);
+      setLoaded(true);
       setError(null);
     } catch (e) {
       setError(formatInvokeError(e));
@@ -51,6 +55,7 @@ export function AppShell() {
         const list = await listProjects();
         if (!cancelled) {
           setProjects(list);
+          setLoaded(true);
           setError(null);
         }
       } catch (e) {
@@ -88,7 +93,6 @@ export function AppShell() {
 
   const navigate = useNavigate();
   const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
-  const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
   const lastOpenedProjectId = useAppStore((s) => s.lastOpenedProjectId);
   const moduleEnabled = useAppStore((s) => s.moduleEnabled);
   const visibleModules = enabledModules(moduleEnabled);
@@ -109,10 +113,11 @@ export function AppShell() {
       if (currentProject == null) return;
       const definition = getModuleDefinition(mod);
       if (definition == null || !visibleModules.some((module) => module.id === mod)) return;
-      setLastModule(mod);
+      // 「最後に開いた」状態は遷移先の画面 (ModuleAccess) が更新する。未保存確認で遷移が
+      // キャンセルされても、元の画面を指したままにするため、ここでは書き換えない
       navigate(modulePath(currentProject.id, mod, definition.defaultRoute));
     },
-    [navigate, currentProject, setLastModule, visibleModules],
+    [navigate, currentProject, visibleModules],
   );
   useHotkeys("mod+1", (e) => {
     e.preventDefault();
@@ -166,14 +171,16 @@ export function AppShell() {
     (project: Project) => {
       void refresh();
       const defaultModule = visibleModules[0];
-      setLastProject(project.id);
-      if (defaultModule == null) navigate("/settings");
-      else {
-        setLastModule(defaultModule.id);
+      if (defaultModule == null) {
+        // 設定画面にはモジュール画面が無く「最後に開いた」を更新する場所が無いので、ここで記録する
+        setLastProject(project.id);
+        navigate("/settings");
+      } else {
+        // 「最後に開いた」は遷移先の画面 (ModuleAccess) が更新する
         navigate(modulePath(project.id, defaultModule.id, defaultModule.defaultRoute));
       }
     },
-    [refresh, navigate, setLastProject, setLastModule, visibleModules],
+    [refresh, navigate, setLastProject, visibleModules],
   );
 
   return (
@@ -187,20 +194,35 @@ export function AppShell() {
             onProjectChanged={() => void refresh()}
           />
         )}
-        <main className="min-w-0 flex-1 overflow-auto">
-          {error != null ? (
-            <div className="m-6 rounded-[var(--radius)] border border-[var(--destructive)] bg-[var(--destructive)]/10 p-4 text-sm text-[var(--destructive)]">
-              プロジェクト一覧の取得に失敗: {error}
-            </div>
-          ) : (
-            <Outlet
-              context={
-                {
-                  projects,
-                  refreshProjects: refresh,
-                } satisfies AppShellOutletContext
+        <main className="flex min-w-0 flex-1 flex-col overflow-auto">
+          {error != null && (
+            <div
+              role="alert"
+              className={
+                loaded
+                  ? "mx-6 mt-4 flex items-center gap-3 rounded-[var(--radius)] border border-[var(--destructive)] bg-[var(--destructive)]/10 px-3 py-2 text-sm text-[var(--destructive)]"
+                  : "m-6 flex items-center gap-3 rounded-[var(--radius)] border border-[var(--destructive)] bg-[var(--destructive)]/10 p-4 text-sm text-[var(--destructive)]"
               }
-            />
+            >
+              <span className="min-w-0 flex-1">プロジェクト一覧の取得に失敗: {error}</span>
+              <Button variant="secondary" size="sm" onClick={() => void refresh()}>
+                再試行
+              </Button>
+            </div>
+          )}
+          {/* 取得済みなら再取得エラーでも Outlet を残す。外すと編集中の画面が未保存確認を通らずに
+              unmount され、入力内容が失われる */}
+          {(error == null || loaded) && (
+            <div className="min-h-0 flex-1">
+              <Outlet
+                context={
+                  {
+                    projects,
+                    refreshProjects: refresh,
+                  } satisfies AppShellOutletContext
+                }
+              />
+            </div>
           )}
         </main>
       </div>

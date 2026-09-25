@@ -9,12 +9,22 @@ import { AppShell } from "./AppShell";
 
 vi.mock("@/ipc/projects", () => ({ listProjects: vi.fn() }));
 vi.mock("@/components/shell/TopBar", () => ({ TopBar: () => <div>トップバー</div> }));
-vi.mock("@/components/shell/Sidebar", () => ({ Sidebar: () => <aside>サイドバー</aside> }));
+vi.mock("@/components/shell/Sidebar", () => ({
+  Sidebar: ({ onProjectChanged }: { onProjectChanged: () => void }) => (
+    <aside>
+      <span>サイドバー</span>
+      <button type="button" onClick={onProjectChanged}>
+        一覧を再取得
+      </button>
+    </aside>
+  ),
+}));
 vi.mock("@/components/shell/SearchOverlay", () => ({ SearchOverlay: () => null }));
 vi.mock("@/components/projects/ProjectSwitcher", () => ({ ProjectSwitcher: () => null }));
 
 describe("AppShell", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     useAppStore.setState({
       lastOpenedProjectId: null,
       lastOpenedModuleId: null,
@@ -65,6 +75,49 @@ describe("AppShell", () => {
     fireEvent.keyDown(document, keys);
     expect(screen.getByText("サイドバー")).toBeInTheDocument();
     expect(useAppStore.getState().sidebarCollapsed).toBe(false);
+  });
+
+  // 一覧取得後の再取得エラーで Outlet (編集中の画面) を外さない。外すと未保存確認を
+  // 通らずに unmount され、入力内容が失われる
+  it("keeps the current page mounted when a later project refresh fails", async () => {
+    vi.mocked(listProjects).mockResolvedValueOnce([]);
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<textarea aria-label="編集中" defaultValue="未保存の内容" />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(listProjects).toHaveBeenCalledOnce());
+
+    vi.mocked(listProjects).mockRejectedValueOnce(new Error("busy"));
+    fireEvent.click(screen.getByRole("button", { name: "一覧を再取得" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "プロジェクト一覧の取得に失敗: busy",
+    );
+    expect(screen.getByLabelText("編集中")).toHaveValue("未保存の内容");
+
+    vi.mocked(listProjects).mockResolvedValueOnce([]);
+    fireEvent.click(screen.getByRole("button", { name: "再試行" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("shows only the error until the first project load succeeds", async () => {
+    vi.mocked(listProjects).mockRejectedValueOnce(new Error("offline"));
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<div>メイン</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("offline");
+    expect(screen.queryByText("メイン")).not.toBeInTheDocument();
   });
 
   it("uses fixed module shortcuts for Memo and Palette", async () => {
