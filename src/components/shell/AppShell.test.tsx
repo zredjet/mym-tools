@@ -19,6 +19,7 @@ describe("AppShell", () => {
       lastOpenedProjectId: null,
       lastOpenedModuleId: null,
       moduleEnabled: {},
+      sidebarCollapsed: false,
     });
     // 初期ロードを完了させず、viewport frame の同期的な描画だけを検証する。
     vi.mocked(listProjects).mockImplementation(() => new Promise(() => undefined));
@@ -38,6 +39,32 @@ describe("AppShell", () => {
     const shell = container.firstElementChild;
     expect(shell).toHaveClass("h-full", "w-full");
     expect(shell).not.toHaveClass("h-screen", "w-screen");
+  });
+
+  it.each([
+    ["Cmd/Ctrl+B", { key: "b", code: "KeyB", ctrlKey: true }],
+    ["Cmd/Ctrl+\\", { key: "\\", code: "Backslash", ctrlKey: true }],
+  ])("toggles the sidebar with %s and remembers it in the store", (_label, keys) => {
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<div>メイン</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("サイドバー")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, keys);
+    expect(screen.queryByText("サイドバー")).not.toBeInTheDocument();
+    expect(useAppStore.getState().sidebarCollapsed).toBe(true);
+    // 本文は残る
+    expect(screen.getByText("メイン")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, keys);
+    expect(screen.getByText("サイドバー")).toBeInTheDocument();
+    expect(useAppStore.getState().sidebarCollapsed).toBe(false);
   });
 
   it("uses fixed module shortcuts for Memo and Palette", async () => {

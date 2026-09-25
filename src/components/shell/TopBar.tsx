@@ -1,15 +1,17 @@
 /**
  * トップバー (`docs/ui-design.md` §3.4 / §6.1)。高さ 40px 固定。
  *
- * 左: 現在プロジェクト名 (切替操作は Sidebar / ⌘P の ProjectSwitcher が担う)
+ * 左: サイドバー開閉ボタン (⌘B / ⌘\) + 現在プロジェクト名 (切替操作は Sidebar / ⌘P の
+ *     ProjectSwitcher が担う)
  * 中央: ⌘K Search トリガ
  * 右: テーマトグル + 設定ページへの遷移 (Cmd+, でも開く)
  */
-import { Info, Search, Settings } from "lucide-react";
+import { Info, PanelLeftClose, PanelLeftOpen, Search, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import type { Project } from "@/lib/types";
+import { useAppStore } from "@/store/useAppStore";
 
 interface Props {
   currentProject: Project | null;
@@ -18,12 +20,29 @@ interface Props {
 
 export function TopBar({ currentProject, onOpenSearch }: Props) {
   const navigate = useNavigate();
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
+  const sidebarLabel = sidebarCollapsed ? "サイドバーを開く" : "サイドバーを閉じる";
   return (
     <header
       className="flex h-[var(--topbar-h)] shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--bg)] px-3"
       role="banner"
     >
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-[var(--fg)]">
+        <button
+          type="button"
+          aria-label={sidebarLabel}
+          aria-expanded={!sidebarCollapsed}
+          title={`${sidebarLabel} (⌘B)`}
+          onClick={toggleSidebarCollapsed}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius)] text-[var(--fg-muted)] hover:bg-[var(--bg-muted)] hover:text-[var(--fg)]"
+        >
+          {sidebarCollapsed ? (
+            <PanelLeftOpen size={16} aria-hidden />
+          ) : (
+            <PanelLeftClose size={16} aria-hidden />
+          )}
+        </button>
         {currentProject != null ? (
           <span className="truncate" title={currentProject.name}>
             {currentProject.name}

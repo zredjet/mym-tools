@@ -15,6 +15,8 @@ export type RowDensity = "compact" | "comfortable";
 interface AppState {
   theme: Theme;
   sidebarWidth: number;
+  /** サイドバーを閉じているか (`core.sidebar_collapsed`、⌘B / ⌘\ または TopBar のボタンで切替) */
+  sidebarCollapsed: boolean;
   uiScale: number;
   rowDensity: RowDensity;
   defaultProjectId: string | null;
@@ -33,6 +35,7 @@ interface AppState {
   setTheme: (theme: Theme) => void;
   toggleTheme: () => void;
   setSidebarWidth: (width: number) => void;
+  toggleSidebarCollapsed: () => void;
   setUiScale: (scale: number) => void;
   setRowDensity: (density: RowDensity) => void;
   setDefaultProjectId: (id: string | null) => void;
@@ -69,6 +72,7 @@ const clampUiScale = (scale: number): number => {
 export const useAppStore = create<AppState>()((set) => ({
   theme: "system",
   sidebarWidth: SIDEBAR_DEFAULT,
+  sidebarCollapsed: false,
   uiScale: UI_SCALE_DEFAULT,
   rowDensity: "compact",
   defaultProjectId: null,
@@ -95,6 +99,7 @@ export const useAppStore = create<AppState>()((set) => ({
   setTheme: (theme) => set({ theme }),
   toggleTheme: () => set((state) => ({ theme: state.theme === "dark" ? "light" : "dark" })),
   setSidebarWidth: (sidebarWidth) => set({ sidebarWidth: clampWidth(sidebarWidth) }),
+  toggleSidebarCollapsed: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
   setUiScale: (uiScale) => set({ uiScale: clampUiScale(uiScale) }),
   setRowDensity: (rowDensity) => set({ rowDensity }),
   setDefaultProjectId: (defaultProjectId) => set({ defaultProjectId }),

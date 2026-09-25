@@ -738,6 +738,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
     },
     "log_level": "info" | "debug" | "warn" | "error",
     "sidebar_width": 240,
+    "sidebar_collapsed": false,
     "ui_scale": 1.0,
     "row_density": "compact" | "comfortable",
     "collapsed_module_categories": ["text", "time"],
@@ -777,6 +778,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
 - `modules.<id>.*`: 各モジュールの設定。**コアは中身を解釈しない**
 - モジュール ID をキーにすることで、モジュール削除時の設定残骸も `modules` ブロックを覗けば分かる
 - `core.sidebar_width`: 180〜320 の整数。範囲外は読み込み時に clamp する
+- `core.sidebar_collapsed`: サイドバー全体を閉じているか。`true` のときだけ閉じ、キーが無い / 真偽値以外は開いた状態で扱う
 - `core.ui_scale`: 0.75〜1.5。範囲外は読み込み時に clamp する
 - `core.row_density`: `compact` (32 px) / `comfortable` (36 px)
 - `core.module_enabled.<id>`: UI 上の有効状態。キーが無ければ registry の `enabledByDefault` を使う (ADR-0012)
@@ -1306,6 +1308,7 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-08-25 | 1.2 | ADR-0016を反映。M-Link / M-Memo payload、設定継承、旧export正規化、新export分離、`db_schema_version`を変えない起動時所属移行とT-41〜T-46を追加 |
 | 2026-08-31 | 1.3 | ADR-0017を反映。M-Mermaid / M-Diagram payload v1、1MiB境界、検索、共通export/import、T-47〜T-50を追加 |
 | 2026-09-25 | 1.4 | ADR-0022を反映。FTS 更新トリガを `UPDATE OF project_id, module_id, search_text` に絞る DB schema v3 を §8.2 / §14.4 に追加 |
+| 2026-09-25 | 1.5 | `core.sidebar_collapsed` (サイドバー全体の開閉状態) を §11.1 に追加 |
 
 ## ベクター作品と軽量な参照API（ADR-0021）
 
