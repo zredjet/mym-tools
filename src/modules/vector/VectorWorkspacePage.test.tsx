@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as items from "@/ipc/items";
-import { vectorEditorUrl } from "@/ipc/vector";
+import { vectorEditorUrl, vectorReadFile } from "@/ipc/vector";
 import { VectorWorkspaceRoute } from "./VectorWorkspacePage";
 import {
   installWindowCloseCoordinator,
@@ -251,5 +251,25 @@ describe("Vector workspace lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "戻る" }));
     expect(screen.getByText("未保存", { exact: true })).toBeVisible();
     expect(screen.queryByText("別画面")).toBeNull();
+  });
+  it("shows how a draw.io SVG was converted on import", async () => {
+    const { post, send } = await start();
+    dialog.open.mockResolvedValueOnce("/tmp/diagram.svg");
+    vi.mocked(vectorReadFile).mockResolvedValueOnce({
+      svg,
+      text: "",
+      notices: [
+        "draw.io の SVG を取り込み用に変換しました。",
+        "HTML のラベル 2 件を通常のテキストに置き換えました (太字などの書式は失われます)。",
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "SVGを取り込む" }));
+    await flush();
+    const load = post.mock.calls[post.mock.calls.length - 1]![0];
+    send({ ...load, event: "loaded", revision: 0 });
+    await flush();
+
+    expect(screen.getByRole("status")).toHaveTextContent("SVGを取り込みました。");
+    expect(screen.getByRole("status")).toHaveTextContent("HTML のラベル 2 件");
   });
 });

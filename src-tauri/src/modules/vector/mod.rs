@@ -1,5 +1,6 @@
 //! Project-owned SVG documents. Every persistence entry point uses this policy.
 pub mod commands;
+mod drawio_import;
 pub mod protocol;
 mod validation;
 
