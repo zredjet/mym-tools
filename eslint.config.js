@@ -29,6 +29,33 @@ export default tseslint.config(
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },
   },
+  // Promise の取りこぼし (await / void / catch 忘れ) を型情報で検出する
+  // (JSX 属性への async handler と、テストコードの act / userEvent は対象外)
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/**/*.test.{ts,tsx}", "src/test/**"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": [
+        "error",
+        {
+          // React Router v7 の navigate() は Promise 型も返すが、画面遷移の完了を待つ必要はない
+          allowForKnownSafeCalls: [
+            { from: "package", name: "NavigateFunction", package: "react-router" },
+          ],
+        },
+      ],
+      "@typescript-eslint/no-misused-promises": [
+        "error",
+        { checksVoidReturn: { attributes: false } },
+      ],
+    },
+  },
   // prettier 競合ルールの無効化 (format は prettier 単独で扱う、ADR-0010 §2.4.3)
   prettier,
 );
