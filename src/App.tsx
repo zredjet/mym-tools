@@ -4,6 +4,7 @@ import { Navigate, RouterProvider, createHashRouter, useParams } from "react-rou
 
 import { SettingsLifecycle } from "@/components/settings/SettingsLifecycle";
 import { AppShell } from "@/components/shell/AppShell";
+import { RouteErrorPage } from "@/components/shell/RouteErrorPage";
 import { useRowDensityAttribute } from "@/hooks/useRowDensityAttribute";
 import { useThemeAttribute } from "@/hooks/useThemeAttribute";
 import { useUiScaleAttribute } from "@/hooks/useUiScaleAttribute";
@@ -33,6 +34,8 @@ function App() {
 const router = createHashRouter([
   {
     element: <AppShell />,
+    // AppShell 自体の描画エラー用の最後の受け皿 (通常は下のルート単位で受ける)
+    errorElement: <RouteErrorPage />,
     children: [
       { path: "/", element: <StartupPage /> },
       { path: "/welcome", element: <WelcomePage /> },
@@ -42,6 +45,8 @@ const router = createHashRouter([
           const suffix = route.path === "/" ? "" : route.path;
           return {
             path: `/projects/:projectId/m/${module.id}${suffix}`,
+            // モジュール画面の描画エラー / chunk 取得失敗は Outlet 内に閉じ込め、サイドバーを残す
+            errorElement: <RouteErrorPage />,
             element: (
               <ModuleAccess module={module}>
                 <Suspense
@@ -58,8 +63,8 @@ const router = createHashRouter([
           };
         }),
       ),
-      { path: "/settings", element: <SettingsPage /> },
-      { path: "/about", element: <AboutPage /> },
+      { path: "/settings", element: <SettingsPage />, errorElement: <RouteErrorPage /> },
+      { path: "/about", element: <AboutPage />, errorElement: <RouteErrorPage /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],
   },
