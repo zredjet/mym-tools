@@ -93,6 +93,7 @@ export function MermaidWorkspacePage() {
   const allowNavigation = useRef(false);
   const renderToken = useRef(0);
   const exportingRef = useRef(false);
+  const savingRef = useRef(false);
 
   const refreshDocuments = useCallback(async () => {
     if (projectId == null) return;
@@ -214,7 +215,9 @@ export function MermaidWorkspacePage() {
     previewSvg !== "" &&
     exporting == null;
   const save = useCallback(async (): Promise<boolean> => {
-    if (projectId == null || !canSave) return false;
+    // submitting state は次の render まで反映されないため、連続した ⌘S での二重作成を ref で防ぐ
+    if (projectId == null || !canSave || savingRef.current) return false;
+    savingRef.current = true;
     setSubmitting(true);
     setError(null);
     const tags = parseTags(tagsInput);
@@ -242,16 +245,23 @@ export function MermaidWorkspacePage() {
       setTitle(normalizedTitle);
       setTagsInput(tags.join(", "));
       setBaseline(documentKey(normalizedTitle, tags.join(", "), source));
-      await refreshDocuments();
       if (itemId == null) {
+        // 作成済みの id へすぐ移る。一覧の再取得を先に待つと、その失敗で /new に留まり、
+        // 次の保存で同じ内容がもう一度作成されていた。移動先の画面が一覧を読み直す
         allowNavigation.current = true;
         navigate(modulePath(projectId, "mermaid", `/edit/${savedId}`), { replace: true });
+      } else {
+        // 一覧の再取得失敗は保存の成否に含めない
+        await refreshDocuments().catch((cause: unknown) =>
+          setError(`保存しました。文書一覧の更新に失敗しました: ${formatInvokeError(cause)}`),
+        );
       }
       return true;
     } catch (cause) {
       setError(formatInvokeError(cause));
       return false;
     } finally {
+      savingRef.current = false;
       setSubmitting(false);
     }
   }, [canSave, itemId, navigate, projectId, refreshDocuments, source, tagsInput, title]);

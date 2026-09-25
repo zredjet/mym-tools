@@ -95,6 +95,7 @@ export function DiagramWorkspacePage() {
   const navigate = useNavigate();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const allowNavigation = useRef(false);
+  const savingRef = useRef(false);
   const initialized = useRef(false);
   const loadKind = useRef<LoadKind>("initial");
   const pendingText = useRef<PendingTextRequest | null>(null);
@@ -219,6 +220,8 @@ export function DiagramWorkspacePage() {
 
   const persist = useCallback(
     async (nextXml: string, text: string) => {
+      // submitting state は次の render まで反映されないため、連続した保存要求は ref で弾く
+      if (savingRef.current) return;
       if (
         projectId == null ||
         submitting ||
@@ -229,6 +232,7 @@ export function DiagramWorkspacePage() {
         setError("タイトル、XML、検索用テキストを確認してください（各1MiB以下）。");
         return;
       }
+      savingRef.current = true;
       setSubmitting(true);
       setError(null);
       const tags = parseTags(tagsInput);
@@ -258,14 +262,21 @@ export function DiagramWorkspacePage() {
         setXml(nextXml);
         setBaseline(documentKey(normalizedTitle, tags.join(", "), nextXml));
         setStatus("保存しました");
-        await refreshDocuments();
         if (itemId == null) {
+          // 作成済みの id へすぐ移る。一覧の再取得を先に待つと、その失敗で /new に留まり、
+          // 次の保存で同じ内容がもう一度作成されていた。移動先の画面が一覧を読み直す
           allowNavigation.current = true;
           navigate(modulePath(projectId, "diagram", `/edit/${savedId}`), { replace: true });
+        } else {
+          // 一覧の再取得失敗は保存の成否に含めない
+          await refreshDocuments().catch((cause: unknown) =>
+            setError(`保存しました。文書一覧の更新に失敗しました: ${formatInvokeError(cause)}`),
+          );
         }
       } catch (cause) {
         setError(formatInvokeError(cause));
       } finally {
+        savingRef.current = false;
         setSubmitting(false);
       }
     },
