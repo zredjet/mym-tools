@@ -5,6 +5,7 @@
 //! モジュールのコードは編集しない** (ADR-0004 §5.1)。
 
 pub mod a11y;
+mod bundled_assets;
 pub mod codec;
 pub mod color;
 pub mod cron;
