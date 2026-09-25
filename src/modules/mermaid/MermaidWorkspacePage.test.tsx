@@ -140,7 +140,7 @@ describe("MermaidWorkspacePage", () => {
   it("moves to the created item even when the document list refresh fails", async () => {
     const { router } = renderWorkspace();
     await finishDebounce();
-    vi.mocked(listAllItems).mockRejectedValue(new Error("list failed"));
+    vi.mocked(listAllItemSummaries).mockRejectedValue(new Error("list failed"));
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /保存/ }));
