@@ -90,7 +90,7 @@ pub(crate) fn write_atomically_with_guard(
         )));
     }
 
-    let temp_path = temporary_path(path);
+    let temp_path = temporary_path(parent);
     let result = (|| -> Result<(), AppError> {
         let mut file = File::create(&temp_path)?;
         write(&mut file)?;
@@ -147,14 +147,19 @@ fn looks_like_svg(bytes: &[u8]) -> bool {
         })
 }
 
-fn temporary_path(path: &Path) -> PathBuf {
-    let mut name = path.as_os_str().to_os_string();
-    name.push(format!(".{}.tmp", uuid::Uuid::new_v4()));
-    PathBuf::from(name)
+/// 出力先と同じディレクトリの一時ファイル名。元のファイル名に付け足すと長い名前で
+/// ファイル名上限 (255 バイト) を超えるため、長さ固定 (41 文字) の名前にする。
+fn temporary_path(parent: &Path) -> PathBuf {
+    parent.join(format!(".mym-{}.tmp", uuid::Uuid::new_v4().simple()))
 }
 
 #[cfg(not(windows))]
 fn replace_atomically(source: &Path, destination: &Path) -> io::Result<()> {
+    // rename は一時ファイルの属性で置き換えるため、既存ファイルのパーミッションを引き継ぐ
+    // (Windows の ReplaceFileW は置換先の属性を保持する)
+    if let Ok(existing) = fs::metadata(destination) {
+        fs::set_permissions(source, existing.permissions())?;
+    }
     fs::rename(source, destination)
 }
 
@@ -283,5 +288,38 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(fs::read(&path).unwrap(), b"old");
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn atomic_write_supports_long_file_names() {
+        let dir = tempfile::tempdir().unwrap();
+        // 250 バイトの名前 (元の名前に付け足す方式だと一時ファイル名が 255 バイトを超えていた)
+        let name = format!("{}.png", "a".repeat(246));
+        let path = dir.path().join(&name);
+        write_atomically(&path, b"data").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"data");
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_keeps_existing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("keep.svg");
+        std::fs::write(&path, b"old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        write_atomically(&path, b"new").unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 }
