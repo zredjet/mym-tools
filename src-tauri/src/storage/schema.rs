@@ -17,7 +17,7 @@
 ///   起動停止画面** が必須 (ADR-0011 §2.2 / ADR-0006)
 ///
 /// 履歴は `docs/data-model.md` §14.4 (一次ソース) を参照。
-pub const CURRENT_DB_SCHEMA_VERSION: i64 = 3;
+pub const CURRENT_DB_SCHEMA_VERSION: i64 = 4;
 
 /// すべての DDL を一括投入する SQL (新規 DB 用)。
 ///
@@ -98,8 +98,17 @@ CREATE TRIGGER trg_items_fts_au AFTER UPDATE OF project_id, module_id, search_te
   WHERE item_id = new.id;
 END;
 
-CREATE TRIGGER trg_items_fts_ad AFTER DELETE ON items BEGIN
+-- item 単独の削除でだけ FTS 行を消す。project 削除の CASCADE 中は親 project の行が既に
+-- 見えないため走査を省き、下の trg_projects_fts_bd がその project の FTS 行を 1 回で消す
+-- (item ごとに UNINDEXED の item_id で全件走査すると O(M·N) になる、DB schema v4)
+CREATE TRIGGER trg_items_fts_ad AFTER DELETE ON items
+  WHEN EXISTS (SELECT 1 FROM projects WHERE id = old.project_id)
+BEGIN
   DELETE FROM items_fts WHERE item_id = old.id;
+END;
+
+CREATE TRIGGER trg_projects_fts_bd BEFORE DELETE ON projects BEGIN
+  DELETE FROM items_fts WHERE project_id = old.id;
 END;
 "#;
 
@@ -171,6 +180,26 @@ pub const MIGRATIONS: &[Migration] = &[
               WHERE item_id = new.id;
             END;
             UPDATE meta SET value = '3' WHERE key = 'db_schema_version';
+        "#,
+    },
+    // v3 → v4: project 削除時の FTS 同期を project 単位の 1 回の削除にする (ADR-0022 §2.1 の条件で
+    // トリガを置換 + 新トリガ追加)。削除トリガは親 project が残っている (= item 単独の削除) ときだけ
+    // 走査し、CASCADE 中は BEFORE DELETE ON projects がその project の FTS 行をまとめて消す。
+    // 同期結果は変わらず、既存行も書き換えない
+    Migration {
+        from_version: 3,
+        to_version: 4,
+        sql: r#"
+            DROP TRIGGER IF EXISTS trg_items_fts_ad;
+            CREATE TRIGGER trg_items_fts_ad AFTER DELETE ON items
+              WHEN EXISTS (SELECT 1 FROM projects WHERE id = old.project_id)
+            BEGIN
+              DELETE FROM items_fts WHERE item_id = old.id;
+            END;
+            CREATE TRIGGER IF NOT EXISTS trg_projects_fts_bd BEFORE DELETE ON projects BEGIN
+              DELETE FROM items_fts WHERE project_id = old.id;
+            END;
+            UPDATE meta SET value = '4' WHERE key = 'db_schema_version';
         "#,
     },
 ];

@@ -489,14 +489,24 @@ CREATE TRIGGER trg_items_fts_au AFTER UPDATE OF project_id, module_id, search_te
   WHERE item_id = new.id;
 END;
 
-CREATE TRIGGER trg_items_fts_ad AFTER DELETE ON items BEGIN
+-- item 単独の削除でだけ走査する。project 削除の CASCADE 中は親 project が既に見えないため省き、
+-- trg_projects_fts_bd がその project の FTS 行を 1 回で消す (DB schema v4)
+CREATE TRIGGER trg_items_fts_ad AFTER DELETE ON items
+  WHEN EXISTS (SELECT 1 FROM projects WHERE id = old.project_id)
+BEGIN
   DELETE FROM items_fts WHERE item_id = old.id;
+END;
+
+CREATE TRIGGER trg_projects_fts_bd BEFORE DELETE ON projects BEGIN
+  DELETE FROM items_fts WHERE project_id = old.id;
 END;
 ```
 
 `item_id` は FTS5 の `UNINDEXED` 列のため、`WHERE item_id = ...` は `items_fts` を全件走査する。更新トリガの発火条件を
 `UPDATE OF project_id, module_id, search_text` に絞り、並び替え (`position` だけの更新) で走査しないようにしている
-(ADR-0022)。1 item の編集・削除では 1 回の走査が残る。
+(ADR-0022)。project 削除では、item ごとに走査すると O(M·N) になるため、`BEFORE DELETE ON projects` で
+その project の FTS 行を 1 回でまとめて消し、item の削除トリガは親 project が残っている (= item 単独の削除) ときだけ
+走査する (DB schema v4)。1 item の編集・削除では 1 回の走査が残る。
 
 トリガは元の INSERT/UPDATE/DELETE と同一トランザクション内で実行されるため、
 `items` 側がロールバックされれば `items_fts` 側もロールバックされる (D-12 の整合性保証)。
@@ -1186,6 +1196,7 @@ ADR-0011 §2.1 のチェックリストを満たすものに限る:
 |---|---|---|
 | 1 → 2 | `items.position` カラム追加 (`NOT NULL DEFAULT 0`) + `idx_items_project_module_position` 追加 | PR-Y / ADR-0011 |
 | 2 → 3 | `trg_items_fts_au` を `AFTER UPDATE OF project_id, module_id, search_text` に置換 (同一 tx の DROP TRIGGER + CREATE TRIGGER、既存行の書き換えなし) | ADR-0022 |
+| 3 → 4 | `trg_items_fts_ad` を親 project が残っているときだけ発火するよう置換し、`trg_projects_fts_bd` (project 単位で FTS 行を削除) を追加。project 削除の FTS 同期を O(M·N) から O(N) に (同一 tx、既存行の書き換えなし) | ADR-0022 §2.1 / #107 |
 
 ### 14.5 Link / Memo所属移行の限定例外 (ADR-0016)
 
@@ -1309,6 +1320,7 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-08-31 | 1.3 | ADR-0017を反映。M-Mermaid / M-Diagram payload v1、1MiB境界、検索、共通export/import、T-47〜T-50を追加 |
 | 2026-09-25 | 1.4 | ADR-0022を反映。FTS 更新トリガを `UPDATE OF project_id, module_id, search_text` に絞る DB schema v3 を §8.2 / §14.4 に追加 |
 | 2026-09-25 | 1.5 | `core.sidebar_collapsed` (サイドバー全体の開閉状態) を §11.1 に追加 |
+| 2026-09-25 | 1.6 | DB schema v4: project 削除時の FTS 同期トリガ (`trg_items_fts_ad` の条件付き化と `trg_projects_fts_bd`) を §8.2 / §14.4 に追加 |
 
 ## ベクター作品と軽量な参照API（ADR-0021）
 
