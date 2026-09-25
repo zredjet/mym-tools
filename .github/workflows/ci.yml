@@ -144,7 +144,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npx vitest run --passWithNoTests
+      - run: npx vitest run
         if: always()
       - run: npm run build
         if: always()

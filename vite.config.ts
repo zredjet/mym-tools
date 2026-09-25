@@ -47,8 +47,5 @@ export default defineConfig(async () => ({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
-    // Phase 1 着手前はテストファイル未配置のため、CI を緑にするために許容する。
-    // モジュール実装着手時に最低 1 件のテストを追加し、本フラグを削除する想定。
-    passWithNoTests: true,
   },
 }));
