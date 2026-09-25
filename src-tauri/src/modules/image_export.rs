@@ -35,6 +35,13 @@ pub(crate) fn decode_and_validate_image(
         }
     };
     require_extension(module_id, path, extension)?;
+    // base64 は 4 文字で 3 バイト。デコード後の上限を超える入力は、デコード (メモリ確保) 前に拒否する
+    if data.len() > MAX_IMAGE_EXPORT_BYTES.div_ceil(3) * 4 + 64 {
+        return Err(validation(
+            module_id,
+            "image export must be 20 MiB or smaller",
+        ));
+    }
     let bytes = decode_data_url(module_id, data, prefix)?;
     if bytes.len() > MAX_IMAGE_EXPORT_BYTES {
         return Err(validation(
@@ -321,5 +328,21 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn rejects_oversized_export_before_decoding() {
+        // デコードすると 20 MiB を超える base64 (中身は不正でもよい: デコード前に弾く)
+        let oversized = format!(
+            "data:image/png;base64,{}",
+            "!".repeat(MAX_IMAGE_EXPORT_BYTES.div_ceil(3) * 4 + 128)
+        );
+        let error =
+            decode_and_validate_image("mermaid", Path::new("/tmp/a.png"), "png", &oversized)
+                .unwrap_err();
+        assert!(
+            matches!(&error, AppError::Validation { reason, .. } if reason.contains("20 MiB")),
+            "{error:?}"
+        );
     }
 }
