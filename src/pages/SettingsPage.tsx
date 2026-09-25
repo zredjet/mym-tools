@@ -39,7 +39,7 @@ import {
 
 export function SettingsPage() {
   const navigate = useNavigate();
-  const { projects } = useOutletContext<AppShellOutletContext>();
+  const { projects, refreshProjects } = useOutletContext<AppShellOutletContext>();
   const settingsError = useAppStore((state) => state.settingsError);
   const [backups, setBackups] = useState<BackupRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -136,7 +136,7 @@ export function SettingsPage() {
 
       <SidebarWidthInfo />
 
-      <DataTransferSection projects={projects} />
+      <DataTransferSection projects={projects} onImported={refreshProjects} />
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
@@ -230,12 +230,16 @@ export function SettingsPage() {
               **手動で再起動** してください (Phase 1 では自動再起動を提供しません)。
             </p>
             <p className="text-[12px] text-[var(--fg-muted)]">
+              再起動するまでの間も古い一覧や編集中の内容を使わないよう、閉じると画面を読み込み直します。
+            </p>
+            <p className="text-[12px] text-[var(--fg-muted)]">
               戻る前の状態は <code className="font-mono">pre-restore-...</code>{" "}
               として保存されており、 必要なら再起動後にそのファイルからもう一度リストアできます。
             </p>
             <div className="flex justify-end">
-              <Button variant="secondary" onClick={() => setRestartPrompt(false)}>
-                了解
+              {/* リストア前の一覧・編集状態がメモリに残ったまま操作されないよう、画面を読み込み直す */}
+              <Button variant="secondary" onClick={() => window.location.reload()}>
+                了解 (画面を再読み込み)
               </Button>
             </div>
           </div>
@@ -493,7 +497,14 @@ function SidebarWidthInfo() {
  *
  * 部分成功方式 (`data-model.md` §12.3) の結果は失敗件数 + 失敗内訳の畳んだリストで表示。
  */
-function DataTransferSection({ projects }: { projects: AppShellOutletContext["projects"] }) {
+function DataTransferSection({
+  projects,
+  onImported,
+}: {
+  projects: AppShellOutletContext["projects"];
+  /** 取り込み後にサイドバーのプロジェクト一覧を読み直す */
+  onImported: () => Promise<void>;
+}) {
   const [busy, setBusy] = useState<"export" | "import" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exportSummary, setExportSummary] = useState<ExportSummary | null>(null);
@@ -540,6 +551,8 @@ function DataTransferSection({ projects }: { projects: AppShellOutletContext["pr
       setBusy("import");
       const summary = await importJson(path);
       setImportSummary(summary);
+      // 新しいプロジェクトをサイドバーへ反映する (再起動しないと出てこなかった)
+      if (summary.projects_inserted > 0) await onImported();
     } catch (e) {
       setError(formatInvokeError(e));
     } finally {

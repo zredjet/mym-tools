@@ -58,7 +58,7 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
-  const { projectId, moduleId } = useParams<{ projectId?: string; moduleId?: string }>();
+  const { projectId } = useParams<{ projectId?: string }>();
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
@@ -131,16 +131,18 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
       ? lastOpenedModuleId
       : null);
 
+  // モジュールのルートは `/projects/:projectId/m/<固定 id>` で `:moduleId` param を持たないため、
+  // 表示中のモジュールは pathname から求める
   useEffect(() => {
-    if (moduleId == null) return;
-    const active = getModuleDefinition(moduleId);
+    if (routeModuleId == null) return;
+    const active = getModuleDefinition(routeModuleId);
     if (active == null) return;
     const category = moduleCategoryId(active);
     if (collapsedCategories.includes(category)) setCategoryCollapsed(category, false);
-  }, [collapsedCategories, moduleId, setCategoryCollapsed]);
+  }, [collapsedCategories, routeModuleId, setCategoryCollapsed]);
 
   const goToProject = (pid: string) => {
-    const current = moduleId != null ? getModuleDefinition(moduleId) : undefined;
+    const current = routeModuleId != null ? getModuleDefinition(routeModuleId) : undefined;
     const previous =
       lastOpenedModuleId != null ? getModuleDefinition(lastOpenedModuleId) : undefined;
     const target =

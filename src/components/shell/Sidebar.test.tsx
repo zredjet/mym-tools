@@ -63,6 +63,16 @@ describe("Sidebar module selection", () => {
     expect(screen.getByRole("button", { name: "プロンプト" })).not.toHaveAttribute("aria-current");
   });
 
+  // モジュールのルートは `:moduleId` param を持たない固定パスなので、pathname から判定する
+  it("expands the collapsed category of the module shown by a literal route", () => {
+    useAppStore.setState({ collapsedModuleCategories: ["manage"] });
+
+    renderAt("/projects/p1/m/prompt");
+
+    expect(useAppStore.getState().collapsedModuleCategories).not.toContain("manage");
+    expect(screen.getByRole("button", { name: "プロンプト" })).toBeInTheDocument();
+  });
+
   it.each(["/settings", "/about"])("highlights the last enabled module on %s", (pathname) => {
     useAppStore.setState({ lastOpenedProjectId: "p1", lastOpenedModuleId: "memo" });
 
