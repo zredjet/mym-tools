@@ -33,12 +33,14 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Modal } from "@/components/ui/Modal";
 import { deleteItem, listAllItems, reorderItems } from "@/ipc/items";
 import { linkmemoOpen } from "@/ipc/linkmemo";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import type { Item, LinkPayloadV1 } from "@/lib/types";
 import { LinkMemoItemDialog } from "@/modules/linkmemo/LinkMemoItemDialog";
+import { requiresOpenConfirmation } from "@/modules/linkmemo/openSafety";
 
 export function LinkMemoListPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -48,6 +50,7 @@ export function LinkMemoListPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deletingItem, setDeletingItem] = useState<Item | null>(null);
+  const [confirmingOpen, setConfirmingOpen] = useState<LinkPayloadV1 | null>(null);
 
   const refresh = useCallback(async (pid: string) => {
     try {
@@ -123,14 +126,23 @@ export function LinkMemoListPage() {
     [items, projectId, refresh],
   );
 
-  const handleOpen = async (item: Item) => {
-    const payload = asPayload(item);
-    if (payload.target === "") return;
+  const openTarget = async (payload: LinkPayloadV1) => {
     try {
       await linkmemoOpen({ itemType: payload.type, target: payload.target });
     } catch (e) {
       setError(formatInvokeError(e));
     }
+  };
+
+  const handleOpen = async (item: Item) => {
+    const payload = asPayload(item);
+    if (payload.target === "") return;
+    // 実行されるファイルは開く前に確認する (インポート由来の Link 対策)
+    if (payload.type === "path" && requiresOpenConfirmation(payload.target)) {
+      setConfirmingOpen(payload);
+      return;
+    }
+    await openTarget(payload);
   };
 
   if (projectId == null) {
@@ -218,6 +230,31 @@ export function LinkMemoListPage() {
         onClose={() => setDeletingItem(null)}
         onConfirm={handleConfirmDelete}
       />
+      <Modal
+        open={confirmingOpen != null}
+        onClose={() => setConfirmingOpen(null)}
+        title="実行ファイルを開きますか?"
+      >
+        <p className="text-[13px] text-[var(--fg-muted)]">
+          このファイルは開くとプログラムとして実行される可能性があります。内容を確認済みの場合のみ開いてください。
+        </p>
+        <p className="mt-2 font-mono text-[12px] break-all">{confirmingOpen?.target}</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmingOpen(null)}>
+            キャンセル
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const payload = confirmingOpen;
+              setConfirmingOpen(null);
+              if (payload != null) void openTarget(payload);
+            }}
+          >
+            開く
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

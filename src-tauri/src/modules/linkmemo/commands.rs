@@ -52,6 +52,16 @@ pub async fn linkmemo_open<R: tauri::Runtime>(
                     reason: "linkmemo_open type=path target must not be empty".into(),
                 });
             }
+            // ネットワーク共有 (UNC) は開かない。Windows では存在確認 (`metadata()`) の時点で
+            // SMB 接続が走り、インポートした Link 1 クリックで NTLM 認証情報が外部へ送られる
+            if is_network_path(&target) {
+                return Err(AppError::Validation {
+                    module_id: "linkmemo".into(),
+                    reason: format!(
+                        "linkmemo_open type=path does not open network paths (UNC): {target}"
+                    ),
+                });
+            }
             app.opener()
                 .open_path(target, None::<&str>)
                 .map_err(|e| AppError::Internal(format!("opener.open_path failed: {e}")))?;
@@ -64,6 +74,16 @@ pub async fn linkmemo_open<R: tauri::Runtime>(
         }
     }
     Ok(())
+}
+
+/// `\\server\share` / `//server/share` / `\\?\UNC\...` のような UNC 形式か。
+/// 先頭 2 文字がどちらもパス区切り (`\` or `/`) なら UNC とみなす。
+fn is_network_path(target: &str) -> bool {
+    let mut chars = target.trim_start().chars();
+    matches!(
+        (chars.next(), chars.next()),
+        (Some('\\' | '/'), Some('\\' | '/'))
+    )
 }
 
 #[cfg(test)]
@@ -92,4 +112,26 @@ mod tests {
     // `linkmemo_open` は `tauri::AppHandle` が必要なため、ユニットテストでは
     // OS 既定アプリ起動経路は検証できない。バリデーションロジックは `linkmemo_open` 内の
     // 早期 return で網羅されており、結合テストは Phase 1 後半の手動検証で扱う。
+
+    #[test]
+    fn network_paths_are_detected() {
+        for path in [
+            r"\\attacker\share\invoice.exe",
+            "//attacker/share/invoice.exe",
+            r"\\?\UNC\attacker\share",
+            r"\/attacker/share",
+            "  //attacker/share",
+        ] {
+            assert!(is_network_path(path), "{path}");
+        }
+        for path in [
+            "/Users/x/Documents",
+            r"C:\Users\x\Documents",
+            "~/Documents",
+            "relative/path",
+            "",
+        ] {
+            assert!(!is_network_path(path), "{path}");
+        }
+    }
 }
