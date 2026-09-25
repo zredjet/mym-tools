@@ -2033,6 +2033,46 @@ mod tests {
         assert!(storage.get_project(&p.id).is_err());
     }
 
+    /// project 削除 (CASCADE) と item 単独の削除のどちらでも FTS が同期される (DB schema v4)。
+    #[test]
+    fn deleting_projects_and_items_keeps_fts_in_sync() {
+        let storage = Arc::new(in_memory_storage());
+        let (p1, p2) = seed_search_data(&storage);
+        let fts_count = |project: &ProjectId| -> i64 {
+            storage
+                .with_conn(|conn| {
+                    conn.query_row(
+                        "SELECT COUNT(*) FROM items_fts WHERE project_id = ?",
+                        [project.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(AppError::from)
+                })
+                .unwrap()
+        };
+        assert_eq!(fts_count(&p1), 2);
+
+        storage.delete_project(&p1).unwrap();
+        assert_eq!(fts_count(&p1), 0);
+        assert_eq!(fts_count(&p2), 1);
+        assert!(storage
+            .search(&SearchScope::Global, "Red", None, 10, 0)
+            .unwrap()
+            .is_empty());
+
+        let green = storage
+            .search(&SearchScope::Global, "Green", None, 10, 0)
+            .unwrap();
+        assert_eq!(green.len(), 1);
+        storage
+            .with_conn(|conn| {
+                conn.execute("DELETE FROM items WHERE id = ?", [green[0].id.as_str()])
+                    .map_err(AppError::from)
+            })
+            .unwrap();
+        assert_eq!(fts_count(&p2), 0);
+    }
+
     #[test]
     fn delete_project_not_found_returns_error() {
         let storage = in_memory_storage();

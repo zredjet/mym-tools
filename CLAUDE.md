@@ -56,7 +56,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユーザーデータを壊すか、配布が破綻する。
 
 - **コアスキーマの破壊的マイグレーションをしない**。`DROP` / `RENAME` / 型変更 / 既存値書き換えは禁止 (ADR-0006 のまま。派生データ同期トリガの置換だけは ADR-0022 の条件で可)。本当に必要なら新 ADR + `db_schema_version` 上昇 + C-12 起動停止画面の追加が前提
-- **additive な DDL マイグレーション** (新カラム + DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) は **ADR-0011 の枠組みで許可**。`schema.rs::MIGRATIONS` にエントリを追加 + `db_schema_version` を bump + pre-migration バックアップが自動取得される。PR 説明で「additive か / バックアップ取得を確認したか」を必ず書く。現在の `CURRENT_DB_SCHEMA_VERSION` は 3
+- **additive な DDL マイグレーション** (新カラム + DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) は **ADR-0011 の枠組みで許可**。`schema.rs::MIGRATIONS` にエントリを追加 + `db_schema_version` を bump + pre-migration バックアップが自動取得される。PR 説明で「additive か / バックアップ取得を確認したか」を必ず書く。現在の `CURRENT_DB_SCHEMA_VERSION` は 4
 - **モジュールデータ変更は引き続き payload バージョニング + Eager-on-Read** (ADR-0006) で吸収する。コアスキーマには触らない。ADR-0016 の Link / Memo 再所属は限定的な例外であり、値書き換えの前例にしない
 - **フロントエンドから SQLite に直接アクセスしない**。`@tauri-apps/plugin-sql` も使わず、`tauri::command` のみを通す (module-contract §6.2)。フロントは `src/ipc/*.ts` 経由の `invoke(...)` で型付き結果を受ける
 - **タイムスタンプは必ずアプリ側で生成**。`CURRENT_TIMESTAMP` 等の DB 生成は禁止。JST `+09:00`、ms 3 桁、固定 29 文字 (ADR-0005)。文字列のまま辞書順ソート可

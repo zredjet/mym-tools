@@ -600,7 +600,10 @@ mod tests {
             trigger_sql.contains("AFTER UPDATE OF project_id, module_id, search_text ON items"),
             "{trigger_sql}"
         );
-        assert_eq!(inspect_db_schema_version(&db).unwrap(), Some(3));
+        assert_eq!(
+            inspect_db_schema_version(&db).unwrap(),
+            Some(CURRENT_DB_SCHEMA_VERSION)
+        );
         drop(conn);
 
         // 移行後も search_text の更新は FTS に反映される
@@ -642,6 +645,45 @@ mod tests {
             )
             .unwrap();
         assert!(stale.is_empty());
+    }
+
+    /// v3 DB (item ごとに FTS を全件走査する削除トリガ) を v4 へ移行すると、project 削除の
+    /// CASCADE 中は走査を省き、project 単位で FTS 行を消すトリガになる (ADR-0022 §2.1)。
+    #[test]
+    fn migrate_v3_to_v4_replaces_fts_delete_triggers() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("v3.sqlite");
+        let backups = dir.path().join("backups");
+        drop(SqliteStorage::open(&db).unwrap());
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(
+                r#"
+                DROP TRIGGER trg_items_fts_ad;
+                DROP TRIGGER trg_projects_fts_bd;
+                CREATE TRIGGER trg_items_fts_ad AFTER DELETE ON items BEGIN
+                  DELETE FROM items_fts WHERE item_id = old.id;
+                END;
+                UPDATE meta SET value = '3' WHERE key = 'db_schema_version';
+                "#,
+            )
+            .unwrap();
+        }
+
+        migrate_if_needed(&db, &backups).expect("migrate succeeds");
+
+        let conn = Connection::open(&db).unwrap();
+        let trigger_sql = |name: &str| -> String {
+            conn.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+                [name],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert!(trigger_sql("trg_items_fts_ad").contains("WHEN EXISTS"));
+        assert!(trigger_sql("trg_projects_fts_bd").contains("BEFORE DELETE ON projects"));
+        assert_eq!(inspect_db_schema_version(&db).unwrap(), Some(4));
     }
 
     /// T-36 相当: migration 完了済 DB を再起動 → migration が走らず冪等。
