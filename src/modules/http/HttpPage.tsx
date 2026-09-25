@@ -240,6 +240,13 @@ export function HttpPage() {
               <span>{response.bytes_received.toLocaleString()} bytes</span>
               <span className="min-w-0 font-mono break-all">{response.final_url}</span>
             </div>
+            {response.redirect_blocked_url != null && (
+              <p role="status" className="mt-2 text-[12px] text-[var(--destructive)]">
+                https から http へのリダイレクトは追従しませんでした
+                (暗号化されていない接続への切替):{" "}
+                <span className="font-mono break-all">{response.redirect_blocked_url}</span>
+              </p>
+            )}
             {response.body_truncated && (
               <p role="status" className="mt-2 text-[12px] text-[var(--destructive)]">
                 応答が5 MiBを超えたため、本文を打ち切りました。
@@ -255,7 +262,11 @@ export function HttpPage() {
             </details>
             {response.body_kind === "binary" ? (
               <p className="mt-3 rounded bg-[var(--bg-muted)] p-3 text-[12px]">
-                バイナリ応答の本文は表示しません。
+                バイナリ応答の本文は受信・表示しません
+                {response.bytes_received > 0
+                  ? ` (Content-Length: ${response.bytes_received.toLocaleString()} bytes)`
+                  : ""}
+                。
               </p>
             ) : (
               <pre className="mt-3 max-h-96 overflow-auto rounded bg-[var(--bg-muted)] p-3 font-mono text-[12px] break-words whitespace-pre-wrap">

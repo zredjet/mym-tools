@@ -1,7 +1,7 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE, LOCATION};
 use reqwest::{Method, Url};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -13,6 +13,8 @@ use crate::state::AppState;
 const MAX_RESPONSE_BYTES: usize = 5 * 1024 * 1024;
 const MIN_TIMEOUT_MS: u64 = 1_000;
 const MAX_TIMEOUT_MS: u64 = 120_000;
+/// 追従するリダイレクトの最大回数 (従来の `Policy::limited(5)` と同じ)
+const MAX_REDIRECTS: usize = 5;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct HttpHeaderInput {
@@ -55,6 +57,9 @@ pub struct HttpResponseOutput {
     pub body_truncated: bool,
     pub bytes_received: u64,
     pub duration_ms: u64,
+    /// https から http へのリダイレクトを追従せずに止めた場合の、リダイレクト先 URL。
+    /// このときの `status` / `headers` はリダイレクト応答 (3xx) そのもの
+    pub redirect_blocked_url: Option<String>,
 }
 
 struct ValidatedRequest {
@@ -162,13 +167,10 @@ async fn send_request(
     operation_id: &str,
 ) -> Result<HttpResponseOutput, AppError> {
     let started = Instant::now();
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .timeout(request.timeout)
-        .build()?;
-    let mut builder = client
+    let mut builder = client()?
         .request(request.method, request.url)
-        .headers(request.headers);
+        .headers(request.headers)
+        .timeout(request.timeout);
     if !matches!(request.body_kind, HttpBodyKind::None) {
         builder = builder.body(request.body);
     }
@@ -197,6 +199,28 @@ async fn send_request(
         || content_type.contains("json")
         || content_type.contains("xml")
         || content_type.contains("javascript");
+    let redirect_blocked_url = blocked_downgrade_target(&response);
+    if !is_text {
+        // 表示しないバイナリ本文は受信せず、サイズは Content-Length で示す
+        let bytes_received = response
+            .headers()
+            .get(CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        return Ok(HttpResponseOutput {
+            status: status.as_u16(),
+            status_text: status.canonical_reason().unwrap_or("").to_string(),
+            final_url,
+            headers,
+            body: String::new(),
+            body_kind: "binary".to_string(),
+            body_truncated: false,
+            bytes_received,
+            duration_ms: elapsed_ms(started),
+            redirect_blocked_url,
+        });
+    }
     let mut bytes = Vec::new();
     let mut bytes_received = 0_u64;
     let mut truncated = false;
@@ -224,16 +248,81 @@ async fn send_request(
         status_text: status.canonical_reason().unwrap_or("").to_string(),
         final_url,
         headers,
-        body: if is_text {
-            String::from_utf8_lossy(&bytes).into_owned()
-        } else {
-            String::new()
-        },
-        body_kind: if is_text { "text" } else { "binary" }.to_string(),
+        body: decode_text(&bytes, &content_type),
+        body_kind: "text".to_string(),
         body_truncated: truncated,
         bytes_received,
-        duration_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        duration_ms: elapsed_ms(started),
+        redirect_blocked_url,
     })
+}
+
+fn elapsed_ms(started: Instant) -> u64 {
+    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+/// リクエスト間で使い回す Client (接続の再利用)。タイムアウトはリクエストごとに設定する。
+fn client() -> Result<&'static reqwest::Client, AppError> {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::custom(
+            |attempt| match redirect_decision(attempt.previous(), attempt.url()) {
+                RedirectDecision::Follow => attempt.follow(),
+                RedirectDecision::StopDowngrade => attempt.stop(),
+                RedirectDecision::TooMany => attempt.error("too many redirects"),
+            },
+        ))
+        .build()?;
+    Ok(CLIENT.get_or_init(|| client))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RedirectDecision {
+    Follow,
+    /// https から http への切り替え。暗号化されていない接続へ黙って移らない
+    StopDowngrade,
+    TooMany,
+}
+
+/// `previous` はこれまでに要求した URL (先頭が元のリクエスト)、`next` はリダイレクト先。
+fn redirect_decision(previous: &[Url], next: &Url) -> RedirectDecision {
+    if previous.len() > MAX_REDIRECTS {
+        return RedirectDecision::TooMany;
+    }
+    let from_https = previous.last().is_some_and(|url| url.scheme() == "https");
+    if from_https && next.scheme() == "http" {
+        return RedirectDecision::StopDowngrade;
+    }
+    RedirectDecision::Follow
+}
+
+/// ダウングレードで止めたリダイレクト応答なら、その Location (絶対 URL) を返す。
+fn blocked_downgrade_target(response: &reqwest::Response) -> Option<String> {
+    if !response.status().is_redirection() || response.url().scheme() != "https" {
+        return None;
+    }
+    let location = response.headers().get(LOCATION)?.to_str().ok()?;
+    let target = response.url().join(location).ok()?;
+    (target.scheme() == "http").then(|| target.to_string())
+}
+
+/// 本文を Content-Type の charset (無ければ BOM、それも無ければ UTF-8) で文字列にする。
+/// 上限で打ち切った末尾の不完全な文字は置換文字になる。
+fn decode_text(bytes: &[u8], content_type: &str) -> String {
+    let encoding = content_type
+        .split(';')
+        .skip(1)
+        .find_map(|parameter| {
+            let (name, value) = parameter.split_once('=')?;
+            (name.trim() == "charset").then(|| value.trim().trim_matches('"'))
+        })
+        .and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes()))
+        .unwrap_or(encoding_rs::UTF_8);
+    let (text, _, _) = encoding.decode(bytes);
+    text.into_owned()
 }
 
 fn validation(reason: &str) -> AppError {
@@ -409,5 +498,88 @@ mod tests {
         assert!(
             matches!(error, AppError::Cancelled { operation_id } if operation_id == "cancel-me")
         );
+    }
+
+    #[test]
+    fn decodes_text_with_the_declared_charset() {
+        let (shift_jis, _, _) = encoding_rs::SHIFT_JIS.encode("こんにちは");
+        assert_eq!(
+            decode_text(&shift_jis, "text/html; charset=shift_jis"),
+            "こんにちは"
+        );
+        assert_eq!(
+            decode_text(
+                &shift_jis,
+                "text/html; charset=\"Shift_JIS\""
+                    .to_ascii_lowercase()
+                    .as_str()
+            ),
+            "こんにちは"
+        );
+        let (euc_jp, _, _) = encoding_rs::EUC_JP.encode("日本語");
+        assert_eq!(decode_text(&euc_jp, "text/plain;charset=euc-jp"), "日本語");
+        // charset 指定なし / 未知の charset は UTF-8
+        assert_eq!(
+            decode_text("日本語".as_bytes(), "application/json"),
+            "日本語"
+        );
+        assert_eq!(
+            decode_text("日本語".as_bytes(), "text/plain; charset=unknown-x"),
+            "日本語"
+        );
+    }
+
+    #[test]
+    fn redirect_decision_stops_https_to_http_downgrade() {
+        let https = Url::parse("https://example.com/a").unwrap();
+        let http = Url::parse("http://example.com/b").unwrap();
+        assert_eq!(
+            redirect_decision(std::slice::from_ref(&https), &http),
+            RedirectDecision::StopDowngrade
+        );
+        assert_eq!(
+            redirect_decision(std::slice::from_ref(&http), &https),
+            RedirectDecision::Follow
+        );
+        assert_eq!(
+            redirect_decision(std::slice::from_ref(&http), &http),
+            RedirectDecision::Follow
+        );
+        let many = vec![http.clone(); MAX_REDIRECTS + 1];
+        assert_eq!(redirect_decision(&many, &http), RedirectDecision::TooMany);
+    }
+
+    #[tokio::test]
+    async fn binary_body_is_not_downloaded_and_reports_content_length() {
+        let (url, server) = serve_once(vec![0_u8; 4096], "image/png");
+        let validated = validate_request(request(&url)).unwrap();
+        let response = send_request(
+            validated,
+            &tokio_util::sync::CancellationToken::new(),
+            "operation",
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        assert_eq!(response.body_kind, "binary");
+        assert!(response.body.is_empty());
+        assert_eq!(response.bytes_received, 4096);
+        assert!(response.redirect_blocked_url.is_none());
+    }
+
+    #[tokio::test]
+    async fn shift_jis_response_is_decoded() {
+        let (body, _, _) = encoding_rs::SHIFT_JIS.encode("文字化けしない");
+        let (url, server) = serve_once(body.into_owned(), "text/plain; charset=Shift_JIS");
+        let validated = validate_request(request(&url)).unwrap();
+        let response = send_request(
+            validated,
+            &tokio_util::sync::CancellationToken::new(),
+            "operation",
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        assert_eq!(response.body, "文字化けしない");
     }
 }
