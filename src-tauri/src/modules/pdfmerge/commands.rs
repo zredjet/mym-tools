@@ -22,6 +22,9 @@ use super::progress::PdfMergeProgress;
 pub const MAX_INPUT_FILES: usize = 50;
 pub const MAX_TOTAL_INPUT_BYTES: u64 = 200 * 1024 * 1024;
 const MAX_DECOMPRESSED_STREAM_BYTES: usize = 64 * 1024 * 1024;
+/// 全入力を読み込んだ後のストリーム内容の合計上限。`MAX_DECOMPRESSED_STREAM_BYTES` は
+/// ストリーム 1 つごとの上限なので、多数のストリームで合計が膨らむ入力をここで止める。
+const MAX_TOTAL_STREAM_BYTES: usize = 1024 * 1024 * 1024;
 const READ_CHUNK_SIZE: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -221,6 +224,10 @@ fn merge_files_inner(
     let mut page_tree_roots = Vec::with_capacity(input_paths.len());
     let mut total_pages = 0_u32;
     let mut actual_total_bytes = 0_u64;
+    let mut total_stream_bytes = 0_usize;
+    // 文書の言語 (/Lang) は最初にそれを持つ入力から引き継ぐ。タグ構造 (/StructTreeRoot)・
+    // ページラベルなど他のカタログ情報は結合結果に含めない
+    let mut output_lang: Option<Object> = None;
     let total_files = input_paths.len().min(u32::MAX as usize) as u32;
 
     for (index, input_path) in input_paths.iter().enumerate() {
@@ -236,6 +243,10 @@ fn merge_files_inner(
         }
         let mut document = loaded.document;
         let page_count = validate_supported_document(&document)?;
+        total_stream_bytes = add_stream_bytes(total_stream_bytes, &document)?;
+        if output_lang.is_none() {
+            output_lang = catalog_lang(&document);
+        }
         total_pages = total_pages
             .checked_add(page_count)
             .ok_or_else(|| validation("総ページ数が処理可能範囲を超えています。"))?;
@@ -286,13 +297,16 @@ fn merge_files_inner(
             "Count" => i64::from(total_pages),
         }),
     );
-    output.objects.insert(
-        catalog_id,
-        Object::Dictionary(dictionary! {
-            "Type" => "Catalog",
-            "Pages" => pages_root_id,
-        }),
-    );
+    let mut catalog = dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_root_id,
+    };
+    if let Some(lang) = output_lang {
+        catalog.set("Lang", lang);
+    }
+    output
+        .objects
+        .insert(catalog_id, Object::Dictionary(catalog));
     output.trailer.set("Root", catalog_id);
     output.prune_objects();
     output.max_id = output
@@ -448,6 +462,11 @@ fn validate_supported_document(document: &Document) -> Result<u32, AppError> {
             b"Perms".as_slice(),
             "電子署名を含むPDFには対応していません。",
         ),
+        (
+            // 結合でオプションコンテンツの定義が失われると、非表示レイヤーが表示されてしまう
+            b"OCProperties".as_slice(),
+            "レイヤー (オプションコンテンツ) を含むPDFには対応していません。",
+        ),
     ] {
         if catalog.has(key) {
             return Err(validation(reason));
@@ -555,6 +574,33 @@ fn validation(reason: impl Into<String>) -> AppError {
         module_id: "pdfmerge".into(),
         reason: reason.into(),
     }
+}
+
+/// 読み込んだ文書のストリーム内容の大きさを合計に加え、上限を超えたら拒否する。
+fn add_stream_bytes(total: usize, document: &Document) -> Result<usize, AppError> {
+    let bytes: usize = document
+        .objects
+        .values()
+        .filter_map(|object| match object {
+            Object::Stream(stream) => Some(stream.content.len()),
+            _ => None,
+        })
+        .sum();
+    check_stream_budget(total, bytes)
+}
+
+fn check_stream_budget(total: usize, add: usize) -> Result<usize, AppError> {
+    total
+        .checked_add(add)
+        .filter(|sum| *sum <= MAX_TOTAL_STREAM_BYTES)
+        .ok_or_else(|| validation("入力PDFを展開したデータが大きすぎます (合計1 GiBまで)。"))
+}
+
+/// カタログの /Lang (文字列) を返す。参照なら解決する。
+fn catalog_lang(document: &Document) -> Option<Object> {
+    let lang = document.catalog().ok()?.get(b"Lang").ok()?;
+    let (_, lang) = document.dereference(lang).ok()?;
+    matches!(lang, Object::String(..)).then(|| lang.clone())
 }
 
 fn rejection_reason(error: AppError) -> String {
@@ -710,6 +756,47 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_first_document_language() {
+        let directory = tempfile::tempdir().unwrap();
+        let untagged = save_document(directory.path(), "none.pdf", sample_document(&[400]));
+        let mut japanese = sample_document(&[500]);
+        japanese
+            .catalog_mut()
+            .unwrap()
+            .set("Lang", Object::string_literal("ja-JP"));
+        let japanese = save_document(directory.path(), "ja.pdf", japanese);
+        let mut english = sample_document(&[600]);
+        english
+            .catalog_mut()
+            .unwrap()
+            .set("Lang", Object::string_literal("en-US"));
+        let english = save_document(directory.path(), "en.pdf", english);
+        let output = directory.path().join("merged.pdf");
+        let paths = [&untagged, &japanese, &english].map(|path| path.display().to_string());
+
+        merge_files_inner(
+            &paths,
+            &output,
+            &CancellationToken::new(),
+            &mut |_| {},
+            "merge",
+        )
+        .unwrap();
+
+        let merged = Document::load(&output).unwrap();
+        let lang = merged.catalog().unwrap().get(b"Lang").unwrap();
+        assert_eq!(lang.as_str().unwrap(), b"ja-JP");
+    }
+
+    #[test]
+    fn rejects_inputs_whose_total_stream_data_is_too_large() {
+        assert_eq!(check_stream_budget(10, 20).unwrap(), 30);
+        let error = check_stream_budget(MAX_TOTAL_STREAM_BYTES, 1).unwrap_err();
+        assert!(rejection_reason(error).contains("1 GiB"));
+        assert!(check_stream_budget(usize::MAX, 1).is_err());
+    }
+
+    #[test]
     fn merges_ten_files_in_the_selected_order() {
         let directory = tempfile::tempdir().unwrap();
         let mut paths = Vec::new();
@@ -745,6 +832,7 @@ mod tests {
             ("Collection", "ポートフォリオ"),
             ("AF", "添付"),
             ("Perms", "電子署名"),
+            ("OCProperties", "レイヤー"),
         ] {
             let mut document = sample_document(&[500]);
             document.catalog_mut().unwrap().set(key, dictionary! {});

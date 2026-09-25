@@ -744,7 +744,7 @@ editor URLは`lang=ja`を固定し、同梱済み日本語resourceだけをsame-
 | 出力契約 | user-selected `.pdf`へ同一directoryの一時ファイル経由でatomic replace。入力自身への上書きは禁止 |
 | `index_text` の対象 | なし |
 
-入力一覧と順序はfrontend stateだけに保持し、items、検索、export / importの対象外とする。各実行はUUIDのoperation IDを持ち、遅延した別operationの進捗をUIへ反映しない。結合開始時に全入力を再検証し、暗号化、署名、AcroForm / Widget、Outlines、embedded files、portfolioを検出したPDFは拒否する。
+入力一覧と順序はfrontend stateだけに保持し、items、検索、export / importの対象外とする。各実行はUUIDのoperation IDを持ち、遅延した別operationの進捗をUIへ反映しない。結合開始時に全入力を再検証し、暗号化、署名、AcroForm / Widget、Outlines、embedded files、portfolio、OCProperties (レイヤー。結合で定義が失われると非表示レイヤーが表示されるため) を検出したPDFは拒否する。出力のカタログは Pages と、最初に持つ入力の Lang だけを持ち、タグ構造 (StructTreeRoot)・ページラベルなど他のカタログ情報は引き継がない。読み込んだストリーム内容の合計は1 GiBまでとする。
 
 ### 12.10 M-NRBF BinaryFormatter解析
 
@@ -835,6 +835,7 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-09-02 | 1.2 | ADR-0018を反映。M-PDF Mergeのstateless契約、固有IPC、進捗・cancel、入力上限、通常PDF限定、atomic outputを追加 |
 | 2026-09-03 | 1.3 | ADR-0020を反映。M-NRBFのnode / summary / Channel契約、解析上限、型非生成sidecar、画面内検索と非永続境界を追加 |
 | 2026-09-03 | 1.4 | M-NRBFのIPCへbyte配列展開許可を追加し、500,000ノード／256 MiB protocolへ上限を変更。項目名＋値のAND条件と絞り込み／ジャンプ検索を追加 |
+| 2026-09-25 | 1.5 | M-PDF Merge: OCProperties (レイヤー) を拒否、Lang の引き継ぎと引き継がないカタログ情報、ストリーム合計1 GiBの上限を明記 |
 
 ## ベクター描画と検索投影の追加契約（ADR-0021）
 
