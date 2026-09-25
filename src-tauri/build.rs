@@ -44,6 +44,9 @@ fn main() {
         "mermaid_write_file",
         "pdfmerge_inspect_files",
         "pdfmerge_merge_files",
+        "pngopt_optimize_file",
+        "pngopt_scan_folder",
+        "pngopt_optimize_folder",
         "nrbf_inspect_file",
         "prompt_render_template",
     ];

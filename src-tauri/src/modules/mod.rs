@@ -22,6 +22,7 @@ pub mod mermaid;
 pub mod nrbf;
 pub mod palette;
 pub mod pdfmerge;
+pub mod pngopt;
 pub mod prompt;
 pub mod regex;
 pub mod registry;

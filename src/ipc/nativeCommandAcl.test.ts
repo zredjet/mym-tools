@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 const PUBLIC_COMMANDS = [
   "pdfmerge_inspect_files",
   "pdfmerge_merge_files",
+  "pngopt_optimize_file",
+  "pngopt_scan_folder",
+  "pngopt_optimize_folder",
   "nrbf_inspect_file",
 ] as const;
 

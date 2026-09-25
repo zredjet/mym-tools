@@ -6,6 +6,7 @@
 - **対象 OS**: macOS / Windows (Linux は対象外)
 - **配布形式**: portable 差し替え方式 (自動更新なし)
 - **図編集**: Mermaid 11.17.2 / draw.io 31.4.1を全資産同梱で完全オフライン実行
+- **PNG最適化**: 自作の shotq を内蔵し、`shotq --quality=70-85 --speed 11` と同じ結果をファイル単位・フォルダ単位で得る (ADR-0023)
 - **データ保存**: ローカル SQLite (アプリ実行ファイルとは別ディレクトリ)
 - **ライセンス**: MIT
 
@@ -20,7 +21,7 @@
 | [docs/ui-design.md](docs/ui-design.md) | UI トークン、画面スケルトン、キーボードショートカット |
 | [docs/developer-tools-plan.md](docs/developer-tools-plan.md) | 開発ツール11モジュールの範囲、段階、品質条件 |
 | [docs/release-process.md](docs/release-process.md) | 担当者向けの手動リリース手順、公開後検証、失敗時対応 |
-| [docs/decisions/](docs/decisions/) | ADR-0001〜0020 (モジュール化 / ローカル処理境界 / リリース方式) |
+| [docs/decisions/](docs/decisions/) | ADR-0001〜0023 (モジュール化 / ローカル処理境界 / リリース方式) |
 | [CLAUDE.md](CLAUDE.md) | 作業時の不変条件と参照優先順位 |
 
 ## 開発
@@ -77,8 +78,8 @@ cargo test --workspace --lib --all-features --locked
 **Phase 1 の主要機能を実装済み (`0.1.0-alpha.19`)**。
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
-rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing / lopdf の Rust バックエンドで構成。
-プロジェクト管理、カテゴリ表示付き22モジュール、横断検索、`settings.json`、バックアップ、
+rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing / lopdf / shotq (PNG最適化、`src-tauri/crates/shotq` に複製) の Rust バックエンドで構成。
+プロジェクト管理、カテゴリ表示付き23モジュール、横断検索、`settings.json`、バックアップ、
 アプリ全体／プロジェクト単位の JSON export / import を備える。
 
 CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2)

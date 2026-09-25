@@ -1,0 +1,31 @@
+# Vendored copy of shotq's library (ADR-0023). See UPSTREAM.md before editing anything here.
+# Differences from upstream Cargo.toml: the GPL `liq` feature and its `imagequant` dependency are removed,
+# the release profile is set by the app (src-tauri/Cargo.toml), and upstream's known dead-code warnings are
+# silenced because this crate is built, not developed, in this repository.
+
+[package]
+name = "shotq"
+version = "0.23.2"
+edition = "2021"
+description = "Time-first lossy PNG optimizer for screenshots (own quantizer, no libimagequant)"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+png = "0.18"
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+libdeflater = "1"
+simd-adler32 = "0.3"
+libc = "0.2"
+rgb = "0.8"
+rayon = "1"
+crc32fast = "1"
+fdeflate = "0.3"
+qcms = { version = "0.3", default-features = false, features = ["iccv4-enabled"] }
+
+[lints.rust]
+dead_code = "allow"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("liq"))'] }

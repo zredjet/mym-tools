@@ -26,6 +26,7 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 
 import { Button } from "@/components/ui/Button";
 import { formatInvokeError } from "@/lib/error";
+import shotqNotices from "../../third_party/shotq-NOTICES.txt?raw";
 import vectorNotices from "../../third_party/svgedit-NOTICES.txt?raw";
 
 const RELEASES_URL = "https://github.com/zredjet/mym-tools/releases";
@@ -242,9 +243,18 @@ export function AboutPage() {
               </button>{" "}
               — MIT License
             </li>
+            <li>
+              shotq 0.23.2 (PNG最適化) — MIT License。libdeflate / zlib-rs / qcms ほかを含む
+              <details className="mt-1">
+                <summary className="cursor-pointer">同梱部品のライセンス全文</summary>
+                <pre className="mt-2 max-h-64 overflow-auto text-[11px] whitespace-pre-wrap">
+                  {shotqNotices}
+                </pre>
+              </details>
+            </li>
           </ul>
           <p className="mt-2 text-[11px] text-[var(--fg-subtle)]">
-            編集資産とNRBFデコーダーはアプリに同梱され、図データ、NRBFファイル、利用状況を外部へ送信しません。
+            編集資産、NRBFデコーダー、PNG最適化エンジンはアプリに同梱され、図データ、NRBFファイル、画像、利用状況を外部へ送信しません。
           </p>
         </section>
 

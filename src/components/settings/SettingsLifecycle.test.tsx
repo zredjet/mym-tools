@@ -41,6 +41,7 @@ describe("SettingsLifecycle", () => {
       "nrbf",
       "palette",
       "pdfmerge",
+      "pngopt",
       "prompt",
       "regex",
       "secretgen",

@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-09-03 / ステータス: Draft (Phase 1)
+最終更新: 2026-09-25 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -67,7 +67,7 @@
 ### 2.2 「やらない」構造的選択
 
 - **マイクロサービス分割しない** — ローカル個人ツール。プロセス境界はオーバーキル
-- **自前のスレッドプールを別途持たない** — Tokio が Tauri に同梱されている。これを唯一の非同期ランタイムとし、`rayon` 等の追加プールは持ち込まない (Tokio 自体は「導入する/しない」の選択肢ではなく、最初から存在する前提)
+- **自前のスレッドプールを別途持たない** — Tokio が Tauri に同梱されている。これを唯一の非同期ランタイムとし、`rayon` 等の追加プールは持ち込まない (Tokio 自体は「導入する/しない」の選択肢ではなく、最初から存在する前提)。唯一の例外は、複製した shotq crate の内部で使う rayon の全体プール (ADR-0023、§10.7)
 - **モジュール独自の SQLite テーブルを Phase 1 では原則作らない** — items テーブル + JSON ペイロードに統一。例外要件が出た場合のみ data-model.md で許可
 
 ### 2.3 「最初から入れる」基盤選択
@@ -469,6 +469,15 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 - `BinaryFormatter.Serialize`を同じstreamへ繰り返したファイル（header〜MessageEndのpayloadが連続）は、最初のpayloadの後もfile末尾までheaderを確認して順にdecodeする。2個以上なら合成のroot `$`（`array`、shape `[N]`）の下に各payloadを`[i]`として並べ、warningで連結を明示する。record IDはpayloadごとに振り直されるため、正規node・参照の判定はpayload単位で行う。NRBFとして解釈できない末尾データ、途中payloadのdecode失敗、50,000 payload超、55秒超では解析済みpayloadを維持して打ち切り、位置付きwarningを返す
 - 対象は先頭にNRBF headerを持つ既定`FormatterTypeStyle.TypesAlways` payloadであり、圧縮、暗号化、独自header、非ゼロ下限配列を扱わない。読み取り専用とし、編集・再シリアライズ・JSON出力を提供しない
 
+### 10.7 PNG最適化境界
+
+- `pngopt`は既定有効・`other` categoryのstatelessモジュールとし、入力path、設定、結果、履歴をitems、設定、横断検索、export / importへ保存しない
+- 自作のshotqのライブラリ部分を`src-tauri/crates/shotq`へ複製してpath依存にし、`shotq::optimize`をRustから直接呼ぶ。複製元のcommitは`UPSTREAM.md`に記録し、複製したソースは編集しない。出力に効く依存crateはshotqの`Cargo.lock`と同じ版に固定し、CLIとのバイト一致を契約テストで確かめる
+- shotqは内部でrayonの全体プールを使う。これはADR-0009 R-2の限定例外で、アプリのコード (`src-tauri/src`) には`rayon::`を書かない。`shotq::optimize`は`spawn_blocking`の中からだけ呼び、処理はアプリ全体で同時に1つにする (shotqの並列処理にはワーカー同士が進捗を待つ箇所があるため)。panicはファイル単位で受け止める
+- PNG本体はWebViewへ渡さず、Rustの`pngopt_optimize_file` / `pngopt_scan_folder` / `pngopt_optimize_folder`がuser-selected pathを読み書きする。フォルダ処理の進捗はTauri Channelで通知する
+- 入力はPNGだけで、1ファイル128 MiB、4,000万画素 (IHDRでデコード前に確認)、1回10,000ファイルを上限とする。4,000万画素でshotqは約110 ms・最大メモリ約400 MB (Apple M4 Max)
+- cancelは読込中 (1 MiBごと)、最適化の後、置換の直前、フォルダの各ファイルの前で確認し、最適化の途中では止めない。出力は同一directoryの一時ファイルをflush / sync後にatomic replaceする
+
 ---
 
 ## 11. 重い処理の扱い
@@ -478,6 +487,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | ファイルハッシュ (大ファイル) | Rust の `tauri::async_runtime::spawn_blocking` で非同期実行、進捗は **Tauri Channel** で通知、キャンセルは `tokio_util::sync::CancellationToken` + `core_cancel_operation`。詳細は ADR-0009 |
 | PDF結合 | Rustの`spawn_blocking`で再検証・page tree統合・原子的書込みを実行し、Tauri Channelで`reading / merging / writing / done / cancelled`を通知する。`OperationRegistry`でキャンセルし、WebViewへPDF本体を渡さない (ADR-0018) |
 | NRBF解析 | RustがNativeAOT sidecarを起動し、60秒timeout・出力量上限・cancelを管理する。sidecarは型非生成で反復走査し、RustからTauri Channelでノードbatchを通知する (ADR-0020) |
+| PNG最適化 | Rustの`spawn_blocking`でshotqを呼ぶ。shotqの中はrayonで並列化し (ADR-0009 R-2の限定例外)、処理は同時に1つ。フォルダ処理はTauri Channelでファイルごとに通知し、ファイルの間でcancelを確認する (ADR-0023) |
 | 全文検索 | SQLite FTS5 (インメモリインデックス不要) |
 | Markdown レンダリング | フロント側で同期実行。長文時の体感劣化が出たら Web Worker 化を検討 |
 | エクスポート | Rust 側で生成し、UI は処理中の二重送信を防ぐ。実測で必要になった時点で件数進捗 Event / Channel を追加 |
@@ -559,6 +569,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-09-02 | 1.0 | ADR-0018を反映。PDF結合のRust処理、対応範囲、size上限、進捗・cancel、atomic replace、MSRV 1.88を追加 |
 | 2026-09-03 | 1.1 | ADR-0020を反映。NRBFの型非生成NativeAOT sidecar、IPC・上限・cancel境界、配布構成、CI検査を追加 |
 | 2026-09-03 | 1.2 | NRBF IPCへbyte配列展開許可を追加し、node上限を500,000、protocol stdout上限を256 MiBへ変更。byte配列は許可時だけ50,000要素まで展開する契約を追加 |
+| 2026-09-25 | 1.3 | ADR-0023を反映。§2.2に複製したshotq内部のrayonの例外、§10.7 PNG最適化境界、§11の重い処理の方針を追加 |
 
 ## SVG-Edit統合（ADR-0021）
 
