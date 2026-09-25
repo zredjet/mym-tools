@@ -139,6 +139,19 @@ export function AppShell() {
     goToModule("palette");
   });
 
+  // Cmd/Ctrl+B (VS Code 等と同じ) / Cmd/Ctrl+\ でサイドバーを開閉する (`docs/ui-design.md` §8.1)。
+  // 状態は settings.json の `core.sidebar_collapsed` に保存され、次回起動時も維持される
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
+  useHotkeys(
+    ["mod+b", "mod+backslash"],
+    (e) => {
+      e.preventDefault();
+      toggleSidebarCollapsed();
+    },
+    { enableOnFormTags: true, enableOnContentEditable: true },
+  );
+
   // Cmd/Ctrl+, で設定ページ (`docs/ui-design.md` §8.1)
   useHotkeys(
     "mod+comma",
@@ -167,11 +180,13 @@ export function AppShell() {
     <div className="flex h-full w-full flex-col bg-[var(--bg)] text-[var(--fg)]">
       <TopBar currentProject={currentProject} onOpenSearch={() => setSearchOpen(true)} />
       <div className="flex min-h-0 flex-1">
-        <Sidebar
-          projects={projects}
-          onProjectCreated={handleProjectCreated}
-          onProjectChanged={() => void refresh()}
-        />
+        {!sidebarCollapsed && (
+          <Sidebar
+            projects={projects}
+            onProjectCreated={handleProjectCreated}
+            onProjectChanged={() => void refresh()}
+          />
+        )}
         <main className="min-w-0 flex-1 overflow-auto">
           {error != null ? (
             <div className="m-6 rounded-[var(--radius)] border border-[var(--destructive)] bg-[var(--destructive)]/10 p-4 text-sm text-[var(--destructive)]">

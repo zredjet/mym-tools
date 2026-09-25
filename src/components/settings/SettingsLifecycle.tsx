@@ -87,6 +87,7 @@ function SettingsSync() {
   const searchDefaultScope = useAppStore((state) => state.searchDefaultScope);
   const logLevel = useAppStore((state) => state.logLevel);
   const sidebarWidth = useAppStore((state) => state.sidebarWidth);
+  const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed);
   const uiScale = useAppStore((state) => state.uiScale);
   const rowDensity = useAppStore((state) => state.rowDensity);
   const moduleEnabled = useAppStore((state) => state.moduleEnabled);
@@ -130,6 +131,7 @@ function SettingsSync() {
       searchDefaultScope,
       logLevel,
       sidebarWidth,
+      sidebarCollapsed,
       uiScale,
       rowDensity,
       moduleEnabled,
@@ -172,6 +174,7 @@ function SettingsSync() {
     searchDefaultScope,
     logLevel,
     sidebarWidth,
+    sidebarCollapsed,
     uiScale,
     rowDensity,
     moduleEnabled,

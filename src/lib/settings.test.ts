@@ -13,6 +13,7 @@ describe("settings document", () => {
           last_opened_project_id: "p-last",
           last_opened_module_id: "prompt",
           sidebar_width: 999,
+          sidebar_collapsed: true,
           ui_scale: 0.5,
           row_density: "comfortable",
           module_enabled: { prompt: false, unknown: false },
@@ -28,10 +29,21 @@ describe("settings document", () => {
     expect(parsed.lastOpenedProjectId).toBe("p-last");
     expect(parsed.lastOpenedModuleId).toBe("prompt");
     expect(parsed.sidebarWidth).toBe(320);
+    expect(parsed.sidebarCollapsed).toBe(true);
     expect(parsed.uiScale).toBe(0.75);
     expect(parsed.rowDensity).toBe("comfortable");
     expect(parsed.moduleEnabled).toEqual({ prompt: false });
     expect(parsed.collapsedModuleCategories).toEqual(["text", "future"]);
+  });
+
+  it("keeps the sidebar open unless sidebar_collapsed is exactly true", () => {
+    expect(
+      parseSettingsDocument({ schema_version: 1, core: {}, modules: {} }).sidebarCollapsed,
+    ).toBe(false);
+    expect(
+      parseSettingsDocument({ schema_version: 1, core: { sidebar_collapsed: "yes" }, modules: {} })
+        .sidebarCollapsed,
+    ).toBe(false);
   });
 
   it("inherits the explicit legacy Link enabled state for Memo only when Memo is absent", () => {
@@ -72,6 +84,7 @@ describe("settings document", () => {
       searchDefaultScope: "global",
       logLevel: "debug",
       sidebarWidth: 280,
+      sidebarCollapsed: true,
       uiScale: 1.15,
       rowDensity: "compact",
       moduleEnabled: { prompt: true, color: false },
@@ -88,5 +101,6 @@ describe("settings document", () => {
       color: false,
     });
     expect(merged.core.collapsed_module_categories).toEqual(["web"]);
+    expect(merged.core.sidebar_collapsed).toBe(true);
   });
 });

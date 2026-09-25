@@ -21,6 +21,7 @@ export interface AppSettingsSnapshot {
   searchDefaultScope: SearchDefaultScope;
   logLevel: LogLevel;
   sidebarWidth: number;
+  sidebarCollapsed: boolean;
   uiScale: number;
   rowDensity: RowDensitySetting;
   moduleEnabled: Partial<Record<ModuleId, boolean>>;
@@ -35,6 +36,7 @@ const DEFAULTS: AppSettingsSnapshot = {
   searchDefaultScope: "project",
   logLevel: "info",
   sidebarWidth: 240,
+  sidebarCollapsed: false,
   uiScale: 1,
   rowDensity: "compact",
   moduleEnabled: {},
@@ -78,6 +80,7 @@ export function parseSettingsDocument(
       search?.["default_scope"] === "global" ? "global" : DEFAULTS.searchDefaultScope,
     logLevel: isLogLevel(core?.["log_level"]) ? core["log_level"] : DEFAULTS.logLevel,
     sidebarWidth: clampNumber(core?.["sidebar_width"], 180, 320, DEFAULTS.sidebarWidth, true),
+    sidebarCollapsed: core?.["sidebar_collapsed"] === true,
     uiScale: clampNumber(core?.["ui_scale"], 0.75, 1.5, DEFAULTS.uiScale, false),
     rowDensity: core?.["row_density"] === "comfortable" ? "comfortable" : DEFAULTS.rowDensity,
     moduleEnabled,
@@ -107,6 +110,7 @@ export function mergeSettingsDocument(
       search: { ...originalSearch, default_scope: settings.searchDefaultScope },
       log_level: settings.logLevel,
       sidebar_width: settings.sidebarWidth,
+      sidebar_collapsed: settings.sidebarCollapsed,
       ui_scale: settings.uiScale,
       row_density: settings.rowDensity,
       module_enabled: { ...originalModuleEnabled, ...settings.moduleEnabled },
