@@ -32,7 +32,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { deleteItem, listItems, reorderItems } from "@/ipc/items";
+import { deleteItem, listAllItems, reorderItems } from "@/ipc/items";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import { extractPromptVariables } from "@/lib/promptVars";
@@ -51,7 +51,7 @@ export function PromptListPage() {
   const refresh = useCallback(async (pid: string) => {
     try {
       setLoading(true);
-      const list = await listItems({ moduleId: "prompt", projectId: pid });
+      const list = await listAllItems({ moduleId: "prompt", projectId: pid });
       setItems(list);
       setError(null);
     } catch (e) {
@@ -66,7 +66,7 @@ export function PromptListPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const list = await listItems({ moduleId: "prompt", projectId });
+        const list = await listAllItems({ moduleId: "prompt", projectId });
         if (!cancelled) {
           setItems(list);
           setError(null);

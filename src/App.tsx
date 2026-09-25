@@ -7,6 +7,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { useRowDensityAttribute } from "@/hooks/useRowDensityAttribute";
 import { useThemeAttribute } from "@/hooks/useThemeAttribute";
 import { useUiScaleAttribute } from "@/hooks/useUiScaleAttribute";
+import { installWindowCloseCoordinator } from "@/lib/windowClose";
 import { enabledModules, isModuleEnabled, modulePath, modules } from "@/modules/registry";
 import type { ModuleDefinition } from "@/modules/types";
 import { AboutPage } from "@/pages/AboutPage";
@@ -19,6 +20,8 @@ function App() {
   useThemeAttribute();
   useUiScaleAttribute();
   useRowDensityAttribute();
+  // ウィンドウを閉じる要求の listener はここで 1 本だけ登録する (`src/lib/windowClose.ts`)
+  useEffect(() => installWindowCloseCoordinator(), []);
 
   return (
     <SettingsLifecycle>

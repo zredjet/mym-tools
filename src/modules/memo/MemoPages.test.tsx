@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RouterProvider, createMemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createItem, getItem, listAllItems, updateItem } from "@/ipc/items";
 import type { Item } from "@/lib/types";
+import { handleCloseRequested, resetWindowCloseCoordinatorForTest } from "@/lib/windowClose";
 
 import { MemoDetailPage } from "./MemoDetailPage";
 import { MemoEditorRoute } from "./MemoEditorPage";
@@ -56,6 +57,7 @@ function router(initialEntry: string) {
 
 describe("Memo pages", () => {
   beforeEach(() => {
+    resetWindowCloseCoordinatorForTest();
     vi.mocked(getItem).mockResolvedValue(memo);
     vi.mocked(createItem).mockResolvedValue("memo-1");
     vi.mocked(updateItem).mockResolvedValue(undefined);
@@ -166,5 +168,25 @@ describe("Memo pages", () => {
     await waitFor(() =>
       expect(editRouter.state.location.pathname).toBe("/projects/project-1/m/memo/memo-1"),
     );
+  });
+
+  it("asks before closing the window with unsaved changes", async () => {
+    const user = userEvent.setup();
+    render(<RouterProvider router={router("/projects/project-1/m/memo/new")} />);
+    const closeWindow = vi.fn().mockResolvedValue(undefined);
+
+    // 変更なし → 閉じる要求を止めない
+    const cleanEvent = { preventDefault: vi.fn() };
+    await act(() => handleCloseRequested(cleanEvent, closeWindow));
+    expect(cleanEvent.preventDefault).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText("タイトル"), "draft");
+    const dirtyEvent = { preventDefault: vi.fn() };
+    await act(() => handleCloseRequested(dirtyEvent, closeWindow));
+    expect(dirtyEvent.preventDefault).toHaveBeenCalledOnce();
+    expect(screen.getByText("変更を破棄してウィンドウを閉じますか?")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "破棄して閉じる" }));
+    expect(closeWindow).toHaveBeenCalledOnce();
   });
 });

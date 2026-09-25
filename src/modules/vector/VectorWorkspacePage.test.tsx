@@ -5,6 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as items from "@/ipc/items";
 import { vectorEditorUrl } from "@/ipc/vector";
 import { VectorWorkspaceRoute } from "./VectorWorkspacePage";
+import {
+  installWindowCloseCoordinator,
+  resetWindowCloseCoordinatorForTest,
+} from "@/lib/windowClose";
 const native = vi.hoisted(() => ({ enabled: false, onCloseRequested: vi.fn(), close: vi.fn() }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => native }));
 const dialog = vi.hoisted(() => ({ open: vi.fn(), save: vi.fn() }));
@@ -72,6 +76,7 @@ async function connect() {
   return { post, send, documentId: load.documentId };
 }
 beforeEach(() => {
+  resetWindowCloseCoordinatorForTest();
   vi.useFakeTimers();
   native.enabled = false;
   native.onCloseRequested.mockResolvedValue(vi.fn());
@@ -200,13 +205,19 @@ describe("Vector workspace lifecycle", () => {
   });
   it("keeps a native close listener across dirty and busy transitions", async () => {
     native.enabled = true;
+    // 閉じる要求の listener は App が 1 本だけ登録し、画面は guard として参加する
+    const uninstall = installWindowCloseCoordinator();
     const { send, documentId, post } = await start();
     const handler = native.onCloseRequested.mock.calls[0]![0];
     const event = { preventDefault: vi.fn() };
-    act(() => handler(event));
+    await act(async () => {
+      await handler(event);
+    });
     expect(event.preventDefault).not.toHaveBeenCalled();
     send({ event: "changed", documentId, revision: 1 });
-    act(() => handler(event));
+    await act(async () => {
+      await handler(event);
+    });
     expect(event.preventDefault).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "戻る" }));
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -220,9 +231,12 @@ describe("Vector workspace lifecycle", () => {
     await flush();
     expect(native.onCloseRequested).toHaveBeenCalledOnce();
     send({ event: "changed", documentId, revision: 2 });
-    act(() => handler(event));
+    await act(async () => {
+      await handler(event);
+    });
     fireEvent.click(screen.getByRole("button", { name: "続行" }));
     expect(native.close).toHaveBeenCalledOnce();
+    uninstall();
   });
   it("preserves the document when a file dialog or unsaved navigation is cancelled", async () => {
     const { post, send, documentId, router } = await start();
