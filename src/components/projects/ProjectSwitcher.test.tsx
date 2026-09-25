@@ -102,9 +102,10 @@ describe("ProjectSwitcher", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByTestId("loc").textContent).toBe("/projects/p2/m/linkmemo");
     expect(onClose).toHaveBeenCalled();
-    // store 更新も確認
-    expect(useAppStore.getState().lastOpenedProjectId).toBe("p2");
-    expect(useAppStore.getState().lastOpenedModuleId).toBe("linkmemo");
+    // 「最後に開いた」は遷移先の ModuleAccess が更新する。未保存確認で遷移がキャンセル
+    // されても元の画面を指すよう、切替操作そのものでは書き換えない
+    expect(useAppStore.getState().lastOpenedProjectId).toBeNull();
+    expect(useAppStore.getState().lastOpenedModuleId).toBeNull();
   });
 
   it("preserves hash module because every module is project-scoped", () => {

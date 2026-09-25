@@ -22,29 +22,38 @@ export function TextDiffPage() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const workerRef = useRef<Worker | null>(null);
+  const timeoutRef = useRef<number | null>(null);
   const requestId = useRef(0);
 
-  useEffect(() => () => workerRef.current?.terminate(), []);
-  const execute = () => {
+  // 実行中の Worker と打ち切りタイマーをまとめて止める。画面を離れた後にタイマーが発火して
+  // 破棄済みの画面を更新しないよう、unmount でも呼ぶ
+  const stop = () => {
+    if (timeoutRef.current != null) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
     workerRef.current?.terminate();
+    workerRef.current = null;
+  };
+  useEffect(() => stop, []);
+  const execute = () => {
+    stop();
     const id = ++requestId.current;
     const worker = new Worker(new URL("./textDiff.worker.ts", import.meta.url), { type: "module" });
     workerRef.current = worker;
     setPending(true);
     setError(null);
-    const timeout = window.setTimeout(() => {
+    timeoutRef.current = window.setTimeout(() => {
+      timeoutRef.current = null;
       if (requestId.current !== id) return;
-      worker.terminate();
-      workerRef.current = null;
+      stop();
       setPending(false);
       setResult([]);
       setError("差分計算が2秒を超えたため停止しました");
     }, 2000);
     worker.onmessage = (event: MessageEvent<{ id: number; result?: Change[]; error?: string }>) => {
       if (event.data.id !== id || requestId.current !== id) return;
-      window.clearTimeout(timeout);
-      worker.terminate();
-      workerRef.current = null;
+      stop();
       setPending(false);
       if (event.data.error != null) {
         setResult([]);
@@ -54,9 +63,7 @@ export function TextDiffPage() {
     // Worker 自体を起動できない (CSP / 読込失敗) 場合はタイムアウトと区別して表示する
     worker.onerror = () => {
       if (requestId.current !== id) return;
-      window.clearTimeout(timeout);
-      worker.terminate();
-      workerRef.current = null;
+      stop();
       setPending(false);
       setResult([]);
       setError("差分計算用ワーカーを起動できませんでした");

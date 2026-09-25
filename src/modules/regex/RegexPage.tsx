@@ -23,7 +23,14 @@ export function RegexPage() {
   const workerRef = useRef<Worker | null>(null);
   const requestId = useRef(0);
 
+  const timeoutRef = useRef<number | null>(null);
+  // 実行中の Worker と打ち切りタイマーをまとめて止める。unmount でも呼び、画面を離れた後に
+  // タイマーが発火して破棄済みの画面を更新しないようにする
   const cancel = () => {
+    if (timeoutRef.current != null) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
     workerRef.current?.terminate();
     workerRef.current = null;
     setPending(false);
@@ -37,7 +44,8 @@ export function RegexPage() {
     workerRef.current = worker;
     setPending(true);
     setError(null);
-    const timeout = window.setTimeout(() => {
+    timeoutRef.current = window.setTimeout(() => {
+      timeoutRef.current = null;
       if (requestId.current !== id) return;
       cancel();
       setResult(null);
@@ -47,10 +55,7 @@ export function RegexPage() {
       event: MessageEvent<{ id: number; result?: RegexEvaluation; error?: string }>,
     ) => {
       if (event.data.id !== id || requestId.current !== id) return;
-      window.clearTimeout(timeout);
-      worker.terminate();
-      workerRef.current = null;
-      setPending(false);
+      cancel();
       if (event.data.error != null) {
         setResult(null);
         setError(event.data.error);
@@ -59,7 +64,6 @@ export function RegexPage() {
     // Worker 自体を起動できない (CSP / 読込失敗) 場合はタイムアウトと区別して表示する
     worker.onerror = () => {
       if (requestId.current !== id) return;
-      window.clearTimeout(timeout);
       cancel();
       setResult(null);
       setError("正規表現の評価用ワーカーを起動できませんでした");

@@ -66,8 +66,6 @@ function Content({ projects, onClose }: { projects: Project[]; onClose: () => vo
   const { pathname } = useLocation();
   const currentModule = deriveModuleFromPath(pathname);
   const lastOpenedModuleId = useAppStore((s) => s.lastOpenedModuleId);
-  const setLastProject = useAppStore((s) => s.setLastOpenedProjectId);
-  const setLastModule = useAppStore((s) => s.setLastOpenedModuleId);
   const moduleEnabled = useAppStore((s) => s.moduleEnabled);
 
   const [query, setQuery] = useState("");
@@ -98,8 +96,8 @@ function Content({ projects, onClose }: { projects: Project[]; onClose: () => vo
       onClose();
       return;
     }
-    setLastProject(project.id);
-    setLastModule(targetModule.id);
+    // 「最後に開いた」状態は遷移先の画面 (ModuleAccess) が更新する。未保存確認で遷移が
+    // キャンセルされても、元の画面を指したままにするため、ここでは書き換えない
     navigate(modulePath(project.id, targetModule.id, targetModule.defaultRoute));
     onClose();
   };
