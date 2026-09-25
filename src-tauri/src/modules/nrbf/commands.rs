@@ -53,7 +53,10 @@ pub async fn nrbf_inspect_file(
         .shell()
         .sidecar("nrbf-decoder")
         .map_err(|error| AppError::Internal(format!("NRBFデコーダーを開始できません: {error}")))?
-        .args(arguments);
+        .args(arguments)
+        // sidecar は応答全体を 1 行の JSON で書くため、行単位で受けると最後に 1 度しか
+        // Stdout が届かず、256 MiB の上限を受信中に効かせられない。読めた分ずつ受け取る
+        .set_raw_out(true);
     let (mut receiver, child) = command.spawn().map_err(|error| {
         AppError::Internal(format!("NRBFデコーダーの起動に失敗しました: {error}"))
     })?;
@@ -97,27 +100,26 @@ pub async fn nrbf_inspect_file(
                     }
                     CommandEvent::Terminated(status) => {
                         child.take();
-                        let response: SidecarResponse = serde_json::from_slice(&stdout).map_err(|error| {
-                            let detail = String::from_utf8_lossy(&stderr);
-                            AppError::Internal(format!("NRBFデコーダーから不正な応答を受信しました: {error} {detail}"))
-                        })?;
-                        if !response.ok || status.code != Some(0) {
-                            return Err(AppError::Validation {
-                                module_id: "nrbf".into(),
-                                reason: response.error.unwrap_or_else(|| "NRBFデコーダーが異常終了しました。".into()),
-                            });
-                        }
-                        let summary = response.summary.ok_or_else(|| {
-                            AppError::Internal("NRBFデコーダーの応答にサマリーがありません。".into())
-                        })?;
-                        validate_sidecar_payload(&response.nodes, &summary)
-                            .map_err(AppError::Internal)?;
-                        for batch in response.nodes.chunks(NODE_BATCH_SIZE) {
+                        // 最大 256 MiB の JSON 解析と 50 万ノードの検証は async worker を塞がないよう
+                        // blocking thread で行う
+                        let stdout = std::mem::take(&mut stdout);
+                        let stderr = std::mem::take(&mut stderr);
+                        let (nodes, summary) = tauri::async_runtime::spawn_blocking(move || {
+                            parse_sidecar_response(&stdout, &stderr, status.code)
+                        })
+                        .await??;
+                        // clone せず所有権ごと 500 件ずつ送る
+                        let mut nodes = nodes.into_iter();
+                        loop {
+                            let batch: Vec<_> = nodes.by_ref().take(NODE_BATCH_SIZE).collect();
+                            if batch.is_empty() {
+                                break;
+                            }
                             if token.is_cancelled() {
                                 send_progress(&on_progress, &operation_id, NrbfProgress::Cancelled);
                                 return Err(AppError::Cancelled { operation_id });
                             }
-                            send_progress(&on_progress, &operation_id, NrbfProgress::Nodes { nodes: batch.to_vec() });
+                            send_progress(&on_progress, &operation_id, NrbfProgress::Nodes { nodes: batch });
                         }
                         if token.is_cancelled() {
                             send_progress(&on_progress, &operation_id, NrbfProgress::Cancelled);
@@ -131,6 +133,33 @@ pub async fn nrbf_inspect_file(
             }
         }
     }
+}
+
+/// sidecar の応答 JSON を解析・検証し、ノード列とサマリーを返す。
+fn parse_sidecar_response(
+    stdout: &[u8],
+    stderr: &[u8],
+    exit_code: Option<i32>,
+) -> Result<(Vec<crate::modules::nrbf::protocol::NrbfNode>, NrbfSummary), AppError> {
+    let response: SidecarResponse = serde_json::from_slice(stdout).map_err(|error| {
+        let detail = String::from_utf8_lossy(stderr);
+        AppError::Internal(format!(
+            "NRBFデコーダーから不正な応答を受信しました: {error} {detail}"
+        ))
+    })?;
+    if !response.ok || exit_code != Some(0) {
+        return Err(AppError::Validation {
+            module_id: "nrbf".into(),
+            reason: response
+                .error
+                .unwrap_or_else(|| "NRBFデコーダーが異常終了しました。".into()),
+        });
+    }
+    let summary = response
+        .summary
+        .ok_or_else(|| AppError::Internal("NRBFデコーダーの応答にサマリーがありません。".into()))?;
+    validate_sidecar_payload(&response.nodes, &summary).map_err(AppError::Internal)?;
+    Ok((response.nodes, summary))
 }
 
 fn validate_sidecar_payload(
@@ -225,5 +254,48 @@ mod tests {
     fn node_limit_matches_the_decoder_contract() {
         assert_eq!(MAXIMUM_NODES, 500_000);
         assert_eq!(MAXIMUM_PROTOCOL_BYTES, 256 * 1024 * 1024);
+    }
+
+    fn response_json(ok: bool, nodes: Vec<NrbfNode>, summary: Option<NrbfSummary>) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "ok": ok,
+            "nodes": nodes,
+            "summary": summary,
+            "error": if ok { None } else { Some("壊れたNRBFです。") },
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn parses_a_successful_response_with_trailing_newline() {
+        let mut stdout = response_json(
+            true,
+            vec![node(1, None), node(2, Some(1))],
+            Some(summary(2)),
+        );
+        stdout.push(b'\n');
+        let (nodes, parsed) = parse_sidecar_response(&stdout, b"", Some(0)).unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(parsed.node_count, 2);
+    }
+
+    #[test]
+    fn reports_decoder_errors_and_non_zero_exit() {
+        let failed = response_json(false, vec![], None);
+        assert!(matches!(
+            parse_sidecar_response(&failed, b"", Some(1)),
+            Err(AppError::Validation { reason, .. }) if reason == "壊れたNRBFです。"
+        ));
+        let ok_but_crashed = response_json(true, vec![node(1, None)], Some(summary(1)));
+        assert!(matches!(
+            parse_sidecar_response(&ok_but_crashed, b"", Some(3)),
+            Err(AppError::Validation { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_malformed_json_with_stderr_detail() {
+        let result = parse_sidecar_response(b"{not json", b"boom", Some(0));
+        assert!(matches!(result, Err(AppError::Internal(message)) if message.contains("boom")));
     }
 }

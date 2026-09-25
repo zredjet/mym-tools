@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, FileInput, FilePlus2, Save } from "lucide-react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useBlocker, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -13,9 +13,15 @@ import {
   diagramReadFile,
   diagramWriteFile,
 } from "@/ipc/diagram";
-import { createItem, getItem, listAllItems, updateItem } from "@/ipc/items";
+import {
+  createItem,
+  getItem,
+  listAllItemSummaries,
+  listItemSummaries,
+  updateItem,
+} from "@/ipc/items";
 import { formatInvokeError } from "@/lib/error";
-import type { DiagramPayloadV1, Item } from "@/lib/types";
+import type { DiagramPayloadV1, ItemSummary } from "@/lib/types";
 import { modulePath } from "@/modules/registry";
 
 import {
@@ -54,10 +60,11 @@ export function DiagramLandingPage() {
   useEffect(() => {
     if (projectId == null) return;
     let cancelled = false;
-    void listAllItems({ moduleId: "diagram", projectId })
+    // 一覧は updated_at DESC なので先頭 1 件が直近。payload は読まない
+    void listItemSummaries({ moduleId: "diagram", projectId, limit: 1 })
       .then((items) => {
         if (cancelled) return;
-        const recent = [...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+        const recent = items[0];
         navigate(modulePath(projectId, "diagram", recent ? `/edit/${recent.id}` : "/new"), {
           replace: true,
         });
@@ -96,7 +103,7 @@ export function DiagramWorkspacePage() {
   const exportInFlight = useRef(false);
   const [editorUrl, setEditorUrl] = useState<string | null>(null);
   const [editorOrigin, setEditorOrigin] = useState<string | null>(null);
-  const [documents, setDocuments] = useState<Item[]>([]);
+  const [documents, setDocuments] = useState<ItemSummary[]>([]);
   const [title, setTitle] = useState(itemId == null ? "新しいダイアグラム" : "");
   const [tagsInput, setTagsInput] = useState("");
   const [xml, setXml] = useState(EMPTY_DIAGRAM);
@@ -112,18 +119,16 @@ export function DiagramWorkspacePage() {
 
   const refreshDocuments = useCallback(async () => {
     if (projectId == null) return;
-    const items = await listAllItems({ moduleId: "diagram", projectId });
-    setDocuments([...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
+    setDocuments(await listAllItemSummaries({ moduleId: "diagram", projectId }));
   }, [projectId]);
 
   useEffect(() => {
     if (projectId == null) return;
     let cancelled = false;
-    void listAllItems({ moduleId: "diagram", projectId })
+    // 文書選択には id / title だけが要るので、payload (最大 1 MiB) を含まない summary を読む
+    void listAllItemSummaries({ moduleId: "diagram", projectId })
       .then((items) => {
-        if (!cancelled) {
-          setDocuments([...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
-        }
+        if (!cancelled) setDocuments(items);
       })
       .catch((cause) => {
         if (!cancelled) setError(formatInvokeError(cause));
@@ -435,7 +440,11 @@ export function DiagramWorkspacePage() {
     xml,
   ]);
 
-  const dirty = documentKey(title, tagsInput, xml) !== baseline;
+  // xml は最大 1 MiB。export 状態など他の state 変化による再描画のたびに文字列化しない
+  const dirty = useMemo(
+    () => documentKey(title, tagsInput, xml) !== baseline,
+    [baseline, tagsInput, title, xml],
+  );
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
       dirty &&

@@ -56,6 +56,27 @@ export async function listAllItems(input: {
   }
 }
 
+/**
+ * payload を含まない一覧 (`ItemSummary`) を 100 件ずつ全ページ取得する。大きな payload を持つ
+ * モジュール (Mermaid / Diagram / Vector) の文書選択など、表示に payload が要らない画面向け。
+ * 並び順はバックエンドの `updated_at DESC, id DESC`。
+ */
+export async function listAllItemSummaries(input: {
+  moduleId: ModuleId;
+  projectId: string;
+}): Promise<import("@/lib/types").ItemSummary[]> {
+  const pageSize = 100;
+  const items: import("@/lib/types").ItemSummary[] = [];
+  let offset = 0;
+
+  while (true) {
+    const page = await listItemSummaries({ ...input, limit: pageSize, offset });
+    items.push(...page);
+    if (page.length < pageSize) return items;
+    offset += page.length;
+  }
+}
+
 export function getItem(input: { moduleId: ModuleId; itemId: string }): Promise<Item> {
   return invoke<Item>("core_get_item", {
     moduleId: input.moduleId,

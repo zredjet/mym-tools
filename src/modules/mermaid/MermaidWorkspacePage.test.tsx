@@ -2,7 +2,13 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { RouterProvider, createMemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createItem, getItem, listAllItems, updateItem } from "@/ipc/items";
+import {
+  createItem,
+  getItem,
+  listAllItemSummaries,
+  listItemSummaries,
+  updateItem,
+} from "@/ipc/items";
 import { useAppStore } from "@/store/useAppStore";
 
 import { MermaidWorkspaceRoute } from "./MermaidWorkspacePage";
@@ -21,7 +27,8 @@ const exportTools = vi.hoisted(() => ({
 vi.mock("@/ipc/items", () => ({
   createItem: vi.fn(),
   getItem: vi.fn(),
-  listAllItems: vi.fn(),
+  listAllItemSummaries: vi.fn(),
+  listItemSummaries: vi.fn(),
   updateItem: vi.fn(),
 }));
 vi.mock("./mermaidRenderer", () => renderer);
@@ -79,7 +86,8 @@ describe("MermaidWorkspacePage", () => {
         removeEventListener: vi.fn(),
       })),
     );
-    vi.mocked(listAllItems).mockResolvedValue([otherDocument]);
+    vi.mocked(listAllItemSummaries).mockResolvedValue([otherDocument]);
+    vi.mocked(listItemSummaries).mockResolvedValue([otherDocument]);
     vi.mocked(getItem).mockResolvedValue(otherDocument);
     vi.mocked(createItem).mockResolvedValue("mermaid-new");
     vi.mocked(updateItem).mockResolvedValue(undefined);
