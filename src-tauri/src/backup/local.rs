@@ -257,15 +257,15 @@ fn parse_filename_timestamp(s: &str) -> Option<DateTime<FixedOffset>> {
 
 impl BackupService for LocalBackupService {
     fn take(&self, kind: BackupKind) -> Result<BackupRecord, AppError> {
-        let revision = self.storage.data_revision()?;
         let ts = now_jst_filename_timestamp();
         let dir = self.dir_for(&kind);
         std::fs::create_dir_all(&dir).map_err(AppError::from)?;
-        let filename = self.build_filename(&kind, revision, &ts);
-        let path = dir.join(&filename);
 
-        // 1) Online Backup API で書き出し
-        self.storage.take_online_backup_to(&path)?;
+        // 1) Online Backup API で書き出し。revision の読み取りとコピーを同じロック区間で行い、
+        //    ファイル名の `-r<N>` と中身の時点を一致させる
+        let (path, revision) = self.storage.take_online_backup_at_revision(&|revision| {
+            dir.join(self.build_filename(&kind, revision, &ts))
+        })?;
 
         // 2) meta 更新 (data_revision は増やさない、ADR-0007 §2.2)
         self.storage.set_last_backup_revision(revision)?;
@@ -514,6 +514,21 @@ mod tests {
         assert!(storage.last_auto_backup_at().unwrap().is_some());
         // data_revision は増えていない (取得は編集ではない)
         assert_eq!(storage.data_revision().unwrap(), 1);
+        // ファイル名の revision とバックアップ内の meta.data_revision が一致する
+        let conn = Connection::open(&record.path).unwrap();
+        let in_file: i64 = conn
+            .query_row(
+                "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'data_revision'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(in_file, record.data_revision);
+        assert!(record
+            .path
+            .to_str()
+            .unwrap()
+            .ends_with(&format!("-r{}.sqlite", record.data_revision)));
     }
 
     #[test]

@@ -21,7 +21,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use tracing::info;
 
 use crate::error::AppError;
@@ -37,9 +37,10 @@ const PRE_OP_SUBDIR: &str = "pre-op";
 /// DB ファイルから `meta.db_schema_version` を軽量に読む。
 ///
 /// - DB ファイル自体が存在しない → `Ok(None)` (新規 DB として扱う)
-/// - `meta` テーブル / `db_schema_version` 行が無い → `Ok(None)` (壊れた DB のため `SqliteStorage::open`
-///   が後で再初期化を試みる)
-/// - その他の I/O エラーは `Err`
+/// - `meta` テーブル / `db_schema_version` 行が無い → `Ok(None)` (`SqliteStorage::open` が
+///   後で初期化を試みる)
+/// - 読み取りエラー (DB ファイルの破損、ロック競合など) や、版が整数でない → `Err`
+///   (起動停止画面に原因を出す)
 ///
 /// 接続は read-only で開き、本関数の戻り直前に必ず close する (writer mutex を握る本接続と
 /// 競合しないように)。
@@ -52,15 +53,45 @@ pub fn inspect_db_schema_version(db_path: &Path) -> Result<Option<i64>, AppError
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(AppError::from)?;
+    // `meta` テーブル / 行が無いときだけ「版なし」とする。それ以外 (破損、ロック競合など) を
+    // 握りつぶすと migration が飛ばされ、後段で原因の分からない UnsupportedDbSchemaVersion になる
+    let has_meta: bool = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| {
+            AppError::Storage(format!(
+                "cannot read DB schema ({}): {e}",
+                db_path.display()
+            ))
+        })?;
+    if !has_meta {
+        return Ok(None);
+    }
     let value: Option<String> = conn
         .query_row(
             "SELECT value FROM meta WHERE key = 'db_schema_version'",
             [],
             |row| row.get(0),
         )
-        .ok();
-    let parsed = value.and_then(|s| s.parse::<i64>().ok());
-    Ok(parsed)
+        .optional()
+        .map_err(|e| {
+            AppError::Storage(format!(
+                "cannot read db_schema_version ({}): {e}",
+                db_path.display()
+            ))
+        })?;
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    value.parse::<i64>().map(Some).map_err(|_| {
+        AppError::Storage(format!(
+            "db_schema_version is not an integer ({}): {value:?}",
+            db_path.display()
+        ))
+    })
 }
 
 /// 起動時に必要なら migration を適用する (ADR-0011 §2.3 / §2.4)。
@@ -329,6 +360,46 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("noexist.sqlite");
         assert_eq!(inspect_db_schema_version(&path).unwrap(), None);
+    }
+
+    #[test]
+    fn inspect_treats_missing_meta_as_unversioned() {
+        let dir = tempdir().unwrap();
+        let empty = dir.path().join("empty.sqlite");
+        fs::write(&empty, b"").unwrap();
+        assert_eq!(inspect_db_schema_version(&empty).unwrap(), None);
+
+        let no_row = dir.path().join("no_row.sqlite");
+        Connection::open(&no_row)
+            .unwrap()
+            .execute_batch("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+            .unwrap();
+        assert_eq!(inspect_db_schema_version(&no_row).unwrap(), None);
+    }
+
+    /// 破損した DB や整数でない版は「版なし」として握りつぶさず、原因付きのエラーにする。
+    #[test]
+    fn inspect_reports_unreadable_or_invalid_versions() {
+        let dir = tempdir().unwrap();
+        let corrupt = dir.path().join("corrupt.sqlite");
+        fs::write(&corrupt, vec![0x42_u8; 8192]).unwrap();
+        assert!(matches!(
+            inspect_db_schema_version(&corrupt),
+            Err(AppError::Storage(message)) if message.contains("cannot read DB schema")
+        ));
+
+        let invalid = dir.path().join("invalid.sqlite");
+        Connection::open(&invalid)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 INSERT INTO meta (key, value) VALUES ('db_schema_version', 'two');",
+            )
+            .unwrap();
+        assert!(matches!(
+            inspect_db_schema_version(&invalid),
+            Err(AppError::Storage(message)) if message.contains("not an integer")
+        ));
     }
 
     #[test]
