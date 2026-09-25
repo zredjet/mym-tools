@@ -68,5 +68,5 @@
 - カテゴリ別の折りたたみSidebarとSettings表示を追加し、開閉状態を`core.collapsed_module_categories`へ保存する。
 - 全新規画面をroute単位で遅延読込し、未使用モジュールの処理ライブラリを起動時bundleから分離した。
 - Frontendの純粋処理テスト、11画面の代表操作テスト、registry / settingsテストを追加した。
-- HTTPはRust native client、既存OperationRegistryのcancel、2 MiB request / 5 MiB response上限、5回redirect、1〜120秒timeoutを実装した。
+- HTTPはRust native client、既存OperationRegistryのcancel、2 MiB request / 5 MiB response上限、5回redirect、1〜120秒timeoutを実装した。応答本文はContent-Typeのcharset (無ければBOM、それも無ければUTF-8) で復号し、表示しないバイナリ本文は受信しない (サイズはContent-Length)。httpsからhttpへのredirectは追従せず、3xx応答と遷移先URLを表示する。
 - DB schema、items、FTS、data_revision、export / importのshapeは変更していない。

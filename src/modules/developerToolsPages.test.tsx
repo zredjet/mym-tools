@@ -45,6 +45,7 @@ describe("stateless developer tool pages", () => {
       body_truncated: false,
       bytes_received: 11,
       duration_ms: 12,
+      redirect_blocked_url: null,
     });
   });
 
@@ -132,5 +133,27 @@ describe("stateless developer tool pages", () => {
       expect.any(String),
       expect.objectContaining({ method: "GET", url: "https://example.com" }),
     );
+  });
+
+  it("explains a blocked https to http redirect", async () => {
+    vi.mocked(sendHttpRequest).mockResolvedValueOnce({
+      status: 301,
+      status_text: "Moved Permanently",
+      final_url: "https://example.com/",
+      headers: [{ name: "location", value: "http://example.com/" }],
+      body: "",
+      body_kind: "text",
+      body_truncated: false,
+      bytes_received: 0,
+      duration_ms: 5,
+      redirect_blocked_url: "http://example.com/",
+    });
+    render(<HttpPage />);
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+    expect(await screen.findByText("301 Moved Permanently")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "https から http へのリダイレクトは追従しませんでした",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("http://example.com/");
   });
 });

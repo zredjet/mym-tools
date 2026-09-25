@@ -2486,6 +2486,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "digest 0.10.7",
+ "encoding_rs",
  "lopdf",
  "md-5 0.10.6",
  "percent-encoding",

@@ -31,6 +31,8 @@ export interface HttpResponseOutput {
   body_truncated: boolean;
   bytes_received: number;
   duration_ms: number;
+  /** https→http のリダイレクトを追従せずに止めたときのリダイレクト先 (status は 3xx のまま) */
+  redirect_blocked_url: string | null;
 }
 
 export function sendHttpRequest(
