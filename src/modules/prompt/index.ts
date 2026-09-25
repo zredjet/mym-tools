@@ -1,8 +1,16 @@
+import { lazy } from "react";
 import { FileText } from "lucide-react";
 
 import type { ModuleDefinition } from "@/modules/types";
-import { PromptDetailPage } from "@/modules/prompt/PromptDetailPage";
-import { PromptListPage } from "@/modules/prompt/PromptListPage";
+
+const PromptDetailPage = lazy(() =>
+  import("@/modules/prompt/PromptDetailPage").then((module) => ({
+    default: module.PromptDetailPage,
+  })),
+);
+const PromptListPage = lazy(() =>
+  import("@/modules/prompt/PromptListPage").then((module) => ({ default: module.PromptListPage })),
+);
 
 export const promptModule: ModuleDefinition = {
   id: "prompt",

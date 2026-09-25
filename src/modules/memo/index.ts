@@ -1,10 +1,18 @@
+import { lazy } from "react";
 import { StickyNote } from "lucide-react";
 
 import type { MemoPayloadV1 } from "@/lib/types";
-import { MemoDetailPage } from "@/modules/memo/MemoDetailPage";
-import { MemoEditorRoute } from "@/modules/memo/MemoEditorPage";
-import { MemoListPage } from "@/modules/memo/MemoListPage";
 import type { ModuleDefinition } from "@/modules/types";
+
+const MemoDetailPage = lazy(() =>
+  import("@/modules/memo/MemoDetailPage").then((module) => ({ default: module.MemoDetailPage })),
+);
+const MemoEditorRoute = lazy(() =>
+  import("@/modules/memo/MemoEditorPage").then((module) => ({ default: module.MemoEditorRoute })),
+);
+const MemoListPage = lazy(() =>
+  import("@/modules/memo/MemoListPage").then((module) => ({ default: module.MemoListPage })),
+);
 
 export const memoModule: ModuleDefinition = {
   id: "memo",

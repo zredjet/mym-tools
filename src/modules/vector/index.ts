@@ -1,6 +1,10 @@
+import { lazy } from "react";
 import { PenTool } from "lucide-react";
 import type { ModuleDefinition } from "@/modules/types";
-import { VectorWorkspaceRoute } from "./VectorWorkspacePage";
+const VectorWorkspaceRoute = lazy(() =>
+  import("./VectorWorkspacePage").then((module) => ({ default: module.VectorWorkspaceRoute })),
+);
+
 export const vectorModule: ModuleDefinition = {
   id: "vector",
   displayName: "ベクター描画",

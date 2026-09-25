@@ -1,10 +1,15 @@
+import { lazy } from "react";
 import { SwatchBook } from "lucide-react";
 
 import type { PalettePayloadV1 } from "@/lib/types";
 import type { ModuleDefinition } from "@/modules/types";
 
-import { PaletteEditorRoute } from "./PaletteEditorPage";
-import { PaletteListPage } from "./PaletteListPage";
+const PaletteEditorRoute = lazy(() =>
+  import("./PaletteEditorPage").then((module) => ({ default: module.PaletteEditorRoute })),
+);
+const PaletteListPage = lazy(() =>
+  import("./PaletteListPage").then((module) => ({ default: module.PaletteListPage })),
+);
 
 export const paletteModule: ModuleDefinition = {
   id: "palette",

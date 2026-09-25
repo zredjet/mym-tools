@@ -1,9 +1,15 @@
+import { lazy } from "react";
 import { Workflow } from "lucide-react";
 
 import type { DiagramPayloadV1 } from "@/lib/types";
 import type { ModuleDefinition } from "@/modules/types";
 
-import { DiagramLandingPage, DiagramWorkspaceRoute } from "./DiagramWorkspacePage";
+const DiagramLandingPage = lazy(() =>
+  import("./DiagramWorkspacePage").then((module) => ({ default: module.DiagramLandingPage })),
+);
+const DiagramWorkspaceRoute = lazy(() =>
+  import("./DiagramWorkspacePage").then((module) => ({ default: module.DiagramWorkspaceRoute })),
+);
 
 export const diagramModule: ModuleDefinition = {
   id: "diagram",

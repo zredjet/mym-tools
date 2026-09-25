@@ -1,8 +1,14 @@
+import { lazy } from "react";
 import { Link as LinkIcon } from "lucide-react";
 
 import type { LinkPayloadV1 } from "@/lib/types";
-import { LinkMemoListPage } from "@/modules/linkmemo/LinkMemoListPage";
 import type { ModuleDefinition } from "@/modules/types";
+
+const LinkMemoListPage = lazy(() =>
+  import("@/modules/linkmemo/LinkMemoListPage").then((module) => ({
+    default: module.LinkMemoListPage,
+  })),
+);
 
 export const linkMemoModule: ModuleDefinition = {
   id: "linkmemo",
