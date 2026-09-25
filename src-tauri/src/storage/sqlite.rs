@@ -269,11 +269,7 @@ impl StorageService for SqliteStorage {
         } else {
             projection.push_str(" ELSE i.payload END");
         }
-        if query.chars().count() >= 3 {
-            self.search_fts(scope, query, module_filter, limit, offset, &projection)
-        } else {
-            self.search_like(scope, query, module_filter, limit, offset, &projection)
-        }
+        self.search_terms(scope, query, module_filter, limit, offset, &projection)
     }
 
     fn create_project(&self, name: &str, description: Option<&str>) -> Result<Project, AppError> {
@@ -878,16 +874,7 @@ impl StorageService for SqliteStorage {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Item>, AppError> {
-        // 3 文字未満は LIKE フォールバック (`data-model.md` §8.1 制限事項)
-        let query_chars = query.chars().count();
-        if query_chars == 0 {
-            return Ok(Vec::new());
-        }
-        if query_chars < 3 {
-            self.search_like(scope, query, module_filter, limit, offset, "i.payload")
-        } else {
-            self.search_fts(scope, query, module_filter, limit, offset, "i.payload")
-        }
+        self.search_terms(scope, query, module_filter, limit, offset, "i.payload")
     }
 
     fn normalize_item_positions(
@@ -1345,11 +1332,38 @@ impl SqliteStorage {
         })
     }
 
-    /// FTS5 MATCH 経由の検索 (3 文字以上の query)。
-    fn search_fts(
+    /// 検索語を空白で分割し、全語を含む item を返す (AND)。
+    ///
+    /// - 全語が 3 文字以上 → FTS5 trigram MATCH。各語はフレーズ (`"..."`) として渡すので、
+    ///   `#ff0000` / `https://` / `foo-bar` / `"` など FTS5 の構文記号を含んでも
+    ///   構文エラーにならず、部分文字列として一致する
+    /// - 3 文字未満の語が 1 つでもある → trigram では一致しないため LIKE フォールバック
+    ///   (`data-model.md` §8.1 制限事項)
+    fn search_terms(
         &self,
         scope: &SearchScope,
         query: &str,
+        module_filter: Option<&[String]>,
+        limit: u32,
+        offset: u32,
+        projection: &str,
+    ) -> Result<Vec<Item>, AppError> {
+        let terms: Vec<&str> = query.split_whitespace().collect();
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        if terms.iter().all(|term| term.chars().count() >= 3) {
+            self.search_fts(scope, &terms, module_filter, limit, offset, projection)
+        } else {
+            self.search_like(scope, &terms, module_filter, limit, offset, projection)
+        }
+    }
+
+    /// FTS5 MATCH 経由の検索 (全語が 3 文字以上)。
+    fn search_fts(
+        &self,
+        scope: &SearchScope,
+        terms: &[&str],
         module_filter: Option<&[String]>,
         limit: u32,
         offset: u32,
@@ -1361,39 +1375,44 @@ impl SqliteStorage {
              FROM items_fts f JOIN items i ON i.id = f.item_id \
              WHERE items_fts MATCH ?",
         );
-        let mut bindings: Vec<String> = vec![query.to_string()];
+        let mut bindings: Vec<String> = vec![to_fts_phrase_query(terms)];
         push_scope_filter(&mut sql, &mut bindings, scope, "f");
         push_module_filter(&mut sql, &mut bindings, module_filter, "f");
         sql.push_str(" ORDER BY rank LIMIT ? OFFSET ?");
         self.run_search_query(&sql, &bindings, limit, offset)
     }
 
-    /// LIKE フォールバック (3 文字未満の query)。
+    /// LIKE フォールバック (3 文字未満の語を含む)。各語が title / tags / search_text の
+    /// いずれかに部分一致する item を返す (語同士は AND)。
     fn search_like(
         &self,
         scope: &SearchScope,
-        query: &str,
+        terms: &[&str],
         module_filter: Option<&[String]>,
         limit: u32,
         offset: u32,
         projection: &str,
     ) -> Result<Vec<Item>, AppError> {
-        // SQL LIKE escape を簡易的に行う (% _ \ をエスケープ)
-        let pattern = format!(
-            "%{}%",
-            query
-                .replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_")
-        );
         let mut sql = format!(
             "SELECT i.id, i.project_id, i.module_id, i.title, i.tags, i.payload_schema_version, \
              {projection}, i.position, i.created_at, i.updated_at \
-             FROM items i \
-             WHERE (i.title LIKE ? ESCAPE '\\' OR i.tags LIKE ? ESCAPE '\\' \
-                    OR i.search_text LIKE ? ESCAPE '\\')",
+             FROM items i WHERE 1 = 1",
         );
-        let mut bindings: Vec<String> = vec![pattern.clone(), pattern.clone(), pattern];
+        let mut bindings: Vec<String> = Vec::with_capacity(terms.len() * 3);
+        for term in terms {
+            // SQL LIKE escape (% _ \ をエスケープ)
+            let pattern = format!(
+                "%{}%",
+                term.replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_")
+            );
+            sql.push_str(
+                " AND (i.title LIKE ? ESCAPE '\\' OR i.tags LIKE ? ESCAPE '\\' \
+                 OR i.search_text LIKE ? ESCAPE '\\')",
+            );
+            bindings.extend([pattern.clone(), pattern.clone(), pattern]);
+        }
         push_scope_filter(&mut sql, &mut bindings, scope, "i");
         push_module_filter(&mut sql, &mut bindings, module_filter, "i");
         sql.push_str(" ORDER BY i.updated_at DESC, i.id DESC LIMIT ? OFFSET ?");
@@ -1515,6 +1534,18 @@ fn build_search_text_for_upgrade(title: &str, tags: &[String], module_text: &str
         s.push_str(module_text);
     }
     s
+}
+
+/// 検索語を FTS5 のフレーズ列 (`"t1" "t2"` = 暗黙の AND) に変換する。
+///
+/// 利用者の入力を FTS5 クエリ構文として解釈させないため、各語をダブルクォートで囲み、
+/// 語の中の `"` は `""` に二重化する (FTS5 の文字列リテラル規則)。
+fn to_fts_phrase_query(terms: &[&str]) -> String {
+    terms
+        .iter()
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// SearchScope を SQL に追記 (`f.project_id = ?` または何もしない)。
@@ -2811,6 +2842,86 @@ mod tests {
         assert!(titles.contains(&"Green"));
     }
 
+    /// FTS5 の構文記号を含む検索語でもエラーにならず、部分文字列として一致する。
+    #[test]
+    fn search_fts_treats_syntax_characters_as_literal_text() {
+        let storage = Arc::new(in_memory_storage());
+        seed_search_data(&storage);
+
+        let results = storage
+            .search(&SearchScope::Global, "#ff0000", None, 100, 0)
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Red");
+
+        for query in [
+            "ff0000\"",
+            "\"unterminated",
+            "https://example.com",
+            "foo-bar",
+            "a.b.c",
+            "title:Red",
+            "NEAR(abc def)",
+            "abc*",
+            "(abc",
+        ] {
+            let result = storage.search(&SearchScope::Global, query, None, 100, 0);
+            assert!(
+                result.is_ok(),
+                "query {query:?} should not error: {result:?}"
+            );
+        }
+    }
+
+    /// 空白区切りの語は AND で絞り込む (FTS 経路)。
+    #[test]
+    fn search_fts_multiple_terms_are_anded() {
+        let storage = Arc::new(in_memory_storage());
+        seed_search_data(&storage);
+        let hit = storage
+            .search(&SearchScope::Global, "Red bright", None, 100, 0)
+            .unwrap();
+        assert_eq!(hit.len(), 1);
+        assert_eq!(hit[0].title, "Red");
+        let miss = storage
+            .search(&SearchScope::Global, "Red calm", None, 100, 0)
+            .unwrap();
+        assert!(miss.is_empty());
+    }
+
+    /// 3 文字未満の語を含む複数語は LIKE で全語 AND (trigram では 2 文字語が一致しないため)。
+    #[test]
+    fn search_with_short_term_falls_back_to_like_and_ands_terms() {
+        let storage = Arc::new(in_memory_storage());
+        seed_search_data(&storage);
+        let hit = storage
+            .search(&SearchScope::Global, "ed ff00", None, 100, 0)
+            .unwrap();
+        assert_eq!(hit.len(), 1);
+        assert_eq!(hit[0].title, "Red");
+        let miss = storage
+            .search(&SearchScope::Global, "Bl ff00", None, 100, 0)
+            .unwrap();
+        assert!(miss.is_empty());
+    }
+
+    #[test]
+    fn search_previews_escapes_fts_query() {
+        let storage = Arc::new(in_memory_storage());
+        seed_search_data(&storage);
+        let results = storage
+            .search_previews(&SearchScope::Global, " #ff0000 ", None, 100, 0, &[])
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Red");
+    }
+
+    #[test]
+    fn to_fts_phrase_query_quotes_each_term() {
+        assert_eq!(to_fts_phrase_query(&["abc"]), "\"abc\"");
+        assert_eq!(to_fts_phrase_query(&["a\"b", "#ff"]), "\"a\"\"b\" \"#ff\"");
+    }
+
     #[test]
     fn search_empty_query_returns_empty() {
         let storage = Arc::new(in_memory_storage());
@@ -2819,5 +2930,9 @@ mod tests {
             .search(&SearchScope::Global, "", None, 100, 0)
             .unwrap();
         assert_eq!(results.len(), 0);
+        let whitespace_only = storage
+            .search(&SearchScope::Global, "   ", None, 100, 0)
+            .unwrap();
+        assert!(whitespace_only.is_empty());
     }
 }
