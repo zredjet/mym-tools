@@ -136,6 +136,23 @@ describe("MermaidWorkspacePage", () => {
     );
   });
 
+  // 作成直後に一覧の再取得が失敗しても /new に留まらず、次の保存で二重作成しない
+  it("moves to the created item even when the document list refresh fails", async () => {
+    const { router } = renderWorkspace();
+    await finishDebounce();
+    vi.mocked(listAllItems).mockRejectedValue(new Error("list failed"));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+      fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(createItem).toHaveBeenCalledOnce();
+    expect(router.state.location.pathname).toBe("/projects/project-1/m/mermaid/edit/mermaid-new");
+  });
+
   it("keeps the last successful preview and rejects saving on a syntax error", async () => {
     renderWorkspace();
     await finishDebounce();

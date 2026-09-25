@@ -56,6 +56,10 @@ export function HashPage() {
   useEffect(() => {
     fileJobRef.current = fileJob;
   }, [fileJob]);
+  // 最新 job の operationId。effect 経由で遅れて更新される fileJobRef と違い、開始時に同期で
+  // 書き換える。小さいファイルで IPC が effect より先に返っても結果を捨てず、連続 drop でも
+  // 直前の job を確実にキャンセルできる
+  const activeOperationRef = useRef<string | null>(null);
 
   const computeText = async () => {
     setTextPending(true);
@@ -73,16 +77,17 @@ export function HashPage() {
 
   const startFileHash = useCallback(async (path: string, algo: HashAlgorithm) => {
     // 既存 job があれば先にキャンセル (drop 連打対策)
-    const prev = fileJobRef.current;
-    if (prev != null) {
+    const operationId = crypto.randomUUID();
+    const prevOperationId = activeOperationRef.current;
+    activeOperationRef.current = operationId;
+    if (prevOperationId != null) {
       try {
-        await cancelOperation(prev.operationId);
+        await cancelOperation(prevOperationId);
       } catch {
         /* 既に終わっている場合は no-op */
       }
     }
 
-    const operationId = crypto.randomUUID();
     setError(null);
     setFileResult(null);
     setFileJob({
@@ -118,9 +123,10 @@ export function HashPage() {
         },
       });
       // codex PR-AC P2: drop 連打などで古い job の Promise が新規 job 完了後に解決する
-      // ケースを防ぐ。fileJobRef.current は常に **最新の** job を指すため、自分が最新かを
+      // ケースを防ぐ。activeOperationRef は常に **最新の** job を指すため、自分が最新かを
       // 確認してからのみ result を書き込む (setFileJob と同じガード)。
-      if (fileJobRef.current?.operationId === operationId) {
+      if (activeOperationRef.current === operationId) {
+        activeOperationRef.current = null;
         setFileResult({ path, algorithm: algo, hash, durationMs: 0 });
         setFileJob(null);
       }
@@ -128,7 +134,8 @@ export function HashPage() {
       // Cancelled / I/O error / Unsupported algo 等すべてここに来る
       const msg = formatInvokeError(e);
       // Cancelled エラーはエラー表示しない (ユーザー意図で止めたため)
-      if (fileJobRef.current?.operationId === operationId) {
+      if (activeOperationRef.current === operationId) {
+        activeOperationRef.current = null;
         if (!/cancel/i.test(msg)) {
           setError(msg);
         }
@@ -190,9 +197,9 @@ export function HashPage() {
   // 走らないようにする (deps = [])。
   useEffect(() => {
     return () => {
-      const active = fileJobRef.current;
+      const active = activeOperationRef.current;
       if (active != null) {
-        void cancelOperation(active.operationId);
+        void cancelOperation(active);
       }
     };
   }, []);
