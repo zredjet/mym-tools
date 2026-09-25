@@ -11,7 +11,7 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use digest::DynDigest;
 use md5::Md5;
@@ -30,6 +30,9 @@ use crate::state::AppState;
 
 /// 1 MB (ADR-0009 §2.3 R-5: I/O 規定チャンクサイズ)。
 const CHUNK_SIZE: usize = 1024 * 1024;
+/// 進捗を送る最短間隔。高速なストレージでは 1 MiB ごとだと毎秒数千件の IPC になるため間引く。
+/// キャンセル確認はこれまでどおりチャンクごとに行う。
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
 /// 対応アルゴリズム名から `Box<dyn DynDigest>` を生成する。
 /// `digest::DynDigest` は object-safe で、`update` / `finalize_reset` を `&mut self` で持つ
@@ -69,7 +72,8 @@ fn hash_text_inner(text: &str, algorithm: &str) -> Result<String, AppError> {
 /// 呼ぶとチャンク境界で早期 return し `AppError::Cancelled` を返す。
 ///
 /// ## 進捗 Channel の挙動 (ADR-0009 §2.3 R-9 / R-10):
-/// - 各チャンク完了後に `HashFileProgress::Progress { bytes_processed, total_bytes }` を 1 件送る
+/// - 最初のチャンク・前回から 100 ms 経過・全バイト到達のときに
+///   `HashFileProgress::Progress { bytes_processed, total_bytes }` を送る (1 MiB ごとには送らない)
 /// - 正常完了直前に `HashFileProgress::Done { duration_ms }` を 1 件送る
 /// - キャンセル成立時に `HashFileProgress::Cancelled` を 1 件送って `Err(Cancelled)` を返す
 /// - `Channel::send` の失敗は warn ログのみで継続 (フロントが既に Channel を drop した等)
@@ -142,6 +146,8 @@ fn hash_file_inner(
     let mut hasher = make_hasher(algorithm)?;
     let mut buf = vec![0u8; CHUNK_SIZE];
     let mut bytes_processed: u64 = 0;
+    let mut last_sent: Option<Instant> = None;
+    let mut sent_bytes: u64 = 0;
 
     loop {
         // R-5: チャンク読み込み前に cancellation 確認 (1 MB 単位)
@@ -158,6 +164,20 @@ fn hash_file_inner(
         }
         hasher.update(&buf[..n]);
         bytes_processed += n as u64;
+        // 最初のチャンク、前回から PROGRESS_INTERVAL 経過、全バイト到達のときだけ送る
+        if last_sent.is_none_or(|sent| sent.elapsed() >= PROGRESS_INTERVAL)
+            || bytes_processed >= total_bytes
+        {
+            progress(HashFileProgress::Progress {
+                bytes_processed,
+                total_bytes,
+            });
+            last_sent = Some(Instant::now());
+            sent_bytes = bytes_processed;
+        }
+    }
+    // 読み込み中にファイルが伸びた等で最後の値を送れていなければ送る
+    if bytes_processed > sent_bytes {
         progress(HashFileProgress::Progress {
             bytes_processed,
             total_bytes,
@@ -327,6 +347,21 @@ mod tests {
     }
 
     #[test]
+    fn hash_file_progress_is_throttled_for_fast_reads() {
+        // 32 MiB (32 チャンク)。ハッシュ計算は 100 ms 未満で終わるため、途中の進捗はほぼ送らない
+        let size = 32 * CHUNK_SIZE;
+        let (_dir, path) = write_temp_file(size);
+        let mut progress_events = 0;
+        let (_registry, result) = hash_file_for_test(&path, "md5", "op-throttle", &mut |p| {
+            if matches!(p, HashFileProgress::Progress { .. }) {
+                progress_events += 1;
+            }
+        });
+        assert!(result.is_ok());
+        assert!(progress_events < 32, "{progress_events} progress events");
+    }
+
+    #[test]
     fn hash_file_multi_chunk_progress_is_monotonic() {
         // 2.5 MB → 1 MB チャンク 3 回 + Done
         let size = 2 * CHUNK_SIZE + CHUNK_SIZE / 2;
@@ -348,14 +383,18 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(progress_pairs.len(), 3);
+        // 最初のチャンクと全バイト到達は必ず送る。途中は 100 ms 間隔で間引く
+        assert!(
+            (2..=3).contains(&progress_pairs.len()),
+            "{progress_pairs:?}"
+        );
+        assert_eq!(progress_pairs[0].0, CHUNK_SIZE as u64);
         // total_bytes は全 Progress で同一
         assert!(progress_pairs.iter().all(|(_, t)| *t == size as u64));
         // bytes_processed は単調増加
-        assert!(progress_pairs[0].0 < progress_pairs[1].0);
-        assert!(progress_pairs[1].0 < progress_pairs[2].0);
+        assert!(progress_pairs.windows(2).all(|pair| pair[0].0 < pair[1].0));
         // 最後の Progress で全バイト到達
-        assert_eq!(progress_pairs[2].0, size as u64);
+        assert_eq!(progress_pairs.last().unwrap().0, size as u64);
         assert!(matches!(events.last(), Some(HashFileProgress::Done { .. })));
     }
 
