@@ -55,6 +55,7 @@ git switch -c "release/v${RELEASE_VERSION}" origin/main
 | `src-tauri/Cargo.lock` | `mym-tools` packageのversion |
 | `src-tauri/tauri.conf.json` | Tauri application version |
 | `README.md` | 開発状況にversionを明記している場合は更新 |
+| `scripts/release/release-notes.md` | 「v<version> の主な変更」を今回のversionの内容へ書き換える。前回のReleaseから今回までにマージしたPRを対象にし、schema更新がある場合は「更新時の注意」に書く。Release本文はこのファイルがそのまま使われる |
 
 npm側は次のコマンドで`package.json`と`package-lock.json`を同時更新できる。
 
