@@ -4,7 +4,7 @@
 //!
 //! 1. `inspect_db_schema_version(&Path) -> i64` で軽量に現行版を読む (DB が無ければ skip)
 //! 2. 旧版なら `take_pre_migration_backup(...)` で rusqlite Backup API を直接叩いて
-//!    `<backups_root>/pre-op/pre-migration-v<N>-<ts>.sqlite` に書き出す
+//!    `<backups_root>/pre-op/pre-migration-v<N>-<ts>-r<revision>.sqlite` に書き出す
 //! 3. `migrate_if_needed(&Path)` で `MIGRATIONS` を順次適用 (各 tx が末尾で
 //!    `db_schema_version` を bump)
 //! 4. その後で初めて `SqliteStorage::open` を呼ぶ → `verify_schema_version` が成立
@@ -101,13 +101,24 @@ pub fn migrate_if_needed(db_path: &Path, backups_root: &Path) -> Result<(), AppE
     // foreign_keys は migration 中も ON にしておく (additive な migration では FK 影響なしが前提)
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(AppError::from)?;
+    apply_pending_migrations(&mut conn, current)
+}
 
-    let mut applied_from = current;
+/// `from_version` から `CURRENT_DB_SCHEMA_VERSION` まで `MIGRATIONS` を順次適用する。
+///
+/// 起動時 (`migrate_if_needed`) と、旧 schema のバックアップをリストアした直後
+/// (`SqliteStorage::restore_online_backup_from`) の両方から呼ぶ。pre-migration バックアップの
+/// 取得は呼び出し側の責務 (リストア時はリストア元ファイル自体が旧 schema の控えになる)。
+pub(crate) fn apply_pending_migrations(
+    conn: &mut Connection,
+    from_version: i64,
+) -> Result<(), AppError> {
+    let mut applied_from = from_version;
     while applied_from < CURRENT_DB_SCHEMA_VERSION {
         let migration = find_migration(applied_from).ok_or_else(|| AppError::Storage(format!(
             "no migration found for from_version={applied_from} (target={CURRENT_DB_SCHEMA_VERSION})"
         )))?;
-        apply_one(&mut conn, migration)?;
+        apply_one(conn, migration)?;
         applied_from = migration.to_version;
         info!(
             from = migration.from_version,
@@ -137,7 +148,9 @@ fn apply_one(conn: &mut Connection, migration: &Migration) -> Result<(), AppErro
 /// 適用前に DB スナップショットを取得する独立ヘルパ (ADR-0011 §2.4)。
 ///
 /// `BackupService` を経由しない理由は本ファイル冒頭のコメント参照。命名規則は
-/// `data-model.md` §13.4 既存規約: `<backups_root>/pre-op/pre-migration-v<N>-<ts>.sqlite`。
+/// `data-model.md` §13.4 既存規約: `<backups_root>/pre-op/pre-migration-v<N>-<ts>-r<revision>.sqlite`。
+/// 他の pre-op と同じ `-r<revision>` 付きにすることで、`LocalBackupService::list()` に表示され
+/// ローテーションでも時系列どおりに扱われる。
 /// `<N>` は **適用後の `CURRENT_DB_SCHEMA_VERSION`** とする (複数段適用の場合も 1 ファイル
 /// のみ、最終 to 値を入れる)。
 ///
@@ -156,34 +169,79 @@ pub fn take_pre_migration_backup(
         ))
     })?;
 
-    let filename = format!(
-        "{}{}-{}.sqlite",
-        PRE_MIGRATION_PREFIX,
-        target_version,
-        now_jst_filename_timestamp()
-    );
-    let dst_path = pre_op_dir.join(filename);
-
-    // rusqlite Backup API: ソース DB → 新規ファイルへフルコピー (WAL を含めた一貫スナップショット)
+    // ソースは read-only で開く。ファイル名に載せる `data_revision` もここから読む
+    // (`data-model.md` §13.4: `<prefix>-<JST_FILENAME_TIMESTAMP>-r<revision>.sqlite`)。
     let src_conn = Connection::open_with_flags(
         db_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(AppError::from)?;
-    let mut dst_conn = Connection::open(&dst_path).map_err(AppError::from)?;
-    {
-        let backup =
-            rusqlite::backup::Backup::new(&src_conn, &mut dst_conn).map_err(AppError::from)?;
-        backup
-            .run_to_completion(1024, std::time::Duration::from_millis(0), None)
-            .map_err(AppError::from)?;
-    }
+    let revision = read_data_revision(&src_conn).unwrap_or(0);
+
+    let filename = format!(
+        "{}{}-{}-r{}.sqlite",
+        PRE_MIGRATION_PREFIX,
+        target_version,
+        now_jst_filename_timestamp(),
+        revision
+    );
+    let dst_path = pre_op_dir.join(filename);
+
+    // rusqlite Backup API: ソース DB → 新規ファイルへフルコピー (WAL を含めた一貫スナップショット)
+    write_backup_file(&src_conn, &dst_path)?;
     Ok(dst_path)
+}
+
+/// `meta.data_revision` を読む。meta 行が無い / 数値でない場合は `None`。
+pub(crate) fn read_data_revision(conn: &Connection) -> Option<i64> {
+    conn.query_row(
+        "SELECT value FROM meta WHERE key = 'data_revision'",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+    .and_then(|s| s.parse::<i64>().ok())
+}
+
+/// SQLite Online Backup API で `src` の内容を `dst_path` に書き出す。
+///
+/// 途中失敗 (ディスクフル等) で「正しい名前の不完全ファイル」が残ると、一覧に表示され
+/// ローテーション枠も消費してしまうため、`<dst>.partial` に書いてから rename する。
+/// `.partial` は拡張子が `sqlite` でないのでバックアップ一覧・ローテーションの対象外。
+pub(crate) fn write_backup_file(src: &Connection, dst_path: &Path) -> Result<(), AppError> {
+    let partial_path = dst_path.with_extension("sqlite.partial");
+    // 前回の異常終了で残った同名 `.partial` があれば捨てる (中身は不完全なコピー)
+    let _ = fs::remove_file(&partial_path);
+    let result = (|| {
+        let mut dst_conn = Connection::open(&partial_path).map_err(AppError::from)?;
+        {
+            let backup =
+                rusqlite::backup::Backup::new(src, &mut dst_conn).map_err(AppError::from)?;
+            // pages_per_step は正の値必須。1024 ページ × 4 KB = 4 MB / step
+            // (`docs/decisions/0007-local-backup.md` §2.1 の例コードと同値)
+            backup
+                .run_to_completion(1024, std::time::Duration::from_millis(0), None)
+                .map_err(AppError::from)?;
+        }
+        // rename 前に接続を閉じてファイルハンドルを解放する (Windows では open 中の rename 不可)
+        dst_conn.close().map_err(|(_, e)| AppError::from(e))?;
+        fs::rename(&partial_path, dst_path).map_err(AppError::from)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&partial_path);
+    }
+    result
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use crate::backup::{BackupKind, BackupService, LocalBackupService};
+    use crate::storage::sqlite::SqliteStorage;
+    use crate::storage::types::ProjectId;
+    use crate::storage::StorageService;
     use rusqlite::params;
     use tempfile::tempdir;
 
@@ -342,7 +400,91 @@ mod tests {
             name.starts_with("pre-migration-v2-"),
             "filename should start with pre-migration-v2-, got: {name}"
         );
-        assert!(name.ends_with(".sqlite"));
+        // 他の pre-op と同じく `-r<data_revision>` 付き (v1 fixture の data_revision は 0)
+        assert!(name.ends_with("-r0.sqlite"), "got: {name}");
+
+        // BackupService の一覧に pre-op として載る (旧実装は解析できず一覧から漏れていた)
+        let storage: Arc<dyn StorageService> =
+            Arc::new(SqliteStorage::open(&db).expect("migrated db opens"));
+        let svc = LocalBackupService::new(backups.clone(), storage);
+        let records = svc.list().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].kind,
+            BackupKind::PreOp {
+                prefix: "pre-migration-v2".into()
+            }
+        );
+    }
+
+    /// 旧 schema (v1) のバックアップをリストアしても、再起動前から現行 schema のクエリが通る。
+    #[test]
+    fn restore_of_v1_backup_applies_pending_migrations() {
+        let dir = tempdir().unwrap();
+        let backups = dir.path().join("backups");
+        let manual_dir = backups.join("manual");
+        fs::create_dir_all(&manual_dir).unwrap();
+        let v1_backup = manual_dir.join("manual-2026-05-01T00-00-00-000-r0.sqlite");
+        create_v1_db(&v1_backup);
+
+        let storage: Arc<dyn StorageService> =
+            Arc::new(SqliteStorage::open(dir.path().join("data.sqlite")).unwrap());
+        let svc = LocalBackupService::new(backups, Arc::clone(&storage));
+
+        svc.verify_integrity(&v1_backup).unwrap();
+        svc.restore_from(&v1_backup).unwrap();
+
+        // position を使う現行クエリがそのまま動く
+        let items = storage
+            .list_items("prompt", &ProjectId::new("p1"), 10, 0)
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "Old Item");
+        // リストア元ファイルは v1 のまま (控えとして残る)
+        assert_eq!(inspect_db_schema_version(&v1_backup).unwrap(), Some(1));
+    }
+
+    /// 新版アプリで作られた (schema が新しい) バックアップは verify 段階で拒否する。
+    #[test]
+    fn verify_rejects_backup_from_newer_schema() {
+        let dir = tempdir().unwrap();
+        let backups = dir.path().join("backups");
+        let manual_dir = backups.join("manual");
+        fs::create_dir_all(&manual_dir).unwrap();
+        let future_backup = manual_dir.join("manual-2026-05-01T00-00-00-000-r0.sqlite");
+        let conn = Connection::open(&future_backup).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO meta (key, value) VALUES ('db_schema_version', '99');",
+        )
+        .unwrap();
+        drop(conn);
+
+        let storage: Arc<dyn StorageService> =
+            Arc::new(SqliteStorage::open(dir.path().join("data.sqlite")).unwrap());
+        let svc = LocalBackupService::new(backups, storage);
+        assert!(matches!(
+            svc.verify_integrity(&future_backup),
+            Err(AppError::UnsupportedDbSchemaVersion { db_version: 99, .. })
+        ));
+    }
+
+    #[test]
+    fn write_backup_file_leaves_no_partial_file() {
+        let dir = tempdir().unwrap();
+        let src = Connection::open(dir.path().join("src.sqlite")).unwrap();
+        src.execute_batch("CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);")
+            .unwrap();
+        let dst = dir.path().join("out.sqlite");
+        write_backup_file(&src, &dst).unwrap();
+
+        let names: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect();
+        assert!(names.contains(&"out.sqlite".to_string()));
+        assert!(!names.iter().any(|n| n.ends_with(".partial")), "{names:?}");
     }
 
     /// T-36 相当: migration 完了済 DB を再起動 → migration が走らず冪等。

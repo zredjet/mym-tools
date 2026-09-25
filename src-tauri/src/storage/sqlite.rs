@@ -19,6 +19,7 @@ use serde_json::Value as JsonValue;
 
 use crate::error::AppError;
 use crate::module::ModuleBackend;
+use crate::storage::bootstrap::{apply_pending_migrations, write_backup_file};
 use crate::storage::schema::{CURRENT_DB_SCHEMA_VERSION, PRAGMAS, SCHEMA_DDL};
 use crate::storage::scoped::ScopedStorage;
 use crate::storage::types::{ImportOutcome, Item, ItemId, Project, ProjectId, SearchScope};
@@ -191,6 +192,34 @@ fn verify_schema_version(conn: &Connection) -> Result<(), AppError> {
         });
     }
     Ok(())
+}
+
+/// バックアップファイルの `meta.db_schema_version` を読み、リストア可能か判定する。
+///
+/// - meta 行が無い → MyMyTools の DB ではないので `AppError::Storage`
+/// - 現行より新しい → `AppError::UnsupportedDbSchemaVersion` (旧版アプリでは開けない)
+/// - 現行以下 → その版を返す (旧版はリストア後に migration を適用する)
+pub(crate) fn read_backup_schema_version(conn: &Connection) -> Result<i64, AppError> {
+    let db_version: Option<i64> = conn
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'db_schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| AppError::Storage(format!("backup has no readable meta table: {e}")))?;
+    let Some(db_version) = db_version else {
+        return Err(AppError::Storage(
+            "backup has no db_schema_version; not a MyMyTools database".into(),
+        ));
+    };
+    if db_version > CURRENT_DB_SCHEMA_VERSION {
+        return Err(AppError::UnsupportedDbSchemaVersion {
+            db_version,
+            app_version: CURRENT_DB_SCHEMA_VERSION,
+        });
+    }
+    Ok(db_version)
 }
 
 impl StorageService for SqliteStorage {
@@ -520,29 +549,14 @@ impl StorageService for SqliteStorage {
         if let Some(parent) = dst_path.parent() {
             std::fs::create_dir_all(parent).map_err(AppError::from)?;
         }
-        // dst Connection は新規作成 (上書き or 新規)。WAL を残さないよう、宛先は
-        // バックアップ専用なので default journal mode のままで良い (PRAGMA は src と
-        // 独立)
-        let mut dst_conn = Connection::open(dst_path).map_err(AppError::from)?;
-        self.with_conn(|src_conn| {
-            // ADR-0007 §2.1 / `data-model.md` §13.1: rusqlite::backup::Backup を使用
-            let backup =
-                rusqlite::backup::Backup::new(src_conn, &mut dst_conn).map_err(AppError::from)?;
-            // pages = -1 で 1 step で全部コピー (個人ツール規模の DB は数百 ms で済む)。
-            // pause = 0、progress callback も無し
-            // pages_per_step は正の値必須 (rusqlite::backup::Backup::run_to_completion)。
-            // 個人ツール規模の DB は 1024 ページ × 4 KB = 4 MB / step で 1 step 完了が
-            // 通常 (`docs/decisions/0007-local-backup.md` §2.1 の例コードと同値)
-            backup
-                .run_to_completion(1024, std::time::Duration::from_millis(0), None)
-                .map_err(AppError::from)?;
-            Ok(())
-        })
+        // ADR-0007 §2.1 / `data-model.md` §13.1: rusqlite::backup::Backup を使用。
+        // `.partial` に書いてから rename するので、途中失敗で不完全ファイルが一覧に載らない
+        self.with_conn(|src_conn| write_backup_file(src_conn, dst_path))
     }
 
     fn restore_online_backup_from(&self, src_path: &Path) -> Result<(), AppError> {
-        // 整合性検証 (`PRAGMA integrity_check`) は本メソッドの呼び出し側 (BackupService)
-        // が事前に済ませる。ここでは src を読み込み、現在 DB に上書きするだけ。
+        // 整合性検証 (`PRAGMA integrity_check` + schema 版確認) は本メソッドの呼び出し側
+        // (BackupService) が事前に済ませる。ここでは src を読み込み、現在 DB に上書きする。
         //
         // **PR #30 codex P1 関連の二重防御**: 既定の `Connection::open` は不在 path で
         // 空 DB を新規作成するため、不在ファイルでの restore = アクティブ DB を空で
@@ -558,6 +572,7 @@ impl StorageService for SqliteStorage {
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .map_err(AppError::from)?;
+        let src_version = read_backup_schema_version(&src_conn)?;
         self.with_conn(|dst_conn| {
             let backup =
                 rusqlite::backup::Backup::new(&src_conn, dst_conn).map_err(AppError::from)?;
@@ -567,7 +582,14 @@ impl StorageService for SqliteStorage {
             backup
                 .run_to_completion(1024, std::time::Duration::from_millis(0), None)
                 .map_err(AppError::from)?;
-            Ok(())
+            drop(backup);
+            // 旧 schema のバックアップ (例: pre-migration-v2) を戻した場合、再起動までの間も
+            // 現行 schema 前提のクエリが通るよう、同じ接続上で additive migration を適用する
+            // (ADR-0011)。リストア元ファイルは旧 schema のまま残るので控えは失われない。
+            if src_version < CURRENT_DB_SCHEMA_VERSION {
+                apply_pending_migrations(dst_conn, src_version)?;
+            }
+            verify_schema_version(dst_conn)
         })
     }
 
