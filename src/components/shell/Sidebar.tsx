@@ -284,8 +284,9 @@ export function Sidebar({ projects, onProjectCreated, onProjectChanged }: Sideba
         description={
           <>
             <strong>このプロジェクト配下のすべてのアイテム</strong>
-            がモジュール種別を問わず連鎖削除されます。バックアップから戻すことは可能ですが、
-            現在の状態へは戻れません。
+            がモジュール種別を問わず連鎖削除されます。削除直前の状態は{" "}
+            <code className="font-mono">pre-delete-project-...</code>{" "}
+            バックアップとして自動保存され、設定画面から戻せます。
           </>
         }
         onClose={() => setDeletingProject(null)}

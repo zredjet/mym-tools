@@ -102,36 +102,20 @@ impl LocalBackupService {
     /// 既存バックアップ 1 件のメタデータを構築する。ファイル名解析に失敗したら `None`。
     fn record_from_path(&self, path: &Path) -> Option<BackupRecord> {
         let file_name = path.file_name()?.to_str()?;
-        // `<prefix>-<YYYY-MM-DDTHH-MM-SS-sss>-r<N>.sqlite`
-        // suffix `.sqlite` を剥がす
-        let stem = file_name.strip_suffix(".sqlite")?;
-
-        // 末尾 `-r<N>` を抽出
-        let r_idx = stem.rfind("-r")?;
-        let revision_str = &stem[r_idx + 2..];
-        let data_revision: i64 = revision_str.parse().ok()?;
-        let before_revision = &stem[..r_idx];
-
-        // ファイル名末尾 23 文字が `JST_FILENAME_TIMESTAMP`
-        if before_revision.len() < 24 {
-            // prefix が空に等しい場合 (`-<ts>`) も許容する: 例 `-2026...-r1.sqlite`。
-            // ただし通常は `auto-...` 等で prefix がある。安全側で min 24 (`p-` + 23) を要求
-            return None;
-        }
-        // 末尾 23 文字が `YYYY-MM-DDTHH-MM-SS-sss` のはず。先頭は `-` で区切られる
-        let ts_start = before_revision.len() - 23;
-        if ts_start == 0 || before_revision.as_bytes().get(ts_start - 1) != Some(&b'-') {
-            return None;
-        }
-        let timestamp_str = &before_revision[ts_start..];
-        let prefix_str = &before_revision[..ts_start - 1];
+        let parsed = parse_backup_file_name(file_name)?;
 
         // タイムスタンプを JST_FILENAME_TIMESTAMP → DateTime にパース
-        let dt = parse_filename_timestamp(timestamp_str)?;
+        let dt = parse_filename_timestamp(parsed.timestamp)?;
         let created_at = format_jst_iso8601(&dt);
 
+        // 旧命名 (`-r<N>` 無し) はファイル内の meta から revision を補う
+        let data_revision = parsed
+            .revision
+            .or_else(|| read_revision_from_file(path))
+            .unwrap_or(0);
+
         // kind を prefix から判定: "auto" / "manual" / 他は PreOp(prefix)
-        let kind = match prefix_str {
+        let kind = match parsed.prefix {
             "auto" => BackupKind::Auto,
             "manual" => BackupKind::Manual,
             other => BackupKind::PreOp {
@@ -151,32 +135,67 @@ impl LocalBackupService {
     }
 }
 
-/// `<prefix>-<JST_FILENAME_TIMESTAMP>-r<N>.sqlite` 形式のパスから
-/// `JST_FILENAME_TIMESTAMP` 部分の **文字列** (23 文字) を抽出する。ローテーション用の
-/// ソートキーで、パース不要で済むよう生文字列で返す (JST_FILENAME_TIMESTAMP の辞書順は
-/// 時系列と一致するため、文字列比較で十分)。
-fn extract_filename_timestamp(path: &Path) -> Option<String> {
-    let file_name = path.file_name()?.to_str()?;
+/// バックアップファイル名 `<prefix>-<JST_FILENAME_TIMESTAMP>-r<N>.sqlite` の構成要素。
+#[derive(Debug, PartialEq, Eq)]
+struct ParsedBackupName<'a> {
+    prefix: &'a str,
+    /// `JST_FILENAME_TIMESTAMP` (23 文字)。辞書順が時系列と一致する。
+    timestamp: &'a str,
+    /// ファイル名末尾の `-r<N>`。旧命名の pre-migration バックアップでは `None`。
+    revision: Option<i64>,
+}
+
+/// v0.1.0-alpha.18 以前の pre-migration バックアップは `-r<N>` 無しで作られていた
+/// (`pre-migration-v<N>-<ts>.sqlite`)。この prefix に限り revision 無しの名前も受け付ける。
+const LEGACY_NO_REVISION_PREFIX: &str = crate::storage::bootstrap::PRE_MIGRATION_PREFIX;
+
+/// バックアップファイル名を解析する。規約外の名前は `None`。
+fn parse_backup_file_name(file_name: &str) -> Option<ParsedBackupName<'_>> {
     let stem = file_name.strip_suffix(".sqlite")?;
-    let r_idx = stem.rfind("-r")?;
-    // `-r` の後がすべて数字であることを軽く確認 (`-rev` 等の文字列誤マッチ防止)
-    let revision_str = &stem[r_idx + 2..];
-    if revision_str.is_empty() || !revision_str.bytes().all(|b| b.is_ascii_digit()) {
+
+    let with_revision = stem.rfind("-r").and_then(|r_idx| {
+        let revision_str = &stem[r_idx + 2..];
+        // `-r` の後がすべて数字であることを確認 (`-rev` 等の文字列誤マッチ防止)
+        if revision_str.is_empty() || !revision_str.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        let revision: i64 = revision_str.parse().ok()?;
+        let (prefix, timestamp) = split_prefix_and_timestamp(&stem[..r_idx])?;
+        Some(ParsedBackupName {
+            prefix,
+            timestamp,
+            revision: Some(revision),
+        })
+    });
+    if with_revision.is_some() {
+        return with_revision;
+    }
+
+    let (prefix, timestamp) = split_prefix_and_timestamp(stem)?;
+    if !prefix.starts_with(LEGACY_NO_REVISION_PREFIX) {
         return None;
     }
-    let before_revision = &stem[..r_idx];
-    if before_revision.len() < 24 {
+    Some(ParsedBackupName {
+        prefix,
+        timestamp,
+        revision: None,
+    })
+}
+
+/// `<prefix>-<JST_FILENAME_TIMESTAMP>` を prefix と timestamp (末尾 23 文字) に分ける。
+fn split_prefix_and_timestamp(s: &str) -> Option<(&str, &str)> {
+    // prefix が空 (`-<ts>`) は認めない。安全側で min 24 (`p-` + 23) を要求
+    if s.len() < 24 {
         return None;
     }
-    let ts_start = before_revision.len() - 23;
-    if ts_start == 0 || before_revision.as_bytes().get(ts_start - 1) != Some(&b'-') {
+    let ts_start = s.len() - 23;
+    if !s.is_char_boundary(ts_start) || s.as_bytes().get(ts_start - 1) != Some(&b'-') {
         return None;
     }
-    let ts = &before_revision[ts_start..];
+    let ts = &s[ts_start..];
     // 区切り文字を軽く検証 (4 / 7 / 13 / 16 / 19 = '-'、10 = 'T')
     let bytes = ts.as_bytes();
-    if bytes.len() != 23
-        || bytes[4] != b'-'
+    if bytes[4] != b'-'
         || bytes[7] != b'-'
         || bytes[10] != b'T'
         || bytes[13] != b'-'
@@ -185,7 +204,25 @@ fn extract_filename_timestamp(path: &Path) -> Option<String> {
     {
         return None;
     }
-    Some(ts.to_string())
+    Some((&s[..ts_start - 1], ts))
+}
+
+/// バックアップファイル名から `JST_FILENAME_TIMESTAMP` 部分の **文字列** (23 文字) を
+/// 抽出する。ローテーション用のソートキーで、パース不要で済むよう生文字列で返す
+/// (JST_FILENAME_TIMESTAMP の辞書順は時系列と一致するため、文字列比較で十分)。
+fn extract_filename_timestamp(path: &Path) -> Option<String> {
+    let file_name = path.file_name()?.to_str()?;
+    parse_backup_file_name(file_name).map(|parsed| parsed.timestamp.to_string())
+}
+
+/// バックアップファイル内の `meta.data_revision` を read-only で読む (旧命名の補完用)。
+fn read_revision_from_file(path: &Path) -> Option<i64> {
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    crate::storage::bootstrap::read_data_revision(&conn)
 }
 
 /// `JST_FILENAME_TIMESTAMP` (`YYYY-MM-DDTHH-MM-SS-sss`) を `DateTime<FixedOffset>` にパースする。
@@ -331,14 +368,16 @@ impl BackupService for LocalBackupService {
         let result: String = conn
             .query_row("PRAGMA integrity_check;", [], |row| row.get(0))
             .map_err(AppError::from)?;
-        if result == "ok" {
-            Ok(())
-        } else {
-            Err(AppError::Storage(format!(
+        if result != "ok" {
+            return Err(AppError::Storage(format!(
                 "integrity_check failed for {}: {result}",
                 path.display()
-            )))
+            )));
         }
+        // 新版アプリで作られたバックアップ / MyMyTools 以外の SQLite はリストアさせない。
+        // pre-restore バックアップを取る前 (= verify 段階) で弾く
+        crate::storage::sqlite::read_backup_schema_version(&conn)?;
+        Ok(())
     }
 
     fn restore_from(&self, src_path: &Path) -> Result<(), AppError> {
@@ -768,6 +807,55 @@ mod tests {
             extract_filename_timestamp(p2).as_deref(),
             Some("2026-04-30T15-23-45-123")
         );
+    }
+
+    #[test]
+    fn parse_backup_file_name_accepts_legacy_pre_migration_without_revision() {
+        // v0.1.0-alpha.18 以前の pre-migration は `-r<N>` 無しで作られていた
+        assert_eq!(
+            parse_backup_file_name("pre-migration-v2-2026-05-01T00-00-00-000.sqlite"),
+            Some(ParsedBackupName {
+                prefix: "pre-migration-v2",
+                timestamp: "2026-05-01T00-00-00-000",
+                revision: None,
+            })
+        );
+        // 現行命名
+        assert_eq!(
+            parse_backup_file_name("pre-migration-v2-2026-05-01T00-00-00-000-r7.sqlite"),
+            Some(ParsedBackupName {
+                prefix: "pre-migration-v2",
+                timestamp: "2026-05-01T00-00-00-000",
+                revision: Some(7),
+            })
+        );
+        // pre-migration 以外は `-r<N>` 必須のまま
+        assert_eq!(
+            parse_backup_file_name("auto-2026-05-01T00-00-00-000.sqlite"),
+            None
+        );
+    }
+
+    #[test]
+    fn legacy_pre_migration_backup_is_listed_and_rotated_by_timestamp() {
+        let (temp, storage, svc) = make_service();
+        let pre_op_dir = temp.path().join("backups").join("pre-op");
+        std::fs::create_dir_all(&pre_op_dir).unwrap();
+        // 旧命名の pre-migration (中身は現行 DB のコピーで data_revision を持つ)
+        storage.create_project("P", None).unwrap();
+        let legacy = pre_op_dir.join("pre-migration-v2-2999-01-01T00-00-00-000.sqlite");
+        storage.take_online_backup_to(&legacy).unwrap();
+
+        let records = svc.list().unwrap();
+        let record = records
+            .iter()
+            .find(|r| r.path == legacy)
+            .expect("legacy pre-migration backup should be listed");
+        assert_eq!(record.data_revision, storage.data_revision().unwrap());
+
+        // 最古扱い (0, "") ではなく timestamp で並ぶ → 未来日付なので最後尾
+        let files = svc.collect_files_in_dir(&pre_op_dir).unwrap();
+        assert_eq!(files.last(), Some(&legacy));
     }
 
     #[test]
