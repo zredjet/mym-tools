@@ -22,7 +22,7 @@ pub mod scoped;
 pub mod sqlite;
 pub mod types;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
@@ -254,6 +254,15 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
     /// 取得中もアプリの読み書きは継続可能だが、本実装では writer mutex を握ったまま
     /// `Backup::run_to_completion` を回すため短時間 (~数百 ms〜数秒) のロックが入る。
     fn take_online_backup_to(&self, dst_path: &Path) -> Result<(), AppError>;
+
+    /// `data_revision` の読み取りと Online Backup を **同じロック区間** で行う。
+    ///
+    /// `path_for_revision` にその時点の `data_revision` を渡して書き出し先を決めるため、
+    /// ファイル名の `-r<N>` とバックアップの中身が同じ時点を指す。戻り値は書き出し先と revision。
+    fn take_online_backup_at_revision(
+        &self,
+        path_for_revision: &dyn Fn(i64) -> PathBuf,
+    ) -> Result<(PathBuf, i64), AppError>;
 
     /// SQLite Online Backup API でバックアップファイル `src_path` の内容を **現在の DB
     /// に書き戻す** (`data-model.md` §13.6 / ADR-0007 §2.4.2 ステップ 4)。

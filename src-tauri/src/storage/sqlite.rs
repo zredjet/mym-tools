@@ -11,7 +11,7 @@
 //! - Online Backup API (ADR-0007)
 //! - 検索 API (FTS5 trigram + LIKE フォールバック、`data-model.md` §8.1)
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
@@ -548,6 +548,27 @@ impl StorageService for SqliteStorage {
         // ADR-0007 §2.1 / `data-model.md` §13.1: rusqlite::backup::Backup を使用。
         // `.partial` に書いてから rename するので、途中失敗で不完全ファイルが一覧に載らない
         self.with_conn(|src_conn| write_backup_file(src_conn, dst_path))
+    }
+
+    fn take_online_backup_at_revision(
+        &self,
+        path_for_revision: &dyn Fn(i64) -> PathBuf,
+    ) -> Result<(PathBuf, i64), AppError> {
+        self.with_conn(|conn| {
+            let revision: i64 = conn
+                .query_row(
+                    "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'data_revision'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(AppError::from)?;
+            let dst_path = path_for_revision(revision);
+            if let Some(parent) = dst_path.parent() {
+                std::fs::create_dir_all(parent).map_err(AppError::from)?;
+            }
+            write_backup_file(conn, &dst_path)?;
+            Ok((dst_path, revision))
+        })
     }
 
     fn restore_online_backup_from(&self, src_path: &Path) -> Result<(), AppError> {

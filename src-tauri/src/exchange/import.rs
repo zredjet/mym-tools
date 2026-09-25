@@ -25,6 +25,7 @@ use crate::exchange::{
     CURRENT_EXPORT_SCHEMA_VERSION,
 };
 use crate::module::ModuleBackend;
+use crate::storage::scoped::build_search_text;
 use crate::storage::{ImportOutcome, Project, StorageService};
 use crate::time::{format_jst_iso8601, parse_jst_iso8601};
 
@@ -313,7 +314,7 @@ fn import_one_item(
             }
         };
 
-    // search_text 生成 (`data-model.md` §12.4 step 6)
+    // search_text 生成 (`data-model.md` §12.4 step 6)。通常の作成・更新と同じ組み立てを使う
     let module_text = module.index_text(&payload);
     let search_text = build_search_text(&item.title, &item.tags, &module_text);
 
@@ -406,13 +407,6 @@ fn normalize_import_timestamp(value: &str) -> Result<String, String> {
     chrono::DateTime::parse_from_rfc3339(value)
         .map(|dt| format_jst_iso8601(&dt))
         .map_err(|error| format!("invalid timestamp {value:?}: {error}"))
-}
-
-fn build_search_text(title: &str, tags: &[String], module_text: &str) -> String {
-    let tags_joined = tags.join(" ");
-    format!("{title} {tags_joined} {module_text}")
-        .trim()
-        .to_string()
 }
 
 #[cfg(test)]
@@ -906,5 +900,36 @@ mod tests {
             }]),
         );
         assert_eq!((s.projects_skipped, s.projects_failed), (1, 0));
+    }
+
+    /// import でも通常の作成と同じ search_text を作る (空タグで二重空白にならない)。
+    #[test]
+    fn imported_search_text_matches_the_regular_builder() {
+        let sqlite = Arc::new(SqliteStorage::open(":memory:").expect("open"));
+        let storage: Arc<dyn StorageService> = Arc::clone(&sqlite) as Arc<dyn StorageService>;
+        let (_, modules) = setup(1);
+        let mut untagged = item("i1", 1, json!({"body": "module body"}));
+        untagged.tags = vec![];
+        let data = data_with(vec![ProjectWithItems {
+            project: project("p1", "Project 1"),
+            items: vec![untagged],
+        }]);
+        let summary = apply_import(&storage, &modules, &data);
+        assert_eq!(summary.items_inserted, 1);
+
+        let search_text: String = sqlite
+            .with_conn(|conn| {
+                conn.query_row("SELECT search_text FROM items WHERE id = 'i1'", [], |row| {
+                    row.get(0)
+                })
+                .map_err(AppError::from)
+            })
+            .unwrap();
+        let imported = &data.projects[0].items[0];
+        assert_eq!(
+            search_text,
+            build_search_text(&imported.title, &imported.tags, "module body")
+        );
+        assert!(!search_text.contains("  "), "{search_text:?}");
     }
 }
