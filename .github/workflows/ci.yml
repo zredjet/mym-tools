@@ -224,6 +224,25 @@ jobs:
           VERSION="$(node -p "require('./package.json').version")"
           node scripts/release/release-contract.mjs check-version "${VERSION}" .
 
+      # tauri-codegen は埋め込み資産 (draw.io 約 150 MB など) を Brotli 圧縮して OUT_DIR の
+      # tauri-codegen-assets/<内容ハッシュ> に置き、同名ファイルがあれば再圧縮しない。
+      # rust-cache は workspace crate (mym-tools) の build 出力を持ち越さないため、毎回
+      # 全資産を圧縮し直して release ビルドの大半を占めていた。圧縮結果だけを持ち越す
+      # (ファイル名が入力の内容ハッシュなので、古い内容を誤って使うことはない)。
+      # draw.io 固定版 / lock ファイルが変わったら新しい系列で作り直し、肥大化を防ぐ。
+      - name: Resolve tauri-codegen cache key
+        id: codegen-cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "prefix=tauri-codegen-${{ matrix.os }}-$(git rev-parse HEAD:vendor/drawio)-${{ hashFiles('package-lock.json', 'src-tauri/Cargo.lock') }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: src-tauri/target/**/build/mym-tools-*/out/tauri-codegen-assets
+          key: ${{ steps.codegen-cache.outputs.prefix }}-${{ github.sha }}
+          restore-keys: ${{ steps.codegen-cache.outputs.prefix }}-
+
       # package-lock.jsonで固定したTauri CLIとCargo.lockで再現可能な配布物を作る。
       - name: Build macOS app bundle
         if: matrix.platform == 'macos'
@@ -286,6 +305,13 @@ jobs:
           finally {
             $zip.Dispose()
           }
+
+      # rust-cache と同じく main の run だけが保存し、PR は main の結果を復元して使う
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: src-tauri/target/**/build/mym-tools-*/out/tauri-codegen-assets
+          key: ${{ steps.codegen-cache.outputs.prefix }}-${{ github.sha }}
 
       - name: Check NativeAOT ZIP size gate
         shell: bash
