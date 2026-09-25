@@ -9,7 +9,7 @@
 //! を `#[tauri::command]` の引数に取る形でアクセスする。
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::backup::BackupService;
 use crate::module::ModuleBackend;
@@ -37,6 +37,15 @@ pub struct AppState {
     /// `<userdata>/backups/{auto,pre-op,manual}/` を管理し、Tauri command 経由で
     /// auto/pre-op/manual の取得・一覧・削除・整合性検証・リストアを提供する。
     pub backup: Arc<dyn BackupService>,
+
+    /// 複数ステップにまたがる操作 (import / export / restore / バックアップ取得 /
+    /// project 削除) と通常の読み書きの排他 (`commands::run_storage`)。
+    ///
+    /// core コマンドはメインスレッドを塞がないよう `spawn_blocking` で並行実行されるため、
+    /// 例えば import の途中で restore が DB を差し替えたり、export の OFFSET ページングの
+    /// 途中で item が更新されたりしないよう、前者を write、後者を read で取る。
+    /// 保護対象のデータは持たない (`()`)。個々の SQL は従来どおり接続の Mutex で直列化される。
+    pub data_lock: Arc<RwLock<()>>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -76,6 +85,7 @@ impl AppState {
             operations: Arc::new(OperationRegistry::new()),
             storage,
             backup,
+            data_lock: Arc::new(RwLock::new(())),
         })
     }
 

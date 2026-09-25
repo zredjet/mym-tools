@@ -81,11 +81,17 @@ fn build_for_projects(
             loop {
                 let page = storage.list_items(m.id(), &project.id, PAGE_SIZE, offset)?;
                 let count = page.len() as u32;
+                let current_version = m.current_payload_version();
                 for it in page {
-                    // Eager-on-Read を踏ませて payload を最新化してから JSON 化する
-                    // (`data-model.md` §12.2)
-                    let eager = storage.get_item_eager(m.id(), &it.id, m.as_ref())?;
-                    items_out.push(ItemExport::from_item(eager));
+                    // 旧版 payload だけ Eager-on-Read を踏ませて最新化してから JSON 化する
+                    // (`data-model.md` §12.2)。現行版は一覧で読んだ行と同じ内容なので、
+                    // payload (Vector は最大 20 MiB) を 2 度読まない
+                    let item = if it.payload_schema_version == current_version {
+                        it
+                    } else {
+                        storage.get_item_eager(m.id(), &it.id, m.as_ref())?
+                    };
+                    items_out.push(ItemExport::from_item(item));
                 }
                 if count < PAGE_SIZE {
                     break;

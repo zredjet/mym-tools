@@ -5,75 +5,81 @@
 //!
 //! `core_get_item` は Eager-on-Read (ADR-0006) を発火する。`core_list_items` は
 //! 発火しない (`data-model.md` §7.2)。
+//!
+//! 全コマンド `async` で、実処理は `run_storage` (`spawn_blocking`) で実行する。
+//! 大きな payload (Vector は最大 20 MiB) の検証・書込みでメインスレッドを塞がないため。
 
 use serde_json::Value as JsonValue;
 use tauri::State;
 
+use std::sync::Arc;
+
+use crate::commands::{run_storage, scoped_storage, LockMode};
 use crate::error::AppError;
 use crate::state::AppState;
-use crate::storage::types::{Item, ItemId, ProjectId};
+use crate::storage::types::{Item, ItemId, ItemSummary, ProjectId};
 
 #[tauri::command]
-pub fn core_list_item_summaries(
+pub async fn core_list_item_summaries(
     state: State<'_, AppState>,
     module_id: String,
     project_id: String,
     limit: u32,
     offset: u32,
-) -> Result<Vec<crate::storage::types::ItemSummary>, AppError> {
+) -> Result<Vec<ItemSummary>, AppError> {
     state
         .module(&module_id)
         .ok_or_else(|| AppError::ModuleNotFound {
             module_id: module_id.clone(),
         })?;
-    state.storage.list_item_summaries(
-        &ProjectId::new(project_id),
-        &module_id,
-        limit.min(100),
-        offset,
-    )
+    let storage = Arc::clone(&state.storage);
+    run_storage(&state, LockMode::Shared, move || {
+        storage.list_item_summaries(
+            &ProjectId::new(project_id),
+            &module_id,
+            limit.min(100),
+            offset,
+        )
+    })
+    .await
 }
 
 /// プロジェクト内の `module_id` 配下 items を `updated_at DESC, id DESC` 順で取得
 /// (`StorageService::list_items`)。Eager-on-Read は発火させない。
 #[tauri::command]
-pub fn core_list_items(
+pub async fn core_list_items(
     state: State<'_, AppState>,
     module_id: String,
     project_id: String,
     limit: u32,
     offset: u32,
 ) -> Result<Vec<Item>, AppError> {
-    let module = state
-        .module(&module_id)
-        .ok_or_else(|| AppError::ModuleNotFound {
-            module_id: module_id.clone(),
-        })?;
-    let scoped = state.storage.clone().scoped_for(module);
-    scoped.list_items(&ProjectId::new(project_id), limit, offset)
+    let scoped = scoped_storage(&state, &module_id)?;
+    run_storage(&state, LockMode::Shared, move || {
+        scoped.list_items(&ProjectId::new(project_id), limit, offset)
+    })
+    .await
 }
 
 /// item を 1 件取得 (Eager-on-Read 経由、ADR-0006 / `data-model.md` §7.2)。
 #[tauri::command]
-pub fn core_get_item(
+pub async fn core_get_item(
     state: State<'_, AppState>,
     module_id: String,
     item_id: String,
 ) -> Result<Item, AppError> {
-    let module = state
-        .module(&module_id)
-        .ok_or_else(|| AppError::ModuleNotFound {
-            module_id: module_id.clone(),
-        })?;
-    let scoped = state.storage.clone().scoped_for(module);
-    scoped.get_item(&ItemId::new(item_id))
+    let scoped = scoped_storage(&state, &module_id)?;
+    run_storage(&state, LockMode::Shared, move || {
+        scoped.get_item(&ItemId::new(item_id))
+    })
+    .await
 }
 
 /// 新規 item を作成。`payload` はモジュール固有の JSON でフロントから送られる。
 /// `validate_payload` / `index_text` / `current_payload_version` はモジュール側が決める
 /// (`ScopedStorage::create_item` 内で実行)。
 #[tauri::command]
-pub fn core_create_item(
+pub async fn core_create_item(
     state: State<'_, AppState>,
     module_id: String,
     project_id: String,
@@ -81,18 +87,16 @@ pub fn core_create_item(
     tags: Vec<String>,
     payload: JsonValue,
 ) -> Result<ItemId, AppError> {
-    let module = state
-        .module(&module_id)
-        .ok_or_else(|| AppError::ModuleNotFound {
-            module_id: module_id.clone(),
-        })?;
-    let scoped = state.storage.clone().scoped_for(module);
-    scoped.create_item(&ProjectId::new(project_id), &title, &tags, payload)
+    let scoped = scoped_storage(&state, &module_id)?;
+    run_storage(&state, LockMode::Shared, move || {
+        scoped.create_item(&ProjectId::new(project_id), &title, &tags, payload)
+    })
+    .await
 }
 
 /// item を更新 (ユーザー編集)。`data_revision` を **+1**。
 #[tauri::command]
-pub fn core_update_item(
+pub async fn core_update_item(
     state: State<'_, AppState>,
     module_id: String,
     item_id: String,
@@ -100,29 +104,25 @@ pub fn core_update_item(
     tags: Vec<String>,
     payload: JsonValue,
 ) -> Result<(), AppError> {
-    let module = state
-        .module(&module_id)
-        .ok_or_else(|| AppError::ModuleNotFound {
-            module_id: module_id.clone(),
-        })?;
-    let scoped = state.storage.clone().scoped_for(module);
-    scoped.update_item(&ItemId::new(item_id), &title, &tags, payload)
+    let scoped = scoped_storage(&state, &module_id)?;
+    run_storage(&state, LockMode::Shared, move || {
+        scoped.update_item(&ItemId::new(item_id), &title, &tags, payload)
+    })
+    .await
 }
 
 /// item を物理削除。
 #[tauri::command]
-pub fn core_delete_item(
+pub async fn core_delete_item(
     state: State<'_, AppState>,
     module_id: String,
     item_id: String,
 ) -> Result<(), AppError> {
-    let module = state
-        .module(&module_id)
-        .ok_or_else(|| AppError::ModuleNotFound {
-            module_id: module_id.clone(),
-        })?;
-    let scoped = state.storage.clone().scoped_for(module);
-    scoped.delete_item(&ItemId::new(item_id))
+    let scoped = scoped_storage(&state, &module_id)?;
+    run_storage(&state, LockMode::Shared, move || {
+        scoped.delete_item(&ItemId::new(item_id))
+    })
+    .await
 }
 
 /// `(project_id, module_id)` スコープ内の items を `ordered_ids` の順序で並び替える
@@ -133,7 +133,7 @@ pub fn core_delete_item(
 /// - `updated_at` は不変
 /// - `module_id` の存在は ModuleRegistry でチェック (未登録 module は `AppError::ModuleNotFound`)
 #[tauri::command]
-pub fn core_reorder_items(
+pub async fn core_reorder_items(
     state: State<'_, AppState>,
     project_id: String,
     module_id: String,
@@ -145,7 +145,11 @@ pub fn core_reorder_items(
             module_id: module_id.clone(),
         });
     }
-    let pid = ProjectId::new(project_id);
-    let ids: Vec<ItemId> = ordered_ids.into_iter().map(ItemId::new).collect();
-    state.storage.reorder_items(&pid, &module_id, &ids)
+    let storage = Arc::clone(&state.storage);
+    run_storage(&state, LockMode::Shared, move || {
+        let pid = ProjectId::new(project_id);
+        let ids: Vec<ItemId> = ordered_ids.into_iter().map(ItemId::new).collect();
+        storage.reorder_items(&pid, &module_id, &ids)
+    })
+    .await
 }

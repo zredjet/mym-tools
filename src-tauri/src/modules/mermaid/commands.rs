@@ -9,8 +9,17 @@ use crate::error::AppError;
 
 use super::super::image_export::{decode_and_validate_image, write_atomically, ImageFormat};
 
+// Image decoding / SVG validation and the fsync'd write run away from the WebView (main) thread.
 #[tauri::command]
-pub fn mermaid_write_file(path: String, format: String, data: String) -> Result<(), AppError> {
+pub async fn mermaid_write_file(
+    path: String,
+    format: String,
+    data: String,
+) -> Result<(), AppError> {
+    tauri::async_runtime::spawn_blocking(move || write_file(path, format, data)).await?
+}
+
+fn write_file(path: String, format: String, data: String) -> Result<(), AppError> {
     let path = PathBuf::from(path);
     let (image_format, bytes) = decode_and_validate_image("mermaid", &path, &format, &data)?;
     if image_format == ImageFormat::Svg {
@@ -131,7 +140,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let svg = directory.path().join("diagram.svg");
         std::fs::write(&svg, "old").unwrap();
-        mermaid_write_file(
+        write_file(
             svg.display().to_string(),
             "svg".into(),
             r##"<svg xmlns="http://www.w3.org/2000/svg"><use href="#node"/></svg>"##.into(),
@@ -140,7 +149,7 @@ mod tests {
         assert!(std::fs::read_to_string(svg).unwrap().starts_with("<svg"));
 
         let png = directory.path().join("diagram.png");
-        mermaid_write_file(
+        write_file(
             png.display().to_string(),
             "png".into(),
             format!("data:image/png;base64,{}", BASE64.encode(PNG)),
@@ -159,14 +168,14 @@ mod tests {
             r#"<svg><image href="https://example.com/image.png"/></svg>"#,
             r#"<svg><style>@import "https://example.com/style.css"</style></svg>"#,
         ] {
-            assert!(mermaid_write_file(
+            assert!(write_file(
                 directory.path().join("diagram.svg").display().to_string(),
                 "svg".into(),
                 svg.into(),
             )
             .is_err());
         }
-        assert!(mermaid_write_file(
+        assert!(write_file(
             directory.path().join("diagram.txt").display().to_string(),
             "svg".into(),
             "<svg/>".into(),

@@ -16,23 +16,27 @@
 //! バックアップ取得失敗時はインポートを中止する (戻り先が無い状態で書き込む方が危険)。
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use tauri::State;
 
 use crate::backup::BackupKind;
+use crate::commands::{run_storage, LockMode};
 use crate::error::AppError;
 use crate::exchange::{
     apply_import, build_export_data, build_project_export_data, parse_export_json, ExportScope,
     ExportSummary, ImportSummary,
 };
 use crate::module::ModuleBackend;
+use crate::modules::image_export::write_atomically_with;
 use crate::state::AppState;
 
 /// 全 stateful モジュール + 全プロジェクトの items を `path` に JSON で書き出す。
 ///
-/// - 既存ファイルは上書き (ユーザー意図を信頼。フロント側でダイアログ確認済の想定)
+/// - 既存ファイルは上書き (ユーザー意図を信頼。フロント側でダイアログ確認済の想定)。
+///   同じディレクトリの一時ファイルに書いてから置換するので、失敗時は既存ファイルが残る
 /// - `app_version` は `env!("CARGO_PKG_VERSION")` を埋める
 /// - pre-op バックアップは取らない (read-only のため、`data-model.md` §12.2 末尾)
 ///
@@ -41,53 +45,66 @@ use crate::state::AppState;
 /// payload を再シリアライズして転送するのは無駄。`bytes_written` を含めることでファイル
 /// サイズの感触もユーザーに伝える。
 #[tauri::command]
-pub fn core_export_json(
+pub async fn core_export_json(
     state: State<'_, AppState>,
     path: String,
     scope: ExportScope,
     project_id: Option<String>,
 ) -> Result<ExportSummary, AppError> {
     let path_buf = validate_output_path(&path)?;
-
-    // module list は AppState の HashMap から取り出して順序を id ソートで安定化
-    let modules = collect_modules_sorted(&state);
-
-    let data = match scope {
-        ExportScope::App => {
-            if project_id.is_some() {
-                return Err(AppError::Validation {
-                    module_id: "core.export".into(),
-                    reason: "project_id must be omitted for app scope".into(),
-                });
-            }
-            build_export_data(&state.storage, &modules, env!("CARGO_PKG_VERSION"))?
+    let project_id = match (scope, project_id) {
+        (ExportScope::App, Some(_)) => {
+            return Err(AppError::Validation {
+                module_id: "core.export".into(),
+                reason: "project_id must be omitted for app scope".into(),
+            });
         }
-        ExportScope::Project => {
-            let id = project_id
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| AppError::Validation {
+        (ExportScope::App, None) => None,
+        (ExportScope::Project, id) => {
+            Some(id.filter(|value| !value.trim().is_empty()).ok_or_else(|| {
+                AppError::Validation {
                     module_id: "core.export".into(),
                     reason: "project_id is required for project scope".into(),
-                })?;
-            build_project_export_data(
-                &state.storage,
-                &modules,
-                env!("CARGO_PKG_VERSION"),
-                &crate::storage::ProjectId::new(id),
-            )?
+                }
+            })?)
         }
     };
 
-    // serde_json で書き出し (pretty 出力で diff しやすく)
-    let json = serde_json::to_string_pretty(&data)
-        .map_err(|e| AppError::Storage(format!("serialize export: {e}")))?;
-    let bytes_written = json.len() as u64;
-    std::fs::write(&path_buf, json)
-        .map_err(|e| AppError::Storage(format!("write {}: {e}", path_buf.display())))?;
+    // module list は AppState の HashMap から取り出して順序を id ソートで安定化
+    let modules = collect_modules_sorted(&state);
+    let storage = Arc::clone(&state.storage);
 
-    let mut summary = ExportSummary::summarize(&data);
-    summary.bytes_written = bytes_written;
-    Ok(summary)
+    // ページングで全件を読む間に item が更新されて取りこぼし / 重複が出ないよう Exclusive
+    run_storage(&state, LockMode::Exclusive, move || {
+        let data = match project_id {
+            None => build_export_data(&storage, &modules, env!("CARGO_PKG_VERSION"))?,
+            Some(id) => build_project_export_data(
+                &storage,
+                &modules,
+                env!("CARGO_PKG_VERSION"),
+                &crate::storage::ProjectId::new(id),
+            )?,
+        };
+
+        // serde_json で書き出し (pretty 出力で diff しやすく)。一時ファイルに書いてから置換する
+        // ので、途中失敗 (ディスクフル等) でも既存ファイルを壊さない
+        write_atomically_with(&path_buf, |file| {
+            let mut writer = std::io::BufWriter::new(file);
+            serde_json::to_writer_pretty(&mut writer, &data)
+                .map_err(|e| AppError::Storage(format!("serialize export: {e}")))?;
+            writer.flush()?;
+            Ok(())
+        })
+        .map_err(|e| AppError::Storage(format!("write {}: {e}", path_buf.display())))?;
+        let bytes_written = std::fs::metadata(&path_buf)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+
+        let mut summary = ExportSummary::summarize(&data);
+        summary.bytes_written = bytes_written;
+        Ok(summary)
+    })
+    .await
 }
 
 /// `path` の JSON を読み取り、現在 DB に **取り込みを試みる** (`data-model.md` §12.3-12.5)。
@@ -96,38 +113,43 @@ pub fn core_export_json(
 /// 「JSON ファイル自体が読めない / schema_version が未対応」など **バッチ全体が無効** な
 /// ケースは `Err(AppError)` を返す (この場合 pre-op バックアップは取得済みなので戻れる)。
 #[tauri::command]
-pub fn core_import_json(
+pub async fn core_import_json(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<ImportSummary, AppError> {
-    let path_buf = PathBuf::from(&path);
-    if !path_buf.exists() {
-        return Err(AppError::NotFound {
-            entity: "import file".into(),
-            key: path,
-        });
-    }
-    let json = std::fs::read_to_string(&path_buf)
-        .map_err(|e| AppError::Storage(format!("read {}: {e}", path_buf.display())))?;
-
-    // ファイルパース (`data-model.md` §12.4 step 1)。schema_version / scope の
-    // バリデーションが含まれるため、不正な JSON はここで弾く
-    let data = parse_export_json(&json)?;
-
-    // pre-op バックアップ取得 (`data-model.md` §12.5)。失敗したら import を中止
-    state.backup.take(BackupKind::PreOp {
-        prefix: "pre-import".into(),
-    })?;
-
-    // apply_import は内部で部分成功させるため Result ではなく ImportSummary を返す
+    let storage = Arc::clone(&state.storage);
+    let backup = Arc::clone(&state.backup);
     let modules_by_id: HashMap<String, Arc<dyn ModuleBackend>> = state
         .modules
         .iter()
         .map(|(k, v)| ((*k).to_string(), Arc::clone(v)))
         .collect();
-    let summary = apply_import(&state.storage, &modules_by_id, &data);
 
-    Ok(summary)
+    // pre-import バックアップから取り込み完了までを 1 つの Exclusive 区間で行う
+    run_storage(&state, LockMode::Exclusive, move || {
+        let path_buf = PathBuf::from(&path);
+        if !path_buf.exists() {
+            return Err(AppError::NotFound {
+                entity: "import file".into(),
+                key: path,
+            });
+        }
+        let json = std::fs::read_to_string(&path_buf)
+            .map_err(|e| AppError::Storage(format!("read {}: {e}", path_buf.display())))?;
+
+        // ファイルパース (`data-model.md` §12.4 step 1)。schema_version / scope の
+        // バリデーションが含まれるため、不正な JSON はここで弾く
+        let data = parse_export_json(&json)?;
+
+        // pre-op バックアップ取得 (`data-model.md` §12.5)。失敗したら import を中止
+        backup.take(BackupKind::PreOp {
+            prefix: "pre-import".into(),
+        })?;
+
+        // apply_import は内部で部分成功させるため Result ではなく ImportSummary を返す
+        Ok(apply_import(&storage, &modules_by_id, &data))
+    })
+    .await
 }
 
 /// 出力先パスの最低限のサニティチェック (空文字 / 親 dir 存在)。
