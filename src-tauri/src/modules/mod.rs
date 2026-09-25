@@ -13,7 +13,7 @@ pub mod diagram;
 pub mod hash;
 pub mod http;
 pub mod idgen;
-mod image_export;
+pub(crate) mod image_export;
 pub mod jwt;
 pub mod linkmemo;
 pub mod memo;

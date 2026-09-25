@@ -4,14 +4,17 @@
 //! `{type: "global"}` の discriminated union)。`module_filter` は string 配列で渡され、
 //! 空配列または `None` は全モジュール対象。
 
+use std::sync::Arc;
+
 use tauri::State;
 
+use crate::commands::{run_storage, LockMode};
 use crate::error::AppError;
 use crate::state::AppState;
 use crate::storage::types::{Item, SearchPreview, SearchScope};
 
 #[tauri::command]
-pub fn core_search_previews(
+pub async fn core_search_previews(
     state: State<'_, AppState>,
     scope: SearchScope,
     query: String,
@@ -28,22 +31,25 @@ pub fn core_search_previews(
                 .map(|field| (module.id().to_string(), field.to_string()))
         })
         .collect::<Vec<_>>();
-    state
-        .storage
-        .search_previews(
-            &scope,
-            &query,
-            module_filter.as_deref(),
-            limit.min(100),
-            offset,
-            &projections,
-        )
-        .map(|items| items.into_iter().map(SearchPreview::from).collect())
+    let storage = Arc::clone(&state.storage);
+    run_storage(&state, LockMode::Shared, move || {
+        storage
+            .search_previews(
+                &scope,
+                &query,
+                module_filter.as_deref(),
+                limit.min(100),
+                offset,
+                &projections,
+            )
+            .map(|items| items.into_iter().map(SearchPreview::from).collect())
+    })
+    .await
 }
 
 /// 検索 API。3 文字未満は LIKE フォールバック (`data-model.md` §8.1)。
 #[tauri::command]
-pub fn core_search(
+pub async fn core_search(
     state: State<'_, AppState>,
     scope: SearchScope,
     query: String,
@@ -51,7 +57,9 @@ pub fn core_search(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<Item>, AppError> {
-    state
-        .storage
-        .search(&scope, &query, module_filter.as_deref(), limit, offset)
+    let storage = Arc::clone(&state.storage);
+    run_storage(&state, LockMode::Shared, move || {
+        storage.search(&scope, &query, module_filter.as_deref(), limit, offset)
+    })
+    .await
 }
