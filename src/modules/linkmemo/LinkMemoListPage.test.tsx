@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { listAllItems } from "@/ipc/items";
+import { linkmemoOpen } from "@/ipc/linkmemo";
 
 import { LinkMemoListPage } from "./LinkMemoListPage";
 
@@ -44,5 +45,39 @@ describe("Link list", () => {
     expect(await screen.findByText("Link 100")).toBeInTheDocument();
     expect(listAllItems).toHaveBeenCalledWith({ moduleId: "linkmemo", projectId: "project-1" });
     expect(screen.queryByText(/Memos/)).not.toBeInTheDocument();
+  });
+
+  it("asks before opening a path that would run as a program", async () => {
+    vi.mocked(listAllItems).mockResolvedValue([
+      {
+        id: "link-app",
+        project_id: "project-1",
+        module_id: "linkmemo",
+        title: "Installer",
+        tags: [],
+        payload_schema_version: 1,
+        payload: { type: "path", target: "/Users/x/Downloads/setup.command", body: "" },
+        position: 0,
+        created_at: "",
+        updated_at: "",
+      },
+    ]);
+    vi.mocked(linkmemoOpen).mockResolvedValue(undefined);
+    render(
+      <MemoryRouter initialEntries={["/projects/project-1/m/linkmemo"]}>
+        <Routes>
+          <Route path="/projects/:projectId/m/linkmemo" element={<LinkMemoListPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByText("Installer"));
+    expect(await screen.findByText("実行ファイルを開きますか?")).toBeInTheDocument();
+    expect(linkmemoOpen).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "開く" }));
+    expect(linkmemoOpen).toHaveBeenCalledWith({
+      itemType: "path",
+      target: "/Users/x/Downloads/setup.command",
+    });
   });
 });
