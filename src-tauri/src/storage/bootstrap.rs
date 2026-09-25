@@ -340,7 +340,7 @@ mod tests {
     }
 
     /// T-35 相当: 旧 schema (v1) DB に migration を適用すると items.position が全行 0 で追加され、
-    /// 新インデックスが作成され、`db_schema_version` が `2` に更新される。
+    /// 新インデックスが作成され、`db_schema_version` が現行版まで更新される。
     #[test]
     fn migrate_v1_to_v2_adds_position_column_and_bumps_version() {
         let dir = tempdir().unwrap();
@@ -358,7 +358,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(v, 2);
+        assert_eq!(v, CURRENT_DB_SCHEMA_VERSION);
 
         let position: i64 = conn
             .query_row("SELECT position FROM items WHERE id = 'i1'", [], |row| {
@@ -396,9 +396,10 @@ mod tests {
             .collect();
         assert_eq!(entries.len(), 1, "exactly one backup file should exist");
         let name = entries[0].file_name().into_string().unwrap();
+        let expected_prefix = format!("pre-migration-v{CURRENT_DB_SCHEMA_VERSION}-");
         assert!(
-            name.starts_with("pre-migration-v2-"),
-            "filename should start with pre-migration-v2-, got: {name}"
+            name.starts_with(&expected_prefix),
+            "filename should start with {expected_prefix}, got: {name}"
         );
         // 他の pre-op と同じく `-r<data_revision>` 付き (v1 fixture の data_revision は 0)
         assert!(name.ends_with("-r0.sqlite"), "got: {name}");
@@ -412,7 +413,7 @@ mod tests {
         assert_eq!(
             records[0].kind,
             BackupKind::PreOp {
-                prefix: "pre-migration-v2".into()
+                prefix: format!("pre-migration-v{CURRENT_DB_SCHEMA_VERSION}")
             }
         );
     }
@@ -485,6 +486,91 @@ mod tests {
             .collect();
         assert!(names.contains(&"out.sqlite".to_string()));
         assert!(!names.iter().any(|n| n.ends_with(".partial")), "{names:?}");
+    }
+
+    /// v2 DB (旧 FTS 更新トリガ) を v3 へ移行すると、更新トリガが items_fts の写す列だけに
+    /// 絞られ、FTS の同期は保たれる (ADR-0022)。
+    #[test]
+    fn migrate_v2_to_v3_narrows_fts_update_trigger() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("v2.sqlite");
+        let backups = dir.path().join("backups");
+        // 現行 DDL で作ってから、更新トリガと版を v2 当時の形へ戻す
+        drop(SqliteStorage::open(&db).unwrap());
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(
+                r#"
+                DROP TRIGGER trg_items_fts_au;
+                CREATE TRIGGER trg_items_fts_au AFTER UPDATE ON items BEGIN
+                  UPDATE items_fts SET
+                    project_id  = new.project_id,
+                    module_id   = new.module_id,
+                    search_text = new.search_text
+                  WHERE item_id = new.id;
+                END;
+                UPDATE meta SET value = '2' WHERE key = 'db_schema_version';
+                "#,
+            )
+            .unwrap();
+        }
+
+        migrate_if_needed(&db, &backups).expect("migrate succeeds");
+
+        let conn = Connection::open(&db).unwrap();
+        let trigger_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_items_fts_au'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            trigger_sql.contains("AFTER UPDATE OF project_id, module_id, search_text ON items"),
+            "{trigger_sql}"
+        );
+        assert_eq!(inspect_db_schema_version(&db).unwrap(), Some(3));
+        drop(conn);
+
+        // 移行後も search_text の更新は FTS に反映される
+        let storage = SqliteStorage::open(&db).unwrap();
+        let project = storage.create_project("P", None).unwrap();
+        storage
+            .with_conn(|conn| {
+                conn.execute(
+                    "INSERT INTO items (id, project_id, module_id, title, tags, search_text, \
+                     payload_schema_version, payload, created_at, updated_at) \
+                     VALUES ('i1', ?, 'prompt', 't', '[]', 'before text', 1, '{}', \
+                     '2026-09-25T00:00:00.000+09:00', '2026-09-25T00:00:00.000+09:00')",
+                    [project.id.as_str()],
+                )?;
+                conn.execute(
+                    "UPDATE items SET search_text = 'after text' WHERE id = 'i1'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let hits = storage
+            .search(
+                &crate::storage::types::SearchScope::Global,
+                "after",
+                None,
+                10,
+                0,
+            )
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        let stale = storage
+            .search(
+                &crate::storage::types::SearchScope::Global,
+                "before",
+                None,
+                10,
+                0,
+            )
+            .unwrap();
+        assert!(stale.is_empty());
     }
 
     /// T-36 相当: migration 完了済 DB を再起動 → migration が走らず冪等。

@@ -49,13 +49,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 0019 | required CI の `build-tauri` が生成した portable ZIP + candidate manifest を Release で再利用する。一意に解決できない場合のみ fallback build |
 | 0020 | NRBF は `BinaryFormatter.Deserialize` を使わず、`System.Formats.Nrbf` を参照する .NET 10 NativeAOT sidecar で型非生成解析。入力 64 MiB / node 50 万等の上限、stateless |
 | 0021 | ベクター描画は SVG-Edit 7.4.2 (上流 Editor.js は無改変) を loopback + sandboxed iframe で同梱。payload v1 `{ svg, text }`、SVG は UTF-8 20 MiB 以下。親子通信は `mym-vector-v1` の限定 postMessage のみ |
+| 0022 | 派生データを同期するトリガの置換 (同一 tx の `DROP TRIGGER` + `CREATE TRIGGER`、同期結果不変、値書き換えなし) は ADR-0011 の `MIGRATIONS` 枠で可。v3 で FTS 更新トリガを `UPDATE OF project_id, module_id, search_text` に絞る |
 
 ## 絶対に破ってはいけない不変条件
 
 D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユーザーデータを壊すか、配布が破綻する。
 
-- **コアスキーマの破壊的マイグレーションをしない**。`DROP` / `RENAME` / 型変更 / 既存値書き換えは禁止 (ADR-0006 のまま)。本当に必要なら新 ADR + `db_schema_version` 上昇 + C-12 起動停止画面の追加が前提
-- **additive な DDL マイグレーション** (新カラム + DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) は **ADR-0011 の枠組みで許可**。`schema.rs::MIGRATIONS` にエントリを追加 + `db_schema_version` を bump + pre-migration バックアップが自動取得される。PR 説明で「additive か / バックアップ取得を確認したか」を必ず書く。現在の `CURRENT_DB_SCHEMA_VERSION` は 2
+- **コアスキーマの破壊的マイグレーションをしない**。`DROP` / `RENAME` / 型変更 / 既存値書き換えは禁止 (ADR-0006 のまま。派生データ同期トリガの置換だけは ADR-0022 の条件で可)。本当に必要なら新 ADR + `db_schema_version` 上昇 + C-12 起動停止画面の追加が前提
+- **additive な DDL マイグレーション** (新カラム + DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) は **ADR-0011 の枠組みで許可**。`schema.rs::MIGRATIONS` にエントリを追加 + `db_schema_version` を bump + pre-migration バックアップが自動取得される。PR 説明で「additive か / バックアップ取得を確認したか」を必ず書く。現在の `CURRENT_DB_SCHEMA_VERSION` は 3
 - **モジュールデータ変更は引き続き payload バージョニング + Eager-on-Read** (ADR-0006) で吸収する。コアスキーマには触らない。ADR-0016 の Link / Memo 再所属は限定的な例外であり、値書き換えの前例にしない
 - **フロントエンドから SQLite に直接アクセスしない**。`@tauri-apps/plugin-sql` も使わず、`tauri::command` のみを通す (module-contract §6.2)。フロントは `src/ipc/*.ts` 経由の `invoke(...)` で型付き結果を受ける
 - **タイムスタンプは必ずアプリ側で生成**。`CURRENT_TIMESTAMP` 等の DB 生成は禁止。JST `+09:00`、ms 3 桁、固定 29 文字 (ADR-0005)。文字列のまま辞書順ソート可
