@@ -137,7 +137,7 @@ describe("Vector workspace lifecycle", () => {
   it("initializes once after StrictMode cleanup and uses metadata lists", async () => {
     const { post } = await start(true);
     expect(post.mock.calls.filter(([m]) => m.action === "load")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /保存/ })).toBeEnabled();
     expect(items.getItem).not.toHaveBeenCalled();
     expect(items.listItemSummaries).toHaveBeenCalledWith({ projectId: "p1", moduleId: "vector" });
   });
@@ -150,7 +150,7 @@ describe("Vector workspace lifecycle", () => {
       }),
     );
     send({ event: "changed", documentId, revision: 1 });
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
     await flush();
     const packet = post.mock.calls[post.mock.calls.length - 1]![0];
     send({ ...packet, event: "snapshot", svg, text: "作品", revision: 1 });
@@ -181,7 +181,7 @@ describe("Vector workspace lifecycle", () => {
   });
   it("releases save locks after timeout and retries without accepting stale replies", async () => {
     const { post, send } = await start();
-    const save = screen.getByRole("button", { name: "保存" });
+    const save = screen.getByRole("button", { name: /保存/ });
     fireEvent.click(save);
     await flush();
     const old = post.mock.calls[post.mock.calls.length - 1]![0];
@@ -220,7 +220,7 @@ describe("Vector workspace lifecycle", () => {
     });
     expect(event.preventDefault).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "戻る" }));
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
     await flush();
     send({
       ...post.mock.calls[post.mock.calls.length - 1]![0],
@@ -240,7 +240,7 @@ describe("Vector workspace lifecycle", () => {
   });
   it("preserves the document when a file dialog or unsaved navigation is cancelled", async () => {
     const { post, send, documentId, router } = await start();
-    fireEvent.click(screen.getByRole("button", { name: "SVGを取り込む" }));
+    fireEvent.click(screen.getByRole("button", { name: /取込/ }));
     await flush();
     expect(post).toHaveBeenCalledTimes(1);
     send({ event: "changed", documentId, revision: 1 });

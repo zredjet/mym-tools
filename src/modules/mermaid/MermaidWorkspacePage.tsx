@@ -346,7 +346,7 @@ export function MermaidWorkspacePage() {
           <Download size={14} /> {exporting === "svg" ? "SVG生成中..." : "SVG"}
         </Button>
         <Button disabled={!canExport} onClick={() => void exportImage("png")}>
-          {exporting === "png" ? "PNG生成中..." : "PNG"}
+          <Download size={14} /> {exporting === "png" ? "PNG生成中..." : "PNG"}
         </Button>
         <span className="ml-auto text-xs text-[var(--fg-muted)]">
           {dirty ? "未保存" : "保存済み"}

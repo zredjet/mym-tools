@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useBlocker, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useHotkeys } from "react-hotkeys-hook";
+import {
+  ChevronsDown,
+  Download,
+  FileInput,
+  FilePlus2,
+  ImagePlus,
+  Save,
+  Trash2,
+} from "lucide-react";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -401,23 +410,31 @@ function VectorWorkspacePage({
               })
             }
           >
-            さらに読込
+            <ChevronsDown size={14} aria-hidden /> さらに読込
           </Button>
         )}
         <Button disabled={!ready || busy} onClick={newDocument}>
-          新規
+          <FilePlus2 size={14} aria-hidden /> 新規
         </Button>
-        <Button disabled={!ready || busy} onClick={importFile}>
-          SVGを取り込む
+        <Button disabled={!ready || busy} title="SVGファイルを取り込む" onClick={importFile}>
+          <FileInput size={14} aria-hidden /> 取込
         </Button>
         <Button disabled={!ready || busy} onClick={() => void insertImage()}>
-          画像を挿入
+          <ImagePlus size={14} aria-hidden /> 画像を挿入
         </Button>
-        <Button disabled={!ready || busy} onClick={() => void exportFile("svg")}>
-          SVG書出し
+        <Button
+          disabled={!ready || busy}
+          title="SVGとして書き出す"
+          onClick={() => void exportFile("svg")}
+        >
+          <Download size={14} aria-hidden /> SVG
         </Button>
-        <Button disabled={!ready || busy} onClick={() => void exportFile("png")}>
-          PNG書出し
+        <Button
+          disabled={!ready || busy}
+          title="PNGとして書き出す"
+          onClick={() => void exportFile("png")}
+        >
+          <Download size={14} aria-hidden /> PNG
         </Button>
       </header>
       <div className="flex flex-wrap items-center gap-2">
@@ -445,7 +462,8 @@ function VectorWorkspacePage({
           disabled={!ready || busy || !title.trim()}
           onClick={() => void save()}
         >
-          保存
+          <Save size={14} aria-hidden /> 保存
+          <span className="text-[10px] opacity-70">⌘S</span>
         </Button>
         <span className="text-xs text-[var(--fg-muted)]">
           {busy ? "処理中…" : dirty ? "未保存" : "保存済み"}
@@ -466,7 +484,7 @@ function VectorWorkspacePage({
               })
             }
           >
-            削除
+            <Trash2 size={14} aria-hidden /> 削除
           </Button>
         )}
       </div>

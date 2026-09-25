@@ -576,26 +576,33 @@ export function DiagramWorkspacePage() {
         <Button onClick={() => navigate(modulePath(projectId, "diagram", "/new"))}>
           <FilePlus2 size={14} /> 新規
         </Button>
-        <Button disabled={!editorReady} onClick={() => void importDiagram()}>
+        <Button
+          disabled={!editorReady}
+          title="draw.io / XML ファイルを取り込む"
+          onClick={() => void importDiagram()}
+        >
           <FileInput size={14} /> 取込
         </Button>
         <Button
           disabled={!editorReady || exportingFormat != null}
+          title=".drawio ファイルとして書き出す"
           onClick={() => void exportDrawio()}
         >
           <Download size={14} /> .drawio
         </Button>
         <Button
           disabled={!editorReady || exportingFormat != null}
+          title="SVGとして書き出す"
           onClick={() => void exportImage("svg")}
         >
-          {exportingFormat === "svg" ? "SVG生成中..." : "SVG"}
+          <Download size={14} /> {exportingFormat === "svg" ? "SVG生成中..." : "SVG"}
         </Button>
         <Button
           disabled={!editorReady || exportingFormat != null}
+          title="PNGとして書き出す"
           onClick={() => void exportImage("png")}
         >
-          {exportingFormat === "png" ? "PNG生成中..." : "PNG"}
+          <Download size={14} /> {exportingFormat === "png" ? "PNG生成中..." : "PNG"}
         </Button>
         <span className="ml-auto text-xs text-[var(--fg-muted)]">{dirty ? "未保存" : status}</span>
         <Button
