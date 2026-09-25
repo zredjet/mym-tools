@@ -2,17 +2,28 @@
 
 use std::net::TcpListener as StdTcpListener;
 use std::path::{Component, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use percent_encoding::percent_decode_str;
 use tauri::AppHandle;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Semaphore;
 
 use crate::error::AppError;
 
 const MAX_REQUEST_HEADER_BYTES: usize = 16 * 1024;
+/// 開発時 (`tauri dev`) だけ Vite dev server (`localhost:1420`) からの埋め込みを許す。
+/// release ビルドの CSP に開発用 origin を残さない。
+#[cfg(debug_assertions)]
 const EDITOR_CSP: &str = "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'none'; child-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self' tauri: http://tauri.localhost http://localhost:1420";
+#[cfg(not(debug_assertions))]
+const EDITOR_CSP: &str = "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'none'; child-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self' tauri: http://tauri.localhost";
+/// 1 接続の上限時間。idle 接続を張り続けられないようにする (Connection: close で 1 要求 1 接続)。
+const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
+/// 同時に処理する接続数の上限。ブラウザの同一 host 同時接続 (6 前後) を十分に上回る。
+const MAX_CONNECTIONS: usize = 64;
 static SERVER_PORT: Mutex<Option<u16>> = Mutex::new(None);
 
 /// エディタを初めて開いた時だけ127.0.0.1のランダムportでasset serverを起動する。
@@ -52,12 +63,22 @@ fn editor_url(port: u16) -> String {
 }
 
 async fn serve(listener: TcpListener, app: AppHandle, port: u16) {
+    let permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     loop {
+        // 上限に達している間は accept しない (接続を捨てずに待たせる)
+        let Ok(permit) = Arc::clone(&permits).acquire_owned().await else {
+            break;
+        };
         match listener.accept().await {
             Ok((stream, peer)) if peer.ip().is_loopback() => {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {
-                    let _ = handle_connection(stream, &app, port).await;
+                    let _permit = permit;
+                    let _ = tokio::time::timeout(
+                        CONNECTION_TIMEOUT,
+                        handle_connection(stream, &app, port),
+                    )
+                    .await;
                 });
             }
             Ok(_) => {}
@@ -275,6 +296,15 @@ mod tests {
         assert_eq!(safe_asset_path("/../secret"), None);
         assert_eq!(safe_asset_path("/%2e%2e/secret"), None);
         assert_eq!(safe_asset_path("//server/share"), None);
+    }
+
+    #[test]
+    fn editor_csp_frame_ancestors_include_dev_origin_only_in_debug() {
+        assert_eq!(
+            EDITOR_CSP.contains("http://localhost:1420"),
+            cfg!(debug_assertions)
+        );
+        assert!(EDITOR_CSP.contains("frame-ancestors 'self' tauri: http://tauri.localhost"));
     }
 
     #[test]
