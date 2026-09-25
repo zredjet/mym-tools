@@ -3,7 +3,7 @@ import { RouterProvider, createMemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { diagramEditorUrl, diagramWriteFile } from "@/ipc/diagram";
-import { listAllItems } from "@/ipc/items";
+import { listAllItemSummaries, listItemSummaries } from "@/ipc/items";
 
 import { DIAGRAM_EXPORT_TIMEOUT_MS, DiagramWorkspaceRoute } from "./DiagramWorkspacePage";
 
@@ -20,7 +20,8 @@ vi.mock("@/ipc/diagram", () => ({
 vi.mock("@/ipc/items", () => ({
   createItem: vi.fn(),
   getItem: vi.fn(),
-  listAllItems: vi.fn(),
+  listAllItemSummaries: vi.fn(),
+  listItemSummaries: vi.fn(),
   updateItem: vi.fn(),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => dialog);
@@ -54,7 +55,8 @@ describe("DiagramWorkspacePage", () => {
     vi.useFakeTimers();
     vi.mocked(diagramEditorUrl).mockResolvedValue("http://127.0.0.1:4567/index.html");
     vi.mocked(diagramWriteFile).mockResolvedValue(undefined);
-    vi.mocked(listAllItems).mockResolvedValue([]);
+    vi.mocked(listAllItemSummaries).mockResolvedValue([]);
+    vi.mocked(listItemSummaries).mockResolvedValue([]);
     dialog.save.mockResolvedValue("/tmp/diagram.png");
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
       "00000000-0000-4000-8000-000000000001",

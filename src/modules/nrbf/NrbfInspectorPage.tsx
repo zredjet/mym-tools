@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useDeferredValue,
   useEffect,
   useId,
   useLayoutEffect,
@@ -21,7 +22,8 @@ import {
   buildVisibleRows,
   normalizeSearchText,
   resolveVisibleSelection,
-  searchNodes,
+  createSearchIndex,
+  searchIndex,
 } from "@/modules/nrbf/tree";
 import { findHighlightRange } from "@/modules/nrbf/highlight";
 import { createPresentationNodes } from "@/modules/nrbf/presentation";
@@ -210,9 +212,22 @@ export function NrbfInspectorPage() {
     for (const node of presentationNodes) result.set(node.id, node);
     return result;
   }, [presentationNodes]);
+  // 正規化済み文字列はノード列が変わったときだけ作る。検索自体は deferred な query で走らせ、
+  // 大きなツリーでも入力欄の反応を優先する
+  const searchIndexForNodes = useMemo(
+    () => createSearchIndex(presentationNodes),
+    [presentationNodes],
+  );
+  // 参照先へのジャンプは検索をクリアして同じ render で選択するため、クリアは即時に反映する
+  // (遅延させると古い filter で選択先が隠れる)。入力中の非空 query だけ遅延させる
+  const deferredNameQuery = useDeferredValue(nameQuery);
+  const deferredValueQuery = useDeferredValue(valueQuery);
+  const effectiveNameQuery = nameQuery.trim() === "" ? "" : deferredNameQuery;
+  const effectiveValueQuery = valueQuery.trim() === "" ? "" : deferredValueQuery;
   const search = useMemo(
-    () => searchNodes(presentationNodes, { name: nameQuery, value: valueQuery }),
-    [nameQuery, presentationNodes, valueQuery],
+    () =>
+      searchIndex(searchIndexForNodes, { name: effectiveNameQuery, value: effectiveValueQuery }),
+    [effectiveNameQuery, effectiveValueQuery, searchIndexForNodes],
   );
   const filteredSearch = searchMode === "filter" ? search : null;
   const rows = useMemo(

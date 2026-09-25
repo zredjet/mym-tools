@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Item } from "@/lib/types";
 
-import { listAllItems } from "./items";
+import { listAllItems, listAllItemSummaries } from "./items";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -57,6 +57,29 @@ describe("listAllItems", () => {
       projectId: "project-1",
       limit: 100,
       offset: 200,
+    });
+  });
+});
+
+describe("listAllItemSummaries", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+  });
+
+  it("pages through summaries without requesting payloads", async () => {
+    invokeMock
+      .mockResolvedValueOnce(createItems(100, 0))
+      .mockResolvedValueOnce(createItems(3, 100));
+
+    await expect(
+      listAllItemSummaries({ moduleId: "diagram", projectId: "project-1" }),
+    ).resolves.toHaveLength(103);
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "core_list_item_summaries", {
+      moduleId: "diagram",
+      projectId: "project-1",
+      limit: 100,
+      offset: 100,
     });
   });
 });

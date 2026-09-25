@@ -7,10 +7,16 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
-import { createItem, getItem, listAllItems, updateItem } from "@/ipc/items";
+import {
+  createItem,
+  getItem,
+  listAllItemSummaries,
+  listItemSummaries,
+  updateItem,
+} from "@/ipc/items";
 import { mermaidWriteFile, type MermaidExportFormat } from "@/ipc/mermaid";
 import { formatInvokeError } from "@/lib/error";
-import type { Item, MermaidPayloadV1 } from "@/lib/types";
+import type { ItemSummary, MermaidPayloadV1 } from "@/lib/types";
 import { modulePath } from "@/modules/registry";
 import { useAppStore } from "@/store/useAppStore";
 
@@ -30,10 +36,11 @@ export function MermaidLandingPage() {
   useEffect(() => {
     if (projectId == null) return;
     let cancelled = false;
-    void listAllItems({ moduleId: "mermaid", projectId })
+    // 一覧は updated_at DESC なので先頭 1 件が直近。payload は読まない
+    void listItemSummaries({ moduleId: "mermaid", projectId, limit: 1 })
       .then((items) => {
         if (cancelled) return;
-        const recent = [...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+        const recent = items[0];
         navigate(modulePath(projectId, "mermaid", recent ? `/edit/${recent.id}` : "/new"), {
           replace: true,
         });
@@ -66,7 +73,7 @@ export function MermaidWorkspacePage() {
   const [systemDark, setSystemDark] = useState(
     () => window.matchMedia("(prefers-color-scheme: dark)").matches,
   );
-  const [documents, setDocuments] = useState<Item[]>([]);
+  const [documents, setDocuments] = useState<ItemSummary[]>([]);
   const [title, setTitle] = useState(itemId == null ? "新しいMermaid図" : "");
   const [tagsInput, setTagsInput] = useState("");
   const [source, setSource] = useState(DEFAULT_SOURCE);
@@ -89,18 +96,16 @@ export function MermaidWorkspacePage() {
 
   const refreshDocuments = useCallback(async () => {
     if (projectId == null) return;
-    const items = await listAllItems({ moduleId: "mermaid", projectId });
-    setDocuments([...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
+    setDocuments(await listAllItemSummaries({ moduleId: "mermaid", projectId }));
   }, [projectId]);
 
   useEffect(() => {
     if (projectId == null) return;
     let cancelled = false;
-    void listAllItems({ moduleId: "mermaid", projectId })
+    // 文書選択には id / title だけが要るので、payload (最大 1 MiB) を含まない summary を読む
+    void listAllItemSummaries({ moduleId: "mermaid", projectId })
       .then((items) => {
-        if (!cancelled) {
-          setDocuments([...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
-        }
+        if (!cancelled) setDocuments(items);
       })
       .catch((cause) => {
         if (!cancelled) setError(formatInvokeError(cause));

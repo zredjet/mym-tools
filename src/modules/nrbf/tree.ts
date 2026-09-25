@@ -24,34 +24,63 @@ export function normalizeSearchText(value: string): string {
   return value.normalize("NFKC").toLocaleLowerCase();
 }
 
+/**
+ * 検索用に正規化済み文字列を前計算した索引。ノード列 (最大 50 万) が変わったときだけ作り直し、
+ * キー入力ごとに全ノードを `normalize("NFKC")` し直さない。
+ */
+export interface NrbfSearchIndex {
+  nodes: readonly NrbfNode[];
+  byId: ReadonlyMap<number, NrbfNode>;
+  names: readonly (readonly [string, string])[];
+  values: readonly (string | null)[];
+}
+
+export function createSearchIndex(nodes: readonly NrbfNode[]): NrbfSearchIndex {
+  const byId = new Map<number, NrbfNode>();
+  const names: (readonly [string, string])[] = new Array(nodes.length);
+  const values: (string | null)[] = new Array(nodes.length);
+  nodes.forEach((node, index) => {
+    byId.set(node.id, node);
+    names[index] = [normalizeSearchText(node.displayName), normalizeSearchText(node.rawName)];
+    values[index] =
+      node.kind === "scalar" && node.formattedValue != null
+        ? normalizeSearchText(node.formattedValue)
+        : null;
+  });
+  return { nodes, byId, names, values };
+}
+
 export function searchNodes(
   nodes: readonly NrbfNode[],
+  query: NrbfSearchQuery,
+  limit = 1000,
+): SearchResult | null {
+  return searchIndex(createSearchIndex(nodes), query, limit);
+}
+
+export function searchIndex(
+  index: NrbfSearchIndex,
   query: NrbfSearchQuery,
   limit = 1000,
 ): SearchResult | null {
   const normalizedName = normalizeSearchText(query.name.trim());
   const normalizedValue = normalizeSearchText(query.value.trim());
   if (normalizedName === "" && normalizedValue === "") return null;
-  const byId = new Map<number, NrbfNode>();
   const limitedMatches: NrbfNode[] = [];
   let totalMatches = 0;
-  for (const node of nodes) {
-    byId.set(node.id, node);
+  index.nodes.forEach((node, position) => {
+    const [displayName, rawName] = index.names[position]!;
     const nameMatch =
       normalizedName === "" ||
-      [node.displayName, node.rawName].some((value) =>
-        normalizeSearchText(value).includes(normalizedName),
-      );
-    const valueMatch =
-      normalizedValue === "" ||
-      (node.kind === "scalar" &&
-        node.formattedValue != null &&
-        normalizeSearchText(node.formattedValue).includes(normalizedValue));
+      displayName.includes(normalizedName) ||
+      rawName.includes(normalizedName);
+    const value = index.values[position];
+    const valueMatch = normalizedValue === "" || (value != null && value.includes(normalizedValue));
     if (nameMatch && valueMatch) {
       totalMatches += 1;
       if (limitedMatches.length < limit) limitedMatches.push(node);
     }
-  }
+  });
 
   const orderedMatchIds = limitedMatches.map((node) => node.id);
   const matchIds = new Set(orderedMatchIds);
@@ -62,7 +91,7 @@ export function searchNodes(
     while (parentId != null && !seen.has(parentId)) {
       seen.add(parentId);
       includedIds.add(parentId);
-      parentId = byId.get(parentId)?.parentId ?? null;
+      parentId = index.byId.get(parentId)?.parentId ?? null;
     }
   }
   return {
