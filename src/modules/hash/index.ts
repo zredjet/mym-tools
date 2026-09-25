@@ -3,10 +3,14 @@
  *
  * `isStateless: true` のため `searchAdapter` は省略し、横断検索の対象外とする。
  */
+import { lazy } from "react";
 import { Hash } from "lucide-react";
 
 import type { ModuleDefinition } from "@/modules/types";
-import { HashPage } from "@/modules/hash/HashPage";
+
+const HashPage = lazy(() =>
+  import("@/modules/hash/HashPage").then((module) => ({ default: module.HashPage })),
+);
 
 export const hashModule: ModuleDefinition = {
   id: "hash",

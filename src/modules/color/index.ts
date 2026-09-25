@@ -1,8 +1,12 @@
+import { lazy } from "react";
 import { Palette } from "lucide-react";
 
 import type { ColorPayloadV1 } from "@/lib/types";
-import { ColorListPage } from "@/modules/color/ColorListPage";
 import type { ModuleDefinition } from "@/modules/types";
+
+const ColorListPage = lazy(() =>
+  import("@/modules/color/ColorListPage").then((module) => ({ default: module.ColorListPage })),
+);
 
 export const colorModule: ModuleDefinition = {
   id: "color",

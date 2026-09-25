@@ -1,9 +1,15 @@
+import { lazy } from "react";
 import { GitBranch } from "lucide-react";
 
 import type { MermaidPayloadV1 } from "@/lib/types";
 import type { ModuleDefinition } from "@/modules/types";
 
-import { MermaidLandingPage, MermaidWorkspaceRoute } from "./MermaidWorkspacePage";
+const MermaidLandingPage = lazy(() =>
+  import("./MermaidWorkspacePage").then((module) => ({ default: module.MermaidLandingPage })),
+);
+const MermaidWorkspaceRoute = lazy(() =>
+  import("./MermaidWorkspacePage").then((module) => ({ default: module.MermaidWorkspaceRoute })),
+);
 
 export const mermaidModule: ModuleDefinition = {
   id: "mermaid",
