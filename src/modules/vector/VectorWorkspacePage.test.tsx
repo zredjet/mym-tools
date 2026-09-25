@@ -263,7 +263,7 @@ describe("Vector workspace lifecycle", () => {
         "HTML のラベル 2 件を通常のテキストに置き換えました (太字などの書式は失われます)。",
       ],
     });
-    fireEvent.click(screen.getByRole("button", { name: "SVGを取り込む" }));
+    fireEvent.click(screen.getByRole("button", { name: /取込/ }));
     await flush();
     const load = post.mock.calls[post.mock.calls.length - 1]![0];
     send({ ...load, event: "loaded", revision: 0 });
