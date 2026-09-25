@@ -26,6 +26,7 @@ use crate::exchange::{
 };
 use crate::module::ModuleBackend;
 use crate::storage::{ImportOutcome, Project, StorageService};
+use crate::time::{format_jst_iso8601, parse_jst_iso8601};
 
 /// JSON テキストを `ExportData` にパースしつつ、トップレベルの schema_version 等
 /// プリチェックを行う (`data-model.md` §12.4 step 1)。
@@ -142,7 +143,34 @@ fn import_one_project(
     summary: &mut ImportSummary,
     pw: &ProjectWithItems,
 ) -> Result<ImportOutcome, AppError> {
-    let project: Project = pw.project.clone().into();
+    let mut project: Project = pw.project.clone().into();
+    let timestamps = normalize_import_timestamp(&project.created_at).and_then(|created_at| {
+        normalize_import_timestamp(&project.updated_at).map(|updated_at| (created_at, updated_at))
+    });
+    match timestamps {
+        Ok((created_at, updated_at)) => {
+            project.created_at = created_at;
+            project.updated_at = updated_at;
+        }
+        // 既存 ID との衝突は検証より優先して skip にする (再 import の冪等性、codex PR-Z P2)
+        Err(_) if storage.get_project(&project.id).is_ok() => {
+            summary.projects_skipped += 1;
+            return Ok(ImportOutcome::Skipped);
+        }
+        Err(reason) => {
+            summary.projects_failed += 1;
+            summary.failures.push(ImportFailure {
+                entity: "project".into(),
+                id: pw.project.id.0.clone(),
+                module_id: None,
+                reason: reason.clone(),
+            });
+            return Err(AppError::Validation {
+                module_id: "core.import".into(),
+                reason,
+            });
+        }
+    }
     match storage.import_project(&project) {
         Ok(ImportOutcome::Inserted) => {
             summary.projects_inserted += 1;
@@ -267,6 +295,24 @@ fn import_one_item(
         return None;
     }
 
+    // タイムスタンプを JST_ISO8601 (29 文字固定、ADR-0005) に揃える。辞書順ソートの前提
+    let (created_at, updated_at) =
+        match normalize_import_timestamp(&item.created_at).and_then(|created_at| {
+            normalize_import_timestamp(&item.updated_at).map(|updated_at| (created_at, updated_at))
+        }) {
+            Ok(timestamps) => timestamps,
+            Err(reason) => {
+                summary.items_failed += 1;
+                summary.failures.push(ImportFailure {
+                    entity: "item".into(),
+                    id: item.id.0.clone(),
+                    module_id: Some(module_id.clone()),
+                    reason,
+                });
+                return None;
+            }
+        };
+
     // search_text 生成 (`data-model.md` §12.4 step 6)
     let module_text = module.index_text(&payload);
     let search_text = build_search_text(&item.title, &item.tags, &module_text);
@@ -284,8 +330,8 @@ fn import_one_item(
         &payload,
         &search_text,
         item.position,
-        &item.created_at,
-        &item.updated_at,
+        &created_at,
+        &updated_at,
     );
     match outcome {
         Ok(ImportOutcome::Inserted) => {
@@ -348,6 +394,20 @@ fn record_skipped_orphan(summary: &mut ImportSummary, item: &ItemExport) {
 /// `data-model.md` §6.2 / §8.2 トリガ参照: search_text は `title` / `tags JSON` /
 /// `module.index_text(payload)` をスペース区切りで連結した形 (FTS5 が自前で
 /// トークナイズする)。
+/// import JSON のタイムスタンプを `JST_ISO8601` (`YYYY-MM-DDTHH:MM:SS.sss+09:00`、ADR-0005) に揃える。
+///
+/// - すでに `JST_ISO8601` → そのまま
+/// - 他のオフセット / 精度の RFC 3339 (手編集や他ツール由来) → 同じ時刻を JST の 29 文字形式へ変換
+/// - それ以外 → エラー (辞書順ソートが壊れるため、そのままは入れない)
+fn normalize_import_timestamp(value: &str) -> Result<String, String> {
+    if parse_jst_iso8601(value).is_ok() {
+        return Ok(value.to_string());
+    }
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|dt| format_jst_iso8601(&dt))
+        .map_err(|error| format!("invalid timestamp {value:?}: {error}"))
+}
+
 fn build_search_text(title: &str, tags: &[String], module_text: &str) -> String {
     let tags_joined = tags.join(" ");
     format!("{title} {tags_joined} {module_text}")
@@ -764,5 +824,87 @@ mod tests {
             revision_after_first,
             "no-op re-import must not bump data_revision (codex PR-Y P1 idempotency)"
         );
+    }
+
+    #[test]
+    fn normalizes_rfc3339_timestamps_to_fixed_jst() {
+        assert_eq!(
+            normalize_import_timestamp("2026-05-01T00:00:00.000+09:00").unwrap(),
+            "2026-05-01T00:00:00.000+09:00"
+        );
+        assert_eq!(
+            normalize_import_timestamp("2026-01-01T00:00:00Z").unwrap(),
+            "2026-01-01T09:00:00.000+09:00"
+        );
+        assert_eq!(
+            normalize_import_timestamp("2026-01-01T09:30:00.123456+00:00").unwrap(),
+            "2026-01-01T18:30:00.123+09:00"
+        );
+        assert!(normalize_import_timestamp("2026/01/01 00:00").is_err());
+        assert!(normalize_import_timestamp("").is_err());
+    }
+
+    #[test]
+    fn imports_utc_timestamps_as_jst_and_rejects_unparseable_ones() {
+        let (storage, modules) = setup(1);
+        let mut utc_project = project("p1", "UTC");
+        utc_project.created_at = "2026-01-01T00:00:00Z".into();
+        let mut good = item("i1", 1, json!({"body": "ok"}));
+        good.updated_at = "2026-01-02T00:00:00Z".into();
+        let mut bad = item("i2", 1, json!({"body": "bad"}));
+        bad.created_at = "yesterday".into();
+        let data = data_with(vec![ProjectWithItems {
+            project: utc_project,
+            items: vec![good, bad],
+        }]);
+
+        let s = apply_import(&storage, &modules, &data);
+        assert_eq!(s.projects_inserted, 1);
+        assert_eq!(s.items_inserted, 1);
+        assert_eq!(s.items_failed, 1);
+        assert_eq!(s.failures[0].id, "i2");
+
+        let p = storage.get_project(&ProjectId::new("p1")).unwrap();
+        assert_eq!(p.created_at, "2026-01-01T09:00:00.000+09:00");
+        let items = storage
+            .list_items("prompt", &ProjectId::new("p1"), 10, 0)
+            .unwrap();
+        assert_eq!(items[0].updated_at, "2026-01-02T09:00:00.000+09:00");
+    }
+
+    #[test]
+    fn project_with_bad_timestamp_fails_but_duplicate_id_is_still_skipped() {
+        let (storage, modules) = setup(1);
+        let mut bad = project("p1", "Bad");
+        bad.updated_at = "not a time".into();
+        let s = apply_import(
+            &storage,
+            &modules,
+            &data_with(vec![ProjectWithItems {
+                project: bad.clone(),
+                items: vec![],
+            }]),
+        );
+        assert_eq!(s.projects_failed, 1);
+        assert!(storage.get_project(&ProjectId::new("p1")).is_err());
+
+        // 既存 ID なら不正な時刻でも従来どおり skip (再 import の冪等性)
+        apply_import(
+            &storage,
+            &modules,
+            &data_with(vec![ProjectWithItems {
+                project: project("p1", "Original"),
+                items: vec![],
+            }]),
+        );
+        let s = apply_import(
+            &storage,
+            &modules,
+            &data_with(vec![ProjectWithItems {
+                project: bad,
+                items: vec![],
+            }]),
+        );
+        assert_eq!((s.projects_skipped, s.projects_failed), (1, 0));
     }
 }

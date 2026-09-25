@@ -67,6 +67,10 @@ async fn serve(listener: TcpListener, app: AppHandle, port: u16) {
             }
         }
     }
+    // Let the next editor open start a new server instead of reusing a dead port.
+    if let Ok(mut server_port) = SERVER_PORT.lock() {
+        *server_port = None;
+    }
 }
 
 async fn handle_connection(
@@ -154,8 +158,13 @@ fn load_asset(app: &AppHandle, relative_path: &str) -> Option<(Vec<u8>, String)>
 
     #[cfg(not(debug_assertions))]
     {
+        // 存在しないパスでアプリ本体の index.html へフォールバックさせない (bundled_assets 参照)
+        let key = format!("drawio/{relative_path}");
+        if !crate::modules::bundled_assets::contains(app, &key) {
+            return None;
+        }
         app.asset_resolver()
-            .get(format!("drawio/{relative_path}"))
+            .get(key)
             .map(|asset| (asset.bytes, asset.mime_type))
     }
 }

@@ -158,8 +158,13 @@ fn load_asset(app: &AppHandle, relative_path: &str) -> Option<(Vec<u8>, String)>
 
     #[cfg(not(debug_assertions))]
     {
+        // 存在しないパスでアプリ本体の index.html へフォールバックさせない (bundled_assets 参照)
+        let key = format!("svgedit/{relative_path}");
+        if !crate::modules::bundled_assets::contains(app, &key) {
+            return None;
+        }
         app.asset_resolver()
-            .get(format!("svgedit/{relative_path}"))
+            .get(key)
             .map(|asset| (asset.bytes, asset.mime_type))
     }
 }
