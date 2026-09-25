@@ -836,6 +836,7 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-09-03 | 1.3 | ADR-0020を反映。M-NRBFのnode / summary / Channel契約、解析上限、型非生成sidecar、画面内検索と非永続境界を追加 |
 | 2026-09-03 | 1.4 | M-NRBFのIPCへbyte配列展開許可を追加し、500,000ノード／256 MiB protocolへ上限を変更。項目名＋値のAND条件と絞り込み／ジャンプ検索を追加 |
 | 2026-09-25 | 1.5 | M-PDF Merge: OCProperties (レイヤー) を拒否、Lang の引き継ぎと引き継がないカタログ情報、ストリーム合計1 GiBの上限を明記 |
+| 2026-09-25 | 1.6 | M-Vector: draw.io の SVG を取込時に変換し、変換内容を `notices` で返す |
 
 ## ベクター描画と検索投影の追加契約（ADR-0021）
 
@@ -847,7 +848,7 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | ルート | `/projects/:projectId/m/vector`、`/new`、`/edit/:itemId` |
 | 保存 | 共通CRUD、タイトル・タグ、明示保存・Cmd/Ctrl+S |
 | 固有IPC | `vector_editor_url`、`vector_read_file`、`vector_read_image`、`vector_write_file` |
-| 取込／出力 | SVG取込、PNG/JPEG/WebP埋込、SVG/PNG原子書出し |
+| 取込／出力 | SVG取込、PNG/JPEG/WebP埋込、SVG/PNG原子書出し。draw.io が書き出した SVG は取込時だけ変換する (HTML ラベル `<switch><foreignObject>` → 代替 `<text>`、`light-dark()` / `var()` → 明るい側の色 / 既定値、`<style>`・ルートの背景指定・外部リンク付きの注意書きを削除)。`vector_read_file` は行った変換を `notices` で返し、画面に表示する (黙って除去しない) |
 | 検索 | `search_preview_field() = Some("text")`、先頭120文字、編集先`/edit/:id` |
 
 `ModuleBackend::search_preview_field()`は`Option<&'static str>`を返し、デフォルトNoneは従来の検索表示データを維持する。指定フィールドはモジュール契約で定義したトップレベルの検索用文字列だけに使う。コアはこの定義からSQL投影を作り、モジュールIDをハードコードしない。`core_search_previews`のSearchPreviewは保存payloadではない。本文の大きいモジュールの一覧は`core_list_item_summaries`、編集は`core_get_item`を使う。

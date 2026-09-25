@@ -8,6 +8,8 @@ use std::{fs::File, io::Read, path::Path};
 pub struct VectorDocument {
     pub svg: String,
     pub text: String,
+    /// 取り込み時に行った変換の説明 (draw.io の SVG など)。変換しなければ空
+    pub notices: Vec<String>,
 }
 
 fn extension(path: &Path) -> String {
@@ -33,8 +35,14 @@ fn read_file(path: String) -> Result<VectorDocument, AppError> {
     }
     let svg =
         String::from_utf8(read_bounded(path)?).map_err(|_| error("SVGはUTF-8にしてください。"))?;
+    // draw.io の SVG は HTML ラベルなどを含みポリシーで拒否されるため、取り込み用に変換し、
+    // 変換内容を notices で利用者に示す
+    let (svg, notices) = match super::drawio_import::convert_drawio_svg(&svg)? {
+        Some(converted) => (converted.svg, converted.notices),
+        None => (svg, Vec::new()),
+    };
     let text = validate_svg(&svg)?;
-    Ok(VectorDocument { svg, text })
+    Ok(VectorDocument { svg, text, notices })
 }
 fn read_image(path: String) -> Result<String, AppError> {
     let path = Path::new(&path);

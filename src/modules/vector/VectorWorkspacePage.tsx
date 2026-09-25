@@ -314,6 +314,12 @@ function VectorWorkspacePage({
                 .pop()
                 ?.replace(/\.svg$/i, "") || DEFAULT_TITLE;
             await replaceDocument(payload.svg, nextTitle, true);
+            // draw.io の SVG などを取り込み用に変換した場合は、その内容を併せて示す
+            if (payload.notices.length > 0) {
+              setStatus(
+                `SVGを取り込みました。保存するとプロジェクトへ追加されます。${payload.notices.join(" ")}`,
+              );
+            }
           }),
       ),
     [guard, run, replaceDocument],
