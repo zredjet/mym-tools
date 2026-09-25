@@ -45,3 +45,6 @@ Thumbs.db
 # OS metadata
 .AppleDouble
 .LSOverride
+
+# TypeScript incremental build info (tsc -b / composite)
+*.tsbuildinfo
