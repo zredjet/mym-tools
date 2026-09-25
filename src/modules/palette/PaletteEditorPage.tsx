@@ -20,6 +20,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { createItem, getItem, updateItem } from "@/ipc/items";
@@ -141,15 +142,7 @@ export function PaletteEditorPage() {
     );
   });
 
-  useEffect(() => {
-    if (!dirty) return;
-    const handler = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty]);
+  const leaveGuard = useUnsavedChangesGuard(blocker, dirty);
 
   const commit = useCallback((next: PaletteSnapshot) => {
     setHistory((current) => commitHistory(current, next));
@@ -528,31 +521,27 @@ export function PaletteEditorPage() {
         </form>
       </div>
 
-      <Modal
-        open={blocker.state === "blocked"}
-        onClose={() => blocker.reset?.()}
-        title="未保存の変更があります"
-      >
+      <Modal open={leaveGuard.open} onClose={leaveGuard.cancel} title="未保存の変更があります">
         <p className="text-[13px] text-[var(--fg-muted)]">
-          移動する前に、現在のパレットを保存しますか?
+          {leaveGuard.isWindowClose ? "閉じる" : "移動する"}前に、現在のパレットを保存しますか?
         </p>
         <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => blocker.reset?.()}>
+          <Button variant="ghost" onClick={leaveGuard.cancel}>
             キャンセル
           </Button>
-          <Button variant="secondary" onClick={() => blocker.proceed?.()}>
-            破棄して移動
+          <Button variant="secondary" onClick={leaveGuard.proceed}>
+            {leaveGuard.isWindowClose ? "破棄して閉じる" : "破棄して移動"}
           </Button>
           <Button
             variant="primary"
             disabled={name.trim() === "" || hasInvalidColorInput || submitting}
             onClick={() => {
               void savePalette(true).then((saved) => {
-                if (saved) blocker.proceed?.();
+                if (saved) leaveGuard.proceed();
               });
             }}
           >
-            保存して移動
+            {leaveGuard.isWindowClose ? "保存して閉じる" : "保存して移動"}
           </Button>
         </div>
       </Modal>

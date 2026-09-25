@@ -5,6 +5,7 @@ import { getSettings, updateSettings } from "@/ipc/settings";
 import { getBackendModuleIds } from "@/ipc/modules";
 import { formatInvokeError } from "@/lib/error";
 import { mergeSettingsDocument } from "@/lib/settings";
+import { registerBeforeCloseTask } from "@/lib/windowClose";
 import { modules } from "@/modules/registry";
 import { useAppStore } from "@/store/useAppStore";
 
@@ -98,8 +99,10 @@ function SettingsSync() {
   } | null>(null);
   const pendingTimeout = useRef<number | null>(null);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // debounce 中の保存を即時に書き出す。unmount 時と、ウィンドウを閉じる直前
+    // (`registerBeforeCloseTask`、⌘Q を含む) の両方で呼ぶ
+    const flush = async () => {
       if (pendingTimeout.current != null) {
         window.clearTimeout(pendingTimeout.current);
         pendingTimeout.current = null;
@@ -108,10 +111,14 @@ function SettingsSync() {
       const pending = pendingSave.current;
       if (pending == null) return;
       pendingSave.current = null;
-      void updateSettings(pending.settings).catch(() => undefined);
-    },
-    [],
-  );
+      await updateSettings(pending.settings).catch(() => undefined);
+    };
+    const unregister = registerBeforeCloseTask(flush);
+    return () => {
+      unregister();
+      void flush();
+    };
+  }, []);
 
   useEffect(() => {
     if (document == null) return;

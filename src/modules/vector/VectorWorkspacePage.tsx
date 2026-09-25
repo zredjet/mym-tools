@@ -2,13 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useBlocker, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useHotkeys } from "react-hotkeys-hook";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { isTauri } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { createItem, updateItem, getItem, deleteItem, listItemSummaries } from "@/ipc/items";
 import { vectorEditorUrl, vectorReadFile, vectorReadImage, vectorWriteFile } from "@/ipc/vector";
 import { formatInvokeError } from "@/lib/error";
+import { registerCloseGuard } from "@/lib/windowClose";
 import type { ItemSummary, VectorPayloadV1 } from "@/lib/types";
 import { modulePath } from "@/modules/registry";
 import { VectorBridge, vectorUrl, type VectorMessage } from "./bridge";
@@ -195,33 +194,22 @@ function VectorWorkspacePage({
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", unload);
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    if (isTauri()) {
-      void getCurrentWindow()
-        .onCloseRequested((event) => {
-          if (allowNavigation.current || (!closeState.current.dirty && !closeState.current.busy))
-            return;
-          event.preventDefault();
-          setConfirmation({
-            message: "未保存の変更を破棄してウィンドウを閉じますか？",
-            action: () => {
-              allowNavigation.current = true;
-              void getCurrentWindow().close();
-            },
-          });
-        })
-        .then((stop) => {
-          if (disposed) stop();
-          else unlisten = stop;
-        })
-        .catch((cause) => {
-          if (!disposed) setError(formatInvokeError(cause));
+    // ウィンドウを閉じる要求は App の単一 listener が調停する (`src/lib/windowClose.ts`)
+    const unregister = registerCloseGuard({
+      shouldBlock: () =>
+        !allowNavigation.current && (closeState.current.dirty || closeState.current.busy),
+      onBlocked: (proceed) => {
+        setConfirmation({
+          message: "未保存の変更を破棄してウィンドウを閉じますか？",
+          action: () => {
+            allowNavigation.current = true;
+            proceed();
+          },
         });
-    }
+      },
+    });
     return () => {
-      disposed = true;
-      unlisten?.();
+      unregister();
       window.removeEventListener("beforeunload", unload);
     };
   }, []);

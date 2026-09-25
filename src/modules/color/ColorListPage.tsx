@@ -33,7 +33,7 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ColorItemDialog } from "@/modules/color/ColorItemDialog";
-import { deleteItem, listItems, reorderItems } from "@/ipc/items";
+import { deleteItem, listAllItems, reorderItems } from "@/ipc/items";
 import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import type { ColorPayloadV1, Item } from "@/lib/types";
@@ -50,7 +50,7 @@ export function ColorListPage() {
   const refresh = useCallback(async (pid: string) => {
     try {
       setLoading(true);
-      const list = await listItems({ moduleId: "color", projectId: pid });
+      const list = await listAllItems({ moduleId: "color", projectId: pid });
       setItems(list);
       setError(null);
     } catch (e) {
@@ -65,7 +65,7 @@ export function ColorListPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const list = await listItems({ moduleId: "color", projectId });
+        const list = await listAllItems({ moduleId: "color", projectId });
         if (!cancelled) {
           setItems(list);
           setError(null);

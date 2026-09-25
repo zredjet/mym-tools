@@ -5,6 +5,7 @@ import { useBlocker, useLocation, useNavigate, useParams } from "react-router-do
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import {
@@ -442,15 +443,7 @@ export function DiagramWorkspacePage() {
       (currentLocation.pathname !== nextLocation.pathname ||
         currentLocation.search !== nextLocation.search),
   );
-  useEffect(() => {
-    if (!dirty) return;
-    const handler = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty]);
+  const leaveGuard = useUnsavedChangesGuard(blocker, dirty);
 
   const requestSave = useCallback(() => {
     if (!editorReady || submitting || title.trim() === "") return;
@@ -641,18 +634,18 @@ export function DiagramWorkspacePage() {
         />
       )}
 
-      <Modal
-        open={blocker.state === "blocked"}
-        onClose={() => blocker.reset?.()}
-        title="未保存の変更があります"
-      >
-        <p className="text-[13px] text-[var(--fg-muted)]">変更を破棄して移動しますか?</p>
+      <Modal open={leaveGuard.open} onClose={leaveGuard.cancel} title="未保存の変更があります">
+        <p className="text-[13px] text-[var(--fg-muted)]">
+          {leaveGuard.isWindowClose
+            ? "変更を破棄してウィンドウを閉じますか?"
+            : "変更を破棄して移動しますか?"}
+        </p>
         <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => blocker.reset?.()}>
+          <Button variant="ghost" onClick={leaveGuard.cancel}>
             編集を続ける
           </Button>
-          <Button variant="secondary" onClick={() => blocker.proceed?.()}>
-            破棄して移動
+          <Button variant="secondary" onClick={leaveGuard.proceed}>
+            {leaveGuard.isWindowClose ? "破棄して閉じる" : "破棄して移動"}
           </Button>
         </div>
       </Modal>

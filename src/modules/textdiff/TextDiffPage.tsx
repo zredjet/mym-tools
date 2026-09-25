@@ -51,6 +51,16 @@ export function TextDiffPage() {
         setError(event.data.error);
       } else setResult(event.data.result ?? []);
     };
+    // Worker 自体を起動できない (CSP / 読込失敗) 場合はタイムアウトと区別して表示する
+    worker.onerror = () => {
+      if (requestId.current !== id) return;
+      window.clearTimeout(timeout);
+      worker.terminate();
+      workerRef.current = null;
+      setPending(false);
+      setResult([]);
+      setError("差分計算用ワーカーを起動できませんでした");
+    };
     worker.postMessage({ id, input: { left, right, mode, ignoreWhitespace, ignoreCase } });
   };
 

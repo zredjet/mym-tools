@@ -56,6 +56,14 @@ export function RegexPage() {
         setError(event.data.error);
       } else setResult(event.data.result ?? null);
     };
+    // Worker 自体を起動できない (CSP / 読込失敗) 場合はタイムアウトと区別して表示する
+    worker.onerror = () => {
+      if (requestId.current !== id) return;
+      window.clearTimeout(timeout);
+      cancel();
+      setResult(null);
+      setError("正規表現の評価用ワーカーを起動できませんでした");
+    };
     worker.postMessage({ id, input: { pattern, flags, text, replacement } });
   };
 
