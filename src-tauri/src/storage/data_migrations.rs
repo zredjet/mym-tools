@@ -105,7 +105,9 @@ fn load_and_validate_legacy_memos(tx: &Transaction<'_>) -> Result<Vec<LegacyMemo
         let body = payload
             .get("body")
             .and_then(JsonValue::as_str)
-            .filter(|body| !body.trim().is_empty())
+            // 旧 linkmemo validator と同じく空文字だけを不正とする。空白だけの本文は旧 JSON
+            // import 経由で保存され得た正当なデータで、ここで弾くと起動そのものが止まる
+            .filter(|body| !body.is_empty())
             .ok_or_else(|| AppError::Storage(format!("legacy memo {id} has no usable body")))?;
         result.push(LegacyMemo {
             id,
@@ -269,6 +271,26 @@ mod tests {
             .unwrap()
             .is_empty());
         assert_ne!(good, bad);
+    }
+
+    /// 旧 validator は `body.is_empty()` だけを拒否していたため、空白だけの本文も
+    /// 正当な旧データとして存在し得る。移行を失敗させず (= 起動を止めず) そのまま移す。
+    #[test]
+    fn migrates_whitespace_only_body_as_is() {
+        let storage = SqliteStorage::open(":memory:").unwrap();
+        let project = storage.create_project("Project", None).unwrap();
+        insert(
+            &storage,
+            &project.id,
+            "Blank",
+            json!({"type":"memo","target":null,"body":"  \n"}),
+        );
+
+        assert_eq!(storage.migrate_legacy_linkmemo_memos().unwrap(), 1);
+        let memos = storage.list_items("memo", &project.id, 100, 0).unwrap();
+        assert_eq!(memos.len(), 1);
+        assert_eq!(memos[0].payload, json!({"body": "  \n"}));
+        assert_eq!(storage.legacy_linkmemo_memo_count().unwrap(), 0);
     }
 
     #[test]
