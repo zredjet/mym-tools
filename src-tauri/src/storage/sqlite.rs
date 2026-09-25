@@ -231,7 +231,7 @@ impl StorageService for SqliteStorage {
         offset: u32,
     ) -> Result<Vec<crate::storage::types::ItemSummary>, AppError> {
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT id, project_id, module_id, title, tags, position, created_at, updated_at FROM items WHERE project_id=?1 AND module_id=?2 ORDER BY updated_at DESC, id DESC LIMIT ?3 OFFSET ?4")?;
+            let mut stmt = conn.prepare_cached("SELECT id, project_id, module_id, title, tags, position, created_at, updated_at FROM items WHERE project_id=?1 AND module_id=?2 ORDER BY updated_at DESC, id DESC LIMIT ?3 OFFSET ?4")?;
             let rows = stmt.query_map(params![project_id.as_str(), module_id, limit, offset], |row| {
                 let tags: String = row.get(4)?;
                 Ok((crate::storage::types::ItemSummary { id: ItemId::new(row.get::<_,String>(0)?), project_id: ProjectId::new(row.get::<_,String>(1)?), module_id: row.get(2)?, title: row.get(3)?, tags: vec![], position: row.get(5)?, created_at: row.get(6)?, updated_at: row.get(7)? }, tags))
@@ -316,7 +316,7 @@ impl StorageService for SqliteStorage {
     fn list_projects(&self) -> Result<Vec<Project>, AppError> {
         self.with_conn(|conn| {
             let mut stmt = conn
-                .prepare(
+                .prepare_cached(
                     "SELECT id, name, description, position, created_at, updated_at \
                      FROM projects \
                      ORDER BY position ASC, id DESC",
@@ -438,7 +438,7 @@ impl StorageService for SqliteStorage {
             // 1) 既存全プロジェクト ID を取得し、ordered_ids と完全一致を要求
             //    (欠損 / 余分があれば stale state からの reorder と見なし弾く)
             let mut stmt = tx
-                .prepare("SELECT id FROM projects")
+                .prepare_cached("SELECT id FROM projects")
                 .map_err(AppError::from)?;
             let existing_ids: std::collections::HashSet<String> = stmt
                 .query_map([], |row| row.get::<_, String>(0))
@@ -836,7 +836,7 @@ impl StorageService for SqliteStorage {
             // 1) 当該スコープの既存全 item ID を取得し、ordered_ids と完全一致を要求
             //    (data-model.md §6.5 「実装規約: 二重ガード」その①)
             let mut stmt = tx
-                .prepare("SELECT id FROM items WHERE project_id = ? AND module_id = ?")
+                .prepare_cached("SELECT id FROM items WHERE project_id = ? AND module_id = ?")
                 .map_err(AppError::from)?;
             let existing_ids: std::collections::HashSet<String> = stmt
                 .query_map([project_id.as_str(), module_id], |row| {
@@ -1286,7 +1286,7 @@ impl SqliteStorage {
     ) -> Result<Vec<Item>, AppError> {
         self.with_conn(|conn| {
             let mut stmt = conn
-                .prepare(
+                .prepare_cached(
                     // ORDER BY: position 優先、未編集スコープ (全行 position=0) は
                     // タイブレーカーで updated_at DESC が効く (data-model.md §6.5)。
                     // `idx_items_project_module_position` で index-only にカバーされる。
@@ -1449,7 +1449,7 @@ impl SqliteStorage {
         offset: u32,
     ) -> Result<Vec<Item>, AppError> {
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare(sql).map_err(AppError::from)?;
+            let mut stmt = conn.prepare_cached(sql).map_err(AppError::from)?;
             let mut all_params: Vec<&dyn rusqlite::ToSql> =
                 bindings.iter().map(|b| b as &dyn rusqlite::ToSql).collect();
             let lim = limit as i64;
