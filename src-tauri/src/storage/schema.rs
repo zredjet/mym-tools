@@ -17,7 +17,7 @@
 ///   起動停止画面** が必須 (ADR-0011 §2.2 / ADR-0006)
 ///
 /// 履歴は `docs/data-model.md` §14.4 (一次ソース) を参照。
-pub const CURRENT_DB_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_DB_SCHEMA_VERSION: i64 = 3;
 
 /// すべての DDL を一括投入する SQL (新規 DB 用)。
 ///
@@ -89,7 +89,8 @@ CREATE TRIGGER trg_items_fts_ai AFTER INSERT ON items BEGIN
   VALUES (new.id, new.project_id, new.module_id, new.search_text);
 END;
 
-CREATE TRIGGER trg_items_fts_au AFTER UPDATE ON items BEGIN
+-- position だけの更新 (並び替え) では発火させない。items_fts が写す列だけを見る (ADR-0022)
+CREATE TRIGGER trg_items_fts_au AFTER UPDATE OF project_id, module_id, search_text ON items BEGIN
   UPDATE items_fts SET
     project_id  = new.project_id,
     module_id   = new.module_id,
@@ -120,7 +121,8 @@ pub const PRAGMAS: &[&str] = &[
 /// **不変条件**:
 /// - `to_version = from_version + 1` (1 段ずつ、複数段ジャンプ禁止)
 /// - `sql` は additive のみ (新カラム + 定数 DEFAULT / 新テーブル / 新インデックス / 新トリガ /
-///   VIEW)。DROP / RENAME / 型変更 / 既存値書き換えは禁止 (ADR-0011 §2.2)
+///   VIEW)。DROP / RENAME / 型変更 / 既存値書き換えは禁止 (ADR-0011 §2.2)。例外として、派生データを
+///   同期するトリガの置換 (同じ tx での DROP TRIGGER + CREATE TRIGGER) は ADR-0022 §2.1 の条件で可
 /// - **`sql` の末尾で必ず** `UPDATE meta SET value = '<to_version>' WHERE key = 'db_schema_version'`
 ///   を含める。DDL と bump を同じトランザクションに同居させ、途中失敗時の片寄りを防ぐ
 ///   (ADR-0011 §2.5)
@@ -151,6 +153,24 @@ pub const MIGRATIONS: &[Migration] = &[
             CREATE INDEX idx_items_project_module_position
               ON items (project_id, module_id, position, updated_at DESC, id DESC);
             UPDATE meta SET value = '2' WHERE key = 'db_schema_version';
+        "#,
+    },
+    // v2 → v3: FTS 更新トリガを items_fts が写す列の更新だけに絞る (ADR-0022)。
+    // 旧トリガは position だけの更新でも発火し、UNINDEXED の item_id で items_fts を
+    // 全件走査していた (並び替えが O(N²))。DROP と CREATE を同じ tx に置き、既存行は書き換えない
+    Migration {
+        from_version: 2,
+        to_version: 3,
+        sql: r#"
+            DROP TRIGGER IF EXISTS trg_items_fts_au;
+            CREATE TRIGGER trg_items_fts_au AFTER UPDATE OF project_id, module_id, search_text ON items BEGIN
+              UPDATE items_fts SET
+                project_id  = new.project_id,
+                module_id   = new.module_id,
+                search_text = new.search_text
+              WHERE item_id = new.id;
+            END;
+            UPDATE meta SET value = '3' WHERE key = 'db_schema_version';
         "#,
     },
 ];

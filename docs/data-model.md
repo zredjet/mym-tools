@@ -1,6 +1,6 @@
 # データモデル (Data Model)
 
-最終更新: 2026-08-25 / ステータス: Draft (Phase 1)
+最終更新: 2026-09-25 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**データをどう持つか**」を定義する。
 要件 (`requirements.md`) と構造 (`architecture.md`) で確定した方針を、
@@ -480,7 +480,8 @@ CREATE TRIGGER trg_items_fts_ai AFTER INSERT ON items BEGIN
   VALUES (new.id, new.project_id, new.module_id, new.search_text);
 END;
 
-CREATE TRIGGER trg_items_fts_au AFTER UPDATE ON items BEGIN
+-- items_fts が写す列の更新だけで発火する (position だけの並び替えでは発火しない、ADR-0022 / DB schema v3)
+CREATE TRIGGER trg_items_fts_au AFTER UPDATE OF project_id, module_id, search_text ON items BEGIN
   UPDATE items_fts SET
     project_id  = new.project_id,
     module_id   = new.module_id,
@@ -492,6 +493,10 @@ CREATE TRIGGER trg_items_fts_ad AFTER DELETE ON items BEGIN
   DELETE FROM items_fts WHERE item_id = old.id;
 END;
 ```
+
+`item_id` は FTS5 の `UNINDEXED` 列のため、`WHERE item_id = ...` は `items_fts` を全件走査する。更新トリガの発火条件を
+`UPDATE OF project_id, module_id, search_text` に絞り、並び替え (`position` だけの更新) で走査しないようにしている
+(ADR-0022)。1 item の編集・削除では 1 回の走査が残る。
 
 トリガは元の INSERT/UPDATE/DELETE と同一トランザクション内で実行されるため、
 `items` 側がロールバックされれば `items_fts` 側もロールバックされる (D-12 の整合性保証)。
@@ -1178,6 +1183,7 @@ ADR-0011 §2.1 のチェックリストを満たすものに限る:
 | from → to | 概要 | 導入 PR / ADR |
 |---|---|---|
 | 1 → 2 | `items.position` カラム追加 (`NOT NULL DEFAULT 0`) + `idx_items_project_module_position` 追加 | PR-Y / ADR-0011 |
+| 2 → 3 | `trg_items_fts_au` を `AFTER UPDATE OF project_id, module_id, search_text` に置換 (同一 tx の DROP TRIGGER + CREATE TRIGGER、既存行の書き換えなし) | ADR-0022 |
 
 ### 14.5 Link / Memo所属移行の限定例外 (ADR-0016)
 
@@ -1235,7 +1241,7 @@ ADR-0011 §2.1 のチェックリストを満たすものに限る:
 | T-32 | リストア対象に破損ファイルを選択 | `PRAGMA integrity_check` が失敗を返し、リストアが中止される。別ファイル選択を促すダイアログが出る (ADR-0007 §2.4.1) |
 | T-33 | pre-op バックアップ取得後に対象操作が失敗 | pre-op バックアップは削除されず `<userdata>/backups/pre-op/` に残る (§13.4) |
 | T-34 | pre-op / manual バックアップ取得 | `last_backup_revision` は更新されるが、`last_auto_backup_at` は変わらない (§13.2) |
-| T-35 | 旧 schema (v1) DB を含む状態でアプリ起動 | `schema::migrate_if_needed` が `MIGRATIONS[0]` を適用し、`items.position` 全行 `0`、`idx_items_project_module_position` が `EXPLAIN QUERY PLAN` で使用される、`meta.db_schema_version` が `2` に更新される (ADR-0011 §2.3 / §2.4) |
+| T-35 | 旧 schema (v1) DB を含む状態でアプリ起動 | `schema::migrate_if_needed` が `MIGRATIONS[0]` を適用し、`items.position` 全行 `0`、`idx_items_project_module_position` が `EXPLAIN QUERY PLAN` で使用される、`meta.db_schema_version` が現行版 (`CURRENT_DB_SCHEMA_VERSION`) に更新される (ADR-0011 §2.3 / §2.4) |
 | T-36 | T-35 の migration 完了後に再起動 | `db_schema_version` が CURRENT と一致するため migration は走らず通常起動。pre-migration バックアップは新規取得されない (冪等性) |
 | T-37 | pre-migration バックアップ取得失敗 (例: backups dir への書込み権限なし) | migration が中止され起動停止画面に遷移する (path / 容量を表示)。DB ファイルは元の v1 状態のまま (ADR-0011 §2.4 / §2.5) |
 | T-38 | `core_reorder_items` の引数検証 | `ordered_ids` 集合が `SELECT id FROM items WHERE project_id=? AND module_id=?` と完全一致しない (欠損 / 余分 / 他スコープ ID 混入) → `AppError::Validation` で reject。1 件成功時は全件 UPDATE → `data_revision +1`、`updated_at` 不変 (§6.5) |
@@ -1299,6 +1305,7 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-08-23 | 1.1 | ADR-0014を反映し、`core.collapsed_module_categories`を追加。開発ツール11種はstatelessのためDB schema、payload、export / importを変更しないことを確認 |
 | 2026-08-25 | 1.2 | ADR-0016を反映。M-Link / M-Memo payload、設定継承、旧export正規化、新export分離、`db_schema_version`を変えない起動時所属移行とT-41〜T-46を追加 |
 | 2026-08-31 | 1.3 | ADR-0017を反映。M-Mermaid / M-Diagram payload v1、1MiB境界、検索、共通export/import、T-47〜T-50を追加 |
+| 2026-09-25 | 1.4 | ADR-0022を反映。FTS 更新トリガを `UPDATE OF project_id, module_id, search_text` に絞る DB schema v3 を §8.2 / §14.4 に追加 |
 
 ## ベクター作品と軽量な参照API（ADR-0021）
 
