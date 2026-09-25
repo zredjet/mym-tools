@@ -128,6 +128,7 @@ CREATE INDEX idx_projects_position ON projects (position);
 
 - `name` のユニーク制約は**かけない**(同名プロジェクトを許容。表記が同じでも別物として扱いたいケースを優先)
 - 削除は物理削除 (architecture.md §7.1)。配下の items は FK のカスケードで一緒に消える (§9)
+- 並び替え (`core_reorder_projects`) は `position` だけを連番で更新し、`updated_at` は変えない (items の §6.5 と同じ。並び替えは内容の編集ではない)。`data_revision` は +1 する
 
 ---
 
@@ -1321,6 +1322,7 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-09-25 | 1.4 | ADR-0022を反映。FTS 更新トリガを `UPDATE OF project_id, module_id, search_text` に絞る DB schema v3 を §8.2 / §14.4 に追加 |
 | 2026-09-25 | 1.5 | `core.sidebar_collapsed` (サイドバー全体の開閉状態) を §11.1 に追加 |
 | 2026-09-25 | 1.6 | DB schema v4: project 削除時の FTS 同期トリガ (`trg_items_fts_ad` の条件付き化と `trg_projects_fts_bd`) を §8.2 / §14.4 に追加 |
+| 2026-09-25 | 1.7 | §5 にプロジェクトの並び替えで `updated_at` を変えないことを明記 |
 
 ## ベクター作品と軽量な参照API（ADR-0021）
 

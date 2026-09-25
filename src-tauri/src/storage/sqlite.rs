@@ -462,13 +462,13 @@ impl StorageService for SqliteStorage {
                 });
             }
 
-            // 2) 連番 0..N-1 で UPDATE
-            let now = now_jst_iso8601();
+            // 2) 連番 0..N-1 で UPDATE。並び替えは内容の編集ではないため updated_at は変えない
+            //    (items の reorder_items と同じ、`data-model.md` §5 / §6.5)
             for (idx, id) in ordered_ids.iter().enumerate() {
                 let position: i64 = idx as i64;
                 tx.execute(
-                    "UPDATE projects SET position = ?, updated_at = ? WHERE id = ?",
-                    params![position, now, id.as_str()],
+                    "UPDATE projects SET position = ? WHERE id = ?",
+                    params![position, id.as_str()],
                 )
                 .map_err(AppError::from)?;
             }
@@ -2109,6 +2109,28 @@ mod tests {
             .map(|p| p.name.clone())
             .collect();
         assert_eq!(listed, vec!["C".to_string(), "A".into(), "B".into()]);
+    }
+
+    #[test]
+    fn reorder_projects_keeps_updated_at() {
+        let storage = in_memory_storage();
+        let a = storage.create_project("A", None).unwrap();
+        let b = storage.create_project("B", None).unwrap();
+        storage
+            .reorder_projects(&[b.id.clone(), a.id.clone()])
+            .unwrap();
+        let after = storage.list_projects().unwrap();
+        assert_eq!(after[0].id, b.id);
+        let updated = |id: &ProjectId| {
+            after
+                .iter()
+                .find(|project| &project.id == id)
+                .unwrap()
+                .updated_at
+                .clone()
+        };
+        assert_eq!(updated(&a.id), a.updated_at);
+        assert_eq!(updated(&b.id), b.updated_at);
     }
 
     #[test]
