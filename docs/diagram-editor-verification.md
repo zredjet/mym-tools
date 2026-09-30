@@ -39,6 +39,7 @@ Chromium (Playwright 1.61.1、headless) で同梱資産を動かす。CI では�
 | PlantUML の変換 | ローカルで変換 | ローカルで変換 (同梱 bundle 更新) |
 | Atlassian 2025 の図形 | なし | stencil と描画を確認 |
 | 親を持たない cell を含む図 | 正常な cell が消える | **両方の cell を保持**し、保存にも残る |
+| ページの並べ替え (Shift+→ / タブのドラッグ) | ページ順が保存 XML に反映され、undo / redo で行き来できる | 同じ |
 | 外部通信 / 資産欠落 / JS エラー / アプリが拒否する message | 0 件 | 0 件 |
 
 既知の遮断として、次の 2 件だけを完全一致で許容している (どちらも 31.4.1 でも起き、外部通信ではない)。
@@ -104,6 +105,10 @@ Chromium (Playwright 1.61.1、headless) で同梱資産を動かす。CI では�
 | その他の図形 > Atlassian | Apps / Work Types / Logos のパレットが追加され、図形の挿入と描画ができる |
 | 配置 > 挿入 > 詳細 > PlantUML | 編集できる図としてオフラインで挿入 |
 | PNG 書出し (保存ダイアログ) | 書出しに成功 |
+| ページの並べ替え (タブの右クリック > 移動、選択が無い時の Shift+← / →) | ページ順が変わり、undo / redo で行き来できる。保存して開き直しても順序を保ち、未保存にならない |
+| ページタブのドラッグによる並べ替え | 動かない (次の段落。31.4.1 から同じ) |
+
+ページタブのドラッグは HTML5 の drag and drop を使う。Tauri は OS からのファイルドロップを受け取るため、WKWebView の drag 処理 (draggingEntered / draggingUpdated / performDragOperation) を置き換えている。tauri-runtime-wry の handler が常に true を返すので、ページ内のドラッグも WebKit に渡らず、iframe 内の `dragover` / `drop` が発生しない。PDF 結合などがファイルドロップを使うため `dragDropEnabled` は無効にできない。ページの並べ替えは、右クリックメニューとキー操作で行える。
 
 実アプリ (WKWebView) で外部通信 0 件を直接測る手段は release build に無い。editor CSP (`connect-src 'self'` など) が同じであることと、上の実ブラウザ検証で確かめている。
 
