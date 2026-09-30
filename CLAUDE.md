@@ -66,7 +66,7 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - **フロントエンドのモジュール列挙は `src/modules/registry.ts` を唯一の正典にする**。Shell / router / search / settings / 起動復元へモジュール ID の分岐を重ねない。カテゴリ定義と順序も同ファイル (ADR-0014)。無効化の詳細は ADR-0012 に従う
 - **自動更新なし、起動時の version-check 通信もしない** (ADR-0008)。「最新版を確認」は OS ブラウザで GitHub Releases を開くだけ (`plugin-shell`)
 - **完全オフラインを守る**。同梱エディタ (draw.io / SVG-Edit) はビルド時にもネットワーク取得しない。外部 script / font / plugin を読み込ませない。外部への通信は HTTP モジュールの `http_send_request` だけ (ADR-0015 / ADR-0017 / ADR-0021)
-- **iframe エディタへ Tauri IPC を公開しない**。loopback origin はリモート扱いで、app command ACL は local app origin だけに付与する。親子通信は source / origin / session / token / サイズを検証する (ADR-0017 §3 / ADR-0021)
+- **iframe エディタへ Tauri IPC を公開しない**。loopback origin はリモート扱いで、app command ACL は local app origin だけに付与する。親子通信は source / origin / session / token / サイズを検証する (ADR-0017 §3 / ADR-0021)。Tauri 内部の `plugin:__TAURI_CHANNEL__|fetch` は ACL の対象外なので、editor CSP の `connect-src` に `ipc:` / `http://ipc.localhost` を加えない (ADR-0017 §7)
 - **`src-tauri/crates/shotq/` は編集しない**。shotq 側で直してから複製し直し、`UPSTREAM.md`・依存の版・契約テストの期待値 (`src-tauri/src/modules/pngopt/contract/`) を同じ変更で更新する。rayon は複製した shotq の内部だけで使い、`src-tauri/src` には書かない (ADR-0023)
 - **NRBF で型を生成しない**。`BinaryFormatter` / `Deserialize` / 任意型ロードは禁止 (CI で検出) (ADR-0020)
 - **portable ZIP は各 80,000,000 bytes 以下** (ADR-0017 §4)。大きな資産や sidecar を足すときはサイズ増分を確認する

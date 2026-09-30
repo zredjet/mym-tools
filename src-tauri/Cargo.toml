@@ -5,6 +5,10 @@ description = "MyMyTools — 軽量なクロスプラットフォーム多目的
 authors = ["zredjet"]
 edition = "2021"
 rust-version = "1.88"  # lopdf 0.44 の MSRV。rust-toolchain.toml は stable を追従する。
+# 依存の新しい版が rust-version を満たさない時は満たす版を選ぶ (cargo update / cargo add)。
+# resolver 2 から変わるのはこの既定値だけで、feature の統合は同じ。
+# [workspace] に置くと crates/shotq が member になるため [package] に置く。
+resolver = "3"
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
@@ -17,8 +21,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# Tauri 本体 (ADR-0001)
-tauri = { version = "2", features = [] }
+# Tauri 本体 (ADR-0001)。2.11.6 は GHSA-w28w-mhc8-qvjv の修正版。
+# 2.12 は Rust 1.90 が必要で、npm の @tauri-apps/* と major.minor をそろえて上げる必要があるため 2.11 系に留める。
+tauri = { version = "~2.11.6", features = [] }
 tauri-plugin-opener = "2"   # ADR-0008 §2.7: 「最新版を確認」で OS 既定ブラウザ起動
 tauri-plugin-dialog = "2"   # PR-Z: Export/Import の save / open ファイルダイアログ (D-05)
 tauri-plugin-os = "2"       # PR-AF: About 画面の Platform 表示 (OS 名 / arch / version)

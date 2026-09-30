@@ -81,6 +81,13 @@ Windowsの最終ZIP実測はWindows release workflowで行い、両OSの検査�
 - draw.io UIは同梱済み`resources/dia_ja.txt`を`lang=ja`で読み込み、日本語へ固定する。言語変更や追加downloadは提供しない。
 - draw.ioのPNG書出しはembed export protocolの`currentPage: true`を指定し、現在表示中の1ページだけを画像化する。`.drawio`は全ページ、SVGは現在の編集ページという既存契約を維持する。
 
+### 7. 2026-09-30追補: Tauri 2.11.6とeditor iframeのIPC境界
+
+- Tauriは2.11.6以上を使う（GHSA-w28w-mhc8-qvjv）。2.11.5以前は、Tauri内部の`plugin:__TAURI_CHANNEL__|fetch`（8 KiB以上のChannel messageの取得）がremote originに対するACLの拒否から外れており、アプリ全体で共有する連番IDのqueueを他のwebviewやoriginから取得・消費できた。
+- 2.11.6でもこのcommandのACL除外自体は残る（Tauri v3で撤去予定）。2.11.6はqueueをwebview単位に分けるが、draw.ioとSVG-Edit（ADR-0021）のeditor iframeはmain webviewのsubframeで同じwebviewに属するため、main frameのqueueから分離されない。§3の「core / plugin IPCを拒否する」は、この1 commandを除いて成り立つ。
+- WindowsではWebView2がTauri初期化scriptをsubframeにも挿入するため、editor iframeからもinvoke keyが見える。IPC endpointへの接続を止めているのはeditor CSPの`connect-src 'self'`であり、postMessage経路はtop-level frameのmessageしか受け付けない。macOSでは初期化scriptはmain frameだけに入る。
+- したがってdraw.ioとSVG-Editのeditor CSPの`connect-src`へ`ipc:` / `http://ipc.localhost`を加えない。editor CSPを緩める変更は、この境界を再評価してから行う。
+
 ## Consequences
 
 - 図編集はネットワーク断でも同じ機能・資産で動き、図データ送信のオンライン経路を持たない。

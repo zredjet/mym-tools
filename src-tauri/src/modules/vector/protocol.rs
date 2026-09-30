@@ -30,6 +30,9 @@ static SERVER_PORT: Mutex<Option<u16>> = Mutex::new(None);
 ///
 /// TauriはこのHTTP originをremoteとして扱う。capabilityにremote URLを付与しないため、
 /// WindowsでTauri初期化scriptがsubframeへ挿入されてもcore/plugin IPCは拒否される。
+/// ただしTauri内部の`plugin:__TAURI_CHANNEL__|fetch`だけはACLの拒否対象外で、iframeは
+/// main webviewに属する。IPC endpointへの接続はeditor CSPの`connect-src 'self'`で止めている
+/// ため、`connect-src`へipc:を加えない (ADR-0017 §7)。
 #[tauri::command]
 pub async fn vector_editor_url(app: AppHandle) -> Result<String, AppError> {
     let mut server_port = SERVER_PORT
