@@ -150,9 +150,13 @@ Node 22 (22.18 以降。`drawioBridge.ts` を型除去で読み込むため) を
 
 ```sh
 git submodule update --init --depth 1 vendor/drawio
+npm ci
+npx playwright install chromium
 npm run prepare:drawio
 npm run test:diagram:browser
 ```
+
+`npm ci` だけでは Playwright の Chromium 本体は入らないため、初回は `npx playwright install chromium` を実行する。
 
 31.4.1 で基準を取り直す手順:
 
