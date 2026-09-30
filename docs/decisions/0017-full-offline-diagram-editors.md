@@ -88,6 +88,30 @@ Windowsの最終ZIP実測はWindows release workflowで行い、両OSの検査�
 - WindowsではWebView2がTauri初期化scriptをsubframeにも挿入するため、editor iframeからもinvoke keyが見える。IPC endpointへの接続を止めているのはeditor CSPの`connect-src 'self'`であり、postMessage経路はtop-level frameのmessageしか受け付けない。macOSでは初期化scriptはmain frameだけに入る。
 - したがってdraw.ioとSVG-Editのeditor CSPの`connect-src`へ`ipc:` / `http://ipc.localhost`を加えない。editor CSPを緩める変更は、この境界を再評価してから行う。
 
+### 8. 2026-09-30追補: draw.io 31.5.3へ更新
+
+- draw.ioの固定先を31.5.3（tag `v31.5.3`、commit `0f419a92c769adb5fb20f2b18053a5ae8c7e4993`）へ更新する。§2の資産範囲とprepare方式、§3のセキュリティ境界、§4の配布契約は変えない。上流の`js/PreConfig.js`は、引き続きMyMyToolsの上書き版で置き換える。
+- 更新理由（同梱資産のうち実行時に使われるもの）:
+  - `js/app.min.js`に内包され実行時に使われるDOMPurifyを3.4.13から3.4.16へ更新する（`js/sanitizer/purify.min.js`は実行経路で読み込まれない）。
+  - 図の属性値に含まれるmarkupがhost pageへ届く問題、MathJaxの`\data`マクロによる任意data属性の書込み、font URLのscheme検査の迂回を修正する（31.4.2〜31.4.4）。
+  - URL parameterで書出しservice / AI endpointを差し替えられる脆弱性（GHSA-ff67-v9r9-6877 / GHSA-v2pv-rjf8-9w9v、31.4.6で修正）。iframe URLは親が固定し、editor CSPが外部通信を拒否するため直接の影響はないが、多層防御として取り込む。
+  - `window.EXPORT_URL = null`が「書出しserviceなし」として保持される。31.4.1では既定の外部URLへ置き換わっており、通信はCSPで遮断していた。
+  - 親を持たないcellが混ざった図を読み込むとpageが空になり、次の保存で空のpageが書き戻される問題を修正する（31.5.1）。
+  - PlantUML変換器（`js/plantuml/drawio-plantuml.min.js`）は同一loopback originから遅延読込みされるため、更新が実行時に反映される。Mermaid / ELK / JSZipは実行時に変化しない`js/extensions.min.js`から読むため、上流のそれらの更新は反映されない。
+- `index.html`、embed JSON protocol（`init` / `load` / `autosave` / `save` / `textContent` / `export` / `openLink`）、同梱directory構成と拡張子は31.4.1と同じため、親画面、`drawioBridge`、Rustのasset serverとCSPは変えない。資産は3,362から3,366 files、`resources/dia_ja.txt`は2,003から2,022 keysになる。
+- 31.5.0から、すべてのmodel変更（`mxChildChange` / `mxTerminalChange` / page操作）にundo / redoの実行時修復が入った。これを主な回帰リスクとし、Chromium上の自動検証（`npm run test:diagram:browser`、ローカル専用）と、macOS実アプリの手動受入で確認した。31.4.6（commit `744cb5420fdf126efd7a09b1d7082ca3e12c0841`）へ戻すのは、31.5.3でだけ起き、実アプリで手動再現できるundo / redoの回帰を確認した場合だけとする。今回は該当しなかった。記録は[ダイアグラムの検証と実機受入](../diagram-editor-verification.md)に置く。
+- 更新時に同じ変更で揃える対象（§2）に、資産契約の`DRAWIO_DOMPURIFY_VERSION`（`js/app.min.js`内のDOMPurifyの版）と、`scripts/drawio/browser-support.mjs`の版ごとの実行時期待値を加える。
+
+| 対象 | 31.4.1 | 31.5.3 |
+|---|---:|---:|
+| draw.io生成asset（`du -sk`）/ files | 151,604 KiB / 3,362 | 153,868 KiB / 3,366 |
+| Tauri release binary（macOS arm64、ローカル） | 69,854,992 bytes | 70,388,096 bytes |
+| portable ZIP（macOS arm64、ローカル） | 55,471,762 bytes | 56,010,464 bytes |
+| portable ZIP（macOS arm64、CI） | 55,468,344 bytes | **56,009,715 bytes**（+541,371） |
+| portable ZIP（Windows x64、CI） | 55,357,651 bytes | **55,893,321 bytes**（+535,670） |
+
+CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこの更新のPRのbuild-tauriである。両ZIPは§4の80,000,000 bytes上限と、CIのsize gate（ADR-0020、alpha.10比+10,000,000 bytes以下: macOS 61,390,662 / Windows 61,105,964 bytes）を満たし、size gateまでの余裕はmacOS 5,380,947 bytes、Windows 5,212,643 bytesである。
+
 ## Consequences
 
 - 図編集はネットワーク断でも同じ機能・資産で動き、図データ送信のオンライン経路を持たない。
@@ -97,7 +121,7 @@ Windowsの最終ZIP実測はWindows release workflowで行い、両OSの検査�
 
 ## Validation Criteria
 
-- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（51,244,151 bytes）
+- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（56,009,715 bytes、§8のdraw.io 31.5.3）
 - [ ] Windowsの実portable ZIPが80,000,000 bytes以下
 - [ ] Windows 10 / 11、macOS 12最新patch、現行macOSで編集、全asset、保存、再読込、SVG / PNG書出しが成功
 - [ ] 代表操作中の外向き通信0件、全asset requestがlocal originで解決
@@ -112,4 +136,8 @@ Windowsの最終ZIP実測はWindows release workflowで行い、両OSの検査�
 
 - Mermaid 11.17.2: <https://www.npmjs.com/package/mermaid/v/11.17.2>
 - draw.io pinned source: <https://github.com/jgraph/drawio/tree/fea5e877f3e6f849331ad09894f7edb9771708fa>
+- draw.io pinned source（§8、31.5.3）: <https://github.com/jgraph/drawio/tree/0f419a92c769adb5fb20f2b18053a5ae8c7e4993>
+- draw.io ChangeLog（31.5.3）: <https://github.com/jgraph/drawio/blob/0f419a92c769adb5fb20f2b18053a5ae8c7e4993/ChangeLog>
+- GHSA-ff67-v9r9-6877: <https://github.com/jgraph/drawio/security/advisories/GHSA-ff67-v9r9-6877>
+- GHSA-v2pv-rjf8-9w9v: <https://github.com/jgraph/drawio/security/advisories/GHSA-v2pv-rjf8-9w9v>
 - draw.io embed mode: <https://www.drawio.com/doc/faq/embed-mode>

@@ -1,5 +1,5 @@
 /**
- * MyMyTools offline override for draw.io 31.4.1.
+ * MyMyTools offline override for draw.io 31.5.3.
  *
  * Upstream `js/PreConfig.js` is replaced at build time. This modified copy keeps the
  * Apache-2.0 copyright notices and removes every server endpoint from the runtime.

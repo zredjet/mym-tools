@@ -32,7 +32,7 @@ import vectorNotices from "../../third_party/svgedit-NOTICES.txt?raw";
 const RELEASES_URL = "https://github.com/zredjet/mym-tools/releases";
 const REPO_URL = "https://github.com/zredjet/mym-tools";
 const MERMAID_URL = "https://github.com/mermaid-js/mermaid/tree/v11.17.2";
-const DRAWIO_URL = "https://github.com/jgraph/drawio/tree/fea5e877f3e6f849331ad09894f7edb9771708fa";
+const DRAWIO_URL = "https://github.com/jgraph/drawio/tree/0f419a92c769adb5fb20f2b18053a5ae8c7e4993";
 const NRBF_URL =
   "https://github.com/dotnet/runtime/tree/v10.0.11/src/libraries/System.Formats.Nrbf";
 
@@ -229,7 +229,7 @@ export function AboutPage() {
                 className="underline underline-offset-2 hover:text-[var(--fg)]"
                 onClick={() => void openExternal(DRAWIO_URL)}
               >
-                draw.io 31.4.1 (fea5e877)
+                draw.io 31.5.3 (0f419a92)
               </button>{" "}
               — Apache License 2.0
             </li>

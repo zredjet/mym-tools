@@ -1,18 +1,34 @@
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
   CLIENT_DIRECTORIES,
   CLIENT_FILES,
   DRAWIO_COMMIT,
+  DRAWIO_DOMPURIFY_VERSION,
   DRAWIO_VERSION,
   REQUIRED_CLIENT_ASSETS,
   drawioAssetStamp,
 } from "./prepare-assets.mjs";
 
+const APP_BUNDLE = "vendor/drawio/src/main/webapp/js/app.min.js";
+
 describe("draw.io offline asset contract", () => {
   it("pins the approved upstream release and commit", () => {
-    expect(DRAWIO_VERSION).toBe("31.4.1");
-    expect(DRAWIO_COMMIT).toBe("fea5e877f3e6f849331ad09894f7edb9771708fa");
+    expect(DRAWIO_VERSION).toBe("31.5.3");
+    expect(DRAWIO_COMMIT).toBe("0f419a92c769adb5fb20f2b18053a5ae8c7e4993");
+    expect(DRAWIO_DOMPURIFY_VERSION).toBe("3.4.16");
+  });
+
+  it("ships the runtime bundle of the pinned release", () => {
+    if (!existsSync(APP_BUNDLE)) {
+      throw new Error(
+        "draw.io submodule が初期化されていません。git submodule update --init --depth 1 vendor/drawio を実行してください。",
+      );
+    }
+    const bundle = readFileSync(APP_BUNDLE, "utf8");
+    expect(bundle).toContain(`@license DOMPurify ${DRAWIO_DOMPURIFY_VERSION} |`);
+    expect(bundle).toContain(`EditorUi.VERSION="${DRAWIO_VERSION}"`);
   });
 
   it("copies every client asset family without server or service-worker assets", () => {

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "prepare:drawio": "node scripts/drawio/prepare-assets.mjs",
+    "test:diagram:browser": "node scripts/drawio/browser-smoke.mjs",
     "prepare:nrbf": "node scripts/nrbf/prepare-sidecar.mjs",
     "test:nrbf:smoke": "node scripts/nrbf/smoke-test.mjs",
     "predev": "npm run prepare:drawio && npm run prepare:vector",

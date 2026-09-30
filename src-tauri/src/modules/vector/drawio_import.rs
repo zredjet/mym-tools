@@ -382,48 +382,90 @@ mod tests {
     use super::*;
     use crate::modules::vector::validation::validate_svg;
 
-    const DRAWIO_EXPORT: &str = include_str!("fixtures/drawio-export.svg");
+    /// 同梱 draw.io の各版で、アプリの SVG 書出し (asText / embedImages / embedFonts) が出した図。
+    /// どちらも同じ 1 ページ目 (角丸の塗り・HTML ラベル 2 件・text ラベル 1 件) を書き出している。
+    /// 旧版の書出しを持つ利用者がいるため、版を上げても古い fixture は残す。
+    struct DrawioExport {
+        version: &'static str,
+        svg: &'static str,
+        notices: &'static [&'static str],
+        colors: &'static [&'static str],
+    }
+
+    const DRAWIO_EXPORTS: &[DrawioExport] = &[
+        DrawioExport {
+            version: "31.4.1",
+            svg: include_str!("fixtures/drawio-export.svg"),
+            notices: &[
+                "HTML のラベル 2 件",
+                "ダークモード用の色指定",
+                "外部リンク付きの注意書き",
+            ],
+            colors: &["fill: rgb(218, 232, 252)", "fill: #ffffff"],
+        },
+        DrawioExport {
+            version: "31.5.3",
+            svg: include_str!("fixtures/drawio-export-31.5.3.svg"),
+            notices: &[
+                "HTML のラベル 2 件",
+                "ダークモード用の色指定",
+                "外部リンク付きの注意書き",
+            ],
+            colors: &["fill: rgb(218, 232, 252)", "fill: #ffffff"],
+        },
+    ];
 
     #[test]
     fn draw_io_export_is_rejected_as_is() {
-        assert!(validate_svg(DRAWIO_EXPORT).is_err());
+        for export in DRAWIO_EXPORTS {
+            assert!(validate_svg(export.svg).is_err(), "{}", export.version);
+        }
     }
 
     #[test]
     fn converted_draw_io_export_passes_the_vector_policy() {
-        let converted = convert_drawio_svg(DRAWIO_EXPORT)
-            .unwrap()
-            .expect("draw.io export");
-        let text = validate_svg(&converted.svg).expect("converted SVG must be valid");
-        // HTML ラベルの代わりに代替テキストが残り、検索用テキストにもなる
-        assert!(text.contains("開始"), "{text}");
-        assert!(text.contains("処理太字"), "{text}");
-        assert!(text.contains("plain"), "{text}");
-        assert!(!text.contains("Text is not SVG"), "{text}");
-        for removed in [
-            "foreignObject",
-            "<switch",
-            "<style",
-            "light-dark(",
-            "var(",
-            "background",
-            "color-scheme",
-            "drawio.com",
-        ] {
-            assert!(!converted.svg.contains(removed), "{removed} remains");
+        for export in DRAWIO_EXPORTS {
+            let version = export.version;
+            let converted = convert_drawio_svg(export.svg)
+                .unwrap()
+                .expect("draw.io export");
+            let text = validate_svg(&converted.svg).expect("converted SVG must be valid");
+            // HTML ラベルの代わりに代替テキストが残り、検索用テキストにもなる
+            assert!(text.contains("開始"), "{version}: {text}");
+            assert!(text.contains("処理太字"), "{version}: {text}");
+            assert!(text.contains("plain"), "{version}: {text}");
+            assert!(!text.contains("Text is not SVG"), "{version}: {text}");
+            for removed in [
+                "foreignObject",
+                "<switch",
+                "<style",
+                "light-dark(",
+                "var(",
+                "background",
+                "color-scheme",
+                "drawio.com",
+            ] {
+                assert!(
+                    !converted.svg.contains(removed),
+                    "{version}: {removed} remains"
+                );
+            }
+            // 明るい側の色が使われる
+            for color in export.colors {
+                assert!(converted.svg.contains(color), "{version}: {color}");
+            }
         }
-        // 明るい側の色が使われる
-        assert!(converted.svg.contains("fill: rgb(218, 232, 252)"));
-        assert!(converted.svg.contains("fill: #ffffff"));
     }
 
     #[test]
     fn conversion_is_reported_to_the_user() {
-        let converted = convert_drawio_svg(DRAWIO_EXPORT).unwrap().unwrap();
-        let notices = converted.notices.join("\n");
-        assert!(notices.contains("HTML のラベル 2 件"), "{notices}");
-        assert!(notices.contains("ダークモード用の色指定"), "{notices}");
-        assert!(notices.contains("外部リンク付きの注意書き"), "{notices}");
+        for export in DRAWIO_EXPORTS {
+            let converted = convert_drawio_svg(export.svg).unwrap().unwrap();
+            let notices = converted.notices.join("\n");
+            for notice in export.notices {
+                assert!(notices.contains(notice), "{}: {notices}", export.version);
+            }
+        }
     }
 
     #[test]
