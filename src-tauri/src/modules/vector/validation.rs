@@ -3,7 +3,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use quick_xml::{
     events::{BytesStart, Event},
     name::ResolveResult,
-    NsReader,
+    NsReader, XmlVersion,
 };
 use serde::Deserialize;
 use std::sync::LazyLock;
@@ -80,7 +80,8 @@ pub fn validate_svg(svg: &str) -> Result<String, AppError> {
                 }
             }
             Event::Text(value) => {
-                let value = value.xml_content().map_err(|e| error(e.to_string()))?;
+                // 0.39 の xml_content() と同じ XML 1.1 の改行規則のまま扱う (挙動を変えない)。
+                let value = value.xml11_content().map_err(|e| error(e.to_string()))?;
                 if stack.is_empty() && !value.trim().is_empty() {
                     return Err(error("SVGルート外にテキストがあります。"));
                 }
@@ -180,8 +181,9 @@ fn inspect_attributes(
             return Err(error("属性の名前空間が不正です。"));
         }
         let name = String::from_utf8_lossy(local.as_ref()).to_ascii_lowercase();
+        // XML の属性値正規化 (改行・タブを空白にし、文字参照は展開する)。DOMParser の attr.value と同じ。
         let value = attr
-            .decode_and_unescape_value(reader.decoder())
+            .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|e| error(e.to_string()))?;
         let value = value.trim();
         if name.starts_with("on") || ["src", "base"].contains(&name.as_str()) {
@@ -324,6 +326,30 @@ mod tests {
                 assert!(result.is_err(), "{}", case["name"]);
             }
         }
+    }
+    #[test]
+    fn namespace_declarations_per_element_are_capped() {
+        // RUSTSEC-2026-0195: quick-xml 0.41 は 1 要素あたり 256 個を超える xmlns 宣言を拒否する。
+        // 既定の xmlns も数に入る。上限を超える既存の item は更新と JSON 取込で拒否される。
+        let svg = |prefixed: usize| {
+            let declarations: String = (0..prefixed)
+                .map(|i| format!(" xmlns:p{i}=\"urn:p{i}\""))
+                .collect();
+            format!("<svg xmlns=\"http://www.w3.org/2000/svg\"{declarations}/>")
+        };
+        assert_eq!(validate_svg(&svg(255)).unwrap(), "");
+        let error = validate_svg(&svg(256)).unwrap_err().to_string();
+        assert!(error.contains("SVGのXMLが不正です"), "{error}");
+    }
+    #[test]
+    #[ignore = "所要時間の比較用。cargo test -- --ignored で手動実行する"]
+    fn many_distinct_attributes_are_checked_quickly() {
+        // RUSTSEC-2026-0194: quick-xml 0.39 は with_checks(true) の重複検査が属性数の 2 乗だった。
+        let attributes: String = (0..30_000).map(|i| format!(" data-a{i}=\"1\"")).collect();
+        let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\"><rect{attributes}/></svg>");
+        let started = std::time::Instant::now();
+        assert_eq!(validate_svg(&svg).unwrap(), "");
+        eprintln!("30,000 attributes: {:?}", started.elapsed());
     }
     #[test]
     fn utf8_limits_are_inclusive() {

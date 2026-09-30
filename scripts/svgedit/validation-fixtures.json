@@ -175,5 +175,32 @@
     "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" version=\"1.1\" width=\"322px\" height=\"131px\" viewBox=\"0 0 322 131\" id=\"ge-svg-jbnORK2GYircEnneHK9t\"><defs/><g><g data-cell-id=\"0\"><g data-cell-id=\"1\"><g data-cell-id=\"2\"><g transform=\"translate(0.5,0.5)\"><rect x=\"0\" y=\"0\" width=\"120\" height=\"60\" rx=\"9\" ry=\"9\" fill=\"#dae8fc\" stroke=\"#6c8ebf\" pointer-events=\"all\" style=\"fill: rgb(218, 232, 252); stroke: rgb(108, 142, 191)\"/></g><g><g><text x=\"60\" y=\"34\" fill=\"#000000\" font-family=\"Helvetica\" font-size=\"12px\" text-anchor=\"middle\" style=\"fill: rgb(0, 0, 0)\">開始</text></g></g></g><g data-cell-id=\"3\"><g transform=\"translate(0.5,0.5)\"><rect x=\"200\" y=\"0\" width=\"120\" height=\"60\" fill=\"#ffffff\" stroke=\"#000000\" pointer-events=\"all\" style=\"fill: #ffffff; stroke: rgb(0, 0, 0)\"/><path d=\"M 212 0 L 212 60 M 308 0 L 308 60\" fill=\"none\" stroke=\"#000000\" stroke-miterlimit=\"10\" pointer-events=\"all\" style=\"stroke: rgb(0, 0, 0)\"/></g><g><g><text x=\"260\" y=\"34\" fill=\"#000000\" font-family=\"Helvetica\" font-size=\"12px\" text-anchor=\"middle\" style=\"fill: rgb(0, 0, 0)\">処理太字</text></g></g></g><g data-cell-id=\"4\"><g transform=\"translate(0.5,0.5)\"><path d=\"M 120 30 L 193.63 30\" fill=\"none\" stroke=\"#000000\" stroke-miterlimit=\"10\" pointer-events=\"stroke\" style=\"stroke: rgb(0, 0, 0)\"/><path d=\"M 198.88 30 L 191.88 33.5 L 193.63 30 L 191.88 26.5 Z\" fill=\"#000000\" stroke=\"#000000\" stroke-miterlimit=\"10\" pointer-events=\"all\" style=\"fill: rgb(0, 0, 0); stroke: rgb(0, 0, 0)\"/></g></g><g data-cell-id=\"5\"><g><rect x=\"0\" y=\"100\" width=\"80\" height=\"30\" fill=\"none\" stroke=\"none\" pointer-events=\"all\"/></g><g><g fill=\"#000000\" font-family=\"Helvetica\" text-anchor=\"start\" font-size=\"12px\" style=\"fill: rgb(0, 0, 0)\"><text x=\"2\" y=\"118\">plain</text></g></g></g></g></g></g></svg>",
     "valid": true,
     "text": "開始 処理太字 plain"
+  },
+  {
+    "name": "duplicate attribute",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"1\" x=\"2\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "duplicate attribute after 40 distinct attributes",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect data-a0=\"1\" data-a1=\"1\" data-a2=\"1\" data-a3=\"1\" data-a4=\"1\" data-a5=\"1\" data-a6=\"1\" data-a7=\"1\" data-a8=\"1\" data-a9=\"1\" data-a10=\"1\" data-a11=\"1\" data-a12=\"1\" data-a13=\"1\" data-a14=\"1\" data-a15=\"1\" data-a16=\"1\" data-a17=\"1\" data-a18=\"1\" data-a19=\"1\" data-a20=\"1\" data-a21=\"1\" data-a22=\"1\" data-a23=\"1\" data-a24=\"1\" data-a25=\"1\" data-a26=\"1\" data-a27=\"1\" data-a28=\"1\" data-a29=\"1\" data-a30=\"1\" data-a31=\"1\" data-a32=\"1\" data-a33=\"1\" data-a34=\"1\" data-a35=\"1\" data-a36=\"1\" data-a37=\"1\" data-a38=\"1\" data-a39=\"1\" data-a0=\"2\"/></svg>",
+    "valid": false
+  },
+  {
+    "name": "line breaks and tabs in attribute values",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><defs><linearGradient id=\"p\"/></defs><use href=\"\n#p\t\"/><rect style=\"fill:\n url(#p);\tstroke: #abc\" fill=\"url(\n#p\n)\"/></svg>",
+    "valid": true,
+    "text": ""
+  },
+  {
+    "name": "character references in attribute values",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><defs><linearGradient id=\"p\"/></defs><use href=\"&#35;p\"/><rect fill=\"url(&apos;&#x23;p&apos;)\"/></svg>",
+    "valid": true,
+    "text": ""
+  },
+  {
+    "name": "external CSS hidden by a character reference",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect fill=\"u&#x72;l(https://example.com/a)\"/></svg>",
+    "valid": false
   }
 ]
