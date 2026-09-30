@@ -107,8 +107,10 @@ Windowsの最終ZIP実測はWindows release workflowで行い、両OSの検査�
 | draw.io生成asset（`du -sk`）/ files | 151,604 KiB / 3,362 | 153,868 KiB / 3,366 |
 | Tauri release binary（macOS arm64、ローカル） | 69,854,992 bytes | 70,388,096 bytes |
 | portable ZIP（macOS arm64、ローカル） | 55,471,762 bytes | 56,010,464 bytes |
+| portable ZIP（macOS arm64、CI） | 55,468,344 bytes | **56,009,715 bytes**（+541,371） |
+| portable ZIP（Windows x64、CI） | 55,357,651 bytes | **55,893,321 bytes**（+535,670） |
 
-CIのportable ZIPは、§4の80,000,000 bytes上限と、CIのsize gate（ADR-0020、alpha.10比+10,000,000 bytes以下: macOS 61,390,662 / Windows 61,105,964 bytes）で検査する。
+CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこの更新のPRのbuild-tauriである。両ZIPは§4の80,000,000 bytes上限と、CIのsize gate（ADR-0020、alpha.10比+10,000,000 bytes以下: macOS 61,390,662 / Windows 61,105,964 bytes）を満たし、size gateまでの余裕はmacOS 5,380,947 bytes、Windows 5,212,643 bytesである。
 
 ## Consequences
 
@@ -119,7 +121,7 @@ CIのportable ZIPは、§4の80,000,000 bytes上限と、CIのsize gate（ADR-00
 
 ## Validation Criteria
 
-- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（51,244,151 bytes）
+- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（56,009,715 bytes、§8のdraw.io 31.5.3）
 - [ ] Windowsの実portable ZIPが80,000,000 bytes以下
 - [ ] Windows 10 / 11、macOS 12最新patch、現行macOSで編集、全asset、保存、再読込、SVG / PNG書出しが成功
 - [ ] 代表操作中の外向き通信0件、全asset requestがlocal originで解決

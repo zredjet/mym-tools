@@ -120,11 +120,15 @@ Chromium (Playwright 1.61.1、headless) で同梱資産を動かす。CI では�
 | release binary (macOS arm64、ローカル) | 69,854,992 bytes | 70,388,096 bytes |
 | `.app` (`du -sk`、ローカル) | 71,024 KiB | 71,544 KiB |
 | portable ZIP macOS arm64 (ローカル) | 55,471,762 bytes | 56,010,464 bytes |
+| portable ZIP macOS arm64 (CI) | 55,468,344 bytes | 56,009,715 bytes (+541,371) |
+| portable ZIP Windows x64 (CI) | 55,357,651 bytes | 55,893,321 bytes (+535,670) |
 
 ローカルの値は参考値である。31.4.1 の列は Tauri 2.11.6 の作業ツリー、31.5.3 の列は Tauri 2.11.0 の作業ツリーでビルドした。Tauri の差による ZIP の増減は、CI で ±3 KB 程度だった。
 
-ADR-0017 には CI の値を記録する。上限は次の 2 つ:
-- CI のサイズゲート (alpha.10 比 +10,000,000 bytes): macOS 61,390,662 bytes / Windows 61,105,964 bytes
+CI の値のうち、31.4.1 の列は Tauri 2.11.6 の main (commit `73de392`、run 36711965696) のもの、31.5.3 の列はこの更新の PR (run 36712271478) のものである。
+
+上限は次の 2 つ:
+- CI のサイズゲート (alpha.10 比 +10,000,000 bytes): macOS 61,390,662 bytes / Windows 61,105,964 bytes。余裕は macOS 5,380,947 bytes / Windows 5,212,643 bytes
 - 80,000,000 bytes の上限
 
 ## 31.4.6 へ戻す判断
