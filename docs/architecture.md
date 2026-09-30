@@ -449,7 +449,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 
 - `pdfmerge` は既定有効のstatelessモジュールとし、入力一覧、順序、結果、履歴をitemsや設定へ保存しない
 - PDF本体はWebViewへ渡さず、Rustの `pdfmerge_inspect_files` / `pdfmerge_merge_files` がuser-selected pathを読み書きする
-- `lopdf 0.44`で入力順のpage treeを再構築し、page固有resource、回転、用紙サイズを維持する。出力は最小Catalogとし、文書level metadataや高度構造を引き継がない
+- `lopdf 0.45`で入力順のpage treeを再構築し、page固有resource、回転、用紙サイズを維持する。出力は最小Catalogとし、文書level metadataや高度構造を引き継がない
 - 暗号化、電子署名、AcroForm / Widget、Outlines、embedded files、portfolioを事前検出してファイル単位で拒否する
 - 2〜50ファイル、入力合計200 MiB、展開済みstream 1個64 MiBを上限とし、結合開始時に全入力を再検証する
 - `spawn_blocking`とTauri Channelを使い、`OperationRegistry`で読み込み・統合・書込み境界をキャンセル可能にする。出力は同一directoryの一時ファイルをflush / sync後、最終cancel確認を通過した場合だけatomic replaceする
@@ -525,7 +525,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` (ADR-0002 で確定) |
 | Mermaid図 | Mermaid 11.17.2、strict security、dynamic import |
 | 自由図編集 | draw.io 31.5.3固定submodule、IPC権限なしloopback origin、sandboxed iframe |
-| PDF結合 | `lopdf 0.44`（MSRV 1.88、`aes 0.9.2`固定、展開済みstream 64 MiB上限） |
+| PDF結合 | `lopdf 0.45`（MSRV 1.88、`aes 0.9.2`固定、展開済みstream 64 MiB上限、終端のないstreamの事前検査） |
 | NRBF解析 | .NET 10 NativeAOT sidecar + `System.Formats.Nrbf 10.0.11`（NuGet lock、型非生成） |
 
 **確定済**:
@@ -571,6 +571,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-09-03 | 1.2 | NRBF IPCへbyte配列展開許可を追加し、node上限を500,000、protocol stdout上限を256 MiBへ変更。byte配列は許可時だけ50,000要素まで展開する契約を追加 |
 | 2026-09-25 | 1.3 | ADR-0023を反映。§2.2に複製したshotq内部のrayonの例外、§10.7 PNG最適化境界、§11の重い処理の方針を追加 |
 | 2026-09-30 | 1.4 | ADR-0017 §8追補を反映。§10.4と§13のdraw.io固定版を31.5.3へ更新 |
+| 2026-09-30 | 1.5 | ADR-0018 2026-09-30追補を反映。§10.5と§13のlopdfを0.45へ更新し、終端のないstreamの事前検査を追加 |
 
 ## SVG-Edit統合（ADR-0021）
 

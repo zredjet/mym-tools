@@ -22,6 +22,10 @@ use super::progress::PdfMergeProgress;
 pub const MAX_INPUT_FILES: usize = 50;
 pub const MAX_TOTAL_INPUT_BYTES: u64 = 200 * 1024 * 1024;
 const MAX_DECOMPRESSED_STREAM_BYTES: usize = 64 * 1024 * 1024;
+/// 読み込む前に許す、最後の `endstream` より後ろの終端のない `stream` の数
+/// (`count_unterminated_streams`)。途中で切れたファイルは 1 つしか持たず、
+/// 4 つまでなら lopdf の再構築はファイルの大きさの約 8 倍の走査で終わる。
+const MAX_UNTERMINATED_STREAMS: usize = 4;
 /// 全入力を読み込んだ後のストリーム内容の合計上限。`MAX_DECOMPRESSED_STREAM_BYTES` は
 /// ストリーム 1 つごとの上限なので、多数のストリームで合計が膨らむ入力をここで止める。
 const MAX_TOTAL_STREAM_BYTES: usize = 1024 * 1024 * 1024;
@@ -396,6 +400,10 @@ fn load_pdf(
     let size_bytes = u64::try_from(bytes.len())
         .map_err(|_| validation("PDFファイルのサイズが処理可能範囲を超えています。"))?;
     ensure_not_cancelled(token, operation_id)?;
+    if count_unterminated_streams(&bytes) > MAX_UNTERMINATED_STREAMS {
+        return Err(invalid_pdf("終端のないstreamが多すぎます。"));
+    }
+    ensure_not_cancelled(token, operation_id)?;
     let options = LoadOptions::with_max_decompressed_size(MAX_DECOMPRESSED_STREAM_BYTES);
     let document = Document::load_mem_with_options(&bytes, options).map_err(map_lopdf_error)?;
     ensure_not_cancelled(token, operation_id)?;
@@ -403,6 +411,26 @@ fn load_pdf(
         document,
         size_bytes,
     })
+}
+
+/// 最後の `endstream` より後ろにある、終端のない `stream` の数。lopdf 0.45 は相互参照を解決
+/// できない入力を object の走査で再構築し、その時に終端のない `stream` ごとに入力の末尾まで
+/// 読み直す (入力の大きさの 2 乗の時間がかかり、途中で取り消せない)。数える条件は lopdf の
+/// `Reader::scan_object_markers` と同じで、`endstream` の後ろだけを線形時間で数える。
+fn count_unterminated_streams(bytes: &[u8]) -> usize {
+    const STREAM: &[u8] = b"stream";
+    const END_STREAM: &[u8] = b"endstream";
+    let tail_start = bytes
+        .windows(END_STREAM.len())
+        .rposition(|window| window == END_STREAM)
+        .map_or(0, |position| position + END_STREAM.len());
+    (tail_start..bytes.len().saturating_sub(STREAM.len()))
+        .filter(|&position| {
+            bytes[position..].starts_with(STREAM)
+                && !bytes[..position].ends_with(b"end")
+                && matches!(bytes.get(position + STREAM.len()), Some(b'\r' | b'\n'))
+        })
+        .count()
 }
 
 fn read_file_cancellable(
@@ -558,11 +586,23 @@ fn map_lopdf_error(error: lopdf::Error) -> AppError {
         lopdf::Error::AlreadyEncrypted
         | lopdf::Error::InvalidPassword
         | lopdf::Error::Decryption(_) => validation("暗号化されたPDFには対応していません。"),
-        lopdf::Error::Decompress(_) => {
+        lopdf::Error::Decompress(lopdf::DecompressError::MemoryLimitExceeded { .. }) => {
             validation("PDF内の圧縮データが安全な展開サイズ上限（64 MiB）を超えています。")
         }
-        other => invalid_pdf(other.to_string()),
+        other => invalid_pdf(lopdf_error_detail(&other)),
     }
+}
+
+/// lopdf 0.45 以降のエラー表示は原因を含まないため、source の連鎖を ": " でつないで拒否理由に残す。
+fn lopdf_error_detail(error: &lopdf::Error) -> String {
+    let mut detail = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        detail.push_str(": ");
+        detail.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    detail
 }
 
 fn invalid_pdf(detail: impl Into<String>) -> AppError {
@@ -786,6 +826,157 @@ mod tests {
         let merged = Document::load(&output).unwrap();
         let lang = merged.catalog().unwrap().get(b"Lang").unwrap();
         assert_eq!(lang.as_str().unwrap(), b"ja-JP");
+    }
+
+    /// lopdf #532 の 3: 相互参照 stream の /W に巨大な幅を持つ PDF (幅 2^40 で 112 バイト)。
+    fn pdf_with_huge_xref_field_width(width: i64) -> Vec<u8> {
+        let mut bytes = b"%PDF-1.5\n".to_vec();
+        let xref_offset = bytes.len();
+        bytes.extend_from_slice(
+            format!(
+                "9 0 obj <</Type/XRef/Size 1/W [{width} 1 1]/Length 0>>stream\n\nendstream\nendobj\n"
+            )
+            .as_bytes(),
+        );
+        bytes.extend_from_slice(format!("startxref\n{xref_offset}\n%%EOF\n").as_bytes());
+        bytes
+    }
+
+    #[test]
+    fn rejects_xref_stream_with_huge_field_width_without_aborting() {
+        // lopdf 0.44 はこの幅で領域を確保しようとしてプロセスごと abort した (パニックではないため
+        // テストハーネスも終了する)。0.45 で幅が 8 以下に制限された。このテストは版の更新と同じ
+        // commit に置く。2^40 は issue の再現値、i64::MAX はどの OS でも確保に失敗する値。
+        let directory = tempfile::tempdir().unwrap();
+        let valid = save_document(directory.path(), "valid.pdf", sample_document(&[400]));
+        let output = directory.path().join("merged.pdf");
+        fs::write(&output, b"existing").unwrap();
+        for width in [1_i64 << 40, i64::MAX] {
+            let crafted = directory.path().join(format!("crafted-{width}.pdf"));
+            fs::write(&crafted, pdf_with_huge_xref_field_width(width)).unwrap();
+
+            let inspected = inspect_files_inner(
+                &[crafted.display().to_string()],
+                &CancellationToken::new(),
+                &mut |_| {},
+                "crafted",
+            )
+            .unwrap();
+            assert!(inspected.accepted.is_empty());
+            assert_eq!(inspected.rejected.len(), 1);
+            let reason = &inspected.rejected[0].reason;
+            assert!(reason.contains("解析できません"), "{reason}");
+
+            let error = merge_files_inner(
+                &[valid.display().to_string(), crafted.display().to_string()],
+                &output,
+                &CancellationToken::new(),
+                &mut |_| {},
+                "crafted-merge",
+            )
+            .unwrap_err();
+            assert!(rejection_reason(error).contains("解析できません"));
+            assert_eq!(fs::read(&output).unwrap(), b"existing");
+        }
+    }
+
+    #[test]
+    fn describes_lopdf_errors_with_their_causes() {
+        let limit = rejection_reason(map_lopdf_error(lopdf::Error::Decompress(
+            lopdf::DecompressError::MemoryLimitExceeded {
+                limit: MAX_DECOMPRESSED_STREAM_BYTES,
+            },
+        )));
+        assert!(limit.contains("64 MiB"), "{limit}");
+        let predictor = rejection_reason(map_lopdf_error(lopdf::Error::Decompress(
+            lopdf::DecompressError::Predictor("bad row"),
+        )));
+        assert!(predictor.contains("解析できません"), "{predictor}");
+        assert!(!predictor.contains("64 MiB"), "{predictor}");
+        assert!(predictor.contains("bad row"), "{predictor}");
+        let header = rejection_reason(map_lopdf_error(lopdf::Error::Parse(
+            lopdf::ParseError::InvalidFileHeader,
+        )));
+        assert!(header.contains("invalid file header"), "{header}");
+    }
+
+    #[test]
+    fn counts_only_unterminated_streams_after_the_last_endstream() {
+        assert_eq!(count_unterminated_streams(b""), 0);
+        assert_eq!(
+            count_unterminated_streams(b"1 0 obj<<>>stream\nabc\nendstream\nendobj\n"),
+            0
+        );
+        // 最後の endstream より前の stream と、改行の続かない stream は数えない
+        assert_eq!(
+            count_unterminated_streams(b"stream\nx endstream\nstream\nstream\r\nstreamx"),
+            2
+        );
+        assert_eq!(
+            count_unterminated_streams(b"stream\n".repeat(5).as_slice()),
+            5
+        );
+    }
+
+    #[test]
+    fn rejects_many_unterminated_streams_before_loading() {
+        // lopdf 0.45 の相互参照の再構築は、終端のない stream ごとに入力の末尾まで読み直す。
+        // 約 64 KiB でも再構築に入ると debug build で数秒かかるため、読み込む前に拒否する。
+        let directory = tempfile::tempdir().unwrap();
+        let crafted = directory.path().join("streams.pdf");
+        let mut bytes = b"%PDF-1.5\n".to_vec();
+        bytes.extend(b"stream\n".repeat(64 * 1024 / 7));
+        fs::write(&crafted, bytes).unwrap();
+        let valid = save_document(directory.path(), "valid.pdf", sample_document(&[400]));
+        let output = directory.path().join("merged.pdf");
+        fs::write(&output, b"existing").unwrap();
+
+        let started = Instant::now();
+        let inspected = inspect_files_inner(
+            &[crafted.display().to_string()],
+            &CancellationToken::new(),
+            &mut |_| {},
+            "streams",
+        )
+        .unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert_eq!(inspected.rejected.len(), 1);
+        let reason = &inspected.rejected[0].reason;
+        assert!(reason.contains("終端のないstreamが多すぎます"), "{reason}");
+
+        let error = merge_files_inner(
+            &[valid.display().to_string(), crafted.display().to_string()],
+            &output,
+            &CancellationToken::new(),
+            &mut |_| {},
+            "streams-merge",
+        )
+        .unwrap_err();
+        assert!(rejection_reason(error).contains("終端のないstreamが多すぎます"));
+        assert_eq!(fs::read(&output).unwrap(), b"existing");
+    }
+
+    #[test]
+    fn passes_a_single_truncated_stream_to_lopdf() {
+        // 途中で切れたファイル (終端のない stream 1 つ) は事前検査を通り、lopdf が判断する。
+        let directory = tempfile::tempdir().unwrap();
+        let truncated = directory.path().join("truncated.pdf");
+        fs::write(
+            &truncated,
+            b"%PDF-1.5\n1 0 obj\n<</Length 100>>\nstream\npartial content",
+        )
+        .unwrap();
+        let inspected = inspect_files_inner(
+            &[truncated.display().to_string()],
+            &CancellationToken::new(),
+            &mut |_| {},
+            "truncated",
+        )
+        .unwrap();
+        assert_eq!(inspected.rejected.len(), 1);
+        let reason = &inspected.rejected[0].reason;
+        assert!(reason.contains("解析できません"), "{reason}");
+        assert!(!reason.contains("終端のないstream"), "{reason}");
     }
 
     #[test]

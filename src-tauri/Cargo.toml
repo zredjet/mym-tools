@@ -4,7 +4,7 @@ version = "0.1.0-alpha.20"
 description = "MyMyTools — 軽量なクロスプラットフォーム多目的 GUI ツール"
 authors = ["zredjet"]
 edition = "2021"
-rust-version = "1.88"  # lopdf 0.44 の MSRV。rust-toolchain.toml は stable を追従する。
+rust-version = "1.88"  # lopdf 0.45 の MSRV。rust-toolchain.toml は stable を追従する。
 # 依存の新しい版が rust-version を満たさない時は満たす版を選ぶ (cargo update / cargo add)。
 # resolver 2 から変わるのはこの既定値だけで、feature の統合は同じ。
 # [workspace] に置くと crates/shotq が member になるため [package] に置く。
@@ -72,9 +72,10 @@ md-5 = "0.10"
 sha1 = "0.10"
 sha2 = "0.10"
 
-# M-PDF Merge: 非暗号化PDFの検査・ページツリー結合。展開サイズ上限を使うため0.44以上。
-lopdf = { version = "0.44", default-features = false }
-# lopdf 0.44の許容範囲でaes 0.9.3を選ぶとRust 1.89が必要になるため、MSRV 1.88対応版へ固定する。
+# M-PDF Merge: 非暗号化PDFの検査・ページツリー結合。展開サイズ上限 (0.44〜) と、
+# 相互参照streamの巨大な/W幅でabortしない修正 (0.45、lopdf #532) を使うため0.45以上。
+lopdf = { version = "0.45", default-features = false }
+# lopdf 0.45の許容範囲 (aes ^0.9) でaes 0.9.3を選ぶとRust 1.89が必要になるため、MSRV 1.88対応版へ固定する。
 aes = "=0.9.2"
 
 # M-PNG最適化 (ADR-0023): shotq のライブラリ部分を複製して path 依存にする。複製元は crates/shotq/UPSTREAM.md。
