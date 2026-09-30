@@ -136,6 +136,17 @@ mod tests {
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\nfixture";
 
     #[test]
+    fn rejects_duplicate_attributes_on_large_tags() {
+        // 32 属性を超えると quick-xml は重複検査を hash で行う (0.41 以降)。どちらの経路でも拒否する。
+        let many: String = (0..40).map(|i| format!(" data-a{i}=\"1\"")).collect();
+        let svg =
+            |extra: &str| format!(r#"<svg xmlns="http://www.w3.org/2000/svg"{many}{extra}/>"#);
+        assert!(validate_safe_mermaid_svg(svg("").as_bytes()).is_ok());
+        assert!(validate_safe_mermaid_svg(svg(r#" data-a0="2""#).as_bytes()).is_err());
+        assert!(validate_safe_mermaid_svg(br#"<svg x="1" x="2"/>"#).is_err());
+    }
+
+    #[test]
     fn writes_svg_and_png_and_replaces_existing_file() {
         let directory = tempfile::tempdir().unwrap();
         let svg = directory.path().join("diagram.svg");

@@ -16,7 +16,7 @@
 
 use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
-use quick_xml::{Reader, Writer};
+use quick_xml::{Reader, Writer, XmlVersion};
 
 use super::validation::error;
 use crate::error::AppError;
@@ -270,8 +270,9 @@ fn rewrite_element(
     for attr in element.attributes().with_checks(false) {
         let attr = attr.map_err(|e| error(e.to_string()))?;
         let key = String::from_utf8_lossy(attr.key.as_ref()).into_owned();
+        // XML の属性値正規化 (改行・タブを空白にする)。書き戻す style / light-dark / var の値だけに効く。
         let value = attr
-            .unescape_value()
+            .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|e| error(e.to_string()))?
             .into_owned();
         if key == "style" {
@@ -466,6 +467,41 @@ mod tests {
                 assert!(notices.contains(notice), "{}: {notices}", export.version);
             }
         }
+    }
+
+    #[test]
+    fn converted_draw_io_export_matches_the_shared_fixture() {
+        // 共通 fixture の変換結果と、31.4.1 の書出しを今の変換器に通した結果が 1 バイトも違わないこと。
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../scripts/svgedit/validation-fixtures.json"
+        ))
+        .unwrap();
+        let expected = fixtures
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["name"] == "draw.io export after import conversion")
+            .unwrap()["svg"]
+            .as_str()
+            .unwrap();
+        let converted = convert_drawio_svg(DRAWIO_EXPORTS[0].svg).unwrap().unwrap();
+        assert_eq!(converted.svg, expected);
+    }
+
+    #[test]
+    fn line_breaks_in_rewritten_attributes_become_spaces() {
+        // quick-xml 0.40 以降は属性値を正規化する (改行・タブを空白にする)。
+        let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" id=\"ge-svg-x\">\
+                   <rect style=\"stroke-dasharray: 3\n3;\tfill: light-dark(#fff,\n#000)\"/></svg>";
+        let converted = convert_drawio_svg(svg).unwrap().unwrap();
+        assert!(
+            converted
+                .svg
+                .contains(r#"style="stroke-dasharray: 3 3; fill: #fff""#),
+            "{}",
+            converted.svg
+        );
+        validate_svg(&converted.svg).unwrap();
     }
 
     #[test]
