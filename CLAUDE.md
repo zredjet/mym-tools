@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 5. `docs/module-contract.md` — モジュールがコアと結ぶ契約 (= モジュール/コア境界)
 6. `docs/ui-design.md` — UI の正典: トークン、画面スケルトン (§6 に C 系と各モジュール画面)、キーボードショートカット、空状態
 7. `docs/developer-tools-plan.md` — 開発ツール 11 モジュールの範囲、段階、品質条件
-8. `docs/release-process.md` / `docs/vector-editor-verification.md` — リリース手順、ベクター描画の検証・実機受入
+8. `docs/release-process.md` / `docs/vector-editor-verification.md` / `docs/diagram-editor-verification.md` — リリース手順、ベクター描画・ダイアグラムの検証・実機受入
 9. `docs/MyMyTools Prototype.bundle.html` — 見た目の参考 (Claude Design 出力)。**技術判断のソースにはしない**
 
 プロトタイプ HTML はブラウザで開けば想定の見た目が確認できるが、技術的な決定の根拠は ADR を見ること。
