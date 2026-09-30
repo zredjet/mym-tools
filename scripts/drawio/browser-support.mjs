@@ -252,13 +252,24 @@ export function largeDiagramXml(targetBytes) {
   return mxfile([{ id: "large", name: "大きな図", xml: model(cells) }]);
 }
 
-/** 保存のたびに変わる属性だけを除き、同じ図かどうかを比べられるようにする。 */
+/**
+ * 保存のたびに変わる属性を除き、属性の並び順をそろえて、同じ図かどうかを比べられるようにする。
+ * draw.io は同じ内容でも編集の経路によって属性を違う順で書き出す。
+ */
 export function normalizeDrawioFile(xml) {
   return xml
     .replace(/<mxfile\b[^>]*>/, (tag) =>
       tag.replace(/\s(?:host|agent|version|modified|etag)="[^"]*"/g, ""),
     )
-    .replace(/<mxGraphModel\b[^>]*>/g, (tag) => tag.replace(/\s(?:dx|dy)="[^"]*"/g, ""));
+    .replace(/<mxGraphModel\b[^>]*>/g, (tag) => tag.replace(/\s(?:dx|dy)="[^"]*"/g, ""))
+    .replace(
+      /<([A-Za-z][\w:.-]*)((?:\s+[^\s=/>]+="[^"]*")*)(\s*\/?)>/g,
+      (_, name, attributes, end) =>
+        `<${name}${[...attributes.matchAll(/\s+([^\s=]+)="([^"]*)"/g)]
+          .map(([, key, value]) => ` ${key}="${value}"`)
+          .sort()
+          .join("")}${end.trim()}>`,
+    );
 }
 
 /** PNG の署名と IHDR を確かめ、幅と高さを返す。 */

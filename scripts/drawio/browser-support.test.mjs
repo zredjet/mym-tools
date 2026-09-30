@@ -80,6 +80,15 @@ describe("draw.io browser smoke support", () => {
     );
   });
 
+  it("ignores the attribute order but keeps values and text", () => {
+    const a =
+      '<mxGraphModel page="1" grid="1"><mxCell id="2" value="a &gt; b" vertex="1" /></mxGraphModel>';
+    const b =
+      '<mxGraphModel grid="1" page="1"><mxCell vertex="1" id="2" value="a &gt; b"/></mxGraphModel>';
+    expect(normalizeDrawioFile(a)).toBe(normalizeDrawioFile(b));
+    expect(normalizeDrawioFile(a)).not.toBe(normalizeDrawioFile(b.replace('"2"', '"3"')));
+  });
+
   it("reads the PNG size and rejects other data", () => {
     expect(pngSize(ONE_PIXEL_PNG)).toEqual({ width: 1, height: 1 });
     expect(() => pngSize(Buffer.from("not a png"))).toThrow("PNG ではありません。");

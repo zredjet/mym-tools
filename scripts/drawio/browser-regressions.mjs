@@ -43,11 +43,11 @@ export async function verifyUndoRedo({ load, invoke, saveXml, textContent, smoke
   };
 
   await load(smokeXml);
-  // delete は invokeAction では event を持たず、頂点だけを消して edge を宙に浮かせる。
   await scenario("図形", [
     ["selectAll", "duplicate"],
-    ["selectVertices", "delete"],
+    ["selectVertices", "deleteAll"],
   ]);
+  const danglingEdges = await verifyDanglingEdges({ invoke, snapshot, textContent });
   await scenario("全削除", [["selectAll", "deleteAll"]]);
   await scenario("グループ", [["selectAll", "group"], ["ungroup"]]);
   await scenario("ページ", [["insertPage"], ["duplicatePage"], ["removePage"]]);
@@ -93,9 +93,47 @@ export async function verifyUndoRedo({ load, invoke, saveXml, textContent, smoke
 
   await load(smokeXml);
   return {
+    danglingEdges,
     timings,
     largeInputBytes,
     largeSavedBytes,
     savedToInputRatio: largeSavedBytes / largeInputBytes,
+  };
+}
+
+/**
+ * delete は invokeAction では event を持たず、頂点だけを消して edge を宙に浮かせる。
+ * 両端を消した edge は削除直後も削除済み cell を参照したまま残る (31.4.1 から続く上流の挙動)。
+ * 31.5 系は redo の時に修復処理がこの参照を端点座標へ置き換えるため、redo の結果は
+ * 最初の削除と一致しない。undo が元へ正確に戻ることだけを保証し、redo の差は記録する。
+ */
+async function verifyDanglingEdges({ invoke, snapshot, textContent }) {
+  const textBefore = await textContent();
+  const before = await snapshot();
+  await invoke("selectVertices");
+  await invoke("delete");
+  const deleted = await snapshot();
+  assert.notEqual(deleted, before, "宙に浮く edge: 頂点の削除で図が変わらない");
+  await invoke("undo");
+  assert.equal(await snapshot(), before, "宙に浮く edge: undo で元に戻らない");
+  await invoke("redo");
+  const redone = await snapshot();
+  await invoke("undo");
+  assert.equal(await snapshot(), before, "宙に浮く edge: redo の後の undo で元に戻らない");
+  assert.equal(await textContent(), textBefore, "宙に浮く edge: 抽出テキストが元に戻らない");
+  const danglingReferences = (xml) => {
+    const cells = [...xml.matchAll(/<mxCell\b[^>]*>/g)].map(([tag]) =>
+      Object.fromEntries([...tag.matchAll(/\s([^\s=]+)="([^"]*)"/g)].map(([, k, v]) => [k, v])),
+    );
+    const ids = new Set(cells.map((cell) => cell.id));
+    return cells
+      .filter((cell) => cell.edge === "1")
+      .filter((cell) => [cell.source, cell.target].some((id) => id != null && !ids.has(id)))
+      .map((cell) => cell.id);
+  };
+  return {
+    redoMatchesDelete: redone === deleted,
+    danglingAfterDelete: danglingReferences(deleted),
+    danglingAfterRedo: danglingReferences(redone),
   };
 }
