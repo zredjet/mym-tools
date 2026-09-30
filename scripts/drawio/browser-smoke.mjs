@@ -18,7 +18,7 @@ import {
   drawioTargetOrigin,
   parseDrawioMessage,
 } from "../../src/modules/diagram/drawioBridge.ts";
-import { verifyUndoRedo } from "./browser-regressions.mjs";
+import { verifyPageMove, verifyUndoRedo } from "./browser-regressions.mjs";
 import {
   EXPECTED_JA,
   MAX_DIAGRAM_BYTES,
@@ -416,6 +416,8 @@ try {
 
   step = "undoRedo";
   result.undoRedo = await verifyUndoRedo({ load, invoke, saveXml, textContent, smokeXml });
+  step = "pageMove";
+  result.pageMove = await verifyPageMove({ page, frame, load, invoke, saveXml, smokeXml });
 
   // 手動受入用のファイル。1 MiB 未満の図は保存時の膨張を見込んで 32 KiB 以上の余裕を取る。
   writeFileSync(resolve(OUTPUT, "smoke-multipage.drawio"), smokeXml);
