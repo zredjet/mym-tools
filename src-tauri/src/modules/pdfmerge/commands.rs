@@ -22,9 +22,9 @@ use super::progress::PdfMergeProgress;
 pub const MAX_INPUT_FILES: usize = 50;
 pub const MAX_TOTAL_INPUT_BYTES: u64 = 200 * 1024 * 1024;
 const MAX_DECOMPRESSED_STREAM_BYTES: usize = 64 * 1024 * 1024;
-/// 読み込む前に許す、最後の `endstream` より後ろの終端のない `stream` の数
-/// (`count_unterminated_streams`)。途中で切れたファイルは 1 つしか持たず、
-/// 4 つまでなら lopdf の再構築はファイルの大きさの約 8 倍の走査で終わる。
+/// 最後の `endstream` より後ろの終端のない `stream` (`count_unterminated_streams`) がこの数を
+/// 超える入力は、相互参照を再構築しない strict で読めた時だけ受け付ける。途中で切れたファイルは
+/// 1 つしか持たず、4 つまでなら lopdf の再構築はファイルの大きさの約 8 倍の走査で終わる。
 const MAX_UNTERMINATED_STREAMS: usize = 4;
 /// 全入力を読み込んだ後のストリーム内容の合計上限。`MAX_DECOMPRESSED_STREAM_BYTES` は
 /// ストリーム 1 つごとの上限なので、多数のストリームで合計が膨らむ入力をここで止める。
@@ -400,12 +400,27 @@ fn load_pdf(
     let size_bytes = u64::try_from(bytes.len())
         .map_err(|_| validation("PDFファイルのサイズが処理可能範囲を超えています。"))?;
     ensure_not_cancelled(token, operation_id)?;
-    if count_unterminated_streams(&bytes) > MAX_UNTERMINATED_STREAMS {
-        return Err(invalid_pdf("終端のないstreamが多すぎます。"));
-    }
-    ensure_not_cancelled(token, operation_id)?;
     let options = LoadOptions::with_max_decompressed_size(MAX_DECOMPRESSED_STREAM_BYTES);
-    let document = Document::load_mem_with_options(&bytes, options).map_err(map_lopdf_error)?;
+    let document = if count_unterminated_streams(&bytes) > MAX_UNTERMINATED_STREAMS {
+        // lopdf は相互参照を解決できない時だけ再構築の走査に入る。strict は再構築も startxref の補正も
+        // しないため、strict で読める PDF (コメントや文字列に "stream" が並ぶだけの正常な PDF) は
+        // そのまま使い、読めない時は再構築の走査が 2 乗の時間になる入力として拒否する。
+        let strict = LoadOptions {
+            strict: true,
+            ..options
+        };
+        Document::load_mem_with_options(&bytes, strict).map_err(|error| match error {
+            lopdf::Error::AlreadyEncrypted
+            | lopdf::Error::InvalidPassword
+            | lopdf::Error::Decryption(_)
+            | lopdf::Error::Decompress(lopdf::DecompressError::MemoryLimitExceeded { .. }) => {
+                map_lopdf_error(error)
+            }
+            _ => invalid_pdf("終端のないstreamが多すぎます。"),
+        })?
+    } else {
+        Document::load_mem_with_options(&bytes, options).map_err(map_lopdf_error)?
+    };
     ensure_not_cancelled(token, operation_id)?;
     Ok(LoadedPdf {
         document,
@@ -921,7 +936,7 @@ mod tests {
     #[test]
     fn rejects_many_unterminated_streams_before_loading() {
         // lopdf 0.45 の相互参照の再構築は、終端のない stream ごとに入力の末尾まで読み直す。
-        // 約 64 KiB でも再構築に入ると debug build で数秒かかるため、読み込む前に拒否する。
+        // 約 64 KiB でも再構築に入ると debug build で数秒かかるため、strict で読めない入力は拒否する。
         let directory = tempfile::tempdir().unwrap();
         let crafted = directory.path().join("streams.pdf");
         let mut bytes = b"%PDF-1.5\n".to_vec();
@@ -954,6 +969,47 @@ mod tests {
         .unwrap_err();
         assert!(rejection_reason(error).contains("終端のないstreamが多すぎます"));
         assert_eq!(fs::read(&output).unwrap(), b"existing");
+    }
+
+    #[test]
+    fn accepts_a_valid_pdf_with_stream_comments_after_the_last_stream() {
+        // 相互参照が正常な PDF は、最後の stream より後ろのコメントに "stream" が並んでも拒否しない
+        // (strict で読めるため、lopdf は再構築の走査に入らない)。
+        let directory = tempfile::tempdir().unwrap();
+        let mut bytes = Vec::new();
+        sample_document(&[450]).save_to(&mut bytes).unwrap();
+        let startxref = bytes
+            .windows(b"startxref".len())
+            .rposition(|window| window == b"startxref")
+            .unwrap();
+        bytes.splice(startxref..startxref, b"%stream\n".repeat(6));
+        assert!(count_unterminated_streams(&bytes) > MAX_UNTERMINATED_STREAMS);
+        let commented = directory.path().join("commented.pdf");
+        fs::write(&commented, &bytes).unwrap();
+
+        let inspected = inspect_files_inner(
+            &[commented.display().to_string()],
+            &CancellationToken::new(),
+            &mut |_| {},
+            "commented",
+        )
+        .unwrap();
+        assert!(inspected.rejected.is_empty(), "{:?}", inspected.rejected);
+        assert_eq!(inspected.accepted[0].page_count, 1);
+
+        let output = directory.path().join("merged.pdf");
+        let merged = merge_files_inner(
+            &[
+                commented.display().to_string(),
+                commented.display().to_string(),
+            ],
+            &output,
+            &CancellationToken::new(),
+            &mut |_| {},
+            "commented-merge",
+        )
+        .unwrap();
+        assert_eq!(merged.total_pages, 2);
     }
 
     #[test]
