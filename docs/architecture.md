@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-09-25 / ステータス: Draft (Phase 1)
+最終更新: 2026-09-30 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -438,7 +438,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 ### 10.4 完全オフライン図編集境界
 
 - Mermaid 11.17.2は画面を開いたときだけdynamic importし、300ms debounce後に`securityLevel: strict` / HTML label無効で描画する。render tokenが古い非同期結果を破棄する
-- draw.io 31.4.1は固定submoduleから`.generated/public/drawio`へ決定的にprepareし、Vite `publicDir`経由でTauri assetへ埋め込む。build時にnetwork取得しない
+- draw.io 31.5.3は固定submoduleから`.generated/public/drawio`へ決定的にprepareし、Vite `publicDir`経由でTauri assetへ埋め込む。build時にnetwork取得しない
 - draw.io iframeはmoduleを開いた時だけ`127.0.0.1`のrandom portへbindするasset serverを起動し、親と異なるloopback originでlazy初期化する。serverはGET / HEAD、厳密なHost、asset pathだけを受理し、図dataは扱わない
 - editor originは同梱資産読込みだけを許可するCSP `connect-src 'self'`、sandbox `allow-scripts allow-same-origin`で動かす。Tauri ACLはapp commandをlocal app originだけへ許可し、remote扱いのloopback editorにはcore / plugin IPC権限を付与しない。親との唯一のdata pathは`postMessage`
 - 親は`event.source`、origin、init後のevent順序、request ID、1MiB XML/text、export受信sizeを検証する。不正messageはstateへ反映しない
@@ -524,7 +524,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | ロギング | `tracing` |
 | Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` (ADR-0002 で確定) |
 | Mermaid図 | Mermaid 11.17.2、strict security、dynamic import |
-| 自由図編集 | draw.io 31.4.1固定submodule、IPC権限なしloopback origin、sandboxed iframe |
+| 自由図編集 | draw.io 31.5.3固定submodule、IPC権限なしloopback origin、sandboxed iframe |
 | PDF結合 | `lopdf 0.44`（MSRV 1.88、`aes 0.9.2`固定、展開済みstream 64 MiB上限） |
 | NRBF解析 | .NET 10 NativeAOT sidecar + `System.Formats.Nrbf 10.0.11`（NuGet lock、型非生成） |
 
@@ -570,6 +570,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-09-03 | 1.1 | ADR-0020を反映。NRBFの型非生成NativeAOT sidecar、IPC・上限・cancel境界、配布構成、CI検査を追加 |
 | 2026-09-03 | 1.2 | NRBF IPCへbyte配列展開許可を追加し、node上限を500,000、protocol stdout上限を256 MiBへ変更。byte配列は許可時だけ50,000要素まで展開する契約を追加 |
 | 2026-09-25 | 1.3 | ADR-0023を反映。§2.2に複製したshotq内部のrayonの例外、§10.7 PNG最適化境界、§11の重い処理の方針を追加 |
+| 2026-09-30 | 1.4 | ADR-0017 §8追補を反映。§10.4と§13のdraw.io固定版を31.5.3へ更新 |
 
 ## SVG-Edit統合（ADR-0021）
 

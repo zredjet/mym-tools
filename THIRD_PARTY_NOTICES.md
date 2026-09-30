@@ -3,7 +3,7 @@
 MyMyTools includes the following third-party components in its distributed binary.
 
 - Mermaid 11.17.2 — MIT License — <https://github.com/mermaid-js/mermaid/tree/v11.17.2>
-- draw.io 31.4.1, commit `fea5e877f3e6f849331ad09894f7edb9771708fa` — Apache License 2.0 — <https://github.com/jgraph/drawio/tree/fea5e877f3e6f849331ad09894f7edb9771708fa>
+- draw.io 31.5.3, commit `0f419a92c769adb5fb20f2b18053a5ae8c7e4993` — Apache License 2.0 — <https://github.com/jgraph/drawio/tree/0f419a92c769adb5fb20f2b18053a5ae8c7e4993>
 - lopdf 0.44.0 — MIT License — <https://github.com/J-F-Liu/lopdf/tree/v0.44.0>
 - System.Formats.Nrbf 10.0.11 / .NET NativeAOT runtime — MIT License — <https://github.com/dotnet/runtime/tree/v10.0.11>
 - shotq 0.23.2 (library part, vendored in `src-tauri/crates/shotq`) — MIT License (shotq is MIT OR Apache-2.0) — includes code adapted from zlib (`adler32.c`, puff) and links libdeflate (MIT), libdeflater (Apache-2.0), zlib-rs (Zlib), qcms (MIT) and other crates listed in [shotq-NOTICES.txt](third_party/shotq-NOTICES.txt)
