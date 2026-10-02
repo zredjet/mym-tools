@@ -155,7 +155,7 @@ function SearchOverlayContent({
             onClick={() => setScope("global")}
           />
         </div>
-        <div className="flex items-center gap-1 text-[12px] text-[var(--fg-muted)]">
+        <div className="flex flex-wrap items-center gap-1 text-[12px] text-[var(--fg-muted)]">
           <span className="text-[var(--fg-subtle)]">Module:</span>
           {[{ id: "all", displayName: "すべて" }, ...searchableModules].map((m) => (
             <ScopeChip
@@ -239,7 +239,7 @@ function ScopeChip({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "rounded-full px-2.5 py-0.5 text-[12px] transition-colors",
+        "rounded-full px-2.5 py-0.5 text-[12px] whitespace-nowrap transition-colors",
         "disabled:cursor-not-allowed disabled:opacity-50",
         selected
           ? "bg-[var(--bg-accent-soft)] text-[var(--accent)]"
