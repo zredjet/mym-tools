@@ -3,7 +3,7 @@
  *
  * 既定アプリで「開く」と実行されるファイル (アプリ / スクリプト / インストーラ / ショートカット)
  * は、インポートした JSON 由来の Link 1 クリックで任意コードが動き得るため、開く前に確認する。
- * UNC (ネットワーク共有) は Rust 側 `linkmemo_open` が拒否する。
+ * ネットワーク上の場所 (UNC) の確認は `networkTrust.ts` が別に扱う。
  */
 const EXECUTABLE_EXTENSIONS = new Set([
   // macOS

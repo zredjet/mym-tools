@@ -82,6 +82,7 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - モジュール ID は `^[a-z0-9]{3,32}$`。Tauri command 名は `<module_id>_<action>`、コアは `core_*`
 - `items.title` は全モジュール共通の表示名。M-Color も独自の `name` フィールドは持たず `title` を使う
 - M-Link (`linkmemo`) は `target` 単一フィールド (`url` / `path` の分割なし)。type は `"url" | "path"`。URL 欄に `file://...` を入れたら `path` に正規化する (`linkmemo_normalize_target` / module-contract §12.2)
+- M-Link の path でネットワーク上の場所 (UNC / `\\?\` / `\\.\` / `\??\`) を開くのは、確認せずに開くサーバ (`modules.linkmemo.trusted_network_hosts`) か、確認ダイアログで「開く」を選んだ時だけ。`linkmemo_open` は `allowNetworkPath: true` の無い呼び出しを拒否する (Windows では存在確認の時点で NTLM 認証がサーバへ送られるため。data-model §10.2)
 - M-Memo (`memo`) の payload v1 は `{ body: string }` (空文字不可)。export schema v1 の旧 `linkmemo` + `type=memo` は import 時に `memo` へ正規化する (ADR-0016)
 - Mermaid は `{ source }`、Diagram は `{ xml, text }` (各 UTF-8 1 MiB 以下)、Vector は `{ svg, text }` (SVG 20 MiB 以下)。`text` は検索用の抽出テキスト。いずれも一覧を挟まず直近 item か新規ドラフトを開く
 - 大きな payload を持つモジュールの一覧・検索は `core_list_item_summaries` / `core_search_previews` (payload を SELECT しない) と `search_preview_field()` を使う (ADR-0021)

@@ -2,6 +2,7 @@ import { lazy } from "react";
 import { Link as LinkIcon } from "lucide-react";
 
 import type { LinkPayloadV1 } from "@/lib/types";
+import { LinkMemoSettingsSection } from "@/modules/linkmemo/LinkMemoSettingsSection";
 import type { ModuleDefinition } from "@/modules/types";
 
 const LinkMemoListPage = lazy(() =>
@@ -31,4 +32,5 @@ export const linkMemoModule: ModuleDefinition = {
       };
     },
   },
+  settingsSection: LinkMemoSettingsSection,
 };

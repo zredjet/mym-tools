@@ -1,6 +1,6 @@
 # データモデル (Data Model)
 
-最終更新: 2026-09-25 / ステータス: Draft (Phase 1)
+最終更新: 2026-10-02 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**データをどう持つか**」を定義する。
 要件 (`requirements.md`) と構造 (`architecture.md`) で確定した方針を、
@@ -640,6 +640,11 @@ project 削除実行時、StorageService は**削除トランザクションの�
 **バリデーション**:
 - `type=url` のとき: `target` は `http://` または `https://` で始まる (`file://` 入力は path に正規化されているのでここに来ない)
 - `type=path` のとき: `target` は空文字でない
+
+**ネットワーク上の場所を開く時の確認** (保存の可否は変えない):
+- 対象: UNC (`\\server\share` / `//server/share`)、Win32 の device path (`\\?\` / `\\.\`)、NT の object path (`\??\`)。Windows では存在確認の時点で SMB 接続が走り、サインイン情報 (NTLM 認証) がサーバへ送られる
+- `modules.linkmemo.trusted_network_hosts` (§11.2) にあるサーバは確認せずに開く。それ以外は開く前に確認し、確認ダイアログで「今後確認せずに開く」を選ぶとこの一覧へ加える。サーバ名を取り出せない device path / object path は常に確認する
+- `linkmemo_open` は `allowNetworkPath: true` の無いネットワーク上の場所を拒否する (`module-contract.md` §12.2)
 **search_text 生成**: `title + " " + target + " " + body`
 
 ### 10.3 M-Memo (`id = memo`)
@@ -769,6 +774,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
     },
     "linkmemo": {
       "favicon_fetch_enabled": false,
+      "trusted_network_hosts": ["nas", "fileserver.example.local"],
       "last_seen_payload_version": 1
     },
     "memo": {
@@ -795,6 +801,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
 - `core.module_enabled.<id>`: UI 上の有効状態。キーが無ければ registry の `enabledByDefault` を使う (ADR-0012)
 - ADR-0016以前の設定で `linkmemo` が明示され、`memo` が無い場合だけ、初回読込み時のMemo有効状態へ同値を継承する。`memo` が存在すれば個別値を優先する
 - `core.collapsed_module_categories`: サイドバーで閉じた表示カテゴリIDの配列。キーが無い初回は全展開。未知IDは前方互換のため保持する (ADR-0014)
+- `modules.linkmemo.trusted_network_hosts`: Link のネットワーク上の場所を確認せずに開くサーバ名の配列 (§10.2)。小文字で保存し、サーバ名として使えない値と重複は読込み時に除く。settings.json は export / import の対象外なので、インポートした JSON では増えない
 
 #### 例外: `modules.<id>.last_seen_payload_version` (コアが解釈する規約フィールド)
 
@@ -1323,6 +1330,7 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-09-25 | 1.5 | `core.sidebar_collapsed` (サイドバー全体の開閉状態) を §11.1 に追加 |
 | 2026-09-25 | 1.6 | DB schema v4: project 削除時の FTS 同期トリガ (`trg_items_fts_ad` の条件付き化と `trg_projects_fts_bd`) を §8.2 / §14.4 に追加 |
 | 2026-09-25 | 1.7 | §5 にプロジェクトの並び替えで `updated_at` を変えないことを明記 |
+| 2026-10-02 | 1.8 | §10.2 に Link のネットワーク上の場所を開く時の確認を、§11 に `modules.linkmemo.trusted_network_hosts` を追加 |
 
 ## ベクター作品と軽量な参照API（ADR-0021）
 

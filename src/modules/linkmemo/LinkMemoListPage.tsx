@@ -3,7 +3,8 @@
  *
  * create + edit + C-15 タイプ・トゥ・コンファーム削除 + open を提供する。
  * - 行高 32px / type 別アイコン (URL: 🌐 / Path: 📄)
- * - クリックで OS 既定アプリで開く
+ * - クリックで OS 既定アプリで開く。登録済みでないネットワーク上のサーバと、実行されるファイルは
+ *   開く前に確認する
  * - 編集ボタン → `LinkMemoItemDialog` (mode=edit)
  * - 削除は `ConfirmDeleteDialog`
  * - `mod+n` で新規
@@ -40,7 +41,21 @@ import { cn } from "@/lib/cn";
 import { formatInvokeError } from "@/lib/error";
 import type { Item, LinkPayloadV1 } from "@/lib/types";
 import { LinkMemoItemDialog } from "@/modules/linkmemo/LinkMemoItemDialog";
+import {
+  type NetworkLocation,
+  isTrustedLocation,
+  networkLocation,
+} from "@/modules/linkmemo/networkTrust";
 import { requiresOpenConfirmation } from "@/modules/linkmemo/openSafety";
+import { useTrustedNetworkHosts } from "@/modules/linkmemo/useTrustedNetworkHosts";
+
+interface OpenConfirmation {
+  payload: LinkPayloadV1;
+  /** 登録済みでないネットワーク上の場所 */
+  network: NetworkLocation | null;
+  /** 開くとプログラムとして実行され得るファイル */
+  executable: boolean;
+}
 
 export function LinkMemoListPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -50,7 +65,9 @@ export function LinkMemoListPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deletingItem, setDeletingItem] = useState<Item | null>(null);
-  const [confirmingOpen, setConfirmingOpen] = useState<LinkPayloadV1 | null>(null);
+  const [confirmingOpen, setConfirmingOpen] = useState<OpenConfirmation | null>(null);
+  const [trustHost, setTrustHost] = useState(false);
+  const { hosts: trustedHosts, trust } = useTrustedNetworkHosts();
 
   const refresh = useCallback(async (pid: string) => {
     try {
@@ -128,22 +145,45 @@ export function LinkMemoListPage() {
 
   const openTarget = async (payload: LinkPayloadV1) => {
     try {
-      await linkmemoOpen({ itemType: payload.type, target: payload.target });
+      await linkmemoOpen({
+        itemType: payload.type,
+        target: payload.target,
+        // ここへ来るネットワーク上の場所は、登録済みのサーバか、確認ダイアログで「開く」を選んだもの
+        allowNetworkPath: payload.type === "path" && networkLocation(payload.target) != null,
+      });
+      setError(null);
     } catch (e) {
-      setError(formatInvokeError(e));
+      setError(formatOpenError(e));
     }
   };
 
   const handleOpen = async (item: Item) => {
     const payload = asPayload(item);
     if (payload.target === "") return;
-    // 実行されるファイルは開く前に確認する (インポート由来の Link 対策)
-    if (payload.type === "path" && requiresOpenConfirmation(payload.target)) {
-      setConfirmingOpen(payload);
-      return;
+    if (payload.type === "path") {
+      // 登録済みでないサーバと、実行されるファイルは開く前に確認する (インポート由来の Link 対策)
+      const location = networkLocation(payload.target);
+      const network =
+        location != null && !isTrustedLocation(location, trustedHosts) ? location : null;
+      const executable = requiresOpenConfirmation(payload.target);
+      if (network != null || executable) {
+        setTrustHost(false);
+        setConfirmingOpen({ payload, network, executable });
+        return;
+      }
     }
     await openTarget(payload);
   };
+
+  const handleConfirmOpen = () => {
+    const confirmation = confirmingOpen;
+    setConfirmingOpen(null);
+    if (confirmation == null) return;
+    const host = confirmation.network?.host;
+    if (trustHost && host != null) trust(host);
+    void openTarget(confirmation.payload);
+  };
+  const confirmingHost = confirmingOpen?.network?.host ?? null;
 
   if (projectId == null) {
     return (
@@ -233,30 +273,66 @@ export function LinkMemoListPage() {
       <Modal
         open={confirmingOpen != null}
         onClose={() => setConfirmingOpen(null)}
-        title="実行ファイルを開きますか?"
+        title={confirmOpenTitle(confirmingOpen)}
       >
-        <p className="text-[13px] text-[var(--fg-muted)]">
-          このファイルは開くとプログラムとして実行される可能性があります。内容を確認済みの場合のみ開いてください。
-        </p>
-        <p className="mt-2 font-mono text-[12px] break-all">{confirmingOpen?.target}</p>
+        <div className="flex flex-col gap-2 text-[13px] text-[var(--fg-muted)]">
+          {confirmingOpen?.network != null && (
+            <p>
+              {confirmingHost != null ? `サーバ「${confirmingHost}」` : "ネットワーク上の場所"}
+              に接続します。Windows
+              では、接続した時にサインイン情報がこのサーバへ送られます。知っているサーバの場合のみ開いてください。
+            </p>
+          )}
+          {confirmingOpen?.executable === true && (
+            <p>
+              このファイルは開くとプログラムとして実行される可能性があります。内容を確認済みの場合のみ開いてください。
+            </p>
+          )}
+        </div>
+        <p className="mt-2 font-mono text-[12px] break-all">{confirmingOpen?.payload.target}</p>
+        {confirmingHost != null && (
+          <label className="mt-3 flex items-center gap-2 text-[13px]">
+            <input
+              type="checkbox"
+              checked={trustHost}
+              onChange={(event) => setTrustHost(event.target.checked)}
+            />
+            今後「{confirmingHost}」は確認せずに開く
+          </label>
+        )}
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirmingOpen(null)}>
             キャンセル
           </Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              const payload = confirmingOpen;
-              setConfirmingOpen(null);
-              if (payload != null) void openTarget(payload);
-            }}
-          >
+          <Button variant="secondary" onClick={handleConfirmOpen}>
             開く
           </Button>
         </div>
       </Modal>
     </div>
   );
+}
+
+function confirmOpenTitle(confirmation: OpenConfirmation | null): string {
+  if (confirmation?.network != null) {
+    return confirmation.executable
+      ? "ネットワーク上の実行ファイルを開きますか?"
+      : "ネットワーク上の場所を開きますか?";
+  }
+  return "実行ファイルを開きますか?";
+}
+
+/** `linkmemo_open` のエラーは Rust 側で日本語の文言にしているので、文言だけを表示する */
+function formatOpenError(e: unknown): string {
+  if (typeof e === "object" && e != null) {
+    const { code, message } = e as { code?: unknown; message?: unknown };
+    if (code === "validation" && typeof message === "object" && message != null) {
+      const reason = (message as { reason?: unknown }).reason;
+      if (typeof reason === "string") return reason;
+    }
+    if (code === "internal" && typeof message === "string") return message;
+  }
+  return formatInvokeError(e);
 }
 
 function asPayload(item: Item): LinkPayloadV1 {

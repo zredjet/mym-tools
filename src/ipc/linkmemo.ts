@@ -24,10 +24,18 @@ export function linkmemoNormalizeTarget(input: string): Promise<NormalizedTarget
 /**
  * `type` (`url` / `path`) に応じて OS の既定アプリで `target` を開く
  * (URL → 既定ブラウザ / path → 既定ファイラー)。`memo` は IPC 不要のため呼ばない。
+ *
+ * ネットワーク上の場所 (UNC など) は、確認せずに開くサーバか、利用者が確認ダイアログで
+ * 「開く」を選んだ時だけ `allowNetworkPath: true` を渡す。無ければ Rust 側が拒否する。
  */
-export function linkmemoOpen(input: { itemType: "url" | "path"; target: string }): Promise<void> {
+export function linkmemoOpen(input: {
+  itemType: "url" | "path";
+  target: string;
+  allowNetworkPath: boolean;
+}): Promise<void> {
   return invoke<void>("linkmemo_open", {
     itemType: input.itemType,
     target: input.target,
+    allowNetworkPath: input.allowNetworkPath,
   });
 }

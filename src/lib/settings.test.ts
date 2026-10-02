@@ -89,6 +89,7 @@ describe("settings document", () => {
       rowDensity: "compact",
       moduleEnabled: { prompt: true, color: false },
       collapsedModuleCategories: ["web"],
+      moduleSettings: {},
     });
 
     expect(merged.future_root_key).toBe("keep");
@@ -102,5 +103,39 @@ describe("settings document", () => {
     });
     expect(merged.core.collapsed_module_categories).toEqual(["web"]);
     expect(merged.core.sidebar_collapsed).toBe(true);
+  });
+
+  it("round-trips module settings without discarding keys the module does not know", () => {
+    const original = {
+      schema_version: 1,
+      core: {},
+      modules: {
+        linkmemo: { last_seen_payload_version: 1, future_key: "keep" },
+        future: { custom: true },
+        broken: 5,
+      },
+    };
+    const parsed = parseSettingsDocument(original, ["linkmemo"]);
+    expect(parsed.moduleSettings).toEqual({
+      linkmemo: { last_seen_payload_version: 1, future_key: "keep" },
+      future: { custom: true },
+    });
+
+    const merged = mergeSettingsDocument(original, {
+      ...parsed,
+      moduleSettings: {
+        ...parsed.moduleSettings,
+        linkmemo: { ...parsed.moduleSettings.linkmemo, trusted_network_hosts: ["nas"] },
+      },
+    });
+    expect(merged.modules).toEqual({
+      linkmemo: {
+        last_seen_payload_version: 1,
+        future_key: "keep",
+        trusted_network_hosts: ["nas"],
+      },
+      future: { custom: true },
+      broken: 5,
+    });
   });
 });

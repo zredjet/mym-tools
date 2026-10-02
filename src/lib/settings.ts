@@ -26,6 +26,8 @@ export interface AppSettingsSnapshot {
   rowDensity: RowDensitySetting;
   moduleEnabled: Partial<Record<ModuleId, boolean>>;
   collapsedModuleCategories: string[];
+  /** `modules.<id>` の中身。コアは解釈せず、各モジュールが自分のキーを読み書きする (§11.2) */
+  moduleSettings: Record<string, Record<string, unknown>>;
 }
 
 const DEFAULTS: AppSettingsSnapshot = {
@@ -41,6 +43,7 @@ const DEFAULTS: AppSettingsSnapshot = {
   rowDensity: "compact",
   moduleEnabled: {},
   collapsedModuleCategories: [],
+  moduleSettings: {},
 };
 
 export function parseSettingsDocument(
@@ -85,6 +88,7 @@ export function parseSettingsDocument(
     rowDensity: core?.["row_density"] === "comfortable" ? "comfortable" : DEFAULTS.rowDensity,
     moduleEnabled,
     collapsedModuleCategories: stringArray(core?.["collapsed_module_categories"]),
+    moduleSettings: recordEntries(root?.["modules"]),
   };
 }
 
@@ -116,7 +120,7 @@ export function mergeSettingsDocument(
       module_enabled: { ...originalModuleEnabled, ...settings.moduleEnabled },
       collapsed_module_categories: settings.collapsedModuleCategories,
     },
-    modules: { ...originalModules },
+    modules: { ...originalModules, ...settings.moduleSettings },
   };
 }
 
@@ -124,6 +128,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value != null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+/** object の値だけを取り出す。それ以外の値は書き戻し時に元の document から残る */
+function recordEntries(value: unknown): Record<string, Record<string, unknown>> {
+  const entries: Record<string, Record<string, unknown>> = {};
+  for (const [key, entry] of Object.entries(asRecord(value) ?? {})) {
+    const record = asRecord(entry);
+    if (record != null) entries[key] = record;
+  }
+  return entries;
 }
 
 function stringOrNull(value: unknown): string | null {
