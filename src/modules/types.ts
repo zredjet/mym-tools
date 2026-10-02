@@ -42,6 +42,12 @@ export interface ModuleDefinition {
 
   /** 横断検索結果の表示と遷移先。stateful module では必須。 */
   readonly searchAdapter?: SearchAdapter;
+
+  /**
+   * 設定画面に出すモジュール固有の設定。モジュールが有効な時だけ表示する。
+   * 値は `modules.<id>.*` に置き、`useAppStore` の `setModuleSetting` で保存する。
+   */
+  readonly settingsSection?: ComponentType;
 }
 
 /** モジュール内画面のルート (`docs/module-contract.md` §4.1) */

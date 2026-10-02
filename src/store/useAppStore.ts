@@ -26,6 +26,8 @@ interface AppState {
   logLevel: LogLevel;
   moduleEnabled: Partial<Record<ModuleId, boolean>>;
   collapsedModuleCategories: string[];
+  /** `modules.<id>.*` (`docs/data-model.md` §11.2)。中身は各モジュールが解釈する */
+  moduleSettings: Record<string, Record<string, unknown>>;
   settingsDocument: SettingsDocument | null;
   settingsHydrated: boolean;
   settingsError: string | null;
@@ -45,6 +47,7 @@ interface AppState {
   setLogLevel: (level: LogLevel) => void;
   setModuleEnabled: (id: ModuleId, enabled: boolean) => void;
   setModuleCategoryCollapsed: (id: string, collapsed: boolean) => void;
+  setModuleSetting: (id: ModuleId, key: string, value: unknown) => void;
 }
 
 const SIDEBAR_MIN = 180;
@@ -82,6 +85,7 @@ export const useAppStore = create<AppState>()((set) => ({
   logLevel: "info",
   moduleEnabled: {},
   collapsedModuleCategories: [],
+  moduleSettings: {},
   settingsDocument: null,
   settingsHydrated: false,
   settingsError: null,
@@ -116,4 +120,11 @@ export const useAppStore = create<AppState>()((set) => ({
       else current.delete(id);
       return { collapsedModuleCategories: [...current] };
     }),
+  setModuleSetting: (id, key, value) =>
+    set((state) => ({
+      moduleSettings: {
+        ...state.moduleSettings,
+        [id]: { ...state.moduleSettings[id], [key]: value },
+      },
+    })),
 }));

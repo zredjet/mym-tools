@@ -130,6 +130,8 @@ export function SettingsPage() {
 
       <ModuleSettingsSection />
 
+      <ModuleSpecificSettings />
+
       <UiScaleSection />
 
       <RowDensitySection />
@@ -306,6 +308,21 @@ function CoreSettingsSection({ projects }: { projects: AppShellOutletContext["pr
       </label>
     </section>
   );
+}
+
+/** `ModuleDefinition.settingsSection` を持つ有効なモジュールの設定 (registry 順) */
+function ModuleSpecificSettings() {
+  const overrides = useAppStore((state) => state.moduleEnabled);
+  return modules.map((module) => {
+    const Section = module.settingsSection;
+    if (Section == null || !isModuleEnabled(module, overrides)) return null;
+    return (
+      <section key={module.id} className="flex flex-col gap-2">
+        <h2 className="text-base font-semibold text-[var(--fg)]">{module.displayName}</h2>
+        <Section />
+      </section>
+    );
+  });
 }
 
 function ModuleSettingsSection() {

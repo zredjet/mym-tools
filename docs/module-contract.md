@@ -1,6 +1,6 @@
 # モジュール契約 (Module Contract)
 
-最終更新: 2026-09-03 / ステータス: Draft (Phase 1)
+最終更新: 2026-10-02 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**モジュールがコアと交わす契約**」を定義する。
 モジュールが提供するもの / コアが提供するもの / 両者がしてはいけないことを具体 API レベルで決めて、
@@ -191,6 +191,13 @@ export interface ModuleDefinition {
    * isStateless = false のモジュールでは必須 (登録時にコアが検査し、欠落時は起動停止)。
    */
   readonly searchAdapter?: SearchAdapter;
+
+  /**
+   * 設定画面に出すモジュール固有の設定。モジュールが有効な時だけ、registry の順に表示する。
+   * 値は settings.json の `modules.<id>.*` に置き、Zustand の `moduleSettings` /
+   * `setModuleSetting(id, key, value)` で読み書きする (中身はコアが解釈しない、data-model §11.2)。
+   */
+  readonly settingsSection?: ComponentType;
 }
 
 export interface ModuleRoute {
@@ -658,6 +665,8 @@ src/modules/<id>/
 | `is_stateless` | false |
 | `current_payload_version` | 1 |
 | 固有 IPC コマンド | `linkmemo_open` (URL or path を OS の既定アプリで開く) / `linkmemo_normalize_target` (`file://` の path 化) |
+| `linkmemo_open` の引数 | `{ itemType, target, allowNetworkPath }`。ネットワーク上の場所 (UNC / `\\?\` / `\\.\` / `\??\`) は `allowNetworkPath: true` の時だけ開き、無ければ validation で拒否する。フロントは確認せずに開くサーバ (`modules.linkmemo.trusted_network_hosts`) か、確認ダイアログで「開く」を選んだ時だけ true を渡す (data-model §10.2)。エラーの `reason` / `message` は画面にそのまま出す日本語の文言 |
+| 設定 (`settingsSection`) | 確認せずに開くネットワーク上のサーバの一覧・追加・削除 |
 | `index_text` の対象 | `target` (URL or path) + `body` |
 | payload v1 | `{ type: "url" \| "path", target: string, body: string }`。`body`はリンク固有の任意メモ |
 
@@ -856,6 +865,7 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-09-25 | 1.5 | M-PDF Merge: OCProperties (レイヤー) を拒否、Lang の引き継ぎと引き継がないカタログ情報、ストリーム合計1 GiBの上限を明記 |
 | 2026-09-25 | 1.6 | M-Vector: draw.io の SVG を取込時に変換し、変換内容を `notices` で返す |
 | 2026-09-25 | 1.7 | ADR-0023を反映。M-PNG最適化 (§12.12) のstateless契約、固有IPC、Channel、status、入力上限、出力契約、cancel境界を追加 |
+| 2026-10-02 | 1.8 | `ModuleDefinition.settingsSection` (§4.1) を追加。M-Link (§12.2) の `linkmemo_open` に `allowNetworkPath` を追加し、確認を経ていないネットワーク上の場所を拒否する |
 
 ## ベクター描画と検索投影の追加契約（ADR-0021）
 
