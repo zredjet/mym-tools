@@ -1,3 +1,5 @@
+<img src="src-tauri/icons/source/mymytools-icon-macos.svg" width="128" height="128" alt="MyMyTools のアイコン">
+
 # MyMyTools
 
 軽量なクロスプラットフォーム多目的 GUI ツール (個人用ローカルツール)。
