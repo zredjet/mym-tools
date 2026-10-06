@@ -6,6 +6,7 @@
 
 pub mod a11y;
 mod bundled_assets;
+pub mod charcount;
 pub mod codec;
 pub mod color;
 pub mod cron;
@@ -27,6 +28,7 @@ pub mod prompt;
 pub mod regex;
 pub mod registry;
 pub mod secretgen;
+pub mod textclean;
 pub mod textdiff;
 pub mod urlquery;
 

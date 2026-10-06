@@ -25,6 +25,7 @@ describe("SettingsLifecycle", () => {
     vi.mocked(getSettings).mockResolvedValue(document);
     vi.mocked(getBackendModuleIds).mockResolvedValue([
       "a11y",
+      "charcount",
       "codec",
       "color",
       "cron",
@@ -45,6 +46,7 @@ describe("SettingsLifecycle", () => {
       "prompt",
       "regex",
       "secretgen",
+      "textclean",
       "textdiff",
       "urlquery",
     ]);

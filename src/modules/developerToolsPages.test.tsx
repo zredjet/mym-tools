@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sendHttpRequest } from "@/ipc/http";
 import { A11yPage } from "@/modules/a11y/A11yPage";
+import { CharCountPage } from "@/modules/charcount/CharCountPage";
 import { CodecPage } from "@/modules/codec/CodecPage";
 import { CronPage } from "@/modules/cron/CronPage";
 import { DateTimePage } from "@/modules/datetime/DateTimePage";
@@ -11,6 +12,7 @@ import { IdGeneratorPage } from "@/modules/idgen/IdGeneratorPage";
 import { JwtPage } from "@/modules/jwt/JwtPage";
 import { RegexPage } from "@/modules/regex/RegexPage";
 import { SecretGeneratorPage } from "@/modules/secretgen/SecretGeneratorPage";
+import { TextCleanPage } from "@/modules/textclean/TextCleanPage";
 import { TextDiffPage } from "@/modules/textdiff/TextDiffPage";
 import { UrlQueryPage } from "@/modules/urlquery/UrlQueryPage";
 
@@ -101,6 +103,34 @@ describe("stateless developer tool pages", () => {
     render(<TextDiffPage />);
     fireEvent.click(screen.getByRole("button", { name: "比較" }));
     expect(screen.getByText("changed")).toBeInTheDocument();
+  });
+
+  it("counts characters, lines and Shift_JIS bytes", async () => {
+    render(<CharCountPage />);
+    fireEvent.change(screen.getByRole("textbox", { name: "入力" }), {
+      target: { value: "あいう\nabc" },
+    });
+    const lines = await screen.findByRole("row", { name: "行数 2" });
+    expect(lines).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("row", { name: /^Shift_JIS バイト数/ })).getByText("10"),
+    ).toBeInTheDocument();
+  });
+
+  it("deletes blank lines and applies replace rules", () => {
+    render(<TextCleanPage />);
+    fireEvent.change(screen.getByRole("textbox", { name: "入力" }), {
+      target: { value: "foo\n\n\nbar" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: /^空行/ }), {
+      target: { value: "delete" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "ルールを追加" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "検索 1" }), { target: { value: "foo" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "置換 1" }), { target: { value: "baz" } });
+    expect(screen.getByRole("textbox", { name: "結果" })).toHaveValue("baz\nbar");
+    fireEvent.click(screen.getByRole("button", { name: "結果を入力へ" }));
+    expect(screen.getByRole("textbox", { name: "入力" })).toHaveValue("baz\nbar");
   });
 
   it("decodes a JWT while showing the unverified warning", () => {

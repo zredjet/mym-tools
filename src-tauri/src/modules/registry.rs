@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use crate::module::ModuleBackend;
 use crate::modules::a11y::A11yModule;
+use crate::modules::charcount::CharCountModule;
 use crate::modules::codec::CodecModule;
 use crate::modules::color::ColorModule;
 use crate::modules::cron::CronModule;
@@ -32,6 +33,7 @@ use crate::modules::pngopt::PngOptModule;
 use crate::modules::prompt::PromptModule;
 use crate::modules::regex::RegexModule;
 use crate::modules::secretgen::SecretGeneratorModule;
+use crate::modules::textclean::TextCleanModule;
 use crate::modules::textdiff::TextDiffModule;
 use crate::modules::urlquery::UrlQueryModule;
 
@@ -64,6 +66,8 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
         Arc::new(CronModule),
         Arc::new(A11yModule),
         Arc::new(HttpModule),
+        Arc::new(CharCountModule),
+        Arc::new(TextCleanModule),
         // 新モジュールはここに 1 行追加する
     ]
 }
@@ -163,7 +167,7 @@ mod tests {
     fn module_backends_build_into_app_state() {
         let storage: Arc<dyn StorageService> = Arc::new(SqliteStorage::open(":memory:").unwrap());
         let backends = module_backends();
-        assert_eq!(backends.len(), 23);
+        assert_eq!(backends.len(), 25);
         let dir = tempfile::tempdir().unwrap();
         let backup: Arc<dyn crate::backup::BackupService> = Arc::new(
             crate::backup::LocalBackupService::new(dir.path().to_path_buf(), Arc::clone(&storage)),
@@ -192,6 +196,8 @@ mod tests {
             "a11y",
             "http",
             "nrbf",
+            "charcount",
+            "textclean",
         ] {
             assert!(state.module(id).is_some(), "missing backend: {id}");
         }

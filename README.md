@@ -3,7 +3,7 @@
 # MyMyTools
 
 軽量なクロスプラットフォーム多目的 GUI ツール (個人用ローカルツール)。
-保存系ツール8種と、変換・解析・生成・通信などのツール15種を、一機能一モジュールで統合。
+保存系ツール8種と、変換・解析・生成・通信などのツール17種を、一機能一モジュールで統合。
 
 - **対象 OS**: macOS / Windows (Linux は対象外)
 - **配布形式**: portable 差し替え方式 (自動更新なし)
@@ -49,7 +49,7 @@
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/screenshots/settings.png" alt="設定画面"><br><b>設定</b>: モジュールの有効 / 無効、表示、バックアップ、JSON のエクスポート / インポート</td>
-    <td width="50%"><b>ほかのツール</b>: ハッシュ計算、エンコード変換、URL・クエリ編集、日時・Timestamp 変換、ID 生成、安全な文字列生成、Web アクセシビリティ、PDF 結合、BinaryFormatter 解析、HTTP (既定は無効)</td>
+    <td width="50%"><b>ほかのツール</b>: ハッシュ計算、エンコード変換、URL・クエリ編集、日時・Timestamp 変換、ID 生成、安全な文字列生成、Web アクセシビリティ、PDF 結合、BinaryFormatter 解析、文字数カウント、テキスト整形、HTTP (既定は無効)</td>
   </tr>
 </table>
 
@@ -62,7 +62,7 @@
 | [docs/data-model.md](docs/data-model.md) | SQLite スキーマ、payload バージョニング、エクスポート JSON |
 | [docs/module-contract.md](docs/module-contract.md) | モジュール / コア境界の API 契約 |
 | [docs/ui-design.md](docs/ui-design.md) | UI トークン、画面スケルトン、キーボードショートカット |
-| [docs/developer-tools-plan.md](docs/developer-tools-plan.md) | 開発ツール11モジュールの範囲、段階、品質条件 |
+| [docs/developer-tools-plan.md](docs/developer-tools-plan.md) | 開発ツールモジュールの範囲、段階、品質条件 |
 | [docs/release-process.md](docs/release-process.md) | 担当者向けの手動リリース手順、公開後検証、失敗時対応 |
 | [docs/decisions/](docs/decisions/) | ADR-0001〜0023 (モジュール化 / ローカル処理境界 / リリース方式) |
 | [CLAUDE.md](CLAUDE.md) | 作業時の不変条件と参照優先順位 |
@@ -122,7 +122,7 @@ cargo test --workspace --lib --all-features --locked
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
 rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing / lopdf / shotq (PNG最適化、`src-tauri/crates/shotq` に複製) の Rust バックエンドで構成。
-プロジェクト管理、カテゴリ表示付き23モジュール、横断検索、`settings.json`、バックアップ、
+プロジェクト管理、カテゴリ表示付き25モジュール、横断検索、`settings.json`、バックアップ、
 アプリ全体／プロジェクト単位の JSON export / import を備える。
 
 CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2)
