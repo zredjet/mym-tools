@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## リポジトリの状態
 
-**Phase 1 の主要機能を実装済みの Tauri 2 デスクトップアプリ** (macOS Apple Silicon / Windows x64)。WebView 側は React 19 + TypeScript + Tailwind v4 + Zustand、ネイティブ側は Rust (MSRV 1.88) + rusqlite。カテゴリ別の 26 モジュールを一機能一モジュールで統合している (ADR-0014)。実行可能なコマンドは `README.md` と `package.json` / `src-tauri/Cargo.toml` を確認すること。
+**Phase 1 の主要機能を実装済みの Tauri 2 デスクトップアプリ** (macOS Apple Silicon / Windows x64)。WebView 側は React 19 + TypeScript + Tailwind v4 + Zustand、ネイティブ側は Rust (MSRV 1.88) + rusqlite。カテゴリ別の 27 モジュールを一機能一モジュールで統合している (ADR-0014)。実行可能なコマンドは `README.md` と `package.json` / `src-tauri/Cargo.toml` を確認すること。
 
 同梱エンジンの資産は `npm run prepare:drawio` / `prepare:vector` / `prepare:nrbf` で生成する (`dev` / `build` の pre スクリプトで drawio と vector は自動実行)。draw.io は Git submodule で固定している。
 
@@ -51,7 +51,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 0021 | ベクター描画は SVG-Edit 7.4.2 (上流 Editor.js は無改変) を loopback + sandboxed iframe で同梱。payload v1 `{ svg, text }`、SVG は UTF-8 20 MiB 以下。親子通信は `mym-vector-v1` の限定 postMessage のみ |
 | 0022 | 派生データを同期するトリガの置換 (同一 tx の `DROP TRIGGER` + `CREATE TRIGGER`、同期結果不変、値書き換えなし) は ADR-0011 の `MIGRATIONS` 枠で可。v3 で FTS 更新トリガを `UPDATE OF project_id, module_id, search_text` に絞る |
 | 0023 | PNG最適化 (`pngopt`) は shotq のライブラリ部分を `src-tauri/crates/shotq/` に複製してプロセス内で実行する (shotq は private のため git 依存にしない)。rayon は複製した shotq の内部に限り ADR-0009 R-2 の例外とし、処理は同時に 1 つ。取消しは読込中・最適化の後・置換の直前・ファイルの間。出力は CLI と同じ規則で、契約テストで CLI とのバイト一致を確かめる |
-| 0024 | テキストファイルの文字コード判定・変換 (`encoding`、後続の `csvview` の読込) は Rust の `encoding_rs` で行い、共通処理は `modules/text_encoding.rs`。path だけを渡す。`_without_replacement` 系だけを使い、読めないバイト・表せない文字があれば保存せず位置を返す (¥ / ‾ / − と外字は警告)。同じ文字コード同士はバイトのまま改行・BOM だけ変える。別名保存のみ、64 MiB 上限 |
+| 0024 | テキストファイルの文字コード判定・変換 (`encoding`、`csvview` の読込) は Rust の `encoding_rs` で行い、共通処理は `modules/text_encoding.rs`。path だけを渡す。`_without_replacement` 系だけを使い、読めないバイト・表せない文字があれば保存せず位置を返す (¥ / ‾ / − と外字は警告)。同じ文字コード同士はバイトのまま改行・BOM だけ変える。別名保存のみ、64 MiB 上限 |
 
 ## 絶対に破ってはいけない不変条件
 
@@ -79,7 +79,7 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 
 - `items` は stateful モジュール共通の単一テーブル。モジュール固有データは `payload` JSON カラムに入れ、`payload_schema_version` を整数で持つ
   - **stateful (8)**: `prompt` / `linkmemo` / `memo` / `color` / `palette` / `mermaid` / `diagram` / `vector`
-  - **stateless (18)**: `hash` / `codec` / `urlquery` / `datetime` / `idgen` / `secretgen` / `regex` / `textdiff` / `jwt` / `cron` / `a11y` / `http` / `pdfmerge` / `pngopt` / `nrbf` / `charcount` / `textclean` / `encoding`。**何も書かない** (D-06)。入力・結果は画面を離れたら破棄する
+  - **stateless (19)**: `hash` / `codec` / `urlquery` / `datetime` / `idgen` / `secretgen` / `regex` / `textdiff` / `jwt` / `cron` / `a11y` / `http` / `pdfmerge` / `pngopt` / `nrbf` / `charcount` / `textclean` / `encoding` / `csvview`。**何も書かない** (D-06)。入力・結果は画面を離れたら破棄する
 - フロントの `ModuleDefinition.isStateless` と Rust の `ModuleBackend::is_stateless` は一致させる。stateful module は `searchAdapter` 必須 (`validateModuleDefinitions` が起動時に検査)
 - モジュール ID は `^[a-z0-9]{3,32}$`。Tauri command 名は `<module_id>_<action>`、コアは `core_*`
 - `items.title` は全モジュール共通の表示名。M-Color も独自の `name` フィールドは持たず `title` を使う

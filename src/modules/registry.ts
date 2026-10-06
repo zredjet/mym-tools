@@ -6,6 +6,7 @@ import { colorModule } from "@/modules/color";
 import { codecModule } from "@/modules/codec";
 import { dateTimeModule } from "@/modules/datetime";
 import { cronModule } from "@/modules/cron";
+import { csvViewModule } from "@/modules/csvview";
 import { diagramModule } from "@/modules/diagram";
 import { encodingModule } from "@/modules/encoding";
 import { vectorModule } from "@/modules/vector";
@@ -69,6 +70,7 @@ export const modules: readonly ModuleDefinition[] = [
   charCountModule,
   textCleanModule,
   encodingModule,
+  csvViewModule,
 ];
 
 export function validateModuleDefinitions(definitions: readonly ModuleDefinition[]): void {
