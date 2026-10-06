@@ -1,6 +1,6 @@
 # モジュール契約 (Module Contract)
 
-最終更新: 2026-10-02 / ステータス: Draft (Phase 1)
+最終更新: 2026-10-06 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**モジュールがコアと交わす契約**」を定義する。
 モジュールが提供するもの / コアが提供するもの / 両者がしてはいけないことを具体 API レベルで決めて、
@@ -791,8 +791,11 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | `regex` / `textdiff` | なし | Web Worker + timeout |
 | `jwt` / `cron` / `a11y` | なし | Frontend同期処理 |
 | `http` | `http_send_request` | Rust `reqwest` + `OperationRegistry` cancel (ADR-0015) |
+| `charcount` / `textclean` | なし | Frontend同期処理 (入力1 MiBまで、150 msのdebounceまたは`useDeferredValue`) |
 
-全11モジュールは `is_stateless = true`、`searchAdapter` なし、payloadなしとする。ローカル完結の10モジュールは `enabledByDefault = true`、ネットワーク通信する `http` のみ `false` とする。
+全13モジュールは `is_stateless = true`、`searchAdapter` なし、payloadなしとする。ローカル完結の12モジュールは `enabledByDefault = true`、ネットワーク通信する `http` のみ `false` とする。
+
+`charcount` のShift_JISバイト数は、encoding_rsのShift_JIS encoderで2バイトになるBMP文字のビットマップ (`src/modules/charcount/sjisTable.json`) と、1バイトになる文字の規則で数える。`TextDecoder` から実行時に表を作らない (WebViewやICUの版で結果が変わるため)。表と規則がencoding_rsと一致することは `src-tauri/src/modules/charcount/mod.rs` のテストで確かめ、同じテストを `MYM_REGENERATE_SJIS_TABLE=1` で実行すると表を作り直す。
 
 ### 12.12 M-PNG最適化
 
@@ -866,6 +869,7 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-09-25 | 1.6 | M-Vector: draw.io の SVG を取込時に変換し、変換内容を `notices` で返す |
 | 2026-09-25 | 1.7 | ADR-0023を反映。M-PNG最適化 (§12.12) のstateless契約、固有IPC、Channel、status、入力上限、出力契約、cancel境界を追加 |
 | 2026-10-02 | 1.8 | `ModuleDefinition.settingsSection` (§4.1) を追加。M-Link (§12.2) の `linkmemo_open` に `allowNetworkPath` を追加し、確認を経ていないネットワーク上の場所を拒否する |
+| 2026-10-06 | 1.9 | §12.11 に `charcount` / `textclean` を追加し、Shift_JISバイト数の表の作り方と検査方法を記載 |
 
 ## ベクター描画と検索投影の追加契約（ADR-0021）
 

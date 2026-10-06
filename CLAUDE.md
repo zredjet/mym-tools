@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## リポジトリの状態
 
-**Phase 1 の主要機能を実装済みの Tauri 2 デスクトップアプリ** (macOS Apple Silicon / Windows x64)。WebView 側は React 19 + TypeScript + Tailwind v4 + Zustand、ネイティブ側は Rust (MSRV 1.88) + rusqlite。カテゴリ別の 23 モジュールを一機能一モジュールで統合している (ADR-0014)。実行可能なコマンドは `README.md` と `package.json` / `src-tauri/Cargo.toml` を確認すること。
+**Phase 1 の主要機能を実装済みの Tauri 2 デスクトップアプリ** (macOS Apple Silicon / Windows x64)。WebView 側は React 19 + TypeScript + Tailwind v4 + Zustand、ネイティブ側は Rust (MSRV 1.88) + rusqlite。カテゴリ別の 25 モジュールを一機能一モジュールで統合している (ADR-0014)。実行可能なコマンドは `README.md` と `package.json` / `src-tauri/Cargo.toml` を確認すること。
 
 同梱エンジンの資産は `npm run prepare:drawio` / `prepare:vector` / `prepare:nrbf` で生成する (`dev` / `build` の pre スクリプトで drawio と vector は自動実行)。draw.io は Git submodule で固定している。
 
@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 4. `docs/data-model.md` — SQLite スキーマ、`settings.json` 形式、エクスポート/インポート JSON、payload バージョニング規則
 5. `docs/module-contract.md` — モジュールがコアと結ぶ契約 (= モジュール/コア境界)
 6. `docs/ui-design.md` — UI の正典: トークン、画面スケルトン (§6 に C 系と各モジュール画面)、キーボードショートカット、空状態
-7. `docs/developer-tools-plan.md` — 開発ツール 11 モジュールの範囲、段階、品質条件
+7. `docs/developer-tools-plan.md` — 開発ツールモジュールの範囲、段階、品質条件
 8. `docs/release-process.md` / `docs/vector-editor-verification.md` / `docs/diagram-editor-verification.md` — リリース手順、ベクター描画・ダイアグラムの検証・実機受入
 9. `docs/MyMyTools Prototype.bundle.html` — 見た目の参考 (Claude Design 出力)。**技術判断のソースにはしない**
 
@@ -77,7 +77,7 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 
 - `items` は stateful モジュール共通の単一テーブル。モジュール固有データは `payload` JSON カラムに入れ、`payload_schema_version` を整数で持つ
   - **stateful (8)**: `prompt` / `linkmemo` / `memo` / `color` / `palette` / `mermaid` / `diagram` / `vector`
-  - **stateless (15)**: `hash` / `codec` / `urlquery` / `datetime` / `idgen` / `secretgen` / `regex` / `textdiff` / `jwt` / `cron` / `a11y` / `http` / `pdfmerge` / `pngopt` / `nrbf`。**何も書かない** (D-06)。入力・結果は画面を離れたら破棄する
+  - **stateless (17)**: `hash` / `codec` / `urlquery` / `datetime` / `idgen` / `secretgen` / `regex` / `textdiff` / `jwt` / `cron` / `a11y` / `http` / `pdfmerge` / `pngopt` / `nrbf` / `charcount` / `textclean`。**何も書かない** (D-06)。入力・結果は画面を離れたら破棄する
 - フロントの `ModuleDefinition.isStateless` と Rust の `ModuleBackend::is_stateless` は一致させる。stateful module は `searchAdapter` 必須 (`validateModuleDefinitions` が起動時に検査)
 - モジュール ID は `^[a-z0-9]{3,32}$`。Tauri command 名は `<module_id>_<action>`、コアは `core_*`
 - `items.title` は全モジュール共通の表示名。M-Color も独自の `name` フィールドは持たず `title` を使う

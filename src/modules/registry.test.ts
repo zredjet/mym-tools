@@ -35,6 +35,8 @@ describe("frontend module registry", () => {
       "pdfmerge",
       "pngopt",
       "nrbf",
+      "charcount",
+      "textclean",
     ]);
     expect(() => validateModuleDefinitions(modules)).not.toThrow();
     for (const module of modules) expect(module.routes.length).toBeGreaterThan(0);

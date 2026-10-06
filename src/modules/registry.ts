@@ -1,6 +1,7 @@
 /** フロント側モジュールレジストリ。Shell / Router / Search の唯一の列挙元。 */
 import type { ModuleId } from "@/lib/types";
 import { a11yModule } from "@/modules/a11y";
+import { charCountModule } from "@/modules/charcount";
 import { colorModule } from "@/modules/color";
 import { codecModule } from "@/modules/codec";
 import { dateTimeModule } from "@/modules/datetime";
@@ -21,6 +22,7 @@ import { pngOptModule } from "@/modules/pngopt";
 import { promptModule } from "@/modules/prompt";
 import { secretGeneratorModule } from "@/modules/secretgen";
 import { regexModule } from "@/modules/regex";
+import { textCleanModule } from "@/modules/textclean";
 import { textDiffModule } from "@/modules/textdiff";
 import { urlQueryModule } from "@/modules/urlquery";
 import type { ModuleCategoryDefinition, ModuleCategoryId, ModuleDefinition } from "@/modules/types";
@@ -63,6 +65,8 @@ export const modules: readonly ModuleDefinition[] = [
   pdfMergeModule,
   pngOptModule,
   nrbfModule,
+  charCountModule,
+  textCleanModule,
 ];
 
 export function validateModuleDefinitions(definitions: readonly ModuleDefinition[]): void {
