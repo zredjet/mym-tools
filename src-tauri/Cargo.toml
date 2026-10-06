@@ -62,7 +62,10 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # M-HTTP: CORS に依存しない native HTTP client (ADR-0015)
 reqwest = { version = "0.13.3", default-features = false, features = ["native-tls", "charset", "http2"] }
 # M-HTTP: 応答本文を Content-Type の charset で復号する (reqwest の charset feature が既に依存)
+# M-文字コード変換 / M-CSV ビューア: テキストファイルの判定・復号・符号化 (ADR-0024)
 encoding_rs = "0.8"
+# M-文字コード変換: 出力先が入力と同じファイル (hardlink を含む) かを確かめる。既に間接依存している版
+same-file = "1"
 
 # ハッシュ計算 (M-Hash)
 # digest 0.10 系は md-5 / sha1 / sha2 0.10 が既に間接依存しているバージョン。

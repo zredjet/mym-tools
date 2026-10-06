@@ -48,6 +48,8 @@ fn main() {
         "pngopt_scan_folder",
         "pngopt_optimize_folder",
         "nrbf_inspect_file",
+        "encoding_inspect_file",
+        "encoding_convert_file",
         "prompt_render_template",
     ];
 

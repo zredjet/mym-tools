@@ -37,6 +37,7 @@ describe("frontend module registry", () => {
       "nrbf",
       "charcount",
       "textclean",
+      "encoding",
     ]);
     expect(() => validateModuleDefinitions(modules)).not.toThrow();
     for (const module of modules) expect(module.routes.length).toBeGreaterThan(0);

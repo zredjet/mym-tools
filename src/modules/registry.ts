@@ -7,6 +7,7 @@ import { codecModule } from "@/modules/codec";
 import { dateTimeModule } from "@/modules/datetime";
 import { cronModule } from "@/modules/cron";
 import { diagramModule } from "@/modules/diagram";
+import { encodingModule } from "@/modules/encoding";
 import { vectorModule } from "@/modules/vector";
 import { hashModule } from "@/modules/hash";
 import { httpModule } from "@/modules/http";
@@ -67,6 +68,7 @@ export const modules: readonly ModuleDefinition[] = [
   nrbfModule,
   charCountModule,
   textCleanModule,
+  encodingModule,
 ];
 
 export function validateModuleDefinitions(definitions: readonly ModuleDefinition[]): void {
