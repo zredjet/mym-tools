@@ -2548,6 +2548,7 @@ dependencies = [
  "quick-xml",
  "reqwest",
  "rusqlite",
+ "same-file",
  "serde",
  "serde_json",
  "sha1",

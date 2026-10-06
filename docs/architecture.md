@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-09-30 / ステータス: Draft (Phase 1)
+最終更新: 2026-10-07 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -479,6 +479,14 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 - cancelは読込中 (1 MiBごと)、最適化の後、置換の直前、フォルダの各ファイルの前で確認し、最適化の途中では止めない。出力は同一directoryの一時ファイルをflush / sync後にatomic replaceする
 
 ---
+### 10.8 文字コード変換境界
+
+- `encoding`は既定有効・`text` categoryのstatelessモジュールとし、入力path、設定、結果、履歴をitems、設定、横断検索、export / importへ保存しない (ADR-0024)
+- テキストファイルの判定・復号・符号化はRustの`encoding_rs`で行う。共通処理は`src-tauri/src/modules/text_encoding.rs` (`pub(crate)`) に置き、`encoding`と`csvview`が使う。文字コードは閉じたenumで受け取り、`Encoding::for_label`は使わない
+- ファイル本体はWebViewへ渡さず、`encoding_inspect_file` / `encoding_convert_file`がuser-selected pathを読み書きする。WebViewへ返すのは判定結果、統計、先頭2,000文字のプレビュー、問題の位置だけ
+- 置換文字で黙って壊さない。復号・符号化は`_without_replacement`系だけを使い、読めないバイトや表せない文字が1つでもあれば保存せず、件数と先頭20件の位置を返す。encoderが別の文字に寄せる¥ / ‾ / −と外字は警告する
+- 変換元と変換先が同じ文字コードなら文字を往復させず、改行とBOMだけをバイト単位で変える
+- 入力は1ファイル64 MiB。読込・判定・変換を1 MiBごとに区切ってcancelを確認し、変換は区切りごとに一時ファイルへ書いて、置換直前にもcancelを確認してからatomic replaceする。出力先が入力と同じファイル (hardlinkを含む) なら拒否する
 
 ## 11. 重い処理の扱い
 
@@ -526,6 +534,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | Mermaid図 | Mermaid 11.17.2、strict security、dynamic import |
 | 自由図編集 | draw.io 31.5.3固定submodule、IPC権限なしloopback origin、sandboxed iframe |
 | PDF結合 | `lopdf 0.45`（MSRV 1.88、`aes 0.9.2`固定、展開済みstream 64 MiB上限、終端のないstreamの事前検査） |
+| 文字コード判定・変換 | `encoding_rs 0.8`（WHATWG。`_without_replacement`系だけを使う）、`same-file 1`（出力先と入力の同一判定） |
 | NRBF解析 | .NET 10 NativeAOT sidecar + `System.Formats.Nrbf 10.0.11`（NuGet lock、型非生成） |
 
 **確定済**:
@@ -572,6 +581,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-09-25 | 1.3 | ADR-0023を反映。§2.2に複製したshotq内部のrayonの例外、§10.7 PNG最適化境界、§11の重い処理の方針を追加 |
 | 2026-09-30 | 1.4 | ADR-0017 §8追補を反映。§10.4と§13のdraw.io固定版を31.5.3へ更新 |
 | 2026-09-30 | 1.5 | ADR-0018 2026-09-30追補を反映。§10.5と§13のlopdfを0.45へ更新し、終端のないstreamの事前検査を追加 |
+| 2026-10-07 | 1.6 | ADR-0024を反映。§10.8 文字コード変換境界と、§13 の encoding_rs / same-file を追加 |
 
 ## SVG-Edit統合（ADR-0021）
 

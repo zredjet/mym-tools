@@ -9,6 +9,8 @@ const PUBLIC_COMMANDS = [
   "pngopt_scan_folder",
   "pngopt_optimize_folder",
   "nrbf_inspect_file",
+  "encoding_inspect_file",
+  "encoding_convert_file",
 ] as const;
 
 describe("Native command ACL", () => {

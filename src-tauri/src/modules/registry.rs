@@ -19,6 +19,7 @@ use crate::modules::color::ColorModule;
 use crate::modules::cron::CronModule;
 use crate::modules::datetime::DateTimeModule;
 use crate::modules::diagram::DiagramModule;
+use crate::modules::encoding::EncodingModule;
 use crate::modules::hash::HashModule;
 use crate::modules::http::HttpModule;
 use crate::modules::idgen::IdGeneratorModule;
@@ -68,6 +69,7 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
         Arc::new(HttpModule),
         Arc::new(CharCountModule),
         Arc::new(TextCleanModule),
+        Arc::new(EncodingModule),
         // 新モジュールはここに 1 行追加する
     ]
 }
@@ -144,6 +146,9 @@ pub fn register_invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Bu
         crate::modules::pngopt::commands::pngopt_optimize_file,
         crate::modules::pngopt::commands::pngopt_scan_folder,
         crate::modules::pngopt::commands::pngopt_optimize_folder,
+        // M-文字コード変換 (ADR-0024): user-selected local text files only
+        crate::modules::encoding::commands::encoding_inspect_file,
+        crate::modules::encoding::commands::encoding_convert_file,
         // M-NRBF: BinaryFormatter NRBFインスペクター
         crate::modules::nrbf::commands::nrbf_inspect_file,
         // M-Prompt
@@ -167,7 +172,7 @@ mod tests {
     fn module_backends_build_into_app_state() {
         let storage: Arc<dyn StorageService> = Arc::new(SqliteStorage::open(":memory:").unwrap());
         let backends = module_backends();
-        assert_eq!(backends.len(), 25);
+        assert_eq!(backends.len(), 26);
         let dir = tempfile::tempdir().unwrap();
         let backup: Arc<dyn crate::backup::BackupService> = Arc::new(
             crate::backup::LocalBackupService::new(dir.path().to_path_buf(), Arc::clone(&storage)),
@@ -198,6 +203,7 @@ mod tests {
             "nrbf",
             "charcount",
             "textclean",
+            "encoding",
         ] {
             assert!(state.module(id).is_some(), "missing backend: {id}");
         }

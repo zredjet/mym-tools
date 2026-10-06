@@ -49,5 +49,7 @@ permissions = [
   "allow-pngopt-scan-folder",
   "allow-pngopt-optimize-folder",
   "allow-nrbf-inspect-file",
+  "allow-encoding-inspect-file",
+  "allow-encoding-convert-file",
   "allow-prompt-render-template",
 ]

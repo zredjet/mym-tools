@@ -1,6 +1,6 @@
 # モジュール契約 (Module Contract)
 
-最終更新: 2026-10-06 / ステータス: Draft (Phase 1)
+最終更新: 2026-10-07 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**モジュールがコアと交わす契約**」を定義する。
 モジュールが提供するもの / コアが提供するもの / 両者がしてはいけないことを具体 API レベルで決めて、
@@ -815,6 +815,25 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 
 最適化は `src-tauri/crates/shotq` に複製した shotq の `shotq::optimize` だけで行い、結果は同じcommitのCLIとバイト単位で一致する (契約テスト `src-tauri/src/modules/pngopt/contract/`)。shotqは内部でrayonを使うため処理はアプリ全体で同時に1つとし、待機中もcancelを受け付ける。cancelは読込中 (1 MiBごと)、最適化の後、置換の直前、フォルダの各ファイルの前で確認し、最適化の途中では止めない (ADR-0023 §2.3 / §2.4)。フォルダ処理は1ファイルの失敗で止めず、`failed` として続ける。入力、設定、結果はfrontend stateだけに保持し、items、設定、検索、export / importの対象外とする。
 
+### 12.13 M-文字コード変換
+
+| 項目 | 値 |
+|------|----|
+| `id` / 表示名 | `encoding` / 文字コード変換 |
+| `category` / 既定 | `text` / enabled |
+| `is_stateless` | true |
+| frontend route | `/` |
+| 固有 IPC コマンド | `encoding_inspect_file(operationId, path, source)` / `encoding_convert_file(operationId, inputPath, outputPath, source, target, newline, normalizeMacSymbols)`。cancelは`core_cancel_operation` |
+| `source` | `auto` / `utf8` / `utf16_le` / `utf16_be` / `shift_jis` / `euc_jp` / `iso2022_jp`。BOMと食い違う指定は拒否 |
+| `target` / `newline` | `utf8` / `utf8_bom` / `shift_jis` / `euc_jp`、`keep` / `lf` / `crlf` |
+| 判定結果 | `{ encoding, confidence: bom \| exact \| guess \| none, ascii_only, candidates[{ encoding, ok, malformed_count, first_error }] }` |
+| 変換結果 | `Ok({ status: written \| rejected, source, bytes_written, malformed_count, malformed[], unmappable_count, unmappable[], normalized_count, warnings[], newlines, duration_ms })`。問題の位置は先頭20件、件数は全体 |
+| 入力上限 | 1ファイル64 MiB |
+| 出力契約 | 読めないバイトか表せない文字が1つでもあれば書かない (`rejected`)。同じdirectoryの一時ファイルからatomic replace。出力先が入力と同じファイル (hardlinkを含む) かdirectoryなら拒否。拡張子は問わない |
+| `index_text` の対象 | なし |
+
+判定・復号は `src-tauri/src/modules/text_encoding.rs` の共通処理を使い、`csvview` も同じものを使う (モジュール同士は直接依存しない)。復号・符号化は encoding_rs の `_without_replacement` 系だけを使い、置換文字や数値文字参照で黙って成功させない。encoder が別の文字に寄せる ¥ / ‾ / − は `warnings` の `substituted`、UTF-8 に書いた外字は `private_use` として返す。変換元と変換先が同じ文字コードで記号の置換もしないときは、文字を往復させずに改行と BOM だけをバイト単位で変える (ADR-0024)。cancel は読込・判定・変換の 1 MiB ごとと置換の直前で確認する。入力、設定、結果は frontend state だけに保持し、items、設定、検索、export / import の対象外とする。
+
 ---
 
 ## 13. 契約自体のバージョニング
@@ -870,6 +889,7 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-09-25 | 1.7 | ADR-0023を反映。M-PNG最適化 (§12.12) のstateless契約、固有IPC、Channel、status、入力上限、出力契約、cancel境界を追加 |
 | 2026-10-02 | 1.8 | `ModuleDefinition.settingsSection` (§4.1) を追加。M-Link (§12.2) の `linkmemo_open` に `allowNetworkPath` を追加し、確認を経ていないネットワーク上の場所を拒否する |
 | 2026-10-06 | 1.9 | §12.11 に `charcount` / `textclean` を追加し、Shift_JISバイト数の表の作り方と検査方法を記載 |
+| 2026-10-07 | 1.10 | ADR-0024を反映し、§12.13 M-文字コード変換を追加 |
 
 ## ベクター描画と検索投影の追加契約（ADR-0021）
 
