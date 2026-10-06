@@ -51,5 +51,6 @@ permissions = [
   "allow-nrbf-inspect-file",
   "allow-encoding-inspect-file",
   "allow-encoding-convert-file",
+  "allow-csvview-read-file",
   "allow-prompt-render-template",
 ]

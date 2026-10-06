@@ -3,7 +3,7 @@
 # MyMyTools
 
 軽量なクロスプラットフォーム多目的 GUI ツール (個人用ローカルツール)。
-保存系ツール8種と、変換・解析・生成・通信などのツール18種を、一機能一モジュールで統合。
+保存系ツール8種と、変換・解析・生成・通信などのツール19種を、一機能一モジュールで統合。
 
 - **対象 OS**: macOS / Windows (Linux は対象外)
 - **配布形式**: portable 差し替え方式 (自動更新なし)
@@ -49,7 +49,7 @@
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/screenshots/settings.png" alt="設定画面"><br><b>設定</b>: モジュールの有効 / 無効、表示、バックアップ、JSON のエクスポート / インポート</td>
-    <td width="50%"><b>ほかのツール</b>: ハッシュ計算、エンコード変換、URL・クエリ編集、日時・Timestamp 変換、ID 生成、安全な文字列生成、Web アクセシビリティ、PDF 結合、BinaryFormatter 解析、文字数カウント、テキスト整形、文字コード変換、HTTP (既定は無効)</td>
+    <td width="50%"><b>ほかのツール</b>: ハッシュ計算、エンコード変換、URL・クエリ編集、日時・Timestamp 変換、ID 生成、安全な文字列生成、Web アクセシビリティ、PDF 結合、BinaryFormatter 解析、文字数カウント、テキスト整形、文字コード変換、CSV ビューア、HTTP (既定は無効)</td>
   </tr>
 </table>
 
@@ -122,7 +122,7 @@ cargo test --workspace --lib --all-features --locked
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
 rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing / lopdf / shotq (PNG最適化、`src-tauri/crates/shotq` に複製) の Rust バックエンドで構成。
-プロジェクト管理、カテゴリ表示付き26モジュール、横断検索、`settings.json`、バックアップ、
+プロジェクト管理、カテゴリ表示付き27モジュール、横断検索、`settings.json`、バックアップ、
 アプリ全体／プロジェクト単位の JSON export / import を備える。
 
 CI 6 ジョブ (lint-rust / test-rust / lint-frontend / test-frontend / build-tauri ×2)

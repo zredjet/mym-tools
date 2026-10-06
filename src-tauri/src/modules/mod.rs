@@ -10,6 +10,7 @@ pub mod charcount;
 pub mod codec;
 pub mod color;
 pub mod cron;
+pub mod csvview;
 pub mod datetime;
 pub mod diagram;
 pub mod encoding;

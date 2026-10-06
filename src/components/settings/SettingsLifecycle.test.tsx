@@ -29,6 +29,7 @@ describe("SettingsLifecycle", () => {
       "codec",
       "color",
       "cron",
+      "csvview",
       "datetime",
       "diagram",
       "encoding",

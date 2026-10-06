@@ -50,6 +50,7 @@ fn main() {
         "nrbf_inspect_file",
         "encoding_inspect_file",
         "encoding_convert_file",
+        "csvview_read_file",
         "prompt_render_template",
     ];
 

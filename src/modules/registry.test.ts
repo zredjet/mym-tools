@@ -38,6 +38,7 @@ describe("frontend module registry", () => {
       "charcount",
       "textclean",
       "encoding",
+      "csvview",
     ]);
     expect(() => validateModuleDefinitions(modules)).not.toThrow();
     for (const module of modules) expect(module.routes.length).toBeGreaterThan(0);

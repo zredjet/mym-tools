@@ -354,6 +354,41 @@ fn japanese_score(text: &str) -> i64 {
         .sum()
 }
 
+/// 復号した全文と、読めなかったバイト。
+#[derive(Debug)]
+pub(crate) struct Decoded {
+    pub text: String,
+    pub malformed_count: u64,
+    pub malformed: Vec<ByteIssue>,
+}
+
+/// `start` (BOM の後ろ) から最後まで厳密に復号する。
+pub(crate) fn decode_all(
+    bytes: &[u8],
+    encoding: TextEncoding,
+    start: usize,
+    max_text_bytes: usize,
+    ctx: &Ctx<'_>,
+) -> Result<Decoded, AppError> {
+    let mut decoder = StreamDecoder::new(bytes, encoding, start);
+    let mut text = String::new();
+    while let Some((piece, _)) = decoder.next_piece() {
+        ctx.check()?;
+        if text.len().saturating_add(piece.len()) > max_text_bytes {
+            return Err(ctx.invalid(format!(
+                "復号した文字列が {} を超えています。",
+                format_mib(max_text_bytes as u64)
+            )));
+        }
+        text.push_str(&piece);
+    }
+    Ok(Decoded {
+        text,
+        malformed_count: decoder.malformed_count,
+        malformed: decoder.malformed,
+    })
+}
+
 /// 1 MiB ずつ厳密に復号する。読めないバイトは数えて飛ばし、先頭 20 件の位置を残す。
 pub(crate) struct StreamDecoder<'a> {
     bytes: &'a [u8],
@@ -643,6 +678,38 @@ mod tests {
         token.cancel();
         let (sjis, _, _) = SHIFT_JIS.encode("日本語");
         let error = detect(&sjis, &ctx(&token)).unwrap_err();
+        assert!(matches!(error, AppError::Cancelled { .. }));
+    }
+
+    #[test]
+    fn decode_all_returns_the_text_and_malformed_bytes() {
+        let token = CancellationToken::new();
+        let decoded = decode_all(
+            b"\xEF\xBB\xBFa\x80b",
+            TextEncoding::Utf8,
+            3,
+            usize::MAX,
+            &ctx(&token),
+        )
+        .unwrap();
+        assert_eq!(decoded.text, "ab");
+        assert_eq!(decoded.malformed_count, 1);
+        assert_eq!(decoded.malformed[0].offset, 4);
+    }
+
+    #[test]
+    fn decode_all_stops_at_the_text_limit() {
+        let token = CancellationToken::new();
+        let error = decode_all(b"abcdef", TextEncoding::Utf8, 0, 3, &ctx(&token)).unwrap_err();
+        assert!(matches!(error, AppError::Validation { .. }));
+    }
+
+    #[test]
+    fn decode_all_stops_when_cancelled() {
+        let token = CancellationToken::new();
+        token.cancel();
+        let error =
+            decode_all(b"abc", TextEncoding::Utf8, 0, usize::MAX, &ctx(&token)).unwrap_err();
         assert!(matches!(error, AppError::Cancelled { .. }));
     }
 

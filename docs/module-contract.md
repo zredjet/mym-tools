@@ -834,6 +834,21 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 
 判定・復号は `src-tauri/src/modules/text_encoding.rs` の共通処理を使い、`csvview` も同じものを使う (モジュール同士は直接依存しない)。復号・符号化は encoding_rs の `_without_replacement` 系だけを使い、置換文字や数値文字参照で黙って成功させない。encoder が別の文字に寄せる ¥ / ‾ / − は `warnings` の `substituted`、UTF-8 に書いた外字は `private_use` として返す。変換元と変換先が同じ文字コードで記号の置換もしないときは、文字を往復させずに改行と BOM だけをバイト単位で変える (ADR-0024)。cancel は読込・判定・変換の 1 MiB ごとと置換の直前で確認する。入力、設定、結果は frontend state だけに保持し、items、設定、検索、export / import の対象外とする。
 
+### 12.14 M-CSV ビューア
+
+| 項目 | 値 |
+|------|----|
+| `id` / 表示名 | `csvview` / CSV ビューア |
+| `category` / 既定 | `text` / enabled |
+| `is_stateless` | true |
+| frontend route | `/` |
+| 固有 IPC コマンド | `csvview_read_file(operationId, path, source)` → `{ text, encoding, confidence, bom, size }`。cancelは`core_cancel_operation` |
+| 入力上限 | ファイル10 MiB、復号後32 MiB、貼り付け10 MiB |
+| Worker | `parse { text, delimiter: auto \| "," \| "\t" \| ";" }` → `{ delimiter, rowCount, columnCount, preview, previewTrimmed, warnings, warningCount }` / `convert { format: json \| markdown \| csv \| tsv, header }` → `{ text, warnings }`。1回15秒で打ち切る |
+| `index_text` の対象 | なし |
+
+ファイルの判定・復号は `text_encoding.rs` の共通処理を使い (ADR-0024)、読めないバイトがあれば位置を付けて `validation` で拒否する。CSV の解析は自作の RFC 4180 パーサー (`src/modules/csvview/csvParser.ts`) で行い、解析済みの行は Worker の中に持つ。メインスレッドへは表示用のプレビューと変換結果だけを送る。JSON は `Object.fromEntries` で作り、`__proto__` という見出しも普通のキーにする。入力、設定、結果は frontend state だけに保持し、items、設定、検索、export / import の対象外とする。
+
 ---
 
 ## 13. 契約自体のバージョニング
@@ -890,6 +905,7 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-10-02 | 1.8 | `ModuleDefinition.settingsSection` (§4.1) を追加。M-Link (§12.2) の `linkmemo_open` に `allowNetworkPath` を追加し、確認を経ていないネットワーク上の場所を拒否する |
 | 2026-10-06 | 1.9 | §12.11 に `charcount` / `textclean` を追加し、Shift_JISバイト数の表の作り方と検査方法を記載 |
 | 2026-10-07 | 1.10 | ADR-0024を反映し、§12.13 M-文字コード変換を追加 |
+| 2026-10-07 | 1.11 | §12.14 M-CSV ビューアを追加 |
 
 ## ベクター描画と検索投影の追加契約（ADR-0021）
 
