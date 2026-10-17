@@ -91,6 +91,11 @@ shotq = { path = "crates/shotq" }
 # 既に tauri 等の transitive dep として Cargo.lock に存在するため新規 dl は発生しない。
 tempfile = "3"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# M-フォルダ容量 (ADR-0025): statfs の MNT_LOCAL でネットワーク上のボリュームを拒否する。
+# 既に tauri 等の transitive dep として Cargo.lock に存在する版。
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 # `settings.json.tmp` を既存 `settings.json` へ原子的に置換するために使用する。
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

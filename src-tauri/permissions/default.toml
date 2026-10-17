@@ -52,5 +52,6 @@ permissions = [
   "allow-encoding-inspect-file",
   "allow-encoding-convert-file",
   "allow-csvview-read-file",
+  "allow-dirsize-scan",
   "allow-prompt-render-template",
 ]
