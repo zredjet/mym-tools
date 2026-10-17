@@ -1,6 +1,6 @@
 # モジュール契約 (Module Contract)
 
-最終更新: 2026-10-07 / ステータス: Draft (Phase 1)
+最終更新: 2026-10-17 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**モジュールがコアと交わす契約**」を定義する。
 モジュールが提供するもの / コアが提供するもの / 両者がしてはいけないことを具体 API レベルで決めて、
@@ -849,6 +849,24 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 
 ファイルの判定・復号は `text_encoding.rs` の共通処理を使い (ADR-0024)、読めないバイトがあれば位置を付けて `validation` で拒否する。CSV の解析は自作の RFC 4180 パーサー (`src/modules/csvview/csvParser.ts`) で行い、解析済みの行は Worker の中に持つ。メインスレッドへは表示用のプレビューと変換結果だけを送る。JSON は `Object.fromEntries` で作り、`__proto__` という見出しも普通のキーにする。入力、設定、結果は frontend state だけに保持し、items、設定、検索、export / import の対象外とする。
 
+### 12.15 M-フォルダ容量
+
+| 項目 | 値 |
+|------|----|
+| `id` / 表示名 | `dirsize` / フォルダ容量 |
+| `category` / 既定 | `other` / enabled |
+| `is_stateless` | true |
+| frontend route | `/` |
+| 固有 IPC コマンド | `dirsize_scan(operationId, rootPath, onProgress)`。cancelは`core_cancel_operation`。表示は `@tauri-apps/plugin-opener` の `revealItemInDir` (`opener:default`) |
+| Channel | `started` / `scanning { files, dirs, logical_bytes, current_dir }` (100 msごと) / `done { duration_ms }` / `cancelled` |
+| 結果 | `{ root_path, separator, nodes[], total_files, total_dirs, unreadable { count, paths[] }, skipped { links, other_volumes, hard_links, entries }, volume { total_bytes, used_bytes } \| null, limit_reached, top_limit, duration_ms }` |
+| node | `{ id, parent_id, name, kind: dir \| file, logical, allocated, file_count, dir_count, other_count, other_logical, other_allocated, unreadable, lossy_name }`。`id` は配列の添字と同じで、親は子より前に並ぶ。ルートの `name` は `root_path` |
+| 入力 | ローカルの絶対パスのフォルダ。UNC・device path、行き先がネットワーク上の場所のリンク (パスの途中を含む。行き先には触らない)、Windowsのネットワークドライブ (`GetDriveTypeW`)、macOSの`MNT_LOCAL`の無いボリュームは `validation` で拒否 |
+| 上限 | 基準ごとの上位10,000件 (和集合で最大20,000ノード)、フォルダ1,000,000件 (超えたら `limit_reached`)、読めないフォルダのパス100件・ノード1,000件 |
+| `index_text` の対象 | なし |
+
+走査は Rust の単一スレッドで行い、シンボリックリンク・ジャンクション・マウントポイントと、ルートと `st_dev` が違うフォルダには入らない (ADR-0025)。ネットワーク上の場所の文字列判定は M-Link と共通の `src-tauri/src/modules/network_path.rs` を使い、ファイルシステムに触る前に拒否する。ルートのパスに含まれるリンクは `read_link` で 1 つずつ解決し、行き先を確かめてから進む (`modules/dirsize/root.rs`)。`logical` はファイル内容のバイト数、`allocated` はディスク上で確保された領域で、macOS / Linux は `st_blocks × 512`、Windows は圧縮・スパース・クラウド上だけのファイルを `GetCompressedFileSizeW`、ほかを `len` のクラスタ切り上げで求める。フォルダ自身の領域は数えず、macOS / Linux のハードリンクは 2 回目以降を `skipped.hard_links` に数える。読めないフォルダは `unreadable` にして走査を続け、ルートが読めない時だけエラーにする。`volume` は Windows でドライブ直下を走査した時だけ返す。cancel は項目ごとに確認し、取消し時は結果を返さない。結果は frontend state だけに保持し、items、設定、検索、export / import の対象外とする。
+
 ---
 
 ## 13. 契約自体のバージョニング
@@ -906,6 +924,7 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-10-06 | 1.9 | §12.11 に `charcount` / `textclean` を追加し、Shift_JISバイト数の表の作り方と検査方法を記載 |
 | 2026-10-07 | 1.10 | ADR-0024を反映し、§12.13 M-文字コード変換を追加 |
 | 2026-10-07 | 1.11 | §12.14 M-CSV ビューアを追加 |
+| 2026-10-17 | 1.12 | ADR-0025を反映し、§12.15 M-フォルダ容量を追加 |
 
 ## ベクター描画と検索投影の追加契約（ADR-0021）
 

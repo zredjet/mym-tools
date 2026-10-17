@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-10-07 / ステータス: Draft (Phase 1)
+最終更新: 2026-10-17 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -489,6 +489,16 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 - 入力は1ファイル64 MiB。読込・判定・変換を1 MiBごとに区切ってcancelを確認し、変換は区切りごとに一時ファイルへ書いて、置換直前にもcancelを確認してからatomic replaceする。出力先が入力と同じファイル (hardlinkを含む) なら拒否する
 - `csvview`は同じ共通処理で判定・復号し、`csvview_read_file`が復号済みの文字列を返す (ファイル10 MiB、復号後32 MiB)。読めないバイトがあれば位置を示して拒否する。CSVの解析と変換はWeb Workerで行い、解析済みの行はWorkerに持ち、メインスレッドへはプレビュー (1,001レコード・100列・1セル200文字まで) と変換結果だけを送る
 
+### 10.9 フォルダ容量境界
+
+- `dirsize`は既定有効・`other` categoryのstatelessモジュールとし、入力path、結果、履歴をitems、設定、横断検索、export / importへ保存しない (ADR-0025)。読み取り専用で、削除・移動はしない。行の「表示」は`opener:default`の`reveal_item_in_dir`を使う
+- 走査はRustの`dirsize_scan`が`spawn_blocking`の単一スレッドで行う。明示スタックの深さ優先で、シンボリックリンク・ジャンクション・マウントポイントと、ルートと`st_dev`が違うフォルダには入らない。`walkdir` / `jwalk`は使わない (jwalkはrayonを使うため)
+- ローカルのフォルダだけを扱う。UNC・device pathはM-Linkと共通の`modules/network_path.rs`で、ファイルシステムに触る前に文字列で拒否する。ルートのパスに含まれるリンク (シンボリックリンク・ジャンクション) は`read_link`でリンク自体から行き先を読んで1つずつ解決し、行き先がネットワーク上の場所なら触る前に拒否する。Windowsはドライブに触る前に`GetDriveTypeW`の`DRIVE_REMOTE`、macOSは解決したパスの`statfs`の`MNT_LOCAL`でネットワーク上のボリュームを拒否する
+- 「サイズ」(`len`) と「ディスク上」(macOS / Linuxは`st_blocks × 512`、Windowsは圧縮・スパース・クラウド上だけのファイルを`GetCompressedFileSizeW`、ほかを`len`のクラスタ切り上げ) を集計する。Windowsの大きさと属性は親フォルダの一覧から取り、ファイルを開かない。macOS / Linuxのハードリンクは1回だけ数える
+- 権限で読めないフォルダは報告して走査を続け、昇格はしない。Windowsでドライブ直下を走査した時は`GetDiskFreeSpaceExW`の使用量を返し、画面で集計との差を示す
+- フォルダは走査中に全件を持ち、ファイルは基準ごとの上位だけを名前付きで残す。WebViewへ返すのは基準ごとの上位10,000件の和集合 (最大20,000ノード、JSONで約5 MB) と、フォルダごとの「ほか」の件数・大きさだけ。親は子以上の大きさなので、同じ大きさなら浅い方を先に並べて祖先を含める
+- フォルダ1,000,000件で止めて途中までの集計を返す。cancelは項目ごとに確認し、進捗はTauri Channelで100 msごとに送る
+
 ## 11. 重い処理の扱い
 
 | 処理 | 方針 |
@@ -497,6 +507,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | PDF結合 | Rustの`spawn_blocking`で再検証・page tree統合・原子的書込みを実行し、Tauri Channelで`reading / merging / writing / done / cancelled`を通知する。`OperationRegistry`でキャンセルし、WebViewへPDF本体を渡さない (ADR-0018) |
 | NRBF解析 | RustがNativeAOT sidecarを起動し、60秒timeout・出力量上限・cancelを管理する。sidecarは型非生成で反復走査し、RustからTauri Channelでノードbatchを通知する (ADR-0020) |
 | PNG最適化 | Rustの`spawn_blocking`でshotqを呼ぶ。shotqの中はrayonで並列化し (ADR-0009 R-2の限定例外)、処理は同時に1つ。フォルダ処理はTauri Channelでファイルごとに通知し、ファイルの間でcancelを確認する (ADR-0023) |
+| フォルダ容量の走査 | Rustの`spawn_blocking`の単一スレッドで再帰的に走査し、項目ごとにcancelを確認する。進捗はTauri Channelで100 msごとに通知し、結果は上位K件と「ほか」にまとめて数MBに抑える (ADR-0025) |
 | 全文検索 | SQLite FTS5 (インメモリインデックス不要) |
 | Markdown レンダリング | フロント側で同期実行。長文時の体感劣化が出たら Web Worker 化を検討 |
 | エクスポート | Rust 側で生成し、UI は処理中の二重送信を防ぐ。実測で必要になった時点で件数進捗 Event / Channel を追加 |
@@ -536,6 +547,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 自由図編集 | draw.io 31.5.3固定submodule、IPC権限なしloopback origin、sandboxed iframe |
 | PDF結合 | `lopdf 0.45`（MSRV 1.88、`aes 0.9.2`固定、展開済みstream 64 MiB上限、終端のないstreamの事前検査） |
 | 文字コード判定・変換 | `encoding_rs 0.8`（WHATWG。`_without_replacement`系だけを使う）、`same-file 1`（出力先と入力の同一判定） |
+| フォルダ容量 | 標準ライブラリの`read_dir`、macOSは`libc 0.2`の`statfs`（ネットワーク上のボリュームの判定）、Windowsは`windows-sys`の`GetDriveTypeW` / `GetCompressedFileSizeW` / `GetDiskFreeSpace(Ex)W` |
 | NRBF解析 | .NET 10 NativeAOT sidecar + `System.Formats.Nrbf 10.0.11`（NuGet lock、型非生成） |
 
 **確定済**:
@@ -584,6 +596,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-09-30 | 1.5 | ADR-0018 2026-09-30追補を反映。§10.5と§13のlopdfを0.45へ更新し、終端のないstreamの事前検査を追加 |
 | 2026-10-07 | 1.6 | ADR-0024を反映。§10.8 文字コード変換境界と、§13 の encoding_rs / same-file を追加 |
 | 2026-10-07 | 1.7 | §10.8 に `csvview` の読込とWorkerでの解析の境界を追加 |
+| 2026-10-17 | 1.8 | ADR-0025を反映。§10.9 フォルダ容量境界、§11 の重い処理の方針、§13 の依存を追加 |
 
 ## SVG-Edit統合（ADR-0021）
 

@@ -20,6 +20,7 @@ use crate::modules::cron::CronModule;
 use crate::modules::csvview::CsvViewModule;
 use crate::modules::datetime::DateTimeModule;
 use crate::modules::diagram::DiagramModule;
+use crate::modules::dirsize::DirSizeModule;
 use crate::modules::encoding::EncodingModule;
 use crate::modules::hash::HashModule;
 use crate::modules::http::HttpModule;
@@ -72,6 +73,7 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
         Arc::new(TextCleanModule),
         Arc::new(EncodingModule),
         Arc::new(CsvViewModule),
+        Arc::new(DirSizeModule),
         // 新モジュールはここに 1 行追加する
     ]
 }
@@ -153,6 +155,8 @@ pub fn register_invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Bu
         crate::modules::encoding::commands::encoding_convert_file,
         // M-CSV ビューア (ADR-0024): user-selected local CSV / TSV files only
         crate::modules::csvview::commands::csvview_read_file,
+        // M-フォルダ容量 (ADR-0025): user-selected local folders only, read-only
+        crate::modules::dirsize::commands::dirsize_scan,
         // M-NRBF: BinaryFormatter NRBFインスペクター
         crate::modules::nrbf::commands::nrbf_inspect_file,
         // M-Prompt
@@ -176,7 +180,7 @@ mod tests {
     fn module_backends_build_into_app_state() {
         let storage: Arc<dyn StorageService> = Arc::new(SqliteStorage::open(":memory:").unwrap());
         let backends = module_backends();
-        assert_eq!(backends.len(), 27);
+        assert_eq!(backends.len(), 28);
         let dir = tempfile::tempdir().unwrap();
         let backup: Arc<dyn crate::backup::BackupService> = Arc::new(
             crate::backup::LocalBackupService::new(dir.path().to_path_buf(), Arc::clone(&storage)),
@@ -209,6 +213,7 @@ mod tests {
             "textclean",
             "encoding",
             "csvview",
+            "dirsize",
         ] {
             assert!(state.module(id).is_some(), "missing backend: {id}");
         }

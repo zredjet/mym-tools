@@ -8,6 +8,7 @@ import { dateTimeModule } from "@/modules/datetime";
 import { cronModule } from "@/modules/cron";
 import { csvViewModule } from "@/modules/csvview";
 import { diagramModule } from "@/modules/diagram";
+import { dirSizeModule } from "@/modules/dirsize";
 import { encodingModule } from "@/modules/encoding";
 import { vectorModule } from "@/modules/vector";
 import { hashModule } from "@/modules/hash";
@@ -71,6 +72,7 @@ export const modules: readonly ModuleDefinition[] = [
   textCleanModule,
   encodingModule,
   csvViewModule,
+  dirSizeModule,
 ];
 
 export function validateModuleDefinitions(definitions: readonly ModuleDefinition[]): void {

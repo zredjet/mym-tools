@@ -32,6 +32,7 @@ describe("SettingsLifecycle", () => {
       "csvview",
       "datetime",
       "diagram",
+      "dirsize",
       "encoding",
       "vector",
       "hash",

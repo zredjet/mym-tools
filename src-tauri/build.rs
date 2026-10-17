@@ -51,6 +51,7 @@ fn main() {
         "encoding_inspect_file",
         "encoding_convert_file",
         "csvview_read_file",
+        "dirsize_scan",
         "prompt_render_template",
     ];
 

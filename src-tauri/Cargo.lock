@@ -2542,6 +2542,7 @@ dependencies = [
  "chrono",
  "digest 0.10.7",
  "encoding_rs",
+ "libc",
  "lopdf",
  "md-5 0.10.6",
  "percent-encoding",

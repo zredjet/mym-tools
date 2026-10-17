@@ -9,6 +9,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::error::AppError;
 use crate::modules::linkmemo::normalize::{normalize_target, NormalizedTarget};
+use crate::modules::network_path::is_network_path;
 
 /// 入力文字列を `(type, target)` に正規化する (`module-contract.md` §12.2)。
 ///
@@ -80,20 +81,6 @@ fn check_path_target(target: &str, allow_network_path: bool) -> Result<(), AppEr
     Ok(())
 }
 
-/// ネットワーク上の場所になり得るパスか。前の空白は除いて判定する。
-///
-/// - 先頭 2 文字がどちらもパス区切り (`\` か `/`): UNC (`\\server\share` / `//server/share`) と、
-///   Win32 の device path (`\\?\UNC\server\share` / `\\.\UNC\...` / `\\?\GLOBALROOT\...`)
-/// - `\??\` で始まる: NT の object path (`\??\UNC\server\share`)。Win32 のパス変換がそのまま通す
-fn is_network_path(target: &str) -> bool {
-    let mut chars = target.trim_start().chars();
-    matches!(
-        (chars.next(), chars.next(), chars.next(), chars.next()),
-        (Some('\\' | '/'), Some('\\' | '/'), _, _)
-            | (Some('\\' | '/'), Some('?'), Some('?'), Some('\\' | '/'))
-    )
-}
-
 fn validation(reason: String) -> AppError {
     AppError::Validation {
         module_id: "linkmemo".into(),
@@ -127,34 +114,6 @@ mod tests {
     // `linkmemo_open` は `tauri::AppHandle` が必要なため、ユニットテストでは
     // OS 既定アプリ起動経路は検証できない。バリデーションロジックは `linkmemo_open` 内の
     // 早期 return で網羅されており、結合テストは Phase 1 後半の手動検証で扱う。
-
-    #[test]
-    fn network_paths_are_detected() {
-        for path in [
-            r"\\attacker\share\invoice.exe",
-            "//attacker/share/invoice.exe",
-            r"\\?\UNC\attacker\share",
-            r"\\.\UNC\attacker\share",
-            r"\\?\GLOBALROOT\Device\Mup\attacker\share",
-            r"\??\UNC\attacker\share",
-            "/??/UNC/attacker/share",
-            r"\/attacker/share",
-            "  //attacker/share",
-        ] {
-            assert!(is_network_path(path), "{path}");
-        }
-        for path in [
-            "/Users/x/Documents",
-            r"C:\Users\x\Documents",
-            r"C:\??\x",
-            "/?/x",
-            "~/Documents",
-            "relative/path",
-            "",
-        ] {
-            assert!(!is_network_path(path), "{path}");
-        }
-    }
 
     #[test]
     fn network_paths_open_only_when_allowed() {
