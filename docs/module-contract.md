@@ -861,11 +861,11 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | Channel | `started` / `scanning { files, dirs, logical_bytes, current_dir }` (100 msごと) / `done { duration_ms }` / `cancelled` |
 | 結果 | `{ root_path, separator, nodes[], total_files, total_dirs, unreadable { count, paths[] }, skipped { links, other_volumes, hard_links, entries }, volume { total_bytes, used_bytes } \| null, limit_reached, top_limit, duration_ms }` |
 | node | `{ id, parent_id, name, kind: dir \| file, logical, allocated, file_count, dir_count, other_count, other_logical, other_allocated, unreadable, lossy_name }`。`id` は配列の添字と同じで、親は子より前に並ぶ。ルートの `name` は `root_path` |
-| 入力 | ローカルの絶対パスのフォルダ。UNC・device path、Windowsのネットワークドライブ (`GetDriveTypeW`)、macOSの`MNT_LOCAL`の無いボリュームは `validation` で拒否 |
+| 入力 | ローカルの絶対パスのフォルダ。UNC・device path、行き先がネットワーク上の場所のリンク (パスの途中を含む。行き先には触らない)、Windowsのネットワークドライブ (`GetDriveTypeW`)、macOSの`MNT_LOCAL`の無いボリュームは `validation` で拒否 |
 | 上限 | 基準ごとの上位10,000件 (和集合で最大20,000ノード)、フォルダ1,000,000件 (超えたら `limit_reached`)、読めないフォルダのパス100件・ノード1,000件 |
 | `index_text` の対象 | なし |
 
-走査は Rust の単一スレッドで行い、シンボリックリンク・ジャンクション・マウントポイントと、ルートと `st_dev` が違うフォルダには入らない (ADR-0025)。ネットワーク上の場所の文字列判定は M-Link と共通の `src-tauri/src/modules/network_path.rs` を使い、ファイルシステムに触る前に拒否する。`logical` はファイル内容のバイト数、`allocated` はディスク上で確保された領域で、macOS / Linux は `st_blocks × 512`、Windows は圧縮・スパース・クラウド上だけのファイルを `GetCompressedFileSizeW`、ほかを `len` のクラスタ切り上げで求める。フォルダ自身の領域は数えず、macOS / Linux のハードリンクは 2 回目以降を `skipped.hard_links` に数える。読めないフォルダは `unreadable` にして走査を続け、ルートが読めない時だけエラーにする。`volume` は Windows でドライブ直下を走査した時だけ返す。cancel は項目ごとに確認し、取消し時は結果を返さない。結果は frontend state だけに保持し、items、設定、検索、export / import の対象外とする。
+走査は Rust の単一スレッドで行い、シンボリックリンク・ジャンクション・マウントポイントと、ルートと `st_dev` が違うフォルダには入らない (ADR-0025)。ネットワーク上の場所の文字列判定は M-Link と共通の `src-tauri/src/modules/network_path.rs` を使い、ファイルシステムに触る前に拒否する。ルートのパスに含まれるリンクは `read_link` で 1 つずつ解決し、行き先を確かめてから進む (`modules/dirsize/root.rs`)。`logical` はファイル内容のバイト数、`allocated` はディスク上で確保された領域で、macOS / Linux は `st_blocks × 512`、Windows は圧縮・スパース・クラウド上だけのファイルを `GetCompressedFileSizeW`、ほかを `len` のクラスタ切り上げで求める。フォルダ自身の領域は数えず、macOS / Linux のハードリンクは 2 回目以降を `skipped.hard_links` に数える。読めないフォルダは `unreadable` にして走査を続け、ルートが読めない時だけエラーにする。`volume` は Windows でドライブ直下を走査した時だけ返す。cancel は項目ごとに確認し、取消し時は結果を返さない。結果は frontend state だけに保持し、items、設定、検索、export / import の対象外とする。
 
 ---
 

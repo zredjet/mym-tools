@@ -493,7 +493,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 
 - `dirsize`は既定有効・`other` categoryのstatelessモジュールとし、入力path、結果、履歴をitems、設定、横断検索、export / importへ保存しない (ADR-0025)。読み取り専用で、削除・移動はしない。行の「表示」は`opener:default`の`reveal_item_in_dir`を使う
 - 走査はRustの`dirsize_scan`が`spawn_blocking`の単一スレッドで行う。明示スタックの深さ優先で、シンボリックリンク・ジャンクション・マウントポイントと、ルートと`st_dev`が違うフォルダには入らない。`walkdir` / `jwalk`は使わない (jwalkはrayonを使うため)
-- ローカルのフォルダだけを扱う。UNC・device pathはM-Linkと共通の`modules/network_path.rs`で、ファイルシステムに触る前に文字列で拒否する。Windowsは`GetDriveTypeW`の`DRIVE_REMOTE`、macOSは`statfs`の`MNT_LOCAL`でネットワーク上のボリュームを拒否する
+- ローカルのフォルダだけを扱う。UNC・device pathはM-Linkと共通の`modules/network_path.rs`で、ファイルシステムに触る前に文字列で拒否する。ルートのパスに含まれるリンク (シンボリックリンク・ジャンクション) は`read_link`でリンク自体から行き先を読んで1つずつ解決し、行き先がネットワーク上の場所なら触る前に拒否する。Windowsはドライブに触る前に`GetDriveTypeW`の`DRIVE_REMOTE`、macOSは解決したパスの`statfs`の`MNT_LOCAL`でネットワーク上のボリュームを拒否する
 - 「サイズ」(`len`) と「ディスク上」(macOS / Linuxは`st_blocks × 512`、Windowsは圧縮・スパース・クラウド上だけのファイルを`GetCompressedFileSizeW`、ほかを`len`のクラスタ切り上げ) を集計する。Windowsの大きさと属性は親フォルダの一覧から取り、ファイルを開かない。macOS / Linuxのハードリンクは1回だけ数える
 - 権限で読めないフォルダは報告して走査を続け、昇格はしない。Windowsでドライブ直下を走査した時は`GetDiskFreeSpaceExW`の使用量を返し、画面で集計との差を示す
 - フォルダは走査中に全件を持ち、ファイルは基準ごとの上位だけを名前付きで残す。WebViewへ返すのは基準ごとの上位10,000件の和集合 (最大20,000ノード、JSONで約5 MB) と、フォルダごとの「ほか」の件数・大きさだけ。親は子以上の大きさなので、同じ大きさなら浅い方を先に並べて祖先を含める

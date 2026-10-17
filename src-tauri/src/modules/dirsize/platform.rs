@@ -5,7 +5,7 @@
 //! 文字列だけで決まる判定 (`drive_root` / `is_drive_root`) は全 OS でテストできるよう分けている。
 
 use std::fs::{DirEntry, Metadata};
-use std::path::Path;
+use std::path::{Path, Prefix};
 
 use super::scan::VolumeUsage;
 
@@ -35,8 +35,8 @@ pub(super) fn hard_link_key(_metadata: &Metadata) -> Option<(u64, u64)> {
     None
 }
 
-/// ルートがネットワーク上のボリュームなら、拒否する理由を返す。UNC などの文字列で分かるものは
-/// 呼び出し側が先に `network_path::is_network_path` で拒否している。
+/// ルートがネットワーク上のボリューム (`/Volumes` 配下の SMB など) なら、拒否する理由を返す。
+/// UNC などの文字列で分かるものとリンクの行き先は、呼び出し側 (`root.rs`) が先に確かめている。
 #[cfg(target_os = "macos")]
 pub(super) fn ensure_local_volume(root: &Path) -> Result<(), String> {
     use std::ffi::CString;
@@ -62,16 +62,23 @@ pub(super) fn ensure_local_volume(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// パスのドライブ (Windows の prefix) を確かめる。ドライブ文字のあるローカルのドライブだけを通す。
+/// UNC・device path・ドライブ文字の無い `\\?\` パスはネットワーク上の場所になり得るので拒否する。
+pub(super) fn ensure_local_prefix(prefix: Prefix<'_>) -> Result<(), String> {
+    match prefix {
+        Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => ensure_local_drive(letter),
+        _ => Err("ネットワーク上の場所は対象外です。ローカルのフォルダを指定してください。".into()),
+    }
+}
+
+/// 割り当てたネットワークドライブ (`GetDriveTypeW` が `DRIVE_REMOTE`) なら拒否する
 #[cfg(windows)]
-pub(super) fn ensure_local_volume(root: &Path) -> Result<(), String> {
+fn ensure_local_drive(letter: u8) -> Result<(), String> {
     use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
     /// `Win32_System_WindowsProgramming` feature を足さないため値をここに置く
     const DRIVE_REMOTE: u32 = 4;
 
-    let Some(drive) = root.to_str().and_then(drive_root) else {
-        return Err("ドライブ文字 (C:\\ など) で始まるフォルダを指定してください。".into());
-    };
-    let wide = to_wide(&drive);
+    let wide = to_wide(&format!("{}:\\", char::from(letter)));
     // SAFETY: 終端 NUL 付きのバッファが呼び出しの間生きている
     if unsafe { GetDriveTypeW(wide.as_ptr()) } == DRIVE_REMOTE {
         return Err(
@@ -81,8 +88,14 @@ pub(super) fn ensure_local_volume(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Linux は配布対象外で、CI のテストでだけ動く。
-#[cfg(not(any(windows, target_os = "macos")))]
+/// Windows 以外のパスに prefix は無い
+#[cfg(not(windows))]
+fn ensure_local_drive(_letter: u8) -> Result<(), String> {
+    Ok(())
+}
+
+/// Windows はドライブごとに `ensure_local_prefix` で確かめている。Linux は配布対象外で、CI のテストでだけ動く。
+#[cfg(not(target_os = "macos"))]
 pub(super) fn ensure_local_volume(_root: &Path) -> Result<(), String> {
     Ok(())
 }
@@ -171,7 +184,6 @@ pub(super) fn volume_usage(_root_path: &str) -> Option<VolumeUsage> {
 }
 
 /// `X:\` か `X:/` で始まるパスの、ドライブのルート (`X:\`)。
-#[cfg_attr(not(windows), allow(dead_code))]
 pub(super) fn drive_root(path: &str) -> Option<String> {
     let bytes = path.as_bytes();
     let is_drive = bytes.len() >= 3

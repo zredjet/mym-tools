@@ -11,7 +11,6 @@ use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf, MAIN_SEPARATOR_STR};
 use std::time::{Duration, Instant};
 
@@ -19,12 +18,11 @@ use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::AppError;
-use crate::modules::network_path::is_network_path;
 
 use super::platform::{self, Allocation};
 use super::progress::DirSizeProgress;
+use super::root::{validate_root, Root};
 
-const MODULE_ID: &str = "dirsize";
 /// 基準ごとに返す項目の数。2 基準の和集合で最大 2 倍になる
 pub const TOP_K: usize = 10_000;
 /// 走査するフォルダの上限。達したら止めて途中までの集計を返す (1 フォルダ約 100 バイト)
@@ -301,34 +299,6 @@ struct Walk {
     seq: u64,
 }
 
-/// ルートを確かめる。ネットワーク上の場所は、ファイルシステムに触る前に文字列で拒否する
-/// (Windows で SMB 接続が走り、サインイン情報がサーバへ送られるのを避ける)。
-pub(super) fn validate_root(root_path: &str) -> Result<(PathBuf, fs::Metadata), AppError> {
-    if root_path.trim().is_empty() {
-        return Err(validation("フォルダを指定してください。"));
-    }
-    if is_network_path(root_path) {
-        return Err(validation(
-            "ネットワーク上の場所は対象外です。ローカルのフォルダを指定してください。",
-        ));
-    }
-    let root = PathBuf::from(root_path);
-    if !root.is_absolute() {
-        return Err(validation("フォルダは絶対パスで指定してください。"));
-    }
-    platform::ensure_local_volume(&root).map_err(validation)?;
-    let metadata = fs::metadata(&root).map_err(|error| match error.kind() {
-        ErrorKind::NotFound => validation("フォルダが見つかりません。"),
-        _ => AppError::Io(format!("{root_path} を読めません: {error}")),
-    })?;
-    if !metadata.is_dir() {
-        return Err(validation(
-            "フォルダを指定してください。ファイルは対象外です。",
-        ));
-    }
-    Ok((root, metadata))
-}
-
 pub(super) fn scan_inner(
     root_path: &str,
     limits: Limits,
@@ -338,7 +308,8 @@ pub(super) fn scan_inner(
 ) -> Result<DirSizeScanResult, AppError> {
     let started = Instant::now();
     ensure_not_cancelled(token, operation_id)?;
-    let (root, root_metadata) = validate_root(root_path)?;
+    // リンクを解決したパスをたどる。表示と結果のパスは指定された root_path のまま
+    let root = validate_root(root_path)?;
     progress(DirSizeProgress::Started);
 
     let mut walk = Walk {
@@ -354,7 +325,7 @@ pub(super) fn scan_inner(
     };
     walk_tree(
         &root,
-        &root_metadata,
+        root_path,
         limits,
         &mut walk,
         token,
@@ -385,18 +356,19 @@ pub(super) fn scan_inner(
 }
 
 fn walk_tree(
-    root: &Path,
-    root_metadata: &fs::Metadata,
+    root: &Root,
+    display_root: &str,
     limits: Limits,
     walk: &mut Walk,
     token: &CancellationToken,
     operation_id: &str,
     progress: &mut impl FnMut(DirSizeProgress),
 ) -> Result<(), AppError> {
-    let root_device = platform::device_id(root_metadata);
-    let allocation = Allocation::for_root(root);
+    let root_device = platform::device_id(&root.metadata);
+    let allocation = Allocation::for_root(&root.path);
+    let display = |path: &Path| display_path(path, &root.path, display_root);
     let mut throttle = Throttle { last_sent: None };
-    let mut stack: Vec<(u32, PathBuf)> = vec![(0, root.to_path_buf())];
+    let mut stack: Vec<(u32, PathBuf)> = vec![(0, root.path.clone())];
 
     'walk: while let Some((index, path)) = stack.pop() {
         ensure_not_cancelled(token, operation_id)?;
@@ -404,21 +376,20 @@ fn walk_tree(
             Ok(entries) => entries,
             Err(error) if index == 0 => {
                 return Err(AppError::Io(format!(
-                    "{} を読めません: {error}",
-                    path.display()
+                    "{display_root} を読めません: {error}"
                 )));
             }
             Err(_) => {
                 walk.dirs[index as usize].unreadable = true;
                 walk.unreadable.count += 1;
                 if walk.unreadable.paths.len() < MAX_UNREADABLE_PATHS {
-                    walk.unreadable.paths.push(path.display().to_string());
+                    walk.unreadable.paths.push(display(&path));
                 }
                 continue;
             }
         };
         if throttle.due() {
-            send_progress(walk, &path, progress);
+            send_progress(walk, display(&path), progress);
         }
         let depth = walk.dirs[index as usize].depth + 1;
         let mut read: u64 = 0;
@@ -426,7 +397,7 @@ fn walk_tree(
             ensure_not_cancelled(token, operation_id)?;
             read += 1;
             if read.is_multiple_of(PROGRESS_CHECK_ENTRIES) && throttle.due() {
-                send_progress(walk, &path, progress);
+                send_progress(walk, display(&path), progress);
             }
             let Ok(entry) = entry else {
                 walk.skipped.entries += 1;
@@ -494,13 +465,22 @@ fn walk_tree(
     Ok(())
 }
 
-fn send_progress(walk: &Walk, path: &Path, progress: &mut impl FnMut(DirSizeProgress)) {
+fn send_progress(walk: &Walk, current_dir: String, progress: &mut impl FnMut(DirSizeProgress)) {
     progress(DirSizeProgress::Scanning {
         files: walk.files_seen,
         dirs: walk.dirs.len() as u64 - 1,
         logical_bytes: walk.logical_seen,
-        current_dir: path.display().to_string(),
+        current_dir,
     });
+}
+
+/// 走査中のパス (リンクを解決したもの) を、指定されたルートの下のパスとして表す
+fn display_path(path: &Path, root: &Path, display_root: &str) -> String {
+    match path.strip_prefix(root) {
+        Ok(rest) if rest.as_os_str().is_empty() => display_root.to_string(),
+        Ok(rest) => Path::new(display_root).join(rest).display().to_string(),
+        Err(_) => path.display().to_string(),
+    }
 }
 
 /// 子の合計を親へ足す。深さ優先で見つけた順に並べたので、親は必ず子より前にある。
@@ -659,13 +639,6 @@ fn ensure_not_cancelled(token: &CancellationToken, operation_id: &str) -> Result
         })
     } else {
         Ok(())
-    }
-}
-
-fn validation(reason: impl Into<String>) -> AppError {
-    AppError::Validation {
-        module_id: MODULE_ID.into(),
-        reason: reason.into(),
     }
 }
 
@@ -1017,6 +990,35 @@ mod tests {
         assert_eq!(result.skipped.links, 2);
         assert_eq!(result.nodes[0].logical, 116 * KIB);
         assert!(!has_node(&result, "link"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolved_paths_are_shown_under_the_given_root() {
+        let resolved = Path::new("/private/data");
+        assert_eq!(display_path(resolved, resolved, "/link"), "/link");
+        assert_eq!(
+            display_path(&resolved.join("a/b"), resolved, "/link"),
+            "/link/a/b"
+        );
+        assert_eq!(
+            display_path(Path::new("/other"), resolved, "/link"),
+            "/other"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_root_reached_through_a_link_is_scanned_under_the_given_path() {
+        let dir = fixture();
+        let outside = tempfile::tempdir().unwrap();
+        let link = outside.path().join("data");
+        std::os::unix::fs::symlink(dir.path(), &link).unwrap();
+        let result = scan(&link, Limits::default()).unwrap();
+        assert_eq!(result.root_path, link.to_str().unwrap());
+        assert_eq!(result.nodes[0].name, link.to_str().unwrap());
+        assert_eq!(result.nodes[0].logical, 116 * KIB);
+        assert_eq!(result.skipped.links, 0);
     }
 
     #[cfg(unix)]

@@ -52,7 +52,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 0022 | 派生データを同期するトリガの置換 (同一 tx の `DROP TRIGGER` + `CREATE TRIGGER`、同期結果不変、値書き換えなし) は ADR-0011 の `MIGRATIONS` 枠で可。v3 で FTS 更新トリガを `UPDATE OF project_id, module_id, search_text` に絞る |
 | 0023 | PNG最適化 (`pngopt`) は shotq のライブラリ部分を `src-tauri/crates/shotq/` に複製してプロセス内で実行する (shotq は private のため git 依存にしない)。rayon は複製した shotq の内部に限り ADR-0009 R-2 の例外とし、処理は同時に 1 つ。取消しは読込中・最適化の後・置換の直前・ファイルの間。出力は CLI と同じ規則で、契約テストで CLI とのバイト一致を確かめる |
 | 0024 | テキストファイルの文字コード判定・変換 (`encoding`、`csvview` の読込) は Rust の `encoding_rs` で行い、共通処理は `modules/text_encoding.rs`。path だけを渡す。`_without_replacement` 系だけを使い、読めないバイト・表せない文字があれば保存せず位置を返す (¥ / ‾ / − と外字は警告)。同じ文字コード同士はバイトのまま改行・BOM だけ変える。別名保存のみ、64 MiB 上限 |
-| 0025 | フォルダ容量 (`dirsize`) は読み取り専用・ローカル限定。Rust の単一スレッドで再帰的に走査し、リンク・ジャンクションと別のボリュームに入らない。UNC は `modules/network_path.rs` で触る前に拒否し、Windows は `GetDriveTypeW`、macOS は `statfs` の `MNT_LOCAL` でネットワーク上のボリュームを拒否する。「サイズ」と「ディスク上」を集計し、読めないフォルダは昇格せず報告する。結果は基準ごとの上位 10,000 件の和集合と「ほか」にまとめ、フォルダ 1,000,000 件で止める |
+| 0025 | フォルダ容量 (`dirsize`) は読み取り専用・ローカル限定。Rust の単一スレッドで再帰的に走査し、リンク・ジャンクションと別のボリュームに入らない。UNC は `modules/network_path.rs` で触る前に拒否し、パス中のリンクは `read_link` で行き先を確かめながら解決する。Windows は `GetDriveTypeW`、macOS は `statfs` の `MNT_LOCAL` でネットワーク上のボリュームを拒否する。「サイズ」と「ディスク上」を集計し、読めないフォルダは昇格せず報告する。結果は基準ごとの上位 10,000 件の和集合と「ほか」にまとめ、フォルダ 1,000,000 件で止める |
 
 ## 絶対に破ってはいけない不変条件
 

@@ -3,6 +3,7 @@
 pub mod commands;
 mod platform;
 pub mod progress;
+mod root;
 mod scan;
 
 use crate::module::ModuleBackend;
