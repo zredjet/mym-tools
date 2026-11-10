@@ -15,6 +15,7 @@ permissions = [
   "allow-core-update-item",
   "allow-core-delete-item",
   "allow-core-reorder-items",
+  "allow-core-move-item",
   "allow-core-search",
   "allow-core-search-previews",
   "allow-core-get-settings",

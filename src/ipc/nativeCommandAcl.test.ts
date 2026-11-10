@@ -13,6 +13,7 @@ const PUBLIC_COMMANDS = [
   "encoding_convert_file",
   "csvview_read_file",
   "dirsize_scan",
+  "core_move_item",
 ] as const;
 
 describe("Native command ACL", () => {

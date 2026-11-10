@@ -124,6 +124,24 @@ export function deleteItem(input: { moduleId: ModuleId; itemId: string }): Promi
 }
 
 /**
+ * item を別のプロジェクトへ移す (`docs/data-model.md` §6.6)。
+ *
+ * 変わるのは所属と移動先での並び順だけで、内容と `updated_at` は変わらない。
+ * 移動先が今と同じプロジェクト、または存在しないプロジェクトなら reject する。
+ */
+export function moveItem(input: {
+  moduleId: ModuleId;
+  itemId: string;
+  targetProjectId: string;
+}): Promise<void> {
+  return invoke<void>("core_move_item", {
+    moduleId: input.moduleId,
+    itemId: input.itemId,
+    targetProjectId: input.targetProjectId,
+  });
+}
+
+/**
  * `(projectId, moduleId)` スコープ内の items を `orderedIds` の順序で並び替える
  * (`docs/data-model.md` §6.5、PR-Y / ADR-0011)。
  *

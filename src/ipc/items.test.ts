@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Item } from "@/lib/types";
 
-import { listAllItems, listAllItemSummaries } from "./items";
+import { listAllItems, listAllItemSummaries, moveItem } from "./items";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -80,6 +80,22 @@ describe("listAllItemSummaries", () => {
       projectId: "project-1",
       limit: 100,
       offset: 100,
+    });
+  });
+});
+
+describe("moveItem", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+  });
+
+  it("invokes core_move_item with the module, item and target project", async () => {
+    invokeMock.mockResolvedValueOnce(undefined);
+    await moveItem({ moduleId: "prompt", itemId: "item-1", targetProjectId: "project-2" });
+    expect(invokeMock).toHaveBeenCalledWith("core_move_item", {
+      moduleId: "prompt",
+      itemId: "item-1",
+      targetProjectId: "project-2",
     });
   });
 });

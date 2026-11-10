@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { FolderInput, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -20,6 +20,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
+import { MoveItemDialog } from "@/components/projects/MoveItemDialog";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -39,6 +40,7 @@ export function PaletteListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingItem, setDeletingItem] = useState<Item | null>(null);
+  const [movingItem, setMovingItem] = useState<Item | null>(null);
 
   const refresh = useCallback(async (pid: string) => {
     try {
@@ -178,6 +180,7 @@ export function PaletteListPage() {
                     key={item.id}
                     item={item}
                     onEdit={() => navigate(modulePath(projectId, "palette", `/edit/${item.id}`))}
+                    onMove={() => setMovingItem(item)}
                     onDelete={() => setDeletingItem(item)}
                   />
                 ))}
@@ -186,6 +189,15 @@ export function PaletteListPage() {
           </DndContext>
         )}
       </div>
+
+      <MoveItemDialog
+        item={movingItem}
+        moduleId="palette"
+        currentProjectId={projectId}
+        entityLabel="パレット"
+        onClose={() => setMovingItem(null)}
+        onMoved={() => void refresh(projectId)}
+      />
 
       <ConfirmDeleteDialog
         open={deletingItem != null}
@@ -201,10 +213,12 @@ export function PaletteListPage() {
 function PaletteCard({
   item,
   onEdit,
+  onMove,
   onDelete,
 }: {
   item: Item;
   onEdit: () => void;
+  onMove: () => void;
   onDelete: () => void;
 }) {
   const payload = item.payload as Partial<PalettePayloadV1>;
@@ -265,6 +279,15 @@ function PaletteCard({
             className="inline-flex h-7 w-7 items-center justify-center rounded text-[var(--fg-subtle)] hover:bg-[var(--bg-muted)] hover:text-[var(--fg)]"
           >
             <Pencil size={13} aria-hidden />
+          </button>
+          <button
+            type="button"
+            aria-label={`${item.title} を別のプロジェクトへ移動`}
+            title={`${item.title} を別のプロジェクトへ移動`}
+            onClick={onMove}
+            className="inline-flex h-7 w-7 items-center justify-center rounded text-[var(--fg-subtle)] hover:bg-[var(--bg-muted)] hover:text-[var(--fg)]"
+          >
+            <FolderInput size={13} aria-hidden />
           </button>
           <button
             type="button"

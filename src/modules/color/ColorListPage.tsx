@@ -8,7 +8,7 @@
  * - `mod+n` で新規
  */
 import { useCallback, useEffect, useState } from "react";
-import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { FolderInput, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useParams } from "react-router-dom";
 import {
@@ -29,6 +29,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
+import { MoveItemDialog } from "@/components/projects/MoveItemDialog";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -46,6 +47,7 @@ export function ColorListPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deletingItem, setDeletingItem] = useState<Item | null>(null);
+  const [movingItem, setMovingItem] = useState<Item | null>(null);
 
   const refresh = useCallback(async (pid: string) => {
     try {
@@ -175,6 +177,7 @@ export function ColorListPage() {
                   key={item.id}
                   item={item}
                   onEdit={() => setEditingItem(item)}
+                  onMove={() => setMovingItem(item)}
                   onDelete={() => setDeletingItem(item)}
                 />
               ))}
@@ -199,6 +202,14 @@ export function ColorListPage() {
           onSaved={() => void refresh(projectId)}
         />
       )}
+      <MoveItemDialog
+        item={movingItem}
+        moduleId="color"
+        currentProjectId={projectId}
+        entityLabel="Color"
+        onClose={() => setMovingItem(null)}
+        onMoved={() => void refresh(projectId)}
+      />
       <ConfirmDeleteDialog
         open={deletingItem != null}
         entityLabel="Color"
@@ -213,10 +224,12 @@ export function ColorListPage() {
 function ColorSwatch({
   item,
   onEdit,
+  onMove,
   onDelete,
 }: {
   item: Item;
   onEdit: () => void;
+  onMove: () => void;
   onDelete: () => void;
 }) {
   const payload = item.payload as ColorPayloadV1 | undefined;
@@ -275,6 +288,15 @@ function ColorSwatch({
             className="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--fg-subtle)] hover:bg-[var(--bg-muted)] hover:text-[var(--accent)]"
           >
             <Pencil size={13} aria-hidden />
+          </button>
+          <button
+            type="button"
+            aria-label="別のプロジェクトへ移動"
+            title="別のプロジェクトへ移動"
+            onClick={onMove}
+            className="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--fg-subtle)] hover:bg-[var(--bg-muted)] hover:text-[var(--accent)]"
+          >
+            <FolderInput size={13} aria-hidden />
           </button>
           <button
             type="button"

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { FolderInput, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -20,6 +20,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
+import { MoveItemDialog } from "@/components/projects/MoveItemDialog";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -40,6 +41,7 @@ function MemoListPageContent({ projectId }: { projectId: string | undefined }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingItem, setDeletingItem] = useState<Item | null>(null);
+  const [movingItem, setMovingItem] = useState<Item | null>(null);
 
   const refresh = useCallback(async (pid: string) => {
     try {
@@ -162,6 +164,7 @@ function MemoListPageContent({ projectId }: { projectId: string | undefined }) {
                   item={item}
                   onOpen={() => navigate(modulePath(projectId, "memo", `/${item.id}`))}
                   onEdit={() => navigate(modulePath(projectId, "memo", `/edit/${item.id}`))}
+                  onMove={() => setMovingItem(item)}
                   onDelete={() => setDeletingItem(item)}
                 />
               ))}
@@ -169,6 +172,15 @@ function MemoListPageContent({ projectId }: { projectId: string | undefined }) {
           </SortableContext>
         </DndContext>
       )}
+
+      <MoveItemDialog
+        item={movingItem}
+        moduleId="memo"
+        currentProjectId={projectId}
+        entityLabel="メモ"
+        onClose={() => setMovingItem(null)}
+        onMoved={() => void refresh(projectId)}
+      />
 
       <ConfirmDeleteDialog
         open={deletingItem != null}
@@ -189,11 +201,13 @@ function MemoRow({
   item,
   onOpen,
   onEdit,
+  onMove,
   onDelete,
 }: {
   item: Item;
   onOpen: () => void;
   onEdit: () => void;
+  onMove: () => void;
   onDelete: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -238,6 +252,15 @@ function MemoRow({
         className="text-[var(--fg-subtle)] hover:text-[var(--accent)]"
       >
         <Pencil size={13} />
+      </button>
+      <button
+        type="button"
+        aria-label="別のプロジェクトへ移動"
+        title="別のプロジェクトへ移動"
+        onClick={onMove}
+        className="text-[var(--fg-subtle)] hover:text-[var(--accent)]"
+      >
+        <FolderInput size={13} />
       </button>
       <button
         type="button"

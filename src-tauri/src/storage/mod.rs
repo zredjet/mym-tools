@@ -145,6 +145,23 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
     /// items の物理削除。`data_revision` を **+1**。
     fn delete_item(&self, module_id: &str, id: &ItemId) -> Result<(), AppError>;
 
+    /// item を別のプロジェクトへ移す (`data-model.md` §6.6)。
+    ///
+    /// - 書き換えるのは `project_id` と `position` だけ。`payload` / `search_text` /
+    ///   `updated_at` は **触らない** (所属の変更は「内容」の変更ではないため、§6.5 の並び替えと同じ)
+    /// - 移動先スコープでの `position` は新規作成と同じ規則 (未編集スコープなら 0、
+    ///   並び替え済みなら末尾)。移動元スコープの `position` は詰め直さない (削除と同じ)
+    /// - `items_fts` の `project_id` は FTS 更新トリガ (`UPDATE OF project_id, ...`) が同期する
+    /// - 1 トランザクションで行い、`data_revision` を **+1**
+    /// - item が無い / 移動先のプロジェクトが無い → `AppError::NotFound`、
+    ///   移動先が今のプロジェクトと同じ → `AppError::Validation`
+    fn move_item(
+        &self,
+        module_id: &str,
+        id: &ItemId,
+        target_project_id: &ProjectId,
+    ) -> Result<(), AppError>;
+
     /// item を 1 件取得し、必要なら Eager-on-Read (ADR-0006 / `data-model.md` §7.2)
     /// で payload をアップグレードして返す。アップグレード時の UPDATE では
     /// `data_revision` を **増やさない** (ADR-0006 §2.2)。

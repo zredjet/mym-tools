@@ -8,7 +8,7 @@
  * - `mod+n` (Cmd/Ctrl+N) で新規 (`docs/ui-design.md` §8.1)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { FolderInput, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -29,6 +29,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
+import { MoveItemDialog } from "@/components/projects/MoveItemDialog";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -47,6 +48,7 @@ export function PromptListPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deletingItem, setDeletingItem] = useState<Item | null>(null);
+  const [movingItem, setMovingItem] = useState<Item | null>(null);
 
   const refresh = useCallback(async (pid: string) => {
     try {
@@ -179,6 +181,7 @@ export function PromptListPage() {
                   item={item}
                   projectId={projectId}
                   onEdit={() => setEditingItem(item)}
+                  onMove={() => setMovingItem(item)}
                   onDelete={() => setDeletingItem(item)}
                 />
               ))}
@@ -203,6 +206,14 @@ export function PromptListPage() {
           onSaved={() => void refresh(projectId)}
         />
       )}
+      <MoveItemDialog
+        item={movingItem}
+        moduleId="prompt"
+        currentProjectId={projectId}
+        entityLabel="プロンプト"
+        onClose={() => setMovingItem(null)}
+        onMoved={() => void refresh(projectId)}
+      />
       <ConfirmDeleteDialog
         open={deletingItem != null}
         entityLabel="プロンプト"
@@ -218,11 +229,13 @@ function PromptRow({
   item,
   projectId,
   onEdit,
+  onMove,
   onDelete,
 }: {
   item: Item;
   projectId: string;
   onEdit: () => void;
+  onMove: () => void;
   onDelete: () => void;
 }) {
   const navigate = useNavigate();
@@ -290,6 +303,15 @@ function PromptRow({
         className="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--fg-subtle)] hover:bg-[var(--bg)] hover:text-[var(--accent)]"
       >
         <Pencil size={13} aria-hidden />
+      </button>
+      <button
+        type="button"
+        aria-label="別のプロジェクトへ移動"
+        title="別のプロジェクトへ移動"
+        onClick={onMove}
+        className="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--fg-subtle)] hover:bg-[var(--bg)] hover:text-[var(--accent)]"
+      >
+        <FolderInput size={13} aria-hidden />
       </button>
       <button
         type="button"

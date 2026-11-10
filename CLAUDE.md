@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 設計が曖昧な時はこの順に確認する。**先に出てくるドキュメントが優先**。
 
-1. `docs/requirements.md` — 何を作る/作らない、決定事項 D-01〜D-17、コア要件 C-01〜C-06
+1. `docs/requirements.md` — 何を作る/作らない、決定事項 D-01〜D-17、コア要件 C-01〜C-07
 2. `docs/architecture.md` — プロセス/スレッドモデル、レイヤ責務、構造の理由
 3. `docs/decisions/00NN-*.md` — ADR (改変不可。覆すなら新しい ADR で supersede する)
 4. `docs/data-model.md` — SQLite スキーマ、`settings.json` 形式、エクスポート/インポート JSON、payload バージョニング規則
@@ -73,7 +73,7 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - **文字コード変換で置換文字を使わない**。`encoding_rs` の `_without_replacement` が付かない `encode*` / `decode*` は使わず、`Encoding::for_label` で任意のラベルを受け付けない。読めないバイト・表せない文字は拒否して位置を返す (ADR-0024)
 - **NRBF で型を生成しない**。`BinaryFormatter` / `Deserialize` / 任意型ロードは禁止 (CI で検出) (ADR-0020)
 - **portable ZIP は各 80,000,000 bytes 以下** (ADR-0017 §4)。大きな資産や sidecar を足すときはサイズ増分を確認する
-- **`data_revision` の意味**: アイテム内容を変える書込みでのみ増やす。Eager-on-Read による再構築や FTS 再構築、ADR-0016 の所属移行では**増やさない** (ADR-0007 §2.2)
+- **`data_revision` の意味**: アイテム内容を変える書込みでのみ増やす。Eager-on-Read による再構築や FTS 再構築、ADR-0016 の所属移行では**増やさない** (ADR-0007 §2.2)。利用者が行う並び替えとプロジェクト間移動は内容を変えないが、意図の永続化として増やす (data-model §6.5 / §6.6)
 - **検索スコープの内部値は `"project" | "global"`** (data-model §11.1)。UI 表示文言は「Current project / All projects」だが内部値は別物
 
 ## モジュール / データ規約 (間違いやすい)
@@ -90,6 +90,7 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - M-Memo (`memo`) の payload v1 は `{ body: string }` (空文字不可)。export schema v1 の旧 `linkmemo` + `type=memo` は import 時に `memo` へ正規化する (ADR-0016)
 - Mermaid は `{ source }`、Diagram は `{ xml, text }` (各 UTF-8 1 MiB 以下)、Vector は `{ svg, text }` (SVG 20 MiB 以下)。`text` は検索用の抽出テキスト。いずれも一覧を挟まず直近 item か新規ドラフトを開く
 - 大きな payload を持つモジュールの一覧・検索は `core_list_item_summaries` / `core_search_previews` (payload を SELECT しない) と `search_preview_field()` を使う (ADR-0021)
+- アイテムのプロジェクト間移動は `core_move_item` (`ScopedStorage::move_item`) だけで行う。書き換えるのは `project_id` と移動先での `position` で、payload・`search_text`・`updated_at` は変えず、`data_revision` は +1 する。FTS の `project_id` はトリガが同期する。UI は共通の `MoveItemDialog` を使い、編集フォームにプロジェクト欄を足さない (data-model §6.6 / ui-design §6.28)
 - M-Prompt の `variables` は**永続化しない**。読込み時に `body` から正規表現で抽出する
 - Phase 1 の `projects` テーブルは `id / name / description / position / created_at / updated_at` のみ。**`accent` カラムはない**。Phase 1 のアクセント色は blue 固定 (ui-design §10 U-10 に Phase 2 持ち越し記録)
 
