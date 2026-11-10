@@ -19,6 +19,7 @@ pub mod hash;
 pub mod http;
 pub mod idgen;
 pub(crate) mod image_export;
+pub mod jsonfmt;
 pub mod jwt;
 pub mod linkmemo;
 pub mod memo;

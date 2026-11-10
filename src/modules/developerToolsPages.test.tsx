@@ -9,6 +9,7 @@ import { CronPage } from "@/modules/cron/CronPage";
 import { DateTimePage } from "@/modules/datetime/DateTimePage";
 import { HttpPage } from "@/modules/http/HttpPage";
 import { IdGeneratorPage } from "@/modules/idgen/IdGeneratorPage";
+import { JsonFormatPage } from "@/modules/jsonfmt/JsonFormatPage";
 import { JwtPage } from "@/modules/jwt/JwtPage";
 import { RegexPage } from "@/modules/regex/RegexPage";
 import { SecretGeneratorPage } from "@/modules/secretgen/SecretGeneratorPage";
@@ -131,6 +132,28 @@ describe("stateless developer tool pages", () => {
     expect(screen.getByRole("textbox", { name: "結果" })).toHaveValue("baz\nbar");
     fireEvent.click(screen.getByRole("button", { name: "結果を入力へ" }));
     expect(screen.getByRole("textbox", { name: "入力" })).toHaveValue("baz\nbar");
+  });
+
+  it("formats JSON without rewriting numbers and locates a syntax error", () => {
+    render(<JsonFormatPage />);
+    const input = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "入力" });
+    const output = screen.getByRole("textbox", { name: "結果" });
+    fireEvent.change(input, { target: { value: '{"b":1,"a":[1.0,2]}' } });
+    expect(output).toHaveValue('{\n  "b": 1,\n  "a": [\n    1.0,\n    2\n  ]\n}');
+    expect(screen.getByText(/正しい JSON です/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: /^出力/ }), {
+      target: { value: "minify" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "キーを文字コード順に並べ替える" }));
+    expect(output).toHaveValue('{"a":[1.0,2],"b":1}');
+
+    fireEvent.change(input, { target: { value: '{"a":1,}' } });
+    expect(screen.getByRole("alert")).toHaveTextContent("1 行 7 文字目: 末尾のカンマは使えません");
+    expect(output).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "エラーの位置へ移動" }));
+    expect(input).toHaveFocus();
+    expect([input.selectionStart, input.selectionEnd]).toEqual([6, 7]);
   });
 
   it("decodes a JWT while showing the unverified warning", () => {

@@ -1,6 +1,6 @@
 # 開発ツール拡張ロードマップ
 
-最終更新: 2026-10-17 / ステータス: 実装済み
+最終更新: 2026-11-10 / ステータス: 実装済み
 
 ## 1. 方針
 
@@ -38,13 +38,13 @@
 |---|---|---|
 | `manage` | 管理 | prompt, linkmemo, memo |
 | `design` | カラー・デザイン | color, palette, mermaid, diagram, vector, a11y |
-| `text` | テキスト・解析 | hash, codec, regex, textdiff, nrbf, charcount, textclean, encoding, csvview |
+| `text` | テキスト・解析 | hash, codec, regex, textdiff, nrbf, charcount, textclean, encoding, csvview, jsonfmt |
 | `web` | Web・通信 | urlquery, jwt, http |
 | `generate` | ID・秘密値 | idgen, secretgen |
 | `time` | 日時・スケジュール | datetime, cron |
 | `other` | その他 | pdfmerge, pngopt, dirsize |
 
-表は 2026-10-17 時点の割り当て。正典は各モジュールの `ModuleDefinition.category` と `src/modules/registry.ts` の並び。
+表は 2026-11-10 時点の割り当て。正典は各モジュールの `ModuleDefinition.category` と `src/modules/registry.ts` の並び。
 
 開閉状態は `settings.json` の `core.collapsed_module_categories` に保存する。キーがない初回はすべて展開し、現在表示中のモジュールを含むカテゴリは自動的に開く。
 
@@ -64,13 +64,15 @@
 - Cron の Quartz 固有記号と year field
 - HTTP の cookie 管理、multipart、ファイル送信、proxy、無効証明書の許可
 - URL 取得によるアクセシビリティ監査、HTML 静的監査
+- JSON のコメント・末尾カンマ (JSON5 / JSONC) の受け入れ、JSON Lines、YAML / TOML との変換、ツリー表示、JSONPath、JSON Schema 検証
 
 ## 6. 実装結果
 
 - 11機能を個別のFrontend / Backend moduleとして登録し、Link / Memo分離後の既存6機能と合わせて当時17モジュールになった。後続のADR-0017でMermaid / Diagram、ADR-0018でPDF Merge、ADR-0020でNRBF、ADR-0021でベクター描画、ADR-0023でPNG最適化を追加した。
 - 2026-10-06 に文字数カウント (`charcount`) とテキスト整形 (`textclean`) を追加した。どちらもフロントだけで完結し、入力は1 MiBまで。
 - 2026-10-07 にADR-0024で文字コード変換 (`encoding`) と、その判定でファイルを読むCSV ビューア (`csvview`) を追加した。
-- 2026-10-17 にADR-0025でフォルダ容量 (`dirsize`) を追加し、現在は28モジュールである。読み取り専用で、ローカルのフォルダだけを走査する。
+- 2026-10-17 にADR-0025でフォルダ容量 (`dirsize`) を追加した。読み取り専用で、ローカルのフォルダだけを走査する。
+- 2026-11-10 にJSON 整形 (`jsonfmt`) を追加し、現在は29モジュールである。フロントだけで完結し、入力は1 MiBまで。数値と文字列を書かれていたまま残すため、`JSON.parse` / `JSON.stringify` の往復ではなく自作のパーサで検証・整形する。
 - カテゴリ別の折りたたみSidebarとSettings表示を追加し、開閉状態を`core.collapsed_module_categories`へ保存する。
 - 全新規画面をroute単位で遅延読込し、未使用モジュールの処理ライブラリを起動時bundleから分離した。
 - Frontendの純粋処理テスト、11画面の代表操作テスト、registry / settingsテストを追加した。

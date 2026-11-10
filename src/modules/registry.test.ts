@@ -40,6 +40,7 @@ describe("frontend module registry", () => {
       "encoding",
       "csvview",
       "dirsize",
+      "jsonfmt",
     ]);
     expect(() => validateModuleDefinitions(modules)).not.toThrow();
     for (const module of modules) expect(module.routes.length).toBeGreaterThan(0);

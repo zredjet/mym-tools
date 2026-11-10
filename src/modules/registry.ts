@@ -14,6 +14,7 @@ import { vectorModule } from "@/modules/vector";
 import { hashModule } from "@/modules/hash";
 import { httpModule } from "@/modules/http";
 import { idGeneratorModule } from "@/modules/idgen";
+import { jsonFormatModule } from "@/modules/jsonfmt";
 import { jwtModule } from "@/modules/jwt";
 import { linkMemoModule } from "@/modules/linkmemo";
 import { memoModule } from "@/modules/memo";
@@ -73,6 +74,7 @@ export const modules: readonly ModuleDefinition[] = [
   encodingModule,
   csvViewModule,
   dirSizeModule,
+  jsonFormatModule,
 ];
 
 export function validateModuleDefinitions(definitions: readonly ModuleDefinition[]): void {

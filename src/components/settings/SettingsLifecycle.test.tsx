@@ -38,6 +38,7 @@ describe("SettingsLifecycle", () => {
       "hash",
       "http",
       "idgen",
+      "jsonfmt",
       "jwt",
       "linkmemo",
       "memo",
