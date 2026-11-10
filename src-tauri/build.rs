@@ -13,6 +13,7 @@ fn main() {
         "core_update_item",
         "core_delete_item",
         "core_reorder_items",
+        "core_move_item",
         "core_search",
         "core_get_settings",
         "core_update_settings",

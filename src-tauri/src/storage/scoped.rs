@@ -107,6 +107,13 @@ impl ScopedStorage {
         self.inner.delete_item(&module_id, id)
     }
 
+    /// item を別のプロジェクトへ移す (`data-model.md` §6.6)。内容と `updated_at` は変えない。
+    pub fn move_item(&self, id: &ItemId, target_project_id: &ProjectId) -> Result<(), AppError> {
+        self.guard_stateless()?;
+        let module_id = self.module.id().to_string();
+        self.inner.move_item(&module_id, id, target_project_id)
+    }
+
     /// item を 1 件取得する。
     ///
     /// **Eager-on-Read** (ADR-0006 / `data-model.md` §7.2):

@@ -125,6 +125,25 @@ pub async fn core_delete_item(
     .await
 }
 
+/// item を別のプロジェクトへ移す (`StorageService::move_item`、`data-model.md` §6.6)。
+///
+/// - 書き換えるのは所属 (`project_id`) と移動先での `position` だけ。内容と `updated_at` は不変
+/// - 1 トランザクションで行い、`data_revision` を **+1**
+/// - stateless module は `ScopedStorage` が拒否する
+#[tauri::command]
+pub async fn core_move_item(
+    state: State<'_, AppState>,
+    module_id: String,
+    item_id: String,
+    target_project_id: String,
+) -> Result<(), AppError> {
+    let scoped = scoped_storage(&state, &module_id)?;
+    run_storage(&state, LockMode::Shared, move || {
+        scoped.move_item(&ItemId::new(item_id), &ProjectId::new(target_project_id))
+    })
+    .await
+}
+
 /// `(project_id, module_id)` スコープ内の items を `ordered_ids` の順序で並び替える
 /// (`StorageService::reorder_items`、PR-Y / `data-model.md` §6.5)。
 ///

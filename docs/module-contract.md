@@ -337,6 +337,14 @@ impl ScopedStorage {
 
     pub async fn delete_item(&self, id: &ItemId) -> Result<(), AppError>;
 
+    /// item を別のプロジェクトへ移す (data-model.md §6.6)。
+    /// 所属と移動先での position だけを変え、内容と updated_at は変えない。
+    pub async fn move_item(
+        &self,
+        id: &ItemId,
+        target_project_id: &ProjectId,
+    ) -> Result<(), AppError>;
+
     pub async fn get_item(&self, id: &ItemId) -> Result<Item, AppError>;
 
     /// モジュール内の項目を**指定プロジェクト内**で一覧取得する。
@@ -358,9 +366,10 @@ impl ScopedStorage {
 **設計上の重要事項**:
 - `ScopedStorage` はモジュールに**自分自身の module_id**しか触らせない。他モジュールの items / 設定にアクセスする方法を提供しない
 - **`list_items` は project_id 必須**。「全プロジェクト横断」のニーズはコアの SearchService 経由で扱う。モジュールが横断一覧を作れる API を持つと、UI 状態と無関係な無作為横断クエリが生まれて事故になる
-- ステートレスモジュール (`is_stateless = true`) で `create_item` / `update_item` / `delete_item` / `list_items` を呼ぶと `AppError::StatelessModule` を返す (パニックさせない)。`list_items` は呼ばれた場合、空配列ではなくエラーを返す (使うべきでない API を黙認しない)
+- ステートレスモジュール (`is_stateless = true`) で `create_item` / `update_item` / `delete_item` / `move_item` / `list_items` を呼ぶと `AppError::StatelessModule` を返す (パニックさせない)。`list_items` は呼ばれた場合、空配列ではなくエラーを返す (使うべきでない API を黙認しない)
 - すべてのメソッドは StorageService の writer mutex 経由で直列化される (data-model.md §13.7)
 - エクスポート/インポートはコアが直接 items テーブルを処理するため、ScopedStorage には全プロジェクト系 API は不要
+- `move_item` はコアの操作で、モジュールは移動のたびに呼び出されない (`validate_payload` / `index_text` は走らない)。payload がプロジェクトに依存しないことを前提にしている (data-model.md §6.6)。フロントからは `core_move_item(module_id, item_id, target_project_id)` で呼び、共通ダイアログ `MoveItemDialog` が UI を受け持つ (ui-design.md §6.28)
 
 **保持戦略**:
 - `ScopedStorage` は**コマンド関数の中で都度生成**する (Arc clone のコストは無視できる)
@@ -929,6 +938,7 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-10-07 | 1.11 | §12.14 M-CSV ビューアを追加 |
 | 2026-10-17 | 1.12 | ADR-0025を反映し、§12.15 M-フォルダ容量を追加 |
 | 2026-11-10 | 1.13 | §12.11 に `jsonfmt` を追加し、`JSON.parse` の往復を使わない理由、値を書き換えない規則、上限を記載 |
+| 2026-11-10 | 1.14 | §5.1 に `ScopedStorage::move_item` と `core_move_item` を追加 |
 
 ## ベクター描画と検索投影の追加契約（ADR-0021）
 

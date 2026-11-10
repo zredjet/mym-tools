@@ -794,6 +794,15 @@ impl StorageService for SqliteStorage {
         self.delete_item_internal(module_id, id)
     }
 
+    fn move_item(
+        &self,
+        module_id: &str,
+        id: &ItemId,
+        target_project_id: &ProjectId,
+    ) -> Result<(), AppError> {
+        self.move_item_internal(module_id, id, target_project_id)
+    }
+
     fn get_item_eager(
         &self,
         module_id: &str,
@@ -948,6 +957,26 @@ impl StorageService for SqliteStorage {
 // -------- items CRUD / Eager-on-Read / search --------
 
 impl SqliteStorage {
+    /// `(project_id, module_id)` スコープへ item を 1 件足す時の `position`
+    /// (`data-model.md` §6.5 既定値ルール)。新規作成とプロジェクト間の移動で共有する。
+    ///
+    /// - 未編集スコープ (全行 `position = 0`) と空スコープ → 0
+    /// - 並び替え済みスコープ → `MAX(position) + 1` (末尾)
+    fn next_item_position(
+        tx: &rusqlite::Transaction,
+        project_id: &ProjectId,
+        module_id: &str,
+    ) -> Result<i64, AppError> {
+        tx.query_row(
+            "SELECT CASE WHEN COALESCE(MAX(position), 0) = 0 THEN 0 \
+             ELSE COALESCE(MAX(position), -1) + 1 END \
+             FROM items WHERE project_id = ? AND module_id = ?",
+            [project_id.as_str(), module_id],
+            |row| row.get(0),
+        )
+        .map_err(AppError::from)
+    }
+
     /// items の新規作成 (`StorageService::create_item` の実装本体)。
     /// 引数が多いのは items テーブルのカラム数に対応するため意図的。
     #[allow(clippy::too_many_arguments)]
@@ -985,15 +1014,7 @@ impl SqliteStorage {
             //
             // 判定 SQL は writer mutex 内の同一 tx 内なので race なし。空スコープも
             // `MAX(position)` が NULL → COALESCE で 0 扱いになり、全体として position = 0 に確定する。
-            let next_position: i64 = tx
-                .query_row(
-                    "SELECT CASE WHEN COALESCE(MAX(position), 0) = 0 THEN 0 \
-                     ELSE COALESCE(MAX(position), -1) + 1 END \
-                     FROM items WHERE project_id = ? AND module_id = ?",
-                    [project_id.as_str(), module_id],
-                    |row| row.get(0),
-                )
-                .map_err(AppError::from)?;
+            let next_position = Self::next_item_position(&tx, project_id, module_id)?;
 
             tx.execute(
                 "INSERT INTO items (id, project_id, module_id, title, tags, search_text, \
@@ -1091,6 +1112,83 @@ impl SqliteStorage {
                     key: id.to_string(),
                 });
             }
+            Self::bump_data_revision(&tx)?;
+            tx.commit().map_err(AppError::from)?;
+            Ok(())
+        })
+    }
+
+    /// item を別のプロジェクトへ移す (`StorageService::move_item` の実装本体、`data-model.md` §6.6)。
+    fn move_item_internal(
+        &self,
+        module_id: &str,
+        id: &ItemId,
+        target_project_id: &ProjectId,
+    ) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            let tx = conn.transaction().map_err(AppError::from)?;
+
+            let current_project_id: Option<String> = tx
+                .query_row(
+                    "SELECT project_id FROM items WHERE id = ? AND module_id = ?",
+                    params![id.as_str(), module_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(AppError::from)?;
+            let Some(current_project_id) = current_project_id else {
+                return Err(AppError::NotFound {
+                    entity: "item".into(),
+                    key: id.to_string(),
+                });
+            };
+            if current_project_id == target_project_id.as_str() {
+                return Err(AppError::Validation {
+                    module_id: module_id.to_string(),
+                    reason: "item already belongs to the target project".into(),
+                });
+            }
+
+            // 外部キーの違反より先に、何が無いのかが分かる形で返す。
+            let target_exists: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?)",
+                    [target_project_id.as_str()],
+                    |row| row.get(0),
+                )
+                .map_err(AppError::from)?;
+            if !target_exists {
+                return Err(AppError::NotFound {
+                    entity: "project".into(),
+                    key: target_project_id.to_string(),
+                });
+            }
+
+            let next_position = Self::next_item_position(&tx, target_project_id, module_id)?;
+
+            // `updated_at` / `payload` / `search_text` は触らない。`items_fts.project_id` は
+            // FTS 更新トリガ (`UPDATE OF project_id, module_id, search_text`) が同じ tx で同期する。
+            // WHERE に今の project_id も入れ、読み取った行だけを書き換える。
+            let rows_affected = tx
+                .execute(
+                    "UPDATE items SET project_id = ?, position = ? \
+                     WHERE id = ? AND module_id = ? AND project_id = ?",
+                    params![
+                        target_project_id.as_str(),
+                        next_position,
+                        id.as_str(),
+                        module_id,
+                        current_project_id,
+                    ],
+                )
+                .map_err(AppError::from)?;
+            if rows_affected != 1 {
+                return Err(AppError::Storage(format!(
+                    "move_item updated {rows_affected} rows for item {id}"
+                )));
+            }
+
+            // 所属の変更はユーザーの意図の永続化なので +1 (並び替えと同じ扱い、§6.5 / §13.2)
             Self::bump_data_revision(&tx)?;
             tx.commit().map_err(AppError::from)?;
             Ok(())
@@ -2406,6 +2504,234 @@ mod tests {
         assert_eq!(
             listed,
             vec!["i1".to_string(), "i2".into(), "i3".into(), "i4".into()]
+        );
+    }
+
+    // -------- プロジェクト間の移動 (`data-model.md` §6.6) --------
+
+    /// 移動で変わるのは所属だけ。内容と `updated_at` は不変で、`data_revision` は +1。
+    #[test]
+    fn move_item_changes_project_only_and_bumps_revision() {
+        let storage = in_memory_storage();
+        let p1 = storage.create_project("P1", None).unwrap();
+        let p2 = storage.create_project("P2", None).unwrap();
+        let id = storage
+            .create_item(
+                "prompt",
+                &p1.id,
+                "moving",
+                &["tag".into()],
+                1,
+                &serde_json::json!({"body": "hello {{name}}"}),
+                "moving tag hello",
+            )
+            .unwrap();
+        let before = storage.list_items("prompt", &p1.id, 100, 0).unwrap();
+        let before = &before[0];
+        let revision = storage.data_revision().unwrap();
+
+        storage.move_item("prompt", &id, &p2.id).unwrap();
+
+        assert!(storage
+            .list_items("prompt", &p1.id, 100, 0)
+            .unwrap()
+            .is_empty());
+        let after = storage.list_items("prompt", &p2.id, 100, 0).unwrap();
+        assert_eq!(after.len(), 1);
+        let after = &after[0];
+        assert_eq!(after.id, id);
+        assert_eq!(after.project_id, p2.id);
+        assert_eq!(after.title, before.title);
+        assert_eq!(after.tags, before.tags);
+        assert_eq!(after.payload, before.payload);
+        assert_eq!(after.payload_schema_version, before.payload_schema_version);
+        assert_eq!(after.created_at, before.created_at);
+        assert_eq!(
+            after.updated_at, before.updated_at,
+            "所属の変更は内容の変更ではないので updated_at は変えない"
+        );
+        assert_eq!(storage.data_revision().unwrap(), revision + 1);
+    }
+
+    /// 移動先での position は新規作成と同じ規則。移動元は詰め直さない。
+    #[test]
+    fn move_item_uses_the_create_position_rule_in_the_target_scope() {
+        let storage = in_memory_storage();
+        let source = storage.create_project("Source", None).unwrap();
+        let unedited = storage.create_project("Unedited", None).unwrap();
+        let reordered = storage.create_project("Reordered", None).unwrap();
+        let [s1, s2, s3] = create_three_items(&storage, &source.id, "prompt");
+        storage
+            .reorder_items(&source.id, "prompt", &[s1.clone(), s2.clone(), s3.clone()])
+            .unwrap();
+        create_three_items(&storage, &unedited.id, "prompt");
+        let [r1, r2, r3] = create_three_items(&storage, &reordered.id, "prompt");
+        storage
+            .reorder_items(&reordered.id, "prompt", &[r3, r1, r2])
+            .unwrap();
+        let position_of = |project: &ProjectId, id: &ItemId| {
+            storage
+                .list_items("prompt", project, 100, 0)
+                .unwrap()
+                .into_iter()
+                .find(|item| &item.id == id)
+                .map(|item| item.position)
+        };
+
+        // 未編集スコープ (全行 0) へは 0 のまま入り、全行 0 の状態を保つ
+        storage.move_item("prompt", &s1, &unedited.id).unwrap();
+        assert_eq!(position_of(&unedited.id, &s1), Some(0));
+
+        // 並び替え済みスコープ (0..2) へは末尾 (3) に入る
+        storage.move_item("prompt", &s2, &reordered.id).unwrap();
+        assert_eq!(position_of(&reordered.id, &s2), Some(3));
+        let titles: Vec<String> = storage
+            .list_items("prompt", &reordered.id, 100, 0)
+            .unwrap()
+            .into_iter()
+            .map(|item| item.title)
+            .collect();
+        assert_eq!(titles.last().map(String::as_str), Some("i2"));
+
+        // 移動元に残った行の position は変えない (削除と同じく穴あきを許す)
+        assert_eq!(position_of(&source.id, &s3), Some(2));
+        assert_eq!(
+            storage
+                .list_items("prompt", &source.id, 100, 0)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // 空のスコープへは 0
+        let empty = storage.create_project("Empty", None).unwrap();
+        storage.move_item("prompt", &s3, &empty.id).unwrap();
+        assert_eq!(position_of(&empty.id, &s3), Some(0));
+    }
+
+    /// 同じプロジェクトの別モジュールの並びには影響しない。
+    #[test]
+    fn move_item_position_ignores_other_modules_in_the_target_project() {
+        let storage = in_memory_storage();
+        let source = storage.create_project("Source", None).unwrap();
+        let target = storage.create_project("Target", None).unwrap();
+        let [l1, l2, l3] = create_three_items(&storage, &target.id, "linkmemo");
+        storage
+            .reorder_items(&target.id, "linkmemo", &[l1, l2, l3])
+            .unwrap();
+        let [p1, _p2, _p3] = create_three_items(&storage, &source.id, "prompt");
+
+        storage.move_item("prompt", &p1, &target.id).unwrap();
+
+        let moved = storage.list_items("prompt", &target.id, 100, 0).unwrap();
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].position, 0);
+        assert_eq!(
+            storage
+                .list_items("linkmemo", &target.id, 100, 0)
+                .unwrap()
+                .len(),
+            3
+        );
+    }
+
+    /// FTS (3 文字以上) と LIKE (3 文字未満) のどちらの検索でも、移動後の所属で見つかる。
+    #[test]
+    fn move_item_is_followed_by_project_scoped_search() {
+        let storage = Arc::new(in_memory_storage());
+        let (p1, p2) = seed_search_data(&storage);
+        let in_project = |project: &ProjectId, query: &str| {
+            storage
+                .search(
+                    &SearchScope::Project {
+                        project_id: project.clone(),
+                    },
+                    query,
+                    None,
+                    100,
+                    0,
+                )
+                .unwrap()
+        };
+        let blue = in_project(&p1, "Blue");
+        assert_eq!(blue.len(), 1);
+        let id = blue[0].id.clone();
+        assert!(in_project(&p2, "Blue").is_empty());
+
+        storage.move_item("color", &id, &p2).unwrap();
+
+        for query in ["Blue", "Bl", "calm"] {
+            assert!(in_project(&p1, query).is_empty(), "p1 / {query}");
+            let found = in_project(&p2, query);
+            assert_eq!(found.len(), 1, "p2 / {query}");
+            assert_eq!(found[0].id, id);
+            assert_eq!(found[0].project_id, p2);
+        }
+        let global = storage
+            .search(&SearchScope::Global, "Blue", None, 100, 0)
+            .unwrap();
+        assert_eq!(global.len(), 1);
+    }
+
+    /// 失敗する移動は何も書かず、`data_revision` も増やさない。
+    #[test]
+    fn move_item_rejects_invalid_requests_without_writing() {
+        let storage = in_memory_storage();
+        let p1 = storage.create_project("P1", None).unwrap();
+        let p2 = storage.create_project("P2", None).unwrap();
+        let [id, _i2, _i3] = create_three_items(&storage, &p1.id, "prompt");
+        let revision = storage.data_revision().unwrap();
+
+        // 今と同じプロジェクト
+        let err = storage.move_item("prompt", &id, &p1.id).unwrap_err();
+        assert!(matches!(err, AppError::Validation { .. }));
+
+        // 無い item
+        let err = storage
+            .move_item("prompt", &ItemId::new("missing".to_string()), &p2.id)
+            .unwrap_err();
+        assert!(matches!(err, AppError::NotFound { ref entity, .. } if entity == "item"));
+
+        // 別モジュールの ID として渡す (module_id が合わない)
+        let err = storage.move_item("linkmemo", &id, &p2.id).unwrap_err();
+        assert!(matches!(err, AppError::NotFound { ref entity, .. } if entity == "item"));
+
+        // 無いプロジェクト
+        let err = storage
+            .move_item("prompt", &id, &ProjectId::new("missing".to_string()))
+            .unwrap_err();
+        assert!(matches!(err, AppError::NotFound { ref entity, .. } if entity == "project"));
+
+        assert_eq!(storage.data_revision().unwrap(), revision);
+        assert_eq!(
+            storage.list_items("prompt", &p1.id, 100, 0).unwrap().len(),
+            3
+        );
+        assert!(storage
+            .list_items("prompt", &p2.id, 100, 0)
+            .unwrap()
+            .is_empty());
+    }
+
+    /// stateless module は items を持たないので、`ScopedStorage` が移動を拒否する。
+    #[test]
+    fn move_item_is_rejected_for_stateless_modules() {
+        let storage = Arc::new(in_memory_storage());
+        let p1 = storage.create_project("P1", None).unwrap();
+        let p2 = storage.create_project("P2", None).unwrap();
+        let id = make_color_scoped(&storage, 1)
+            .create_item(&p1.id, "Red", &[], serde_json::json!({"hex": "#f00"}))
+            .unwrap();
+        let stateless: Arc<dyn ModuleBackend> = Arc::new(crate::modules::hash::HashModule);
+        let scoped = storage.clone().scoped_for(stateless);
+        assert!(scoped.move_item(&id, &p2.id).is_err());
+
+        make_color_scoped(&storage, 1)
+            .move_item(&id, &p2.id)
+            .unwrap();
+        assert_eq!(
+            storage.list_items("color", &p2.id, 100, 0).unwrap().len(),
+            1
         );
     }
 

@@ -105,6 +105,7 @@ pub fn register_invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Bu
         crate::commands::items::core_update_item,
         crate::commands::items::core_delete_item,
         crate::commands::items::core_reorder_items,
+        crate::commands::items::core_move_item,
         // Core: 横断検索 (FTS5 trigram + LIKE フォールバック、data-model.md §8)
         crate::commands::search::core_search,
         // Core: settings.json (data-model.md §11)

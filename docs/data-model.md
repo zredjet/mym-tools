@@ -1,6 +1,6 @@
 # データモデル (Data Model)
 
-最終更新: 2026-10-02 / ステータス: Draft (Phase 1)
+最終更新: 2026-11-10 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**データをどう持つか**」を定義する。
 要件 (`requirements.md`) と構造 (`architecture.md`) で確定した方針を、
@@ -287,6 +287,43 @@ core_reorder_items(project_id, module_id, ordered_ids: string[])
   ```
 
   これにより、JSON 内の元順序 (= position 昇順、同点は created_at 昇順、最終的に id) を保ったまま 0..N-1 の連番に詰める。インポート JSON が古くて全行 position=0 の場合は created_at 順になる。完璧な順序保全 (例: 元 DB の reorder 履歴) は Phase 1 では追跡しない (UI 設計 §10 U-11 で Phase 2 再評価)
+
+### 6.6 プロジェクト間の移動 (`core_move_item`)
+
+item を、同じモジュールのまま別のプロジェクトへ移す。export → 削除 → import や作り直しを経ずに、所属だけを変えるための書込み。
+
+```
+core_move_item(module_id, item_id, target_project_id)
+```
+
+#### 書き換える列と書き換えない列
+
+| 列 | 扱い |
+|----|------|
+| `project_id` | 移動先のプロジェクトにする |
+| `position` | 移動先の `(project_id, module_id)` スコープで、新規作成と同じ規則 (§6.5) で決める。未編集スコープと空スコープなら 0、並び替え済みスコープなら `MAX(position) + 1` (末尾) |
+| `id` / `module_id` / `title` / `tags` / `payload` / `payload_schema_version` / `search_text` / `created_at` | 変えない |
+| `updated_at` | **変えない**。所属の変更は「内容」の変更ではなく、`updated_at` の意味 (本文の最終更新) を保つ (§6.5 の並び替えと同じ) |
+
+- `items_fts` の `project_id` は、FTS 更新トリガ (`UPDATE OF project_id, module_id, search_text`、§8.2) が同じトランザクションで同期する。アプリ側で FTS を書かない
+- 移動元スコープに残った行の `position` は詰め直さない (削除と同じく穴あきを許す。次の並び替えで `0..N-1` に戻る)
+- 未編集スコープへ移した item は `position = 0` のままなので、一覧では `updated_at` の順に並ぶ (先頭に来るとは限らない)
+- payload は移動で書き換えない。Phase 1 の payload は他の item やプロジェクトを参照しないため、移動後もそのまま有効である。将来 payload がプロジェクト内の別 item を参照するモジュールを足す時は、この前提を見直す
+
+#### 実装規約
+
+1 トランザクション内で次の順に行う。
+
+1. `SELECT project_id FROM items WHERE id=? AND module_id=?` で今の所属を読む。無ければ `AppError::NotFound` (entity = item)。別モジュールの item ID を渡した場合もここで弾かれる
+2. 移動先が今の所属と同じなら `AppError::Validation`
+3. 移動先のプロジェクトが `projects` に無ければ `AppError::NotFound` (entity = project)。外部キー違反より先に、何が無いのかが分かる形で返す
+4. 移動先スコープの `position` を §6.5 の規則で求める
+5. `UPDATE items SET project_id=?, position=? WHERE id=? AND module_id=? AND project_id=?` (今の所属も条件に入れ、1 で読んだ行だけを書き換える)
+6. `data_revision +1`
+
+- **`data_revision +1` の根拠**: 並び替え (§6.5) と同じく、ユーザーの意図の永続化でありバックアップ判定の対象に含める。ADR-0016 の Link / Memo 再所属 (起動時の一括移行、+0) とは別の、利用者が 1 件ずつ行う操作である
+- stateless module は items を持たないので、`ScopedStorage::move_item` が `AppError::StatelessModule` で拒否する
+- export / import の形は変えない。移動後の item は、移動先のプロジェクトの item として書き出される
 
 ---
 
@@ -988,6 +1025,7 @@ import 実行ボタン押下時、StorageService は**実行前に pre-op バッ
   - データに変化を起こさない読み取りオンリー処理では増えない
 - 増分の対象となる操作 (= 「データが変化した」と見なす操作):
   - item の create / update / delete
+  - item の並び替え (§6.5) とプロジェクト間の移動 (§6.6)
   - project の create / update / delete
   - import の投入
   - DB schema migration の適用
@@ -1278,6 +1316,9 @@ ADR-0011 §2.1 のチェックリストを満たすものに限る:
 | T-48 | Diagram item create/update | `mxfile` / `mxGraphModel` root、DTD/entityなし、XML/text各1MiB以下だけが保存され、textで検索できる |
 | T-49 | Diagramを含むproject export/import | 共通items経路でpayload v1を保持し、import後にtextからsearch_textが再生成される |
 | T-50 | `.drawio` / `.xml` import | 拡張子、容量、UTF-8、XML root、DTD/entityのいずれかが不正ならitemsを変更せず拒否する |
+| T-51 | `core_move_item` で item を別プロジェクトへ移動 | `project_id` と `position` だけが変わり、title / tags / payload / `created_at` / `updated_at` は不変。`data_revision` は +1。移動先の `position` は未編集スコープで 0、並び替え済みスコープで末尾。移動元の残りの `position` は不変 |
+| T-52 | 移動後の検索 | プロジェクト内検索 (FTS と 3 文字未満の LIKE) が、移動元では 0 件、移動先では 1 件になる。横断検索は 1 件のまま |
+| T-53 | `core_move_item` の拒否 | 今と同じプロジェクト (`Validation`)、無い item / module_id の不一致 / 無いプロジェクト (`NotFound`)、stateless module のいずれも何も書かず、`data_revision` を増やさない |
 
 ---
 
@@ -1331,6 +1372,7 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-09-25 | 1.6 | DB schema v4: project 削除時の FTS 同期トリガ (`trg_items_fts_ad` の条件付き化と `trg_projects_fts_bd`) を §8.2 / §14.4 に追加 |
 | 2026-09-25 | 1.7 | §5 にプロジェクトの並び替えで `updated_at` を変えないことを明記 |
 | 2026-10-02 | 1.8 | §10.2 に Link のネットワーク上の場所を開く時の確認を、§11 に `modules.linkmemo.trusted_network_hosts` を追加 |
+| 2026-11-10 | 1.9 | §6.6 プロジェクト間の移動 (`core_move_item`) を追加。書き換える列、`position` と `updated_at` の扱い、`data_revision +1`、§13.2 の増分対象、§15 の T-51〜T-53 |
 
 ## ベクター作品と軽量な参照API（ADR-0021）
 
