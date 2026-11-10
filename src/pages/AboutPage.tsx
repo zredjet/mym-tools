@@ -34,7 +34,7 @@ const REPO_URL = "https://github.com/zredjet/mym-tools";
 const MERMAID_URL = "https://github.com/mermaid-js/mermaid/tree/v11.17.2";
 const DRAWIO_URL = "https://github.com/jgraph/drawio/tree/0f419a92c769adb5fb20f2b18053a5ae8c7e4993";
 const NRBF_URL =
-  "https://github.com/dotnet/runtime/tree/v10.0.11/src/libraries/System.Formats.Nrbf";
+  "https://github.com/dotnet/runtime/tree/v10.0.14/src/libraries/System.Formats.Nrbf";
 
 interface ModuleVersionInfo {
   module_id: string;
@@ -239,7 +239,7 @@ export function AboutPage() {
                 className="underline underline-offset-2 hover:text-[var(--fg)]"
                 onClick={() => void openExternal(NRBF_URL)}
               >
-                System.Formats.Nrbf 10.0.11 / .NET NativeAOT
+                System.Formats.Nrbf 10.0.14 / .NET NativeAOT
               </button>{" "}
               — MIT License
             </li>

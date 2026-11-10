@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-10-17 / ステータス: Draft (Phase 1)
+最終更新: 2026-11-10 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -460,7 +460,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 - Rustの`nrbf_inspect_file(operationId, path, expandByteArrays, onProgress)`だけを公開し、開始、500件単位のノード、完了、キャンセルをTauri Channelで通知する。`OperationRegistry`でcancelし、60秒timeout・遅延operation event破棄を保証する
 - Tauriは8 KiB以上のChannel messageを追加IPCで取得するため、command応答がnodes batchより先に届くことがある。frontendのIPC wrapperはcommand応答後、最後に送られる`done`（Channelは送信順に配送する）の到着を最大30秒待ってから結果を返し、受信node数が`summary.nodeCount`と一致しない場合はtreeを表示せずerrorにする
 - Rust wrapperは入力64 MiB、sidecar stdout 256 MiB、stderr 64 KiBを検証し、sidecar終了・破損header・上限・非対応形式を日本語`AppError::Validation { module_id: "nrbf", ... }`または`AppError::Internal`へ変換する
-- .NET 10 NativeAOT sidecarは`System.Formats.Nrbf 10.0.11`の`NrbfDecoder`だけを使い、assembly / 型をロードしない。`BinaryFormatter`、`Deserialize`、任意型生成はソース検査で禁止する
+- .NET 10 NativeAOT sidecarは`System.Formats.Nrbf 10.0.14`の`NrbfDecoder`だけを使い、assembly / 型をロードしない。`BinaryFormatter`、`Deserialize`、任意型生成はソース検査で禁止する
 - record graphは反復走査する。最初のrecordを正規ノードとし、共有参照・循環参照は参照ノードにして再展開しない。byte配列は既定で長さだけを返し、`expandByteArrays`がtrueの場合だけ最大50,000要素を展開する。多次元配列は安全に展開できない場合shapeだけを返す
 - sidecar内の上限は500,000ノード、1配列50,000展開要素、1スカラー1 MiB、検索対象文字列32 MiB、protocol出力256 MiB、55秒とする。500,000個の最小ノードだけでも見積り上約128 MiBとなるため、protocol上限は256 MiBとする。部分超過では可能な解析結果を維持し、省略ノードとwarningを返す。Rust側60秒をhard timeoutとする
 - 解析失敗は1行目に日本語の分類、続く「【詳細】」に例外型・メッセージ・内部例外、読込位置（FileStreamのbuffer単位の概算）、非対応record種別、非NRBF fileの先頭16 byteと推定形式を返す。`EndOfStreamException`は途中切れ、`DecoderFallbackException`は不正UTF-8として分類する
@@ -548,7 +548,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | PDF結合 | `lopdf 0.45`（MSRV 1.88、`aes 0.9.2`固定、展開済みstream 64 MiB上限、終端のないstreamの事前検査） |
 | 文字コード判定・変換 | `encoding_rs 0.8`（WHATWG。`_without_replacement`系だけを使う）、`same-file 1`（出力先と入力の同一判定） |
 | フォルダ容量 | 標準ライブラリの`read_dir`、macOSは`libc 0.2`の`statfs`（ネットワーク上のボリュームの判定）、Windowsは`windows-sys`の`GetDriveTypeW` / `GetCompressedFileSizeW` / `GetDiskFreeSpace(Ex)W` |
-| NRBF解析 | .NET 10 NativeAOT sidecar + `System.Formats.Nrbf 10.0.11`（NuGet lock、型非生成） |
+| NRBF解析 | .NET 10 NativeAOT sidecar + `System.Formats.Nrbf 10.0.14`（NuGet lock、型非生成） |
 
 **確定済**:
 - **CI パイプライン (検証)**: ADR-0010 で確定 — GitHub Actions / lint-rust / test-rust / lint-frontend / test-frontend / build-tauri matrix (macOS + Windows) / branch protection / `clippy.toml` `disallowed-methods` 連携。NRBFは既存build-tauri 2 job内で.NET test、禁止API検査、NativeAOT起動試験も行いrequired check 6件を維持する
@@ -597,6 +597,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-10-07 | 1.6 | ADR-0024を反映。§10.8 文字コード変換境界と、§13 の encoding_rs / same-file を追加 |
 | 2026-10-07 | 1.7 | §10.8 に `csvview` の読込とWorkerでの解析の境界を追加 |
 | 2026-10-17 | 1.8 | ADR-0025を反映。§10.9 フォルダ容量境界、§11 の重い処理の方針、§13 の依存を追加 |
+| 2026-11-10 | 1.9 | ADR-0020 2026-11-10追補を反映。§10.6と§13の`System.Formats.Nrbf`を10.0.14へ更新 |
 
 ## SVG-Edit統合（ADR-0021）
 
