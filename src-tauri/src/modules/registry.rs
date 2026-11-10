@@ -25,6 +25,7 @@ use crate::modules::encoding::EncodingModule;
 use crate::modules::hash::HashModule;
 use crate::modules::http::HttpModule;
 use crate::modules::idgen::IdGeneratorModule;
+use crate::modules::jsonfmt::JsonFormatModule;
 use crate::modules::jwt::JwtModule;
 use crate::modules::linkmemo::LinkMemoModule;
 use crate::modules::memo::MemoModule;
@@ -74,6 +75,7 @@ pub fn module_backends() -> Vec<Arc<dyn ModuleBackend>> {
         Arc::new(EncodingModule),
         Arc::new(CsvViewModule),
         Arc::new(DirSizeModule),
+        Arc::new(JsonFormatModule),
         // 新モジュールはここに 1 行追加する
     ]
 }
@@ -180,7 +182,7 @@ mod tests {
     fn module_backends_build_into_app_state() {
         let storage: Arc<dyn StorageService> = Arc::new(SqliteStorage::open(":memory:").unwrap());
         let backends = module_backends();
-        assert_eq!(backends.len(), 28);
+        assert_eq!(backends.len(), 29);
         let dir = tempfile::tempdir().unwrap();
         let backup: Arc<dyn crate::backup::BackupService> = Arc::new(
             crate::backup::LocalBackupService::new(dir.path().to_path_buf(), Arc::clone(&storage)),
@@ -214,6 +216,7 @@ mod tests {
             "encoding",
             "csvview",
             "dirsize",
+            "jsonfmt",
         ] {
             assert!(state.module(id).is_some(), "missing backend: {id}");
         }

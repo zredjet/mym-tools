@@ -1,6 +1,6 @@
 # モジュール契約 (Module Contract)
 
-最終更新: 2026-10-17 / ステータス: Draft (Phase 1)
+最終更新: 2026-11-10 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**モジュールがコアと交わす契約**」を定義する。
 モジュールが提供するもの / コアが提供するもの / 両者がしてはいけないことを具体 API レベルで決めて、
@@ -792,10 +792,13 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | `jwt` / `cron` / `a11y` | なし | Frontend同期処理 |
 | `http` | `http_send_request` | Rust `reqwest` + `OperationRegistry` cancel (ADR-0015) |
 | `charcount` / `textclean` | なし | Frontend同期処理 (入力1 MiBまで、150 msのdebounceまたは`useDeferredValue`) |
+| `jsonfmt` | なし | Frontend同期処理 (入力1 MiBまで、`useDeferredValue`) |
 
-全13モジュールは `is_stateless = true`、`searchAdapter` なし、payloadなしとする。ローカル完結の12モジュールは `enabledByDefault = true`、ネットワーク通信する `http` のみ `false` とする。
+全14モジュールは `is_stateless = true`、`searchAdapter` なし、payloadなしとする。ローカル完結の13モジュールは `enabledByDefault = true`、ネットワーク通信する `http` のみ `false` とする。
 
 `charcount` のShift_JISバイト数は、encoding_rsのShift_JIS encoderで2バイトになるBMP文字のビットマップ (`src/modules/charcount/sjisTable.json`) と、1バイトになる文字の規則で数える。`TextDecoder` から実行時に表を作らない (WebViewやICUの版で結果が変わるため)。表と規則がencoding_rsと一致することは `src-tauri/src/modules/charcount/mod.rs` のテストで確かめ、同じテストを `MYM_REGENERATE_SJIS_TABLE=1` で実行すると表を作り直す。
+
+`jsonfmt` は `JSON.parse` → `JSON.stringify` の往復で整形しない。往復させると、大きな整数の桁落ち、`1.0` → `1`、`1e400` → `null`、重複したキーの消失が黙って起こり、構文エラーの位置もWebView (V8 / JavaScriptCore) ごとに違う形でしか取れないためである。`src/modules/jsonfmt/jsonFormat.ts` の自作パーサでRFC 8259に沿って検証し、数値と文字列 (キーを含む) は入力の書き方のまま持って、空白・改行だけを組み替える。キーの並べ替えは、エスケープを解いたキーをUTF-16コード単位の昇順で安定ソートし、配列の順序は変えない。同じオブジェクト内で重複したキーは両方残し、先頭20件の位置を警告として返す。先頭のBOM (U+FEFF) は取り除いて知らせる。上限は入力1 MiB (UTF-16コード単位)、入れ子512段、結果8 MiBで、超えた時は結果を出さない。エラーの位置は行 (LF / CRLF / CRを1つの改行として数える) とUTF-16コード単位の列で返す。
 
 ### 12.12 M-PNG最適化
 
@@ -925,6 +928,7 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-10-07 | 1.10 | ADR-0024を反映し、§12.13 M-文字コード変換を追加 |
 | 2026-10-07 | 1.11 | §12.14 M-CSV ビューアを追加 |
 | 2026-10-17 | 1.12 | ADR-0025を反映し、§12.15 M-フォルダ容量を追加 |
+| 2026-11-10 | 1.13 | §12.11 に `jsonfmt` を追加し、`JSON.parse` の往復を使わない理由、値を書き換えない規則、上限を記載 |
 
 ## ベクター描画と検索投影の追加契約（ADR-0021）
 

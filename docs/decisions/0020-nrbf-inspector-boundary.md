@@ -97,3 +97,17 @@ BinaryFormatterで作成されたNRBF payloadの内容を、項目名・値で�
 - Microsoft: [BinaryFormatter security guide](https://learn.microsoft.com/dotnet/standard/serialization/binaryformatter-security-guide)
 - Microsoft: [Native AOT deployment](https://learn.microsoft.com/dotnet/core/deploying/native-aot/)
 - Tauri: [Embedding external binaries](https://v2.tauri.app/develop/sidecar/)
+
+## 7. 2026-11-10追補: .NET 10.0.14へ更新
+
+- sidecarの固定先を10.0.11から10.0.14へ更新する。対象は`RuntimeFrameworkVersion`（NativeAOT runtime packと`Microsoft.DotNet.ILCompiler`）と`System.Formats.Nrbf`で、どちらも同じ版に揃える。§2のdecoder境界、resource limits、IPC・protocol、配布形式は変えない。§2.1の「10.0.11へ固定する」は、この追補で10.0.14に読み替える。
+- 更新理由: `Microsoft.DotNet.ILCompiler` 10.0.0〜10.0.13にBrotli展開の領域外書き込み（GHSA-p3jp-9v83-76w9 / CVE-2026-111497、High、2026-11-03公開、10.0.14で修正）が報告された。sidecarは警告をエラーとして扱うため、NuGetの監査（NU1903）で`dotnet restore --locked-mode`が失敗し、CIの`build-tauri`が両OSで止まった。
+- sidecarのソースはBrotliと`System.IO.Compression`を参照せず、入力は利用者が選んだローカルの1ファイルだけなので、直接の影響は見込まない。ただしビルド済みバイナリに該当コードが含まれないことまでは確かめていない。監査を抑止する設定（`NuGetAuditSuppress`など）は検査を弱めるため採らず、修正版へ更新する。
+- `System.Formats.Nrbf`を10.0.11のまま残さないのは、runtimeと同じ`dotnet/runtime`のtagから出る版に揃え、ライセンス表記とAbout画面の参照先を1つに保つため。解析結果が変わらないことは固定fixtureのテストで確かめる。
+- `global.json`のSDK（10.0.302、`rollForward: latestPatch`）は変えない。runtime packとILCompilerはSDKの同梱物ではなくNuGetから取得するため、SDKの版に依存しない。
+- 確認: `dotnet restore --locked-mode --force`、`dotnet test`（29件）、macOS arm64のNativeAOT publishと`npm run test:nrbf:smoke`、Rustの`nrbf`テスト（8件）。Windows x64のpublishとsmoke test、両OSのportable ZIPのサイズはCIの`build-tauri`で確かめる。
+- 更新時に同じ変更で揃える対象: `tools/nrbf-decoder/NrbfDecoder.csproj`の`RuntimeFrameworkVersion`と`System.Formats.Nrbf`の版、`tools/nrbf-decoder/packages.lock.json`と`tools/nrbf-decoder.tests/packages.lock.json`、requirements（§2.2 M-NRBF、D-17）、architecture（§10.6、§13）、`THIRD_PARTY_NOTICES.md`、About画面の表示とリンク、sidecarの実測サイズ。
+
+| 対象 | 10.0.11 | 10.0.14 |
+|---|---:|---:|
+| macOS arm64 sidecar（`nrbf-decoder`） | 2,763,280 bytes | 2,763,344 bytes |

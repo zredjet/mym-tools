@@ -49,8 +49,8 @@
       },
       "System.Formats.Nrbf": {
         "type": "Transitive",
-        "resolved": "10.0.11",
-        "contentHash": "6w8KQTESA2HyNt/cyuIfvKBpQuBHd2e0EwAYoWQ7f+cWE0kCQCAGz4bQdATTH3jhDLvoqlf0vgPXK0Ml5qeVjg=="
+        "resolved": "10.0.14",
+        "contentHash": "pl9R3NfEKEYnU9Dj74AKRpe3tFQEA4tcLepHLOUQVT2vAyTW6E+WeKS3+JydxYnig4hXtLOrLNDcBkUNzm+9FA=="
       },
       "xunit.abstractions": {
         "type": "Transitive",
@@ -95,7 +95,7 @@
       "nrbf-decoder": {
         "type": "Project",
         "dependencies": {
-          "System.Formats.Nrbf": "[10.0.11, 10.0.11]"
+          "System.Formats.Nrbf": "[10.0.14, 10.0.14]"
         }
       }
     }
