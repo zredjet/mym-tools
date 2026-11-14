@@ -7,7 +7,23 @@
  * - 編集のショートカット (Undo、コピー、削除、矢印、グループ化、重なり順など) は
  *   「選択と変形」のセッションが「編集」の節に足す
  */
+import {
+  copySelection,
+  cutSelection,
+  deleteSelection,
+  groupSelection,
+  reorderSelection,
+  selectAll,
+  ungroupSelection,
+} from "../state/commands";
 import type { ToolId } from "../state/types";
+import {
+  duplicateWithinLimits,
+  enterSelection,
+  escapeSelection,
+  nudgeSelection,
+  pasteWithinLimits,
+} from "../tools/select/actions";
 import type { KeyInput } from "./input";
 import { IS_MAC, isModPressed } from "./input";
 import { runViewCommand, type ViewCommandEnv } from "./viewCommands";
@@ -143,8 +159,111 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
   },
 
   // ---- 編集 ----
-  // 「選択と変形」のセッションがここに足す (Undo / Redo、コピー・切り取り・貼り付け・複製、すべて選択、
-  // 削除、矢印での移動、グループ化と解除、重なり順、Enter、Esc の段階的な解除)。
+  // 文書の操作は `state/commands.ts`、範囲の確認・Enter・Esc は `tools/select/actions.ts`。
+  // Cmd/Ctrl+S と Cmd/Ctrl+N は作品バーの担当なので、ここには置かない
+  {
+    id: "edit.undo",
+    keys: [{ key: ["z"], mod: true }],
+    run: ({ store }) => store.getState().undo(),
+  },
+  {
+    id: "edit.redo",
+    keys: [{ key: ["z"], mod: true, shift: true }],
+    run: ({ store }) => store.getState().redo(),
+  },
+  {
+    id: "edit.copy",
+    keys: [{ key: ["c"], mod: true }],
+    run: ({ store }) => {
+      copySelection(store);
+    },
+  },
+  {
+    id: "edit.cut",
+    keys: [{ key: ["x"], mod: true }],
+    run: ({ store }) => cutSelection(store),
+  },
+  {
+    id: "edit.paste",
+    keys: [{ key: ["v"], mod: true }],
+    run: ({ store }) => pasteWithinLimits(store),
+  },
+  {
+    id: "edit.duplicate",
+    keys: [{ key: ["d"], mod: true }],
+    run: ({ store }) => duplicateWithinLimits(store),
+  },
+  {
+    id: "edit.selectAll",
+    keys: [{ key: ["a"], mod: true }],
+    run: ({ store }) => selectAll(store),
+  },
+  {
+    id: "edit.delete",
+    keys: [{ key: ["Delete", "Backspace"] }],
+    run: ({ store }) => {
+      if (store.getState().selection.length === 0) return false;
+      deleteSelection(store);
+    },
+  },
+  ...(
+    [
+      ["ArrowLeft", -1, 0],
+      ["ArrowRight", 1, 0],
+      ["ArrowUp", 0, -1],
+      ["ArrowDown", 0, 1],
+    ] as const
+  ).flatMap(([key, x, y]): Shortcut[] =>
+    [1, 10].map((step) => ({
+      // 矢印は 1 px、Shift と一緒なら 10 px
+      id: `edit.nudge.${key}.${step}`,
+      keys: [{ key: [key], shift: step === 10 }],
+      run: ({ store }) => nudgeSelection(store, x * step, y * step),
+    })),
+  ),
+  {
+    id: "edit.group",
+    keys: [{ key: ["g"], mod: true }],
+    run: ({ store }) => groupSelection(store),
+  },
+  {
+    id: "edit.ungroup",
+    keys: [{ key: ["g"], mod: true, shift: true }],
+    run: ({ store }) => ungroupSelection(store),
+  },
+  {
+    id: "edit.bringForward",
+    keys: [{ key: ["]"], mod: true }],
+    run: ({ store }) => reorderSelection(store, "forward"),
+  },
+  {
+    id: "edit.sendBackward",
+    keys: [{ key: ["["], mod: true }],
+    run: ({ store }) => reorderSelection(store, "backward"),
+  },
+  {
+    id: "edit.bringToFront",
+    keys: [{ key: ["]"] }],
+    run: ({ store }) => reorderSelection(store, "front"),
+  },
+  {
+    id: "edit.sendToBack",
+    keys: [{ key: ["["] }],
+    run: ({ store }) => reorderSelection(store, "back"),
+  },
+  {
+    // テキストなら本文の編集、frame / group なら中に入る
+    id: "edit.enter",
+    keys: [{ key: ["Enter"], repeat: false }],
+    run: ({ store }) => enterSelection(store),
+  },
+  {
+    // 何もしていないときの Esc: 本文の編集の終了 → スコープを 1 段外へ → 選択の解除
+    // (操作の途中の Esc は CanvasView が先に取り消す。ほかのツールの Esc は上の tool.escape)
+    id: "edit.escape",
+    keys: [{ key: ["Escape"] }],
+    run: ({ store }) => escapeSelection(store),
+  },
 ];
 
 /** 合うショートカットを上から順に実行し、処理したものを返す。なければ null。 */
