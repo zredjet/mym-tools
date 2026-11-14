@@ -5,7 +5,9 @@ import {
   isComposing,
   isModalOpen,
   isEditableTarget,
+  MULTI_CLICK_DISTANCE,
   MULTI_CLICK_MS,
+  movedFromPress,
   nextClick,
   toCanvasKeyEvent,
   toCanvasPointerEvent,
@@ -104,6 +106,14 @@ describe("クリックの回数", () => {
     expect(nextClick(first, press(MULTI_CLICK_MS + 1)).count).toBe(1);
     expect(nextClick(first, press(100, 10)).count).toBe(1);
     expect(nextClick(first, press(100, 0, 2)).count).toBe(1);
+  });
+
+  it("押した位置から続けて押したとみなす距離を超えたら、動いたとみなす", () => {
+    const first = nextClick(null, press(0));
+    expect(movedFromPress(first, MULTI_CLICK_DISTANCE, 0)).toBe(false);
+    expect(movedFromPress(first, MULTI_CLICK_DISTANCE + 1, 0)).toBe(true);
+    expect(movedFromPress(first, 3, 3)).toBe(true);
+    expect(movedFromPress(null, 100, 100)).toBe(false);
   });
 });
 

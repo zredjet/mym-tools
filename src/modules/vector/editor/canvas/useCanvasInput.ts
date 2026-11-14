@@ -30,6 +30,7 @@ import {
   CONTROL_KEYS,
   isComposing,
   isEditableTarget,
+  movedFromPress,
   nextClick,
   toCanvasKeyEvent,
   toCanvasPointerEvent,
@@ -132,13 +133,17 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
     return true;
   }, [containerRef, cancelTool]);
 
-  /** ドラッグと現在のツールの操作を捨て、残ったジェスチャーも取り消す。 */
+  /**
+   * ドラッグと現在のツールの操作を捨てる。
+   * ジェスチャーを取り消すのは、ポインターのドラッグの途中だったときだけ (§4.4)。
+   * パネルや本文の編集が開いているジェスチャーは、開いた側が閉じる。
+   */
   const cancelAll = useCallback(() => {
     const current = TOOLS[store.getState().toolId];
     const pointerTool = active.current?.tool;
-    cancelActive();
+    const dragging = cancelActive();
     if (pointerTool !== current) cancelTool(current);
-    if (store.getState().gestureActive) store.getState().cancelGesture();
+    if (dragging && store.getState().gestureActive) store.getState().cancelGesture();
   }, [store, cancelActive, cancelTool]);
 
   const releaseSpace = useCallback(() => {
@@ -198,9 +203,9 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
         return;
       }
       const state = store.getState();
-      if (event.key === "Escape" && (active.current || state.gestureActive)) {
+      // ドラッグの途中の Esc は、ツールの onCancel だけに渡す。ツールが取り消さなくても文書を戻す
+      if (event.key === "Escape" && cancelActive()) {
         event.preventDefault();
-        if (!cancelActive()) cancelTool(TOOLS[state.toolId]);
         if (store.getState().gestureActive) store.getState().cancelGesture();
         return;
       }
@@ -356,6 +361,11 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
       const pointer = active.current;
       if (pointer) {
         if (event.pointerId !== pointer.id) return;
+        // 押したまま動かしたら、次の押下をダブルクリックに数えない
+        const o = lastClick.current ? origin() : null;
+        if (o && movedFromPress(lastClick.current, event.clientX - o.x, event.clientY - o.y)) {
+          lastClick.current = null;
+        }
         remember(event);
         pointer.tool.onPointerMove?.(toEvent(event, pointer.button, pointer.clickCount), ctx);
         return;

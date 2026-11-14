@@ -202,3 +202,11 @@ export function nextClick(
     Math.hypot(press.x - previous.x, press.y - previous.y) <= MULTI_CLICK_DISTANCE;
   return { ...press, count: continued ? 2 : 1 };
 }
+
+/**
+ * 押した位置から、続けて押したとみなす距離を超えて動いたか。
+ * 動いた押下 (ドラッグ) は、次の押下をダブルクリックに数えない。
+ */
+export function movedFromPress(press: ClickRecord | null, x: number, y: number): boolean {
+  return press !== null && Math.hypot(x - press.x, y - press.y) > MULTI_CLICK_DISTANCE;
+}
