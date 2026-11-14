@@ -13,6 +13,7 @@ import {
   type ParentRef,
 } from "../../model/tree";
 import type { CanvasDocument, NodeId, PageId } from "../../model/types";
+import { geometryWithinLimits } from "../limits";
 
 export interface LayerRow {
   id: NodeId;
@@ -160,13 +161,18 @@ export function resolveLayerDrop(
   return { target: parent, index: zone === "before" ? index + 1 : index, zone };
 }
 
-/** 落とした結果の文書。見た目の位置は `moveNodes` が保つ。 */
+/**
+ * 落とした結果の文書。見た目の位置は `moveNodes` が保つ。
+ * 座標系が変わると親の座標系での値が §3.5 の範囲を超えることがあり、そのときは落とさない
+ * (元の文書を返す。超えた文書は保存の検証で拒否されるため)。
+ */
 export function applyLayerDrop(
   doc: CanvasDocument,
   draggedIds: readonly NodeId[],
   drop: LayerDrop,
 ): CanvasDocument {
-  return moveNodes(doc, draggedIds, drop.target, drop.index);
+  const next = moveNodes(doc, draggedIds, drop.target, drop.index);
+  return next !== doc && !geometryWithinLimits(next, draggedIds) ? doc : next;
 }
 
 /** Shift を押しながらのクリック: 行の並びで `anchorId` から `id` までの ID。 */

@@ -5,7 +5,10 @@ import { CANVAS_LIMITS } from "../../model/limits";
 import { deepFreeze, sampleDocument } from "../../model/testing";
 import { MIXED } from "../fields/values";
 import { FRAME_PRESETS, DEFAULT_FRAME_PRESET, findFramePresetBySize } from "./framePresets";
-import { geometryWithinLimits, readPosition, setBoundsField, setLineField } from "./propertyOps";
+import { createText } from "../../model/create";
+import { insertNode } from "../../model/structure";
+import { geometryWithinLimits } from "../limits";
+import { readPosition, setBoundsField, setLineField } from "./propertyOps";
 
 const doc = deepFreeze(sampleDocument());
 
@@ -68,6 +71,27 @@ describe("setBoundsField", () => {
     const frame = setBoundsField(doc, ["f"], "height", 10);
     expect(frame.nodes.f).toMatchObject({ height: 10 });
     expect(frame.nodes.r1).toBe(doc.nodes.r1); // frame の子は動かさない
+  });
+
+  it("大きさ 0 からでも値をそのまま当てて戻せる", () => {
+    const flat = setBoundsField(doc, ["r1"], "width", 0);
+    expect(flat.nodes.r1).toMatchObject({ x: 10, width: 0 });
+    const back = setBoundsField(flat, ["r1"], "width", 25);
+    expect(back.nodes.r1).toMatchObject({ x: 10, width: 25, height: 20 });
+    const tall = setBoundsField(setBoundsField(doc, ["f"], "height", 0), ["f"], "height", 30);
+    expect(tall.nodes.f).toMatchObject({ y: 50, height: 30 });
+    expect(tall.nodes.r1).toBe(doc.nodes.r1);
+  });
+
+  it("大きさ 0 のテキストは resizeNodes と同じ規則で大きさの決め方を変える", () => {
+    const withText = insertNode(doc, createText({ id: "t1", width: 0, height: 0 }), {
+      kind: "page",
+      id: "p1",
+    });
+    const wide = setBoundsField(withText, ["t1"], "width", 120);
+    expect(wide.nodes.t1).toMatchObject({ width: 120, height: 0, sizing: "auto-height" });
+    const tall = setBoundsField(withText, ["t1"], "height", 40);
+    expect(tall.nodes.t1).toMatchObject({ width: 0, height: 40, sizing: "fixed" });
   });
 
   it("同じ値なら同じ文書、範囲の外へ出るなら変えない", () => {

@@ -1,12 +1,13 @@
 /**
  * プロパティパネルの変更 (純関数)。どれも変わらなければ引数の文書をそのまま返す。
  */
-import { getLocalBounds, getPageBounds } from "../../model/geometry";
+import { getLocalBounds, getPageBounds, isBoxNode, type BoxNode } from "../../model/geometry";
 import { CANVAS_LIMITS } from "../../model/limits";
-import { resizeNodes, translateNodes } from "../../model/transform";
-import { getDescendantIds, getNode, topLevelIds } from "../../model/tree";
+import { resizeNodes, translateNodes, updateNodes, type NodePatch } from "../../model/transform";
+import { getNode, topLevelIds } from "../../model/tree";
 import type { CanvasDocument, CanvasNode, NodeId, Shadow, Stroke } from "../../model/types";
 import { commonValue, type Mixed } from "../fields/values";
+import { geometryWithinLimits } from "../limits";
 
 export type BoundsField = "x" | "y" | "width" | "height";
 export type LineField = "x1" | "y1" | "x2" | "y2";
@@ -62,26 +63,6 @@ export function readPosition(
 }
 
 /**
- * 変えたノードとその子孫の座標と大きさが §3.5 の範囲に収まっているか。
- * group の位置を変えると子が範囲の外へ出ることがあるので、確定の前に確かめる。
- */
-export function geometryWithinLimits(doc: CanvasDocument, ids: readonly NodeId[]): boolean {
-  const { maxCoordinate, maxSize } = CANVAS_LIMITS;
-  const coord = (v: number) => Number.isFinite(v) && Math.abs(v) <= maxCoordinate;
-  const size = (v: number) => Number.isFinite(v) && v >= 0 && v <= maxSize;
-  for (const id of ids)
-    for (const nodeId of [id, ...getDescendantIds(doc, id)]) {
-      const node = getNode(doc, nodeId);
-      if (!node || node.type === "group") continue;
-      if (node.type === "line") {
-        if (![node.x1, node.y1, node.x2, node.y2].every(coord)) return false;
-      } else if (!coord(node.x) || !coord(node.y) || !size(node.width) || !size(node.height))
-        return false;
-    }
-  return true;
-}
-
-/**
  * X / Y / W / H を当てる。X と Y は外接矩形の左上がその値になるように動かし (`translateNodes`)、
  * W と H は左上を保って大きさを変える (`resizeNodes`、整数に丸める)。複数選択はそれぞれに当てる。
  * 結果が範囲の外へ出るなら変えない。
@@ -103,10 +84,28 @@ export function setBoundsField(
     } else {
       const from = getPageBounds(next, id);
       if (!from) continue;
+      const node = getNode(next, id);
+      if (from[field] === 0 && node && isBoxNode(node)) {
+        // 大きさ 0 からは比例で広げられない (`resizeNodes` は倍率 1 にする) ので、値をそのまま当てる
+        next = updateNodes(next, [id], zeroSizePatch(node, field, value));
+        continue;
+      }
       next = resizeNodes(next, [id], from, { ...from, [field]: value }, { round: true });
     }
   }
   return next !== doc && geometryWithinLimits(next, ids) ? next : doc;
+}
+
+/**
+ * 大きさ 0 のノードに W / H を当てる変更。テキストは `resizeNodes` と同じ規則で大きさの決め方を変える
+ * (縦に引いたら `fixed`、横だけなら `auto-width` を `auto-height` に。§4.6)。
+ */
+function zeroSizePatch(node: BoxNode, field: "width" | "height", value: number): NodePatch {
+  const size = field === "width" ? { width: value } : { height: value };
+  if (node.type !== "text") return size;
+  const sizing =
+    field === "height" ? "fixed" : node.sizing === "auto-width" ? "auto-height" : node.sizing;
+  return { ...size, sizing };
 }
 
 /** 線の始点・終点の座標を当てる (選択の中の線だけ)。 */

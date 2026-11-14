@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { CANVAS_LIMITS } from "../../model/limits";
 import { getNode, getParent } from "../../model/tree";
 import { deepFreeze, fixtureDocument, sampleDocument } from "../../model/testing";
 import type { FrameNode, RectNode } from "../../model/types";
@@ -144,6 +145,26 @@ describe("resolveLayerDrop", () => {
     const moved = applyLayerDrop(doc, ["r2", "l1"], out);
     expect(getNode(moved, "grp")).toBeUndefined();
     expect(moved.pages[0]!.children).toEqual(["f", "r0", "r2", "l1"]);
+  });
+});
+
+describe("applyLayerDrop の範囲の確認", () => {
+  it("座標系が変わって上限を超えるなら落とさない", () => {
+    const max = CANVAS_LIMITS.maxCoordinate;
+    const far = {
+      ...doc,
+      nodes: {
+        ...doc.nodes,
+        r0: { ...(doc.nodes.r0 as RectNode), x: max },
+        f: { ...(doc.nodes.f as FrameNode), x: -max },
+      },
+    };
+    const drop = resolveLayerDrop(far, ["r0"], "r1", "before", false)!;
+    expect(drop).not.toBeNull();
+    // そのまま動かすと frame の中での X は 2,000,000 になる
+    expect(applyLayerDrop(far, ["r0"], drop)).toBe(far);
+    // 範囲に収まる移動は落とせる
+    expect(applyLayerDrop(doc, ["r0"], drop)).not.toBe(doc);
   });
 });
 
