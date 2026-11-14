@@ -68,16 +68,21 @@ function normalizeRect(r: Rect): Rect {
   };
 }
 
+/** `-0` を `0` にする (`Object.is` で「変わった」と見なされないように)。 */
+const noNegativeZero = (v: number) => (v === 0 ? 0 : v);
+
 /**
  * ページ座標の外接矩形 `from` を `to` へ写すように、ノードを拡大縮小する (§4.6)。
  *
  * - 複数のノードと group は、子孫の位置と大きさを `from` に対する割合のまま比例させる
- * - frame は自分の矩形だけを変え、子は動かさない (group の中の frame も同じ)
- * - テキストはフォントサイズを変えず枠だけを変える。高さが変わったら `fixed`、
- *   幅だけが変わった `auto-width` は `auto-height` にする
+ * - frame は自分の矩形だけを変え、子は動かさない (group や複数選択の中の frame も同じ)
+ * - テキストはフォントサイズを変えず枠だけを変える。横に引いた (`from` と `to` の幅の比が 1 でない)
+ *   だけなら `auto-width` を `auto-height` に、縦に引いた (高さの比が 1 でない) なら `fixed` にする。
+ *   縦に引いていなければ、テキストの `height` は丸めでも変えない
  * - 角丸・線の太さ・影は変えない
  * - `from` の幅 (高さ) が 0 の向きは拡大縮小せず、`to` との差だけ動かす
- * - 反転 (負の幅) は扱わない。`to` は正規化してから使う
+ * - 反転 (負の幅) は扱わない。`from` と `to` は正規化 (負の幅なら左右を入れ替える) してから使う
+ * - 中身が変わらなければ引数の文書をそのまま返す
  */
 export function resizeNodes(
   doc: CanvasDocument,
@@ -98,35 +103,41 @@ export function resizeNodes(
   const visit = (id: NodeId, origin: Point) => {
     const node = draft.get(id);
     if (!node) return;
-    const mapX = (lx: number) => round(dst.x + (origin.x + lx - src.x) * sx) - origin.x;
-    const mapY = (ly: number) => round(dst.y + (origin.y + ly - src.y) * sy) - origin.y;
+    const mapX = (lx: number) =>
+      noNegativeZero(round(dst.x + (origin.x + lx - src.x) * sx) - origin.x);
+    const mapY = (ly: number) =>
+      noNegativeZero(round(dst.y + (origin.y + ly - src.y) * sy) - origin.y);
+    let next: CanvasNode;
     switch (node.type) {
       case "group":
         for (const child of node.children) visit(child, origin);
         return;
       case "line":
-        draft.set({
+        next = {
           ...node,
           x1: mapX(node.x1),
           y1: mapY(node.y1),
           x2: mapX(node.x2),
           y2: mapY(node.y2),
-        });
-        return;
+        };
+        break;
       default: {
         const left = mapX(node.x);
         const top = mapY(node.y);
         const width = Math.max(0, mapX(node.x + node.width) - left);
-        const height = Math.max(0, mapY(node.y + node.height) - top);
-        const next = { ...node, x: left, y: top, width, height };
-        if (next.type === "text") {
-          if (height !== node.height) next.sizing = "fixed";
-          else if (width !== node.width && next.sizing === "auto-width")
-            next.sizing = "auto-height";
-        }
-        if (!shallowEqual(next, node)) draft.set(next);
+        let height = Math.max(0, mapY(node.y + node.height) - top);
+        if (node.type === "text") {
+          let sizing = node.sizing;
+          if (sy !== 1) sizing = "fixed";
+          else {
+            height = node.height; // 縦に引いていなければ、丸めでも高さを変えない
+            if (sx !== 1 && sizing === "auto-width") sizing = "auto-height";
+          }
+          next = { ...node, x: left, y: top, width, height, sizing };
+        } else next = { ...node, x: left, y: top, width, height };
       }
     }
+    if (!shallowEqual(next, node)) draft.set(next);
   };
 
   for (const id of topLevelIds(doc, ids)) visit(id, nodeOrigin(doc, id));
@@ -142,12 +153,13 @@ type PatchOf<T> = T extends unknown ? Partial<Omit<T, "id" | "type" | "children"
 /**
  * ノードの部分更新。種別ごとのフィールドの和 (`id` / `type` / `children` は変えられない)。
  * 複数選択に当てるとき、そのノードにないフィールドは無視する (楕円に `radius` を当てても足さない)。
+ * 線に `stroke: null` は当てない (線の stroke は null にできないため)。
  */
 export type NodePatch = PatchOf<CanvasNode>;
 
 /** JSON の値として等しいか (塗りや影のオブジェクトを値で比べる)。 */
 export function jsonEqual(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true;
+  if (a === b) return true; // 0 と -0 は同じと見る
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   const ka = Object.keys(a);
@@ -160,9 +172,10 @@ export function jsonEqual(a: unknown, b: unknown): boolean {
   );
 }
 
+/** 浅い比較。数値は `===` で比べる (`0` と `-0` を同じと見る)。 */
 function shallowEqual(a: object, b: object): boolean {
   const ka = Object.keys(a) as (keyof typeof a)[];
-  return ka.length === Object.keys(b).length && ka.every((key) => Object.is(a[key], b[key]));
+  return ka.length === Object.keys(b).length && ka.every((key) => a[key] === b[key]);
 }
 
 function patchNode(node: CanvasNode, patch: NodePatch): CanvasNode {
@@ -170,6 +183,8 @@ function patchNode(node: CanvasNode, patch: NodePatch): CanvasNode {
   for (const [key, value] of Object.entries(patch)) {
     if (key === "id" || key === "type" || key === "children" || !hasOwn(node, key)) continue;
     if (value === undefined) continue;
+    // 線の stroke は null にできない (§4.6)。混在選択に「線なし」を当てたときは線を外す
+    if (key === "stroke" && value === null && node.type === "line") continue;
     const current = (node as unknown as Record<string, unknown>)[key];
     if (jsonEqual(current, value)) continue;
     next ??= { ...node };

@@ -2,7 +2,7 @@
  * 幾何。座標の規則は §3.2: ページ直下はページ座標、frame の子は frame の左上が原点、
  * group は座標系を作らない。外接矩形は図形の幾何だけから求める (線の太さ・影は含めない)。
  */
-import { getChildren, getCoordinateFrame, type ParentRef } from "./tree";
+import { getChildren, getCoordinateFrame, getNode, type ParentRef } from "./tree";
 import type { CanvasDocument, CanvasNode, NodeId, Point } from "./types";
 
 export interface Rect {
@@ -23,7 +23,7 @@ export function isBoxNode(node: CanvasNode): node is BoxNode {
 
 /** frame の座標系の原点 (frame の左上) のページ座標。祖先の frame の位置を足し合わせる。 */
 function frameOrigin(doc: CanvasDocument, frameId: NodeId): Point {
-  const frame = doc.nodes[frameId];
+  const frame = getNode(doc, frameId);
   if (!frame || frame.type !== "frame") return ORIGIN;
   const outer = nodeOrigin(doc, frameId);
   return { x: outer.x + frame.x, y: outer.y + frame.y };
@@ -41,7 +41,7 @@ export function nodeOrigin(doc: CanvasDocument, id: NodeId): Point {
  */
 export function parentOrigin(doc: CanvasDocument, parent: ParentRef): Point {
   if (parent.kind === "page") return ORIGIN;
-  const node = doc.nodes[parent.id];
+  const node = getNode(doc, parent.id);
   if (!node) return ORIGIN;
   return node.type === "frame" ? frameOrigin(doc, node.id) : nodeOrigin(doc, node.id);
 }
@@ -64,7 +64,7 @@ export function pageToLocal(doc: CanvasDocument, parent: ParentRef, point: Point
  * 子のない group と存在しないノードは null。
  */
 export function getLocalBounds(doc: CanvasDocument, id: NodeId): Rect | null {
-  const node = doc.nodes[id];
+  const node = getNode(doc, id);
   if (!node) return null;
   switch (node.type) {
     case "line":

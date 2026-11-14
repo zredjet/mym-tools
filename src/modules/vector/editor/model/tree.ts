@@ -133,10 +133,13 @@ export function getCoordinateFrame(doc: CanvasDocument, id: NodeId): FrameNode |
 /** 子孫の ID を深さ優先・重なり順 (背面から) で返す。自分は含まない。 */
 export function getDescendantIds(doc: CanvasDocument, id: NodeId): NodeId[] {
   const result: NodeId[] = [];
+  const seen = new Set<NodeId>([id]); // 壊れた文書 (子が祖先を指す) でも止まるように
   const visit = (nodeId: NodeId) => {
     const node = getNode(doc, nodeId);
     if (!node || !isContainer(node)) return;
     for (const child of node.children) {
+      if (seen.has(child)) continue;
+      seen.add(child);
       result.push(child);
       visit(child);
     }
@@ -150,7 +153,7 @@ export type WalkResult = void | "skip";
 
 /**
  * ページのノードを深さ優先で、背面から前面の順にたどる (§3.6 の検索用テキストと同じ順)。
- * `depth` はページ直下が 1。
+ * `depth` はページ直下が 1。同じノードは 1 回しか訪れない (壊れた文書の循環でも止まる)。
  */
 export function walkPage(
   doc: CanvasDocument,
@@ -159,10 +162,12 @@ export function walkPage(
 ): void {
   const page = getPage(doc, pageId);
   if (!page) return;
+  const seen = new Set<NodeId>();
   const go = (ids: readonly NodeId[], parent: ParentRef, depth: number) => {
     for (const id of ids) {
       const node = getNode(doc, id);
-      if (!node) continue;
+      if (!node || seen.has(id)) continue;
+      seen.add(id);
       if (visit(node, depth, parent) === "skip") continue;
       if (isContainer(node)) go(node.children, { kind: "node", id }, depth + 1);
     }

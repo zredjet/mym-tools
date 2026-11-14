@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createText } from "../model/create";
 import { deleteNodes, insertNode } from "../model/structure";
 import { deepFreeze, sampleDocument } from "../model/testing";
-import { translateNodes, updateNode } from "../model/transform";
+import { resizeNodes, translateNodes, updateNode } from "../model/transform";
 import { HISTORY_LIMIT } from "./history";
 import { createEditorStore, editorStore } from "./store";
 import { MAX_ZOOM, MIN_ZOOM } from "./types";
@@ -224,5 +224,62 @@ describe("editorStore", () => {
     expect(store.getState().view).toMatchObject({ grid: true, gridSize: 16, rulers: true });
     store.getState().setTool("rect");
     expect(store.getState().toolId).toBe("rect");
+  });
+});
+
+describe("ジェスチャーと履歴の境界 (レビューの指摘)", () => {
+  it("beginGesture を 2 回呼ぶと、1 回目を確定して 2 回目を始める", () => {
+    const store = setup();
+    store.getState().beginGesture();
+    store.getState().updateGesture(move(3));
+    store.getState().beginGesture();
+    // 2 回目の recipe には 1 回目を確定した文書が渡る
+    store.getState().updateGesture((doc) => translateNodes(doc, ["r0"], 2, 0));
+    store.getState().commitGesture();
+    expect(store.getState().doc.nodes["r0"]).toMatchObject({ x: 5 });
+    expect(store.getState().revision).toBe(2);
+    store.getState().undo();
+    expect(store.getState().doc.nodes["r0"]).toMatchObject({ x: 3 });
+  });
+
+  it("ジェスチャー中の load はジェスチャーを捨てる", () => {
+    const store = setup();
+    store.getState().beginGesture();
+    store.getState().updateGesture(move(3));
+    const next = sampleDocument();
+    store.getState().load(next);
+    expect(store.getState()).toMatchObject({ doc: next, gestureActive: false, revision: 0 });
+    store.getState().updateGesture(move(9));
+    store.getState().commitGesture();
+    expect(store.getState()).toMatchObject({ doc: next, revision: 0, canUndo: false });
+  });
+
+  it("Redo の履歴も 100 件まで", () => {
+    const store = setup();
+    for (let i = 0; i < HISTORY_LIMIT + 5; i++) store.getState().apply(move(1));
+    while (store.getState().canUndo) store.getState().undo();
+    let redone = 0;
+    while (store.getState().canRedo) {
+      store.getState().redo();
+      redone++;
+    }
+    expect(redone).toBe(HISTORY_LIMIT);
+    expect(store.getState().doc.nodes["r0"]).toMatchObject({ x: HISTORY_LIMIT + 5 });
+  });
+
+  it("中身が変わらないリサイズは履歴も revision も増やさない", () => {
+    const store = setup();
+    store
+      .getState()
+      .apply((doc) =>
+        resizeNodes(
+          doc,
+          ["l1"],
+          { x: 140, y: 90, width: 40, height: 0 },
+          { x: 140, y: 90, width: 40.2, height: 0 },
+          { round: true },
+        ),
+      );
+    expect(store.getState()).toMatchObject({ revision: 0, canUndo: false });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createText } from "./create";
+import { createLine, createStroke, createText } from "./create";
 import { getPageBounds } from "./geometry";
 import { insertNode } from "./structure";
 import { deepFreeze, sampleDocument } from "./testing";
@@ -192,5 +192,102 @@ describe("ページとガイド線", () => {
     expect(moveGuide(moved, "p1", 0, 20)).toBe(moved);
     expect(removeGuide(moved, "p1", 0).pages[0]!.guides).toEqual([]);
     expect(removeGuide(moved, "p1", 5)).toBe(moved);
+  });
+});
+
+describe("拡大縮小の境界 (レビューの指摘)", () => {
+  const withText = () =>
+    deepFreeze(
+      insertNode(
+        sampleDocument(),
+        createText({ id: "t", x: 10, y: 10, width: 50.3, height: 22.4, text: "abc" }),
+        { kind: "page", id: "p1" },
+      ),
+    );
+
+  it("横に引いただけのテキストは、丸めても高さを変えず auto-height になる", () => {
+    const doc = withText();
+    const from = getPageBounds(doc, "t")!;
+    const next = resizeNodes(doc, ["t"], from, { ...from, width: 80 }, { round: true });
+    expect(next.nodes["t"]).toMatchObject({
+      x: 10,
+      y: 10,
+      width: 80,
+      height: 22.4,
+      sizing: "auto-height",
+    });
+  });
+
+  it("縦に引いたテキストは fixed になる", () => {
+    const doc = withText();
+    const from = getPageBounds(doc, "t")!;
+    const next = resizeNodes(doc, ["t"], from, { ...from, height: 40 }, { round: true });
+    expect(next.nodes["t"]).toMatchObject({ height: 40, sizing: "fixed" });
+  });
+
+  it("中身が変わらないリサイズは引数の文書を返す (線と -0 を含む)", () => {
+    const doc = frozen();
+    // 線: 丸めると元と同じ
+    const line = getPageBounds(doc, "l1")!;
+    expect(resizeNodes(doc, ["l1"], line, { ...line, width: 40.2 }, { round: true })).toBe(doc);
+    // round(-0.4) は -0 になるが、0 と同じと見る
+    expect(
+      resizeNodes(
+        doc,
+        ["r0"],
+        { x: 0, y: 0, width: 10, height: 10 },
+        { x: -0.4, y: 0, width: 10.4, height: 10 },
+        { round: true },
+      ),
+    ).toBe(doc);
+  });
+
+  it("負の幅の to は正規化する", () => {
+    const next = resizeNodes(
+      frozen(),
+      ["r0"],
+      { x: 0, y: 0, width: 10, height: 10 },
+      { x: 20, y: 10, width: -20, height: -10 },
+    );
+    expect(next.nodes["r0"]).toMatchObject({ x: 0, y: 0, width: 20, height: 10 });
+  });
+
+  it("幅 0 の to では幅 0 になる", () => {
+    const next = resizeNodes(
+      frozen(),
+      ["r0"],
+      { x: 0, y: 0, width: 10, height: 10 },
+      { x: 5, y: 0, width: 0, height: 10 },
+    );
+    expect(next.nodes["r0"]).toMatchObject({ x: 5, width: 0, height: 10 });
+  });
+
+  it("長さ 0 の線は拡大縮小せずに動かす", () => {
+    const base = insertNode(sampleDocument(), createLine({ id: "z", x1: 5, y1: 5, x2: 5, y2: 5 }), {
+      kind: "page",
+      id: "p1",
+    });
+    const next = resizeNodes(
+      deepFreeze(base),
+      ["z"],
+      { x: 5, y: 5, width: 0, height: 0 },
+      { x: 0, y: 0, width: 10, height: 10 },
+    );
+    expect(next.nodes["z"]).toMatchObject({ x1: 0, y1: 0, x2: 0, y2: 0 });
+  });
+});
+
+describe("線の stroke (レビューの指摘)", () => {
+  it("混在選択に stroke: null を当てても、線の stroke は残る", () => {
+    const doc = deepFreeze(updateNode(sampleDocument(), "r1", { stroke: createStroke("#FF0000") }));
+    const next = updateNodes(doc, ["r1", "l1"], { stroke: null });
+    expect(next.nodes["r1"]).toMatchObject({ stroke: null });
+    expect(next.nodes["l1"]).toBe(doc.nodes["l1"]);
+    expect(updateNodes(doc, ["l1"], { stroke: null })).toBe(doc);
+  });
+
+  it("0 と -0 は同じ値と見る", () => {
+    const doc = frozen();
+    expect(updateNode(doc, "r0", { x: -0 })).toBe(doc);
   });
 });

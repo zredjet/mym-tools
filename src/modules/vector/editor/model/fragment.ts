@@ -5,7 +5,7 @@
 import { findSameAsset } from "./assets";
 import { DocDraft } from "./draft";
 import { getSelectionBounds, nodeOrigin, parentOrigin, type Rect } from "./geometry";
-import { createId, hasOwn } from "./ids";
+import { createId, getOwn, hasOwn, setOwn } from "./ids";
 import { CANVAS_LIMITS } from "./limits";
 import {
   cloneSubtreeInto,
@@ -44,11 +44,13 @@ export function extractFragment(doc: CanvasDocument, ids: readonly NodeId[]): Fr
   const assets: Record<AssetId, Asset> = {};
   for (const root of roots)
     for (const id of [root, ...getDescendantIds(doc, root)]) {
-      const node = doc.nodes[id];
+      const node = getOwn(doc.nodes, id);
       if (!node) continue;
-      nodes[id] = node;
-      if ((node.type === "image" || node.type === "svg") && hasOwn(doc.assets, node.assetId))
-        assets[node.assetId] = doc.assets[node.assetId] as Asset;
+      setOwn(nodes, id, node);
+      const asset =
+        node.type === "image" || node.type === "svg" ? getOwn(doc.assets, node.assetId) : undefined;
+      if (asset && (node.type === "image" || node.type === "svg"))
+        setOwn(assets, node.assetId, asset);
     }
   const draft = new DocDraft(fragmentDocument({ roots, nodes, assets }));
   for (const root of roots) {
@@ -105,7 +107,7 @@ export function insertFragment(
       continue;
     }
     const newId = hasOwn(assets, id) ? createId(assets) : id;
-    assets[newId] = asset;
+    setOwn(assets, newId, asset);
     draft.setAsset(newId, asset);
     assetMap.set(id, newId);
   }

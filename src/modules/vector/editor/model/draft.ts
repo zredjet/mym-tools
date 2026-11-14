@@ -7,7 +7,7 @@
  *
  * 親の参照は元の文書の索引を使い、下書きの中で付け替えたものは上書きの表で追う。
  */
-import { hasOwn } from "./ids";
+import { getOwn, hasOwn, setOwn } from "./ids";
 import { getParent, isContainer, type ParentRef } from "./tree";
 import type { Asset, AssetId, CanvasDocument, CanvasNode, NodeId, Page } from "./types";
 
@@ -23,8 +23,7 @@ export class DocDraft {
   }
 
   get(id: NodeId): CanvasNode | undefined {
-    const nodes = this.nodes ?? this.base.nodes;
-    return hasOwn(nodes, id) ? nodes[id] : undefined;
+    return getOwn(this.nodes ?? this.base.nodes, id);
   }
 
   has(id: NodeId): boolean {
@@ -35,7 +34,7 @@ export class DocDraft {
   set(node: CanvasNode): void {
     if (this.get(node.id) === node) return;
     this.nodes ??= { ...this.base.nodes };
-    this.nodes[node.id] = node;
+    setOwn(this.nodes, node.id, node);
   }
 
   /** ノードを表から消す (親の `children` からは外さない)。 */
@@ -87,7 +86,7 @@ export class DocDraft {
     }
     const node = this.get(parent.id);
     if (!node || !isContainer(node) || sameIds(node.children, children)) return;
-    const original = this.base.nodes[parent.id];
+    const original = getOwn(this.base.nodes, parent.id);
     if (original && isContainer(original) && original.type === node.type) {
       const restored = sameIds(original.children, children) && sameExceptChildren(original, node);
       if (restored) {
@@ -123,14 +122,13 @@ export class DocDraft {
   }
 
   asset(id: AssetId): Asset | undefined {
-    const assets = this.assets ?? this.base.assets;
-    return hasOwn(assets, id) ? assets[id] : undefined;
+    return getOwn(this.assets ?? this.base.assets, id);
   }
 
   setAsset(id: AssetId, asset: Asset): void {
     if (this.asset(id) === asset) return;
     this.assets ??= { ...this.base.assets };
-    this.assets[id] = asset;
+    setOwn(this.assets, id, asset);
   }
 
   /** 結果の文書。何も変わっていなければ元の文書を返す。 */

@@ -10,13 +10,14 @@ import {
   deleteNodes,
   duplicateNodes,
   groupNodes,
+  parentExists,
   reorderNodes,
   ungroupNodes,
   type DocChange,
   type ReorderDirection,
 } from "../model/structure";
 import { translateNodes } from "../model/transform";
-import { getChildren, getNode, topLevelIds, type ParentRef } from "../model/tree";
+import { getChildren, getNode, getPageOf, topLevelIds, type ParentRef } from "../model/tree";
 import type { CanvasDocument } from "../model/types";
 import { editorClipboard, PASTE_OFFSET, type EditorClipboard } from "./clipboard";
 import type { EditorState, EditorStore } from "./types";
@@ -121,18 +122,40 @@ export function cutSelection(store: Store, clipboard: EditorClipboard = editorCl
   if (copySelection(store, clipboard)) deleteSelection(store);
 }
 
+/** 親が今の文書にあり、表示中のページのものか。 */
+function parentOnPage(state: EditorState, parent: ParentRef): boolean {
+  if (!parentExists(state.doc, parent)) return false;
+  return parent.kind === "page"
+    ? parent.id === state.pageId
+    : getPageOf(state.doc, parent.id)?.id === state.pageId;
+}
+
 /**
- * 貼り付け先: frame を 1 つだけ選んでいればその中、そうでなければスコープの中かページの直下。
+ * 貼り付け先 (§4.10)。次の順で決める。
+ * 1. frame を 1 つだけ選んでいて、それがコピーしたノード自身でなければ、その frame の中
+ *    (同じ内容を前に貼り付けたノードも「コピーしたノード自身」と見る。続けて貼ると入れ子になるのを防ぐ)
+ * 2. コピー元の親が今の文書の表示中のページにあれば、その親
+ * 3. スコープがあればその中、なければページの直下
  */
-export function pasteTarget(state: EditorState): ParentRef {
+export function pasteTarget(
+  state: EditorState,
+  clipboard: EditorClipboard = editorClipboard,
+): ParentRef {
+  const source = clipboard.source;
   const [only, ...rest] = topLevelIds(state.doc, state.selection);
-  if (only !== undefined && rest.length === 0 && getNode(state.doc, only)?.type === "frame")
+  if (
+    only !== undefined &&
+    rest.length === 0 &&
+    getNode(state.doc, only)?.type === "frame" &&
+    !source?.rootIds.has(only)
+  )
     return { kind: "node", id: only };
+  if (source?.parent && parentOnPage(state, source.parent)) return source.parent;
   return currentParent(state);
 }
 
 /** 貼り付けて、貼り付けたノードを選ぶ (Cmd/Ctrl+V)。 */
 export function pasteClipboard(store: Store, clipboard: EditorClipboard = editorClipboard): void {
-  const target = pasteTarget(store.getState());
+  const target = pasteTarget(store.getState(), clipboard);
   applyChange(store, (doc) => clipboard.paste(doc, target));
 }

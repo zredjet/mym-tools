@@ -2,7 +2,7 @@
  * アセット (§3.4)。同じ中身の画像・SVG は 1 つのアセットを共有し、
  * 参照されなくなったアセットは保存の前に落とす。
  */
-import { createId, hasOwn } from "./ids";
+import { createId, getOwn, hasOwn, setOwn } from "./ids";
 import type { Asset, AssetId, CanvasDocument, CanvasNode } from "./types";
 
 /** 中身が同じアセットか (画像は mime と base64、SVG は文書の文字列で比べる)。 */
@@ -55,7 +55,7 @@ export function pruneAssets(doc: CanvasDocument): CanvasDocument {
   const keys = Object.keys(doc.assets);
   if (keys.every((id) => used.has(id))) return doc;
   const assets: Record<AssetId, Asset> = {};
-  for (const id of keys) if (used.has(id)) assets[id] = doc.assets[id] as Asset;
+  for (const id of keys) if (used.has(id)) setOwn(assets, id, getOwn(doc.assets, id) as Asset);
   return { ...doc, assets };
 }
 

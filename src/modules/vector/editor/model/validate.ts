@@ -55,8 +55,23 @@ function range(value: unknown, path: string, min: number, max: number, minExclus
 const abs = (value: unknown, path: string, max: number) => range(value, path, -max, max);
 const opacity = (value: unknown, path: string) => range(value, path, 0, 1);
 
+/** 対になっていないサロゲートを含むか (§3.5。Rust の JSON の読み込みが受け付けない)。 */
+export function hasLoneSurrogate(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0xd800 || code > 0xdfff) continue;
+    if (code >= 0xdc00) return true; // 前に上位サロゲートのない下位サロゲート
+    const next = value.charCodeAt(i + 1); // 範囲外は NaN
+    if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
+    i++;
+  }
+  return false;
+}
+
+/** 文字列のフィールド。どの文字列も、対になっていないサロゲートを拒否する。 */
 function str(value: unknown, path: string): string {
   if (typeof value !== "string") fail(path, "文字列ではありません");
+  if (hasLoneSurrogate(value)) fail(path, "対になっていないサロゲートを含められません");
   return value;
 }
 
@@ -74,6 +89,8 @@ function oneOf<T extends string>(value: unknown, path: string, options: readonly
 function id(value: unknown, path: string): string {
   const s = str(value, path);
   if (!NODE_ID_PATTERN.test(s)) fail(path, "ID の書式が違います");
+  // §3.3: JavaScript でオブジェクトを表として使うと、この名前だけ正しく扱えない
+  if (s === "__proto__") fail(path, "__proto__ は ID に使えません");
   return s;
 }
 
@@ -81,17 +98,12 @@ function color(value: unknown, path: string): void {
   if (!HEX_COLOR_PATTERN.test(str(value, path))) fail(path, "色は #RRGGBB にしてください");
 }
 
-/** Unicode のコードポイント数 (§3.5)。 */
+/** Unicode のコードポイント数 (§3.5)。`str` を通った文字列 (サロゲートは必ず対) に使う。 */
 function codePoints(value: string): number {
-  let n = 0;
+  let n = value.length;
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
-    // サロゲートペアの後半は数えない
-    if (code < 0xdc00 || code > 0xdfff || i === 0) n++;
-    else {
-      const prev = value.charCodeAt(i - 1);
-      if (prev < 0xd800 || prev > 0xdbff) n++;
-    }
+    if (code >= 0xdc00 && code <= 0xdfff) n--;
   }
   return n;
 }
@@ -226,6 +238,8 @@ interface NodeInfo {
   type: NodeTypeName;
   children: string[] | null;
   assetId: string | null;
+  /** テキストノードの本文の UTF-8 のバイト数 (ほかは 0) */
+  textBytes: number;
 }
 
 function checkNode(key: string, value: unknown): NodeInfo {
@@ -252,6 +266,7 @@ function checkNode(key: string, value: unknown): NodeInfo {
 
   let children: string[] | null = null;
   let assetId: string | null = null;
+  let textBytes = 0;
   switch (type) {
     case "frame":
     case "group": {
@@ -267,7 +282,7 @@ function checkNode(key: string, value: unknown): NodeInfo {
       for (const k of ["x1", "y1", "x2", "y2"]) abs(node[k], `${path}.${k}`, L.maxCoordinate);
       break;
     case "text": {
-      maxChars(node["text"], `${path}.text`, L.maxTextLength);
+      textBytes = utf8Length(maxChars(node["text"], `${path}.text`, L.maxTextLength));
       const family = maxChars(node["fontFamily"], `${path}.fontFamily`, L.maxFontFamilyLength);
       if (family.length === 0) fail(`${path}.fontFamily`, "空にはできません");
       if (hasControl(family)) fail(`${path}.fontFamily`, "制御文字を含められません");
@@ -289,14 +304,19 @@ function checkNode(key: string, value: unknown): NodeInfo {
     default:
       break;
   }
-  return { type, children, assetId };
+  return { type, children, assetId, textBytes };
 }
 
 // ---------------------------------------------------------------------------
 // アセット
 // ---------------------------------------------------------------------------
 
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+/**
+ * 繰り返しを入れ子にしない形にする (§3.4)。`^(?:[A-Za-z0-9+/]{4})*...$` の形は、
+ * JavaScriptCore では約 557 万文字を超えると正しい入力でも false、V8 では約 447 万文字で
+ * RangeError になる。長さが 4 の倍数で、`=` が末尾の 2 個以内なら、パディングの形は正しい。
+ */
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /**
@@ -304,8 +324,8 @@ const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
  * 標準の字母で、パディングは必須かつ正規の形、最後の文字の使わないビットは 0
  * (`QR==` や `QUJ=` は `atob` では読めるが Rust は拒否する)。
  */
-function isCanonicalBase64(data: string): boolean {
-  if (!BASE64.test(data)) return false;
+export function isCanonicalBase64(data: string): boolean {
+  if (data.length === 0 || data.length % 4 !== 0 || !BASE64.test(data)) return false;
   if (data.endsWith("=="))
     return (BASE64_ALPHABET.indexOf(data.charAt(data.length - 3)) & 0x0f) === 0;
   if (data.endsWith("="))
@@ -375,9 +395,9 @@ function checkAsset(key: string, value: unknown): "image" | "svg" {
     }
     if (extracted !== text) fail(`${path}.text`, "SVG から抽出した文字と一致しません");
   }
-  // §3.5 に規則がないので、Rust の検証 (PR #165) と同じ 0 以上 maxSize 以下にそろえる
-  range(asset["width"], `${path}.width`, 0, L.maxSize);
-  range(asset["height"], `${path}.height`, 0, L.maxSize);
+  // §3.4: image も svg も、0 より大きく maxSize 以下
+  range(asset["width"], `${path}.width`, 0, L.maxSize, true);
+  range(asset["height"], `${path}.height`, 0, L.maxSize, true);
   return kind;
 }
 
@@ -424,7 +444,17 @@ function checkPayload(value: unknown): void {
   const nodeKeys = Object.keys(nodes);
   if (nodeKeys.length > L.maxNodes) fail("nodes", `ノードは ${L.maxNodes} 個以下にしてください`);
   const infos = new Map<string, NodeInfo>();
-  for (const key of nodeKeys) infos.set(key, checkNode(key, nodes[key]));
+  let totalTextBytes = 0;
+  for (const key of nodeKeys) {
+    const info = checkNode(key, nodes[key]);
+    infos.set(key, info);
+    totalTextBytes += info.textBytes;
+  }
+  if (totalTextBytes > L.maxTotalTextBytes)
+    fail(
+      "nodes",
+      `テキストの本文の合計は UTF-8 で ${L.maxTotalTextBytes} バイト以下にしてください`,
+    );
 
   // 木: どのノードもちょうど 1 回、ページから届き、深さは maxDepth 以下
   const seen = new Set<string>();

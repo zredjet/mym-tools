@@ -1,6 +1,7 @@
 /**
  * 検索用テキスト (§3.6)。Rust も同じ規則で求め直し、一致しない payload を拒否する。
  */
+import { getOwn } from "./ids";
 import { walkPage } from "./tree";
 import type { CanvasDocument } from "./types";
 
@@ -48,7 +49,7 @@ export function computeSearchText(doc: CanvasDocument): string {
       if (node.type === "frame") push(node.name);
       else if (node.type === "text") push(node.text);
       else if (node.type === "svg") {
-        const asset = doc.assets[node.assetId];
+        const asset = getOwn(doc.assets, node.assetId);
         if (asset?.kind === "svg") push(asset.text);
       }
     });

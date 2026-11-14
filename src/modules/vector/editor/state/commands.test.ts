@@ -180,3 +180,56 @@ describe("選択に対する操作", () => {
     expect(store.getState().selection).toEqual(["grp", "f2"]);
   });
 });
+
+describe("貼り付け先と位置 (§4.10)", () => {
+  it("frame をコピーしてそのまま貼ると、入れ子にならず兄弟になる", () => {
+    const clipboard = new EditorClipboard();
+    const store = setup(["f2"]);
+    copySelection(store, clipboard);
+    pasteClipboard(store, clipboard);
+    const [first] = store.getState().selection;
+    expect(getParent(store.getState().doc, first!)).toEqual({ kind: "node", id: "f" });
+    // 貼ったものを選んだまま続けて貼っても、その中には入らない
+    pasteClipboard(store, clipboard);
+    const [second] = store.getState().selection;
+    expect(getParent(store.getState().doc, second!)).toEqual({ kind: "node", id: "f" });
+    expect(getPageBounds(store.getState().doc, second!)).toMatchObject({ x: 320, y: 170 });
+  });
+
+  it("frame の子をコピーして貼ると、同じ frame の中に入る", () => {
+    const clipboard = new EditorClipboard();
+    const store = setup(["r1"]);
+    copySelection(store, clipboard);
+    pasteClipboard(store, clipboard);
+    const [pasted] = store.getState().selection;
+    expect(getParent(store.getState().doc, pasted!)).toEqual({ kind: "node", id: "f" });
+    expect(store.getState().doc.nodes[pasted!]).toMatchObject({ x: 20, y: 20 });
+  });
+
+  it("選んだ frame と重ならない位置なら、frame の中央に置く", () => {
+    const clipboard = new EditorClipboard();
+    const store = setup(["r0"]);
+    copySelection(store, clipboard);
+    store.getState().setSelection(["f2"]);
+    pasteClipboard(store, clipboard);
+    const [pasted] = store.getState().selection;
+    expect(getParent(store.getState().doc, pasted!)).toEqual({ kind: "node", id: "f2" });
+    // f2 はページ座標で (300, 150) 100×100。中央に 10×10 を置く
+    expect(getPageBounds(store.getState().doc, pasted!)).toEqual({
+      x: 345,
+      y: 195,
+      width: 10,
+      height: 10,
+    });
+  });
+
+  it("コピー元の親がない文書では、スコープかページの直下", () => {
+    const clipboard = new EditorClipboard();
+    copySelection(setup(["r3"]), clipboard);
+    const target = createEditorStore();
+    expect(pasteTarget(target.getState(), clipboard)).toEqual({
+      kind: "page",
+      id: FIRST_PAGE_ID,
+    });
+  });
+});

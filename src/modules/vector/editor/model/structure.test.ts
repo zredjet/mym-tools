@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { createRect } from "./create";
+import { createFrame, createRect } from "./create";
+import { extractFragment, insertFragment } from "./fragment";
+import { CANVAS_LIMITS } from "./limits";
 import { getPageBounds } from "./geometry";
 import {
   deleteNodes,
@@ -217,5 +219,73 @@ describe("グループ化", () => {
     const grouped = groupNodes(doc, ["r1", "grp"], "G");
     const next = ungroupNodes(grouped, ["G", "grp"]);
     expect(children(next, "f")).toEqual(["r1", "r2", "l1", "f2"]);
+  });
+});
+
+describe("上限を超える変更の拒否", () => {
+  /** frame を `depth` 段つなげた文書 (いちばん内側が `d<depth-1>`)。 */
+  const chain = (depth: number): CanvasDocument => {
+    const ids = Array.from({ length: depth }, (_, i) => `d${i}`);
+    const nodes = Object.fromEntries(
+      ids.map((id, i) => [id, createFrame({ id, children: i + 1 < depth ? [`d${i + 1}`] : [] })]),
+    );
+    return deepFreeze({
+      pages: [{ id: "p", name: "", children: ["d0", "x"], guides: [] }],
+      nodes: { ...nodes, x: createRect({ id: "x" }) },
+      assets: {},
+    });
+  };
+  const max = CANVAS_LIMITS.maxDepth;
+
+  it("maxDepth を超える挿入・移動・グループ化・貼り付けをしない", () => {
+    const doc = chain(max);
+    const deepest = { kind: "node", id: `d${max - 1}` } as const;
+    expect(insertNode(doc, createRect({ id: "n" }), deepest)).toBe(doc);
+    expect(moveNodes(doc, ["x"], deepest)).toBe(doc);
+    expect(groupNodes(doc, ["d0"], "G")).toBe(doc);
+    const fragment = extractFragment(doc, ["x"])!;
+    expect(insertFragment(doc, fragment, deepest)).toEqual({ doc, ids: [] });
+    // 1 段浅ければ入る
+    const shallower = { kind: "node", id: `d${max - 2}` } as const;
+    expect(insertNode(doc, createRect({ id: "n" }), shallower)).not.toBe(doc);
+    expect(moveNodes(doc, ["x"], shallower)).not.toBe(doc);
+  });
+
+  it("maxNodes を超える挿入・複製・グループ化・貼り付けをしない", () => {
+    const count = CANVAS_LIMITS.maxNodes;
+    const ids = Array.from({ length: count }, (_, i) => `n${i}`);
+    const doc: CanvasDocument = deepFreeze({
+      pages: [{ id: "p", name: "", children: ids, guides: [] }],
+      nodes: Object.fromEntries(ids.map((id) => [id, createRect({ id })])),
+      assets: {},
+    });
+    const page = { kind: "page", id: "p" } as const;
+    expect(insertNode(doc, createRect({ id: "extra" }), page)).toBe(doc);
+    expect(duplicateNodes(doc, ["n0"])).toEqual({ doc, ids: [] });
+    expect(groupNodes(doc, ["n0", "n1"], "G")).toBe(doc);
+    expect(insertFragment(doc, extractFragment(doc, ["n0"])!, page)).toEqual({ doc, ids: [] });
+  });
+});
+
+describe("グループの解除とロック (レビューの指摘)", () => {
+  it("ロック中の group の子はロックになる", () => {
+    const doc = sampleDocument();
+    doc.nodes["grp"] = { ...doc.nodes["grp"]!, locked: true };
+    deepFreeze(doc);
+    const next = ungroupNodes(doc, ["grp"]);
+    expect(next.nodes["r2"]).toMatchObject({ locked: true });
+    expect(next.nodes["l1"]).toMatchObject({ locked: true });
+  });
+});
+
+describe("index の位置に動かすノード自身がある場合", () => {
+  it("動かすノードを飛ばした次の子の背面に入れる", () => {
+    const doc = frozen();
+    // index 0 も 1 も動かすノード → 目印は f2
+    expect(moveNodes(doc, ["r1", "grp"], { kind: "node", id: "f" }, 0)).toBe(doc);
+    // 別の親から来るノードと、同じ親のノードを一緒に動かす (元の重なり順 grp → r0 を保つ)
+    const next = moveNodes(doc, ["r0", "grp"], { kind: "node", id: "f" }, 1);
+    expect(children(next, "f")).toEqual(["r1", "grp", "r0", "f2"]);
+    expect(getPageBounds(next, "r0")).toEqual(getPageBounds(doc, "r0"));
   });
 });

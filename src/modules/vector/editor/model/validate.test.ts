@@ -4,7 +4,10 @@ import { fromPayload, toPayload } from "./payload";
 import { computeSearchText } from "./searchText";
 import { fixturePayload } from "./testing";
 import type { VectorPayloadV2 } from "./types";
-import { validatePayload } from "./validate";
+import { CANVAS_LIMITS } from "./limits";
+import { checkSavable } from "./payload";
+import { createFrame, createText } from "./create";
+import { hasLoneSurrogate, isCanonicalBase64, validatePayload } from "./validate";
 
 type Path = (string | number)[];
 interface PatchOp {
@@ -160,14 +163,90 @@ describe("validatePayload の個別の規則", () => {
     else expect(validatePayload(payload)).toMatch(/^assets\.img1\.data: /);
   });
 
-  it("アセットの width / height は 0 以上 maxSize 以下 (Rust と同じ)", () => {
+  it("アセットの width / height は 0 より大きく maxSize 以下 (§3.4)", () => {
     const payload = full();
     payload["assets"].img1.width = 0;
-    payload["assets"].svgA.height = 0;
+    expect(validatePayload(payload)).toMatch(/img1\.width/);
+    payload["assets"].img1.width = CANVAS_LIMITS.maxSize;
     expect(validatePayload(payload)).toBeNull();
-    payload["assets"].img1.width = -1;
+    payload["assets"].img1.width = CANVAS_LIMITS.maxSize + 1;
     expect(validatePayload(payload)).toMatch(/img1\.width/);
-    payload["assets"].img1.width = 100001;
-    expect(validatePayload(payload)).toMatch(/img1\.width/);
+    payload["assets"].img1.width = 0.5;
+    payload["assets"].svgA.height = 0;
+    expect(validatePayload(payload)).toMatch(/svgA\.height/);
+  });
+
+  it("20 MiB の base64 でも正しく判定する (入れ子の繰り返しの正規表現を使わない)", () => {
+    const length = 20 * 1024 * 1024;
+    const big = "/9j/" + "A".repeat(length - 4);
+    expect(isCanonicalBase64(big)).toBe(true);
+    expect(isCanonicalBase64(big.slice(0, -2) + "B=")).toBe(false); // 使わないビットが 0 でない
+    expect(isCanonicalBase64(big.slice(0, -1))).toBe(false); // 長さが 4 の倍数でない
+    expect(isCanonicalBase64(big.slice(0, -4) + "A=A=")).toBe(false);
+
+    // payload 全体の上限ぎりぎりの JPEG を通す
+    const payload = full();
+    const svgBytes = new TextEncoder().encode(payload["assets"].svgA.svg).length;
+    const room = CANVAS_LIMITS.payloadBytes - svgBytes;
+    payload["assets"].img1.mime = "image/jpeg";
+    payload["assets"].img1.data = "/9j/" + "A".repeat(room - (room % 4) - 4);
+    expect(validatePayload(payload)).toBeNull();
+  });
+
+  it("すべての文字列で、対になっていないサロゲートを拒否する", () => {
+    expect(hasLoneSurrogate("a😀b")).toBe(false);
+    expect(hasLoneSurrogate("\ud800")).toBe(true);
+    expect(hasLoneSurrogate("a\udc00")).toBe(true);
+    expect(hasLoneSurrogate("\ud83d\ud83d")).toBe(true);
+    const cases: [(p: ReturnType<typeof full>) => void, RegExp][] = [
+      [(p) => (p["nodes"].rect1.name = "a\ud800"), /rect1\.name/],
+      [(p) => (p["nodes"].text1.fontFamily = "\udc00Arial"), /text1\.fontFamily/],
+      [(p) => (p["pages"][0].name = "\ud800"), /pages\[0\]\.name/],
+      [(p) => (p["assets"].svgA.text = "\ud800"), /svgA\.text/],
+      [(p) => (p["text"] = p["text"] + "\ud800"), /^text: /],
+      [(p) => (p["nodes"].text1.text = "見出し\ud800"), /text1\.text/],
+    ];
+    for (const [patch, pattern] of cases) {
+      const payload = full();
+      patch(payload);
+      expect(validatePayload(payload)).toMatch(pattern);
+    }
+  });
+
+  it("__proto__ をノード・ページ・アセットの ID に使えない", () => {
+    const base = JSON.stringify(fixturePayload("full"));
+    for (const name of ["svg1", "page2", "img1"]) {
+      const payload: unknown = JSON.parse(base.split(`"${name}"`).join('"__proto__"'));
+      expect(validatePayload(payload)).toMatch(/__proto__/);
+    }
+  });
+
+  it("全テキストの本文の合計は UTF-8 で maxTotalTextBytes 以下", () => {
+    // 空白だけの本文は検索用テキストに入らないので、合計の上限だけで止まる
+    const text = "\u3000".repeat(CANVAS_LIMITS.maxTextLength); // 300,000 バイト
+    const make = (count: number) => {
+      const ids = Array.from({ length: count }, (_, i) => `t${i}`);
+      return {
+        pages: [{ id: "p", name: "", children: ids, guides: [] }],
+        nodes: Object.fromEntries(ids.map((id) => [id, createText({ id, text })])),
+        assets: {},
+        text: "",
+      };
+    };
+    const fits = Math.floor(CANVAS_LIMITS.maxTotalTextBytes / 300_000);
+    expect(validatePayload(make(fits))).toBeNull();
+    expect(validatePayload(make(fits + 1))).toMatch(/本文の合計/);
+  });
+
+  it("壊れた文書 (frame が互いを子に持つ) でも checkSavable は例外にならない", () => {
+    const doc = {
+      pages: [{ id: "p", name: "", children: ["a"], guides: [] }],
+      nodes: {
+        a: createFrame({ id: "a", children: ["b"] }),
+        b: createFrame({ id: "b", children: ["a"] }),
+      },
+      assets: {},
+    };
+    expect(checkSavable(doc)).toMatch(/2 回以上/);
   });
 });

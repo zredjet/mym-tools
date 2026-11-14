@@ -6,12 +6,13 @@
 import { createGroup } from "./create";
 import { DocDraft } from "./draft";
 import { parentOrigin } from "./geometry";
-import { createId } from "./ids";
+import { createId, getOwn } from "./ids";
 import { CANVAS_LIMITS } from "./limits";
 import { translateInDraft } from "./transform";
 import {
   getDepth,
   getDescendantIds,
+  getNode,
   getParent,
   isAncestorOf,
   isContainer,
@@ -35,15 +36,22 @@ export function parentDepth(doc: CanvasDocument, parent: ParentRef): number {
 /** 親が実在し、子を持てるか。 */
 export function parentExists(doc: CanvasDocument, parent: ParentRef): boolean {
   if (parent.kind === "page") return doc.pages.some((page) => page.id === parent.id);
-  const node = doc.nodes[parent.id];
+  const node = getNode(doc, parent.id);
   return node !== undefined && isContainer(node) && getDepth(doc, node.id) > 0;
 }
 
 /** ノードを根とする部分木の高さ (葉は 1)。 */
-export function subtreeHeight(nodes: Record<NodeId, CanvasNode>, id: NodeId): number {
-  const node = nodes[id];
-  if (!node || !isContainer(node) || node.children.length === 0) return 1;
-  return 1 + Math.max(...node.children.map((child) => subtreeHeight(nodes, child)));
+export function subtreeHeight(
+  nodes: Record<NodeId, CanvasNode>,
+  id: NodeId,
+  seen: ReadonlySet<NodeId> = new Set(),
+): number {
+  const node = getOwn(nodes, id);
+  if (!node || !isContainer(node) || node.children.length === 0 || seen.has(id)) return 1;
+  const inner = new Set(seen).add(id);
+  let max = 0;
+  for (const child of node.children) max = Math.max(max, subtreeHeight(nodes, child, inner));
+  return 1 + max;
 }
 
 /** 空になった group を消し、空になった親の group も続けて消す (§3.3: group は子が 1 個以上)。 */
@@ -75,7 +83,7 @@ export function insertNode(
   parent: ParentRef,
   index?: number,
 ): CanvasDocument {
-  if (doc.nodes[node.id] !== undefined || !parentExists(doc, parent)) return doc;
+  if (getNode(doc, node.id) !== undefined || !parentExists(doc, parent)) return doc;
   if (isContainer(node) && node.children.length > 0) return doc;
   if (parentDepth(doc, parent) + 1 > CANVAS_LIMITS.maxDepth) return doc;
   if (Object.keys(doc.nodes).length + 1 > CANVAS_LIMITS.maxNodes) return doc;
@@ -120,7 +128,7 @@ export function cloneSubtreeInto(
   assetMap?: ReadonlyMap<string, string>,
 ): NodeId {
   const visit = (id: NodeId): NodeId => {
-    const node = source[id];
+    const node = getOwn(source, id);
     if (!node) throw new Error(`node not found: ${id}`);
     let newId = createId();
     while (taken.has(newId) || draft.has(newId)) newId = createId();
@@ -314,7 +322,7 @@ export function groupNodes(
 ): CanvasDocument {
   const tops = topLevelIds(doc, ids);
   const front = tops[tops.length - 1];
-  if (front === undefined || doc.nodes[groupId] !== undefined) return doc;
+  if (front === undefined || getNode(doc, groupId) !== undefined) return doc;
   const target = getParent(doc, front);
   if (!target) return doc;
   if (Object.keys(doc.nodes).length + 1 > CANVAS_LIMITS.maxNodes) return doc;
@@ -346,12 +354,13 @@ export function groupNodes(
 
 /**
  * group を解除し、子を group があった位置に並べる (座標はそのまま。group は座標系を作らない)。
- * 見た目を保つため、group の不透明度は子に掛け合わせ、非表示の group の子は非表示にする。
+ * 見た目と状態を保つため、group の不透明度は子に掛け合わせ、非表示の group の子は非表示に、
+ * ロック中の group の子はロックにする (§4.6)。
  * group でない ID は無視する。入れ子の group を同時に解除するときは内側から解く。
  */
 export function ungroupNodes(doc: CanvasDocument, ids: readonly NodeId[]): CanvasDocument {
   const groups = [...new Set(ids)]
-    .filter((id) => doc.nodes[id]?.type === "group")
+    .filter((id) => getNode(doc, id)?.type === "group")
     .sort((a, b) => getDepth(doc, b) - getDepth(doc, a));
   if (groups.length === 0) return doc;
   const draft = new DocDraft(doc);
@@ -364,8 +373,9 @@ export function ungroupNodes(doc: CanvasDocument, ids: readonly NodeId[]): Canva
       if (!child) continue;
       const opacity = child.opacity * group.opacity;
       const visible = child.visible && group.visible;
-      if (opacity !== child.opacity || visible !== child.visible)
-        draft.set({ ...child, opacity, visible });
+      const locked = child.locked || group.locked;
+      if (opacity !== child.opacity || visible !== child.visible || locked !== child.locked)
+        draft.set({ ...child, opacity, visible, locked });
     }
     const siblings = [...draft.children(parent)];
     const at = siblings.indexOf(id);
