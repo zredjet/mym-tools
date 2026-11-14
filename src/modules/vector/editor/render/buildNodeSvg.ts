@@ -19,7 +19,14 @@ import type {
 } from "../model/types";
 import { layoutText } from "../text/layout";
 import { CHILDREN_SLOT, el, fillSlot } from "./svgEl";
-import type { BuildNodeSvg, FontSpec, RenderOptions, SvgEl, TextMeasurer } from "./types";
+import type {
+  BuildNodeSvg,
+  FontSpec,
+  RenderOptions,
+  SvgEl,
+  TextLayout,
+  TextMeasurer,
+} from "./types";
 
 /** `buildNodeShell` に渡すもの。画像と埋め込み SVG のアセットは呼び出し側が引いて渡す。 */
 export interface ShellContext {
@@ -129,6 +136,7 @@ export function assetDataUrl(asset: Asset): string {
  * 塗りの属性。グラデーションは `defs` に定義を足す。
  * 座標は外接矩形を 0〜1 に正規化した値なので、`gradientTransform` で外接矩形へ写す
  * (`objectBoundingBox` と同じ結果で、文字の字形の外接矩形ではなくノードの矩形を基準にできる)。
+ * 外接矩形の幅か高さが 0 なら、先頭の停止点の色の単色にする (§4.3)。
  */
 function paintAttrs(
   paint: Paint | null,
@@ -139,6 +147,12 @@ function paintAttrs(
   if (paint === null) return { fill: "none" };
   if (paint.type === "solid") {
     return { fill: paint.color, "fill-opacity": paint.opacity === 1 ? undefined : paint.opacity };
+  }
+  if (box.width === 0 || box.height === 0) {
+    // 大きさ 0 の外接矩形には写せない (変換行列が潰れる) ので、先頭の停止点の色で塗る
+    const first = paint.stops[0];
+    if (!first) return { fill: "none" };
+    return { fill: first.color, "fill-opacity": first.opacity === 1 ? undefined : first.opacity };
   }
   const stops = paint.stops.map((stop) =>
     el("stop", {
@@ -180,9 +194,34 @@ function strokeAttrs(stroke: Stroke | null): Record<string, string | number | un
 /**
  * ドロップシャドウの `filter`。ぼかしは CSS の box-shadow と同じく標準偏差の 2 倍として扱う。
  * フィルターの範囲は既定 (外接矩形の ±10%) では足りないので、影の届く範囲を利用者空間で指定する。
+ *
+ * `shadowOnly` なら元の図形を出さず影だけを出す (`feDropShadow` と同じ影を基本の部品で組む)。
+ * frame は影を子の背面に描くため、影だけの要素を子より先に置く。
  */
-function shadowFilter(shadow: Shadow, box: Box, strokeWidth: number, id: string): SvgEl {
+function shadowFilter(
+  shadow: Shadow,
+  box: Box,
+  strokeWidth: number,
+  id: string,
+  shadowOnly = false,
+): SvgEl {
   const pad = shadow.blur * 1.5 + strokeWidth / 2 + 1;
+  const primitives = shadowOnly
+    ? [
+        el("feGaussianBlur", { in: "SourceAlpha", stdDeviation: shadow.blur / 2 }),
+        el("feOffset", { dx: shadow.x, dy: shadow.y, result: "offset" }),
+        el("feFlood", { "flood-color": shadow.color, "flood-opacity": shadow.opacity }),
+        el("feComposite", { in2: "offset", operator: "in" }),
+      ]
+    : [
+        el("feDropShadow", {
+          dx: shadow.x,
+          dy: shadow.y,
+          stdDeviation: shadow.blur / 2,
+          "flood-color": shadow.color,
+          "flood-opacity": shadow.opacity,
+        }),
+      ];
   return el(
     "filter",
     {
@@ -194,15 +233,7 @@ function shadowFilter(shadow: Shadow, box: Box, strokeWidth: number, id: string)
       height: box.height + pad * 2 + Math.abs(shadow.y),
       "color-interpolation-filters": "sRGB",
     },
-    [
-      el("feDropShadow", {
-        dx: shadow.x,
-        dy: shadow.y,
-        stdDeviation: shadow.blur / 2,
-        "flood-color": shadow.color,
-        "flood-opacity": shadow.opacity,
-      }),
-    ],
+    primitives,
   );
 }
 
@@ -224,6 +255,38 @@ function roundedClip(box: Box, radius: number, id: string): SvgEl {
       rx: radius > 0 ? radius : undefined,
     }),
   ]);
+}
+
+// ---------------------------------------------------------------------------
+// テキストの字形の範囲
+// ---------------------------------------------------------------------------
+
+/**
+ * 字形が行の箱からはみ出しうる量 (フォントサイズに対する倍率)。斜体の左右、
+ * 行の高さがフォントサイズ以下のときのアセンダー・ディセンダーを含める。
+ * 影のフィルタ領域 (ここ) と画面外の判定 (`canvas/culling.ts`) で同じ値を使う。
+ */
+export const TEXT_INK_OVERFLOW = 0.5;
+
+/**
+ * テキストの字形が描かれうる範囲 (親の座標系)。ノードの矩形と行分割の結果
+ * (fixed ははみ出した行も描く) を合わせ、フォントサイズ × `TEXT_INK_OVERFLOW` だけ広げる。
+ */
+export function textInkExtent(node: TextNode, layout: TextLayout): Box {
+  let left = 0;
+  let right = node.width;
+  for (const line of layout.lines) {
+    left = Math.min(left, line.x);
+    right = Math.max(right, line.x + line.width);
+  }
+  const bottom = Math.max(node.height, layout.height);
+  const pad = node.fontSize * TEXT_INK_OVERFLOW;
+  return {
+    x: node.x + left - pad,
+    y: node.y - pad,
+    width: right - left + pad * 2,
+    height: bottom + pad * 2,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -253,30 +316,22 @@ export function buildNodeShell(node: CanvasNode, ctx: ShellContext): SvgEl | nul
       const box = boxOf(node);
       const rx = node.radius > 0 ? node.radius : undefined;
       const body: SvgEl[] = [];
-      // 影は frame 自身の矩形が落とす (塗りがあれば塗りの矩形、なければ線の矩形)
-      const shadowOn: "fill" | "stroke" | null =
-        node.shadow === null
-          ? null
-          : node.fill !== null
-            ? "fill"
-            : node.stroke !== null
-              ? "stroke"
-              : null;
-      const filter =
-        node.shadow !== null && shadowOn !== null
-          ? (defs.push(shadowFilter(node.shadow, box, node.stroke?.width ?? 0, id("shadow"))),
-            `url(#${id("shadow")})`)
-          : undefined;
-      if (node.fill !== null) {
+      // 影は frame 自身の矩形 (塗りと線) が落とし、子の形の影にはしない。必ず子の背面に描くため、
+      // 影だけを出す要素を塗りより先に置く (§4.3)。塗りも線もなければ影もない
+      const fill = node.fill === null ? null : paintAttrs(node.fill, box, id("fill"), defs);
+      if (node.shadow !== null && (node.fill !== null || node.stroke !== null)) {
+        defs.push(shadowFilter(node.shadow, box, node.stroke?.width ?? 0, id("shadow"), true));
         body.push(
           el("rect", {
             ...box,
             rx,
-            ...paintAttrs(node.fill, box, id("fill"), defs),
-            filter: shadowOn === "fill" ? filter : undefined,
+            ...(fill ?? { fill: "none" }),
+            ...strokeAttrs(node.stroke),
+            filter: `url(#${id("shadow")})`,
           }),
         );
       }
+      if (fill !== null) body.push(el("rect", { ...box, rx, ...fill }));
       if (node.clip)
         defs.push(
           roundedClip(
@@ -303,7 +358,6 @@ export function buildNodeShell(node: CanvasNode, ctx: ShellContext): SvgEl | nul
             rx,
             fill: "none",
             ...strokeAttrs(node.stroke),
-            filter: shadowOn === "stroke" ? filter : undefined,
           }),
         );
       }
@@ -350,12 +404,7 @@ export function buildNodeShell(node: CanvasNode, ctx: ShellContext): SvgEl | nul
     case "text": {
       const layout = layoutText(node, ctx.measurer);
       const box = boxOf(node);
-      // fixed ははみ出した分も描くので、影の範囲は行分割の結果も含める
-      const extent: Box = {
-        ...box,
-        width: Math.max(box.width, layout.width),
-        height: Math.max(box.height, layout.height),
-      };
+      const extent = textInkExtent(node, layout);
       const filter =
         node.shadow === null
           ? undefined

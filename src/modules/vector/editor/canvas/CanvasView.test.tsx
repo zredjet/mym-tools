@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sampleDocument } from "../model/testing";
 import { editorStore } from "../state/store";
 import { DEFAULT_VIEW_OPTIONS } from "../state/types";
+import { isHandDragging } from "../tools/handTool";
 import { TOOLS } from "../tools/registry";
 import type { Tool } from "../tools/types";
 import { CanvasView } from "./CanvasView";
@@ -233,5 +234,185 @@ describe("層", () => {
     expect(canvas.querySelector("[data-canvas-ruler]")).not.toBeNull();
     act(() => editorStore.getState().setView({ rulers: false }));
     expect(canvas.querySelector("[data-canvas-ruler]")).toBeNull();
+  });
+});
+
+describe("キーを取る範囲 (§4.4)", () => {
+  function setupInEditor() {
+    const view = render(
+      <>
+        <button type="button" data-testid="outside">
+          外
+        </button>
+        <div data-canvas-editor="">
+          <button type="button" data-testid="inside">
+            中
+          </button>
+          <input data-testid="field" />
+          <CanvasView />
+        </div>
+      </>,
+    );
+    const canvas = view.container.querySelector<HTMLElement>("[data-canvas-view]")!;
+    return { ...view, canvas };
+  }
+
+  it("エディタの外のボタンにフォーカスがある間は、Space・Esc・文字キーを取らない", () => {
+    const { getByTestId, canvas } = setupInEditor();
+    const outside = getByTestId("outside");
+    outside.focus();
+    const space = fireEvent.keyDown(outside, { key: " ", code: "Space" });
+    expect(space).toBe(true); // preventDefault していない (ボタンが Space で押せる)
+    expect(canvas.style.cursor).toBe("default");
+    fireEvent.keyDown(outside, { key: "r", code: "KeyR" });
+    fireEvent.keyDown(outside, { key: "Escape", code: "Escape" });
+    expect(editorStore.getState().toolId).toBe("select");
+    expect(spy.onKeyDown).not.toHaveBeenCalled();
+  });
+
+  it("モーダルが開いている間は、フォーカスがどこにあっても何も取らない", () => {
+    setupInEditor();
+    const modal = document.createElement("div");
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    document.body.append(modal);
+    fireEvent.keyDown(document.body, { key: "r", code: "KeyR" });
+    fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" });
+    expect(editorStore.getState().toolId).toBe("select");
+    expect(spy.onKeyDown).not.toHaveBeenCalled();
+    modal.remove();
+  });
+
+  it("エディタの中のボタンでは Space・Enter・矢印を部品に任せ、ほかのショートカットは効かせる", () => {
+    const { getByTestId, canvas } = setupInEditor();
+    const inside = getByTestId("inside");
+    inside.focus();
+    expect(fireEvent.keyDown(inside, { key: " ", code: "Space" })).toBe(true);
+    expect(canvas.style.cursor).toBe("default");
+    fireEvent.keyDown(inside, { key: "Enter", code: "Enter" });
+    fireEvent.keyDown(inside, { key: "ArrowLeft", code: "ArrowLeft" });
+    expect(spy.onKeyDown).not.toHaveBeenCalled();
+    fireEvent.keyDown(inside, { key: "r", code: "KeyR" });
+    expect(editorStore.getState().toolId).toBe("rect");
+  });
+
+  it("フォーカスがどこにもない (body) ときは効く", () => {
+    setupInEditor();
+    fireEvent.keyDown(document.body, { key: "r", code: "KeyR" });
+    expect(editorStore.getState().toolId).toBe("rect");
+  });
+
+  it("入力欄にフォーカスがあってキャンバスを押したら、先に確定 (blur) させてからツールへ渡し、フォーカスをキャンバスへ移す", () => {
+    const { getByTestId, canvas } = setupInEditor();
+    const field = getByTestId("field");
+    const order: string[] = [];
+    field.addEventListener("blur", () => order.push("blur"));
+    spy.onPointerDown.mockImplementation(() => order.push("tool"));
+    field.focus();
+    fireEvent.pointerDown(canvas, pointer());
+    expect(order).toEqual(["blur", "tool"]);
+    expect(document.activeElement).toBe(canvas);
+  });
+});
+
+describe("カーソルの上書き (ToolContext.setCursor)", () => {
+  it("上書きがあればそれを、null ならツールの cursor。ツールの切替と onCancel で戻す", () => {
+    const { canvas } = setup();
+    spy.onPointerMove.mockImplementation((_, ctx) => ctx.setCursor("nwse-resize"));
+    fireEvent.pointerMove(canvas, pointer());
+    expect(canvas.style.cursor).toBe("nwse-resize");
+    act(() => spy.onPointerMove.mock.calls[0]![1].setCursor(null));
+    expect(canvas.style.cursor).toBe("default");
+
+    // ドラッグ中の Esc (onCancel) で戻す
+    fireEvent.pointerMove(canvas, pointer());
+    fireEvent.pointerDown(canvas, pointer());
+    expect(canvas.style.cursor).toBe("nwse-resize");
+    fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" });
+    expect(canvas.style.cursor).toBe("default");
+
+    // ツールの切替で戻す
+    fireEvent.pointerMove(canvas, pointer());
+    expect(canvas.style.cursor).toBe("nwse-resize");
+    act(() => editorStore.getState().setTool("rect"));
+    act(() => editorStore.getState().setTool("select"));
+    expect(canvas.style.cursor).toBe("default");
+  });
+});
+
+describe("Space と修飾キー", () => {
+  it("Cmd/Ctrl と一緒の Space では手のひらに入らない", () => {
+    const { canvas } = setup();
+    fireEvent.keyDown(document.body, { key: " ", code: "Space", metaKey: true });
+    fireEvent.keyDown(document.body, { key: " ", code: "Space", ctrlKey: true });
+    expect(canvas.style.cursor).toBe("default");
+  });
+
+  it("Space の keyup が来なくても、Cmd / Ctrl を離したら解除する", () => {
+    const { canvas } = setup();
+    fireEvent.keyDown(document.body, { key: " ", code: "Space" });
+    expect(canvas.style.cursor).toBe("grab");
+    fireEvent.keyUp(document.body, { key: "Meta", code: "MetaLeft" });
+    expect(canvas.style.cursor).toBe("default");
+    fireEvent.keyDown(document.body, { key: " ", code: "Space" });
+    fireEvent.keyUp(document.body, { key: "Control", code: "ControlLeft" });
+    expect(canvas.style.cursor).toBe("default");
+  });
+});
+
+describe("ドラッグ中のホイール", () => {
+  it("今の位置での移動をツールへ渡し、直前の修飾キーを保つ", () => {
+    const { canvas } = setup();
+    fireEvent.pointerDown(canvas, { ...pointer(0, 10, 20), shiftKey: true, altKey: true });
+    fireEvent.wheel(canvas, { deltaY: 40 });
+    const calls = spy.onPointerMove.mock.calls;
+    const last = calls[calls.length - 1]![0];
+    expect(last).toMatchObject({ shift: true, alt: true, button: 0, clickCount: 1 });
+    // 表示位置が 20 ページ px 下へ動いたので、同じ画面位置のページ座標も 20 下がる
+    expect(last.page).toEqual({ x: 10, y: 35 });
+  });
+
+  it("手のひらのドラッグは、途中のホイールによる表示位置の変化を打ち消さない", () => {
+    const { canvas } = setup();
+    act(() => editorStore.getState().setTool("hand"));
+    fireEvent.pointerDown(canvas, pointer(0, 100, 100));
+    fireEvent.wheel(canvas, { deltaY: 40 }); // y += 20
+    fireEvent.pointerMove(canvas, pointer(0, 100, 90)); // 画面で 10 上へ → y += 5
+    fireEvent.pointerUp(canvas, pointer(0, 100, 90));
+    expect(editorStore.getState().viewport).toEqual({ x: 5, y: 30, zoom: 2 });
+  });
+});
+
+describe("何もしていないときの Esc と、画面から外れるとき", () => {
+  it("何もしていないときの Esc は onKeyDown に渡すだけで、onCancel は呼ばない", () => {
+    setup();
+    fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" });
+    expect(spy.onKeyDown).toHaveBeenCalledTimes(1);
+    expect(spy.onKeyDown.mock.calls[0]![0]).toMatchObject({ key: "Escape" });
+    expect(spy.onCancel).not.toHaveBeenCalled();
+  });
+
+  it("ドラッグ中に画面から外れたら onCancel を呼び、ジェスチャーも取り消す", () => {
+    const { canvas, unmount } = setup();
+    const before = editorStore.getState().doc;
+    spy.onPointerDown.mockImplementation((_, ctx) => {
+      ctx.store.getState().beginGesture();
+      ctx.store.getState().updateGesture((doc: typeof before) => ({ ...doc }));
+    });
+    fireEvent.pointerDown(canvas, pointer());
+    expect(editorStore.getState().gestureActive).toBe(true);
+    unmount();
+    expect(spy.onCancel).toHaveBeenCalled();
+    expect(editorStore.getState().gestureActive).toBe(false);
+    expect(editorStore.getState().doc).toBe(before);
+  });
+
+  it("手のひらのドラッグ中に画面から外れたら、手のひらの状態も片付ける", () => {
+    const { canvas, unmount } = setup();
+    act(() => editorStore.getState().setTool("hand"));
+    fireEvent.pointerDown(canvas, pointer());
+    expect(isHandDragging()).toBe(true);
+    unmount();
+    expect(isHandDragging()).toBe(false);
   });
 });

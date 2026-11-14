@@ -62,7 +62,7 @@ export function CanvasView() {
       zoomToFit({ store: editorStore, size, measurer: canvasTextMeasurer }, 1);
   }, [size]);
 
-  const { handlers, spaceHeld, panning } = useCanvasInput({
+  const { handlers, spaceHeld, panning, cursorOverride } = useCanvasInput({
     store: editorStore,
     measurer: canvasTextMeasurer,
     containerRef,
@@ -72,7 +72,12 @@ export function CanvasView() {
   const viewport = useEditorStore((state) => state.viewport);
   const rulers = useEditorStore((state) => state.view.rulers);
   const toolId = useEditorStore((state) => state.toolId);
-  const cursor = panning ? "grabbing" : spaceHeld ? "grab" : TOOLS[toolId].cursor;
+  // 手のひら (ドラッグ中・Space) > ツールの上書き (`ToolContext.setCursor`) > ツールの cursor
+  const cursor = panning
+    ? "grabbing"
+    : spaceHeld
+      ? "grab"
+      : (cursorOverride ?? TOOLS[toolId].cursor);
 
   return (
     <div

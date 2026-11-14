@@ -3,7 +3,7 @@
  * ノード 1 個の変更でほかのノードを描き直さない (§4.2)。
  * 形の規則は `render/buildNodeSvg.ts` の `buildNodeShell` を使い、ここには書かない。
  */
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { CANVAS_LIMITS } from "../model/limits";
 import { getNode, isContainer } from "../model/tree";
@@ -13,7 +13,7 @@ import { canvasTextMeasurer } from "../render/measureText";
 import { svgElToReact } from "../render/svgEl";
 import { useEditorStore } from "../state/store";
 import type { EditorStore } from "../state/types";
-import { selectVisibleTopLevelIds } from "./selectors";
+import { createVisibleTopLevelIdsSelector } from "./selectors";
 import type { Size } from "./viewport";
 
 /** 画面の `<defs>` の id の接頭辞。書き出しは別の接頭辞を使ってよい。 */
@@ -49,9 +49,8 @@ export const NodeView = memo(function NodeView({ id, depth }: NodeViewProps) {
 
 /** 表示中のページの、画面に入るページ直下のノード。ページ座標で描く (親の `<g>` が画面へ写す)。 */
 export function PageLayer({ size }: { size: Size }) {
-  const ids = useEditorStore(
-    useShallow((state: EditorStore) => selectVisibleTopLevelIds(state, size)),
-  );
+  const [selectIds] = useState(createVisibleTopLevelIdsSelector);
+  const ids = useEditorStore(useShallow((state: EditorStore) => selectIds(state, size)));
   return (
     <>
       {ids.map((id) => (

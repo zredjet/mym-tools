@@ -11,6 +11,7 @@ import { getNode, getPage } from "../model/tree";
 import type { CanvasDocument, CanvasNode, NodeId, PageId, Shadow } from "../model/types";
 import type { TextMeasurer } from "../render/types";
 import { layoutText } from "../text/layout";
+import { textInkExtent } from "../render/buildNodeSvg";
 
 function expand(rect: Rect, by: number): Rect {
   return {
@@ -53,18 +54,9 @@ function leafBounds(node: CanvasNode, measurer: TextMeasurer): Rect | null {
       result = withShadow(expand(box, (node.stroke?.width ?? 0) / 2), node.shadow);
       break;
     }
-    case "text": {
-      const layout = layoutText(node, measurer);
-      const box = {
-        x: node.x,
-        y: node.y,
-        width: Math.max(node.width, layout.width),
-        height: Math.max(node.height, layout.height),
-      };
-      // 斜体やアセンダーのはみ出しの分だけ少し広げる
-      result = withShadow(expand(box, node.fontSize * 0.25), node.shadow);
+    case "text":
+      result = withShadow(textInkExtent(node, layoutText(node, measurer)), node.shadow);
       break;
-    }
     case "image":
       result = withShadow(
         { x: node.x, y: node.y, width: node.width, height: node.height },

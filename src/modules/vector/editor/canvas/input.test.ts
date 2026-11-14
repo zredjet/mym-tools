@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  canvasKeyScope,
+  CONTROL_KEYS,
   isComposing,
+  isModalOpen,
   isEditableTarget,
   MULTI_CLICK_MS,
   nextClick,
@@ -101,5 +104,53 @@ describe("クリックの回数", () => {
     expect(nextClick(first, press(MULTI_CLICK_MS + 1)).count).toBe(1);
     expect(nextClick(first, press(100, 10)).count).toBe(1);
     expect(nextClick(first, press(100, 0, 2)).count).toBe(1);
+  });
+});
+
+describe("canvasKeyScope (キーを取る範囲)", () => {
+  function mount(html: string) {
+    const host = document.createElement("div");
+    host.innerHTML = html;
+    document.body.append(host);
+    return host;
+  }
+
+  it("エディタの中か、フォーカスがどこにもないときだけ取る", () => {
+    const host = mount(`
+      <button id="outside">外</button>
+      <div data-canvas-editor="">
+        <div id="canvas" tabindex="-1"></div>
+        <button id="button">中</button>
+        <input id="check" type="checkbox">
+        <div id="item" role="menuitem" tabindex="0"></div>
+        <input id="field">
+      </div>`);
+    const get = (id: string) => host.querySelector(`#${id}`);
+    expect(canvasKeyScope(document.body)).toBe("canvas");
+    expect(canvasKeyScope(null)).toBe("canvas");
+    expect(canvasKeyScope(get("canvas"))).toBe("canvas");
+    expect(canvasKeyScope(get("outside"))).toBe("none");
+    expect(canvasKeyScope(get("button"))).toBe("control");
+    expect(canvasKeyScope(get("check"))).toBe("control");
+    expect(canvasKeyScope(get("item"))).toBe("control");
+    expect(canvasKeyScope(get("field"))).toBe("editable");
+    host.remove();
+  });
+
+  it("モーダルが開いている間は、どこにフォーカスがあっても取らない", () => {
+    const host = mount(
+      `<div data-canvas-editor=""><div id="canvas"></div></div><div role="dialog" aria-modal="true"></div>`,
+    );
+    expect(isModalOpen()).toBe(true);
+    expect(canvasKeyScope(document.body)).toBe("none");
+    expect(canvasKeyScope(host.querySelector("#canvas"))).toBe("none");
+    host.remove();
+    expect(isModalOpen()).toBe(false);
+  });
+
+  it("部品に任せるキーは Space・Enter・矢印", () => {
+    expect([...CONTROL_KEYS].sort()).toEqual(
+      [" ", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "Enter"].sort(),
+    );
   });
 });

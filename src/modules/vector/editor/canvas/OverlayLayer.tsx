@@ -5,6 +5,7 @@
  * - ページ座標の `<g>`: `SelectionOverlay` (どのツールでも) と現在のツールの `Overlay`。
  *   線の太さは `overlayKit.ts` の `OVERLAY_LINE` で倍率に関係なく一定にする
  */
+import { useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { getPage } from "../model/tree";
 import type { Guide } from "../model/types";
@@ -14,7 +15,7 @@ import { SelectionOverlay } from "../tools/select/SelectionOverlay";
 import { TOOLS } from "../tools/registry";
 import { FRAME_LABEL_FONT, FRAME_LABEL_GAP } from "./frameLabels";
 import { OVERLAY_COLORS } from "./overlayKit";
-import { selectFrameLabels } from "./selectors";
+import { createFrameLabelsSelector } from "./selectors";
 import { pageRectToScreen, viewportTransform, type Size } from "./viewport";
 
 const EMPTY_GUIDES: readonly Guide[] = [];
@@ -40,7 +41,8 @@ function Guides({ viewport, size }: { viewport: Viewport; size: Size }) {
 }
 
 function FrameLabels({ viewport, size }: { viewport: Viewport; size: Size }) {
-  const labels = useEditorStore((state) => selectFrameLabels(state, size));
+  const [selectLabels] = useState(createFrameLabelsSelector);
+  const labels = useEditorStore((state) => selectLabels(state, size));
   const highlighted = useEditorStore(
     useShallow((state) => [...state.selection, ...(state.hoveredId ? [state.hoveredId] : [])]),
   );

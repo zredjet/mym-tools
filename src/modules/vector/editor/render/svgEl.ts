@@ -58,21 +58,60 @@ export function formatNumber(value: number): string {
 }
 
 /**
- * XML 1.0 に書けない文字 (U+0000〜U+0008、U+000B、U+000C、U+000E〜U+001F、U+FFFE、U+FFFF、
- * 対になっていないサロゲート) を取り除く。文字参照でも書けないので、残すと SVG 全体が読めなくなる。
+ * XML 1.0 に書けない文字かもしれないもの (制御文字、U+FFFE、U+FFFF、サロゲート)。
+ * macOS 12 の WKWebView は正規表現の後読みを読めないので使わない (§6.1)。
+ * 当たったときだけ `stripInvalidXmlChars` が 1 文字ずつ調べる (正しい組のサロゲートは残す)。
  */
-const INVALID_XML_CHARS = new RegExp(
-  [
-    "[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\uFFFE\\uFFFF]",
-    "[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])",
-    "(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF]",
-  ].join("|"),
-  "g",
+const SUSPECT_XML_CHARS = new RegExp(
+  // 制御文字を探すための正規表現なので、制御文字を含めるのは意図どおり
+  // eslint-disable-next-line no-control-regex
+  "[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\uFFFE\\uFFFF\\uD800-\\uDFFF]",
 );
 
+/**
+ * XML 1.0 に書けない文字 (U+0000〜U+0008、U+000B、U+000C、U+000E〜U+001F、U+FFFE、U+FFFF、
+ * 対になっていないサロゲート) を取り除く。文字参照でも書けないので、残すと SVG 全体が読めなくなる。
+ * 当たらなければ同じ文字列を返す。
+ */
+export function stripInvalidXmlChars(value: string): string {
+  if (!SUSPECT_XML_CHARS.test(value)) return value;
+  let out = "";
+  let start = 0;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    let drop: boolean;
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        i++; // 正しい組はそのまま残す
+        continue;
+      }
+      drop = true;
+    } else {
+      drop =
+        (code >= 0xdc00 && code <= 0xdfff) ||
+        (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) ||
+        code === 0xfffe ||
+        code === 0xffff;
+    }
+    if (drop) {
+      out += value.slice(start, i);
+      start = i + 1;
+    }
+  }
+  return out + value.slice(start);
+}
+
+/**
+ * 自分で組み立てた data URL か (`assetDataUrl` が作る `href`)。中身は base64 で XML に書ける文字だけなので、
+ * 画面の描き直しのたびに大きな文字列を走査しないよう、検査を飛ばす (§4.3)。
+ */
+function isOwnDataUrl(name: string, value: string): boolean {
+  return name === "href" && value.startsWith("data:");
+}
+
 export function escapeXmlText(value: string): string {
-  return value
-    .replace(INVALID_XML_CHARS, "")
+  return stripInvalidXmlChars(value)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
@@ -141,7 +180,7 @@ export interface ToReactOptions {
  * XML に書けない文字は文字列化と同じく取り除き、画面と書き出しで中身をそろえる。
  */
 export function svgElToReact(node: SvgEl | string, options: ToReactOptions = {}): ReactNode {
-  if (typeof node === "string") return node.replace(INVALID_XML_CHARS, "");
+  if (typeof node === "string") return stripInvalidXmlChars(node);
   if (node.tag === CHILDREN_SLOT)
     return createElement(
       Fragment,
@@ -152,7 +191,11 @@ export function svgElToReact(node: SvgEl | string, options: ToReactOptions = {})
   if (options.key !== undefined) props["key"] = options.key;
   for (const [name, value] of Object.entries(node.attrs)) {
     props[reactAttrName(name)] =
-      typeof value === "number" ? formatNumber(value) : value.replace(INVALID_XML_CHARS, "");
+      typeof value === "number"
+        ? formatNumber(value)
+        : isOwnDataUrl(name, value)
+          ? value
+          : stripInvalidXmlChars(value);
   }
   const children = node.children.map((child, index) =>
     svgElToReact(child, { slot: options.slot, key: index }),

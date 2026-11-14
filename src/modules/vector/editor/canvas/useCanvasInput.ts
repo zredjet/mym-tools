@@ -4,8 +4,11 @@
  *
  * - ポインターは `setPointerCapture` で追う。同時に追うのは 1 本だけ
  * - Space を押している間と中ボタンのドラッグは、どのツールでも手のひら (`handTool`) へ渡す
- * - ツールの切替、Esc、ウィンドウのフォーカス喪失でツールの `onCancel` を呼ぶ
- * - キーは window の keydown 1 か所で受け、入力欄にフォーカスがある間と変換中は何もしない
+ * - `onCancel` は、ドラッグの途中の Esc、ツールの切替、ポインターの取消、ウィンドウからのフォーカス喪失、
+ *   キャンバスが画面から外れるときに呼ぶ。呼んだらカーソルの上書きを戻す
+ * - キーは window の keydown 1 か所で受け、`canvasKeyScope` の範囲だけを取る
+ *   (エディタの外とモーダルの間は何もしない。入力欄と変換中は文字キーを効かせない。
+ *   エディタの中のボタンでは Space・Enter・矢印を部品に任せる)
  */
 import {
   useCallback,
@@ -23,6 +26,8 @@ import { handTool } from "../tools/handTool";
 import { TOOLS } from "../tools/registry";
 import type { Tool, ToolContext } from "../tools/types";
 import {
+  canvasKeyScope,
+  CONTROL_KEYS,
   isComposing,
   isEditableTarget,
   nextClick,
@@ -30,6 +35,7 @@ import {
   toCanvasPointerEvent,
   type ClickRecord,
   type KeyInput,
+  type PointerInput,
 } from "./input";
 import { runShortcut, type Shortcut } from "./shortcuts";
 import { applyWheel, zoomAt, type Size } from "./viewport";
@@ -39,6 +45,10 @@ export const CANVAS_IGNORE_ATTR = "data-canvas-ignore";
 
 function isIgnoredTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(`[${CANVAS_IGNORE_ATTR}]`) !== null;
+}
+
+function isSpaceKey(event: { key: string; code: string }): boolean {
+  return event.code === "Space" || event.key === " ";
 }
 
 interface ActivePointer {
@@ -70,6 +80,8 @@ export interface CanvasInput {
   spaceHeld: boolean;
   /** 手のひらでドラッグ中 */
   panning: boolean;
+  /** ツールが `ToolContext.setCursor` で上書きしたカーソル。null ならツールの `cursor` */
+  cursorOverride: string | null;
 }
 
 export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
@@ -81,10 +93,15 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
     shortcutsRef.current = shortcuts;
   });
 
-  const ctx: ToolContext = useMemo(() => ({ store, measurer }), [store, measurer]);
+  const [cursorOverride, setCursorOverride] = useState<string | null>(null);
+  const ctx: ToolContext = useMemo(
+    () => ({ store, measurer, setCursor: setCursorOverride }),
+    [store, measurer],
+  );
   const active = useRef<ActivePointer | null>(null);
   const lastClick = useRef<ClickRecord | null>(null);
-  const lastClient = useRef<{ clientX: number; clientY: number } | null>(null);
+  /** 直前のポインターの位置と修飾キー (ドラッグ中のホイールで移動を合成するため) */
+  const lastPointer = useRef<PointerInput | null>(null);
   const spaceRef = useRef(false);
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [panning, setPanning] = useState(false);
@@ -94,7 +111,16 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
     return { x: rect?.left ?? 0, y: rect?.top ?? 0 };
   }, [containerRef]);
 
-  /** 今のドラッグを捨てる (ツールの onCancel を呼び、キャプチャを外す)。 */
+  /** ツールの `onCancel` を呼び、カーソルの上書きを戻す。 */
+  const cancelTool = useCallback(
+    (tool: Tool) => {
+      tool.onCancel?.(ctx);
+      setCursorOverride(null);
+    },
+    [ctx],
+  );
+
+  /** 今のドラッグを捨てる (ツールの onCancel を呼び、キャプチャを外す)。ドラッグがなければ false。 */
   const cancelActive = useCallback(() => {
     const pointer = active.current;
     if (!pointer) return false;
@@ -102,31 +128,45 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
     setPanning(false);
     const element = containerRef.current;
     if (element?.hasPointerCapture?.(pointer.id)) element.releasePointerCapture(pointer.id);
-    pointer.tool.onCancel?.(ctx);
+    cancelTool(pointer.tool);
     return true;
-  }, [containerRef, ctx]);
+  }, [containerRef, cancelTool]);
 
-  // ---- ツールの切替で onCancel ----
+  /** ドラッグと現在のツールの操作を捨て、残ったジェスチャーも取り消す。 */
+  const cancelAll = useCallback(() => {
+    const current = TOOLS[store.getState().toolId];
+    const pointerTool = active.current?.tool;
+    cancelActive();
+    if (pointerTool !== current) cancelTool(current);
+    if (store.getState().gestureActive) store.getState().cancelGesture();
+  }, [store, cancelActive, cancelTool]);
+
+  const releaseSpace = useCallback(() => {
+    if (!spaceRef.current) return;
+    spaceRef.current = false;
+    setSpaceHeld(false);
+  }, []);
+
+  // ---- ツールの切替で onCancel (ツールが自分のハンドラの中で setTool を呼んでもその場で呼ぶ) ----
   useEffect(
     () =>
       store.subscribe((state, previous) => {
         if (state.toolId === previous.toolId) return;
         const pointer = active.current;
         if (pointer && pointer.tool === TOOLS[previous.toolId]) cancelActive();
-        else TOOLS[previous.toolId].onCancel?.(ctx);
+        else cancelTool(TOOLS[previous.toolId]);
       }),
-    [store, ctx, cancelActive],
+    [store, cancelActive, cancelTool],
   );
+
+  // ---- 画面から外れるとき ----
+  useEffect(() => cancelAll, [cancelAll]);
 
   // ---- フォーカス喪失 ----
   useEffect(() => {
     const onBlur = () => {
-      const current = TOOLS[store.getState().toolId];
-      const pointerTool = active.current?.tool;
-      cancelActive();
-      if (pointerTool !== current) current.onCancel?.(ctx);
-      spaceRef.current = false;
-      setSpaceHeld(false);
+      cancelAll();
+      releaseSpace();
     };
     const onVisibility = () => {
       if (document.visibilityState === "hidden") onBlur();
@@ -137,14 +177,19 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
       window.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [store, ctx, cancelActive]);
+  }, [cancelAll, releaseSpace]);
 
   // ---- キー ----
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isComposing(event) || isEditableTarget(event.target)) return;
-      if (event.code === "Space" || event.key === " ") {
-        // 押している間は手のひら。ボタンのクリックやページのスクロールにしない
+      if (event.defaultPrevented || isComposing(event)) return;
+      const scope = canvasKeyScope(event.target);
+      if (scope === "none" || scope === "editable") return;
+      if (scope === "control" && (CONTROL_KEYS.has(event.key) || isSpaceKey(event))) return;
+      if (isSpaceKey(event)) {
+        // Cmd/Ctrl と一緒の Space は手のひらにしない (OS の入力切替などに使われる)
+        if (event.metaKey || event.ctrlKey) return;
+        // 押している間は手のひら。ページのスクロールにしない
         event.preventDefault();
         if (!spaceRef.current) {
           spaceRef.current = true;
@@ -155,7 +200,7 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
       const state = store.getState();
       if (event.key === "Escape" && (active.current || state.gestureActive)) {
         event.preventDefault();
-        if (!cancelActive()) TOOLS[state.toolId].onCancel?.(ctx);
+        if (!cancelActive()) cancelTool(TOOLS[state.toolId]);
         if (store.getState().gestureActive) store.getState().cancelGesture();
         return;
       }
@@ -172,10 +217,8 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
       if (handled) event.preventDefault();
     };
     const onKeyUp = (event: KeyboardEvent) => {
-      if ((event.code === "Space" || event.key === " ") && spaceRef.current) {
-        spaceRef.current = false;
-        setSpaceHeld(false);
-      }
+      // macOS は Cmd を押している間ほかのキーの keyup を送らないので、修飾キーを離したときにも解除する
+      if (isSpaceKey(event) || event.key === "Meta" || event.key === "Control") releaseSpace();
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
@@ -183,16 +226,16 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [store, ctx, measurer, cancelActive]);
+  }, [store, ctx, measurer, cancelActive, cancelTool, releaseSpace]);
 
   /** ドラッグ中のツールへ、表示位置が変わった後の位置で移動を知らせる (ドラッグ中のホイール)。 */
   const notifyMoveAfterViewportChange = useCallback(() => {
     const pointer = active.current;
-    const client = lastClient.current;
-    if (!pointer || !client || pointer.tool === handTool) return;
+    const last = lastPointer.current;
+    if (!pointer || !last || pointer.tool === handTool) return;
     pointer.tool.onPointerMove?.(
       toCanvasPointerEvent(
-        { ...client, shiftKey: false, altKey: false, metaKey: false, ctrlKey: false },
+        last,
         origin(),
         store.getState().viewport,
         pointer.button,
@@ -269,10 +312,23 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
   const toEvent = (event: ReactPointerEvent<HTMLElement>, button: number, clickCount: number) =>
     toCanvasPointerEvent(event, origin(), store.getState().viewport, button, clickCount);
 
+  const remember = (event: ReactPointerEvent<HTMLElement>) => {
+    lastPointer.current = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      shiftKey: event.shiftKey,
+      altKey: event.altKey,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+    };
+  };
+
   const handlers: CanvasInput["handlers"] = {
     onPointerDown(event) {
       if (isIgnoredTarget(event.target) || active.current) return;
-      // パネルの入力欄からフォーカスを外し、キーのショートカットが効くようにする
+      // 入力欄の値を確定させてから (選択が変わる前に) ツールへ渡す。フォーカスはキャンバスへ移す
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && isEditableTarget(focused)) focused.blur();
       containerRef.current?.focus({ preventScroll: true });
       const temporaryHand = event.button === 1 || spaceRef.current;
       const tool = temporaryHand ? handTool : TOOLS[store.getState().toolId];
@@ -285,7 +341,7 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
       });
       lastClick.current = click;
       active.current = { id: event.pointerId, button: event.button, clickCount: click.count, tool };
-      lastClient.current = { clientX: event.clientX, clientY: event.clientY };
+      remember(event);
       try {
         event.currentTarget.setPointerCapture?.(event.pointerId);
       } catch {
@@ -300,7 +356,7 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
       const pointer = active.current;
       if (pointer) {
         if (event.pointerId !== pointer.id) return;
-        lastClient.current = { clientX: event.clientX, clientY: event.clientY };
+        remember(event);
         pointer.tool.onPointerMove?.(toEvent(event, pointer.button, pointer.clickCount), ctx);
         return;
       }
@@ -330,5 +386,5 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
     },
   };
 
-  return { handlers, spaceHeld, panning };
+  return { handlers, spaceHeld, panning, cursorOverride };
 }

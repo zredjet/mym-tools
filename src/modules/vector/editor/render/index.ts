@@ -2,6 +2,8 @@
 export {
   assetDataUrl,
   assetOf,
+  TEXT_INK_OVERFLOW,
+  textInkExtent,
   buildNodeShell,
   buildNodeSvg,
   cssFont,
@@ -27,6 +29,7 @@ export {
   formatNumber,
   isSvgEl,
   reactAttrName,
+  stripInvalidXmlChars,
   SVG_NS,
   svgElToReact,
   svgElToString,

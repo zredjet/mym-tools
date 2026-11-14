@@ -102,6 +102,75 @@ export function isComposing(event: { isComposing?: boolean; keyCode?: number }):
 }
 
 // ---------------------------------------------------------------------------
+// キーを取る範囲 (§4.4「キーとフォーカスの規則」)
+// ---------------------------------------------------------------------------
+
+/** エディタの範囲の目印 (`EditorRoot` のルート)。キャンバス本体も範囲に含める。 */
+export const EDITOR_SCOPE_SELECTOR = "[data-canvas-editor], [data-canvas-view]";
+
+/**
+ * キーを取る範囲。
+ * - `none`: 何も取らない (エディタの外にフォーカスがある、モーダルが開いている)
+ * - `editable`: 入力欄の中。ショートカットを効かせない
+ * - `control`: エディタの中のボタンなど。`CONTROL_KEYS` だけ部品に任せ、ほかは効かせる
+ * - `canvas`: すべて効かせる (エディタの中か、フォーカスがどこにもない)
+ */
+export type KeyScope = "none" | "editable" | "control" | "canvas";
+
+/** ボタンやチェックボックスが自分で使うキー。 */
+export const CONTROL_KEYS: ReadonlySet<string> = new Set([
+  " ",
+  "Enter",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+]);
+
+const CONTROL_ROLES = new Set([
+  "button",
+  "checkbox",
+  "radio",
+  "switch",
+  "tab",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "option",
+  "slider",
+  "spinbutton",
+  "treeitem",
+]);
+
+/** キーを自分で使う部品か (ボタン、チェックボックス、リンク、role で示した部品)。 */
+export function isControlElement(element: Element): boolean {
+  const tag = element.tagName;
+  if (tag === "BUTTON" || tag === "SUMMARY" || (tag === "A" && element.hasAttribute("href"))) {
+    return true;
+  }
+  if (tag === "INPUT") return true; // 文字を受けない input (チェックボックスなど)。文字を受けるものは editable
+  const role = element.getAttribute("role");
+  return role !== null && CONTROL_ROLES.has(role);
+}
+
+/** モーダル (`aria-modal="true"`) が開いているか。 */
+export function isModalOpen(root: ParentNode = document): boolean {
+  return root.querySelector('[aria-modal="true"]') !== null;
+}
+
+/** keydown の対象 (フォーカスのある要素) から、キーを取る範囲を決める。 */
+export function canvasKeyScope(target: EventTarget | null, root: Document = document): KeyScope {
+  if (isModalOpen(root)) return "none";
+  if (!target || typeof (target as Element).closest !== "function") return "canvas";
+  const element = target as Element;
+  if (element === root.body || element === root.documentElement) return "canvas";
+  if (element.closest(EDITOR_SCOPE_SELECTOR) === null) return "none";
+  if (isEditableTarget(element)) return "editable";
+  if (isControlElement(element)) return "control";
+  return "canvas";
+}
+
+// ---------------------------------------------------------------------------
 // クリックの回数
 // ---------------------------------------------------------------------------
 

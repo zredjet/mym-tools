@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
@@ -8,6 +10,7 @@ import {
   fillSlot,
   formatNumber,
   reactAttrName,
+  stripInvalidXmlChars,
   svgElToReact,
   svgElToString,
 } from "./svgEl";
@@ -85,5 +88,48 @@ describe("svgElToReact", () => {
     expect(markup).toBe(
       '<svg><g fill-opacity="0.5"><text>&lt;&amp;&gt;</text><rect data-x="1"></rect></g></svg>',
     );
+  });
+});
+
+describe("stripInvalidXmlChars", () => {
+  it("書けない文字だけを除き、正しい組のサロゲートは残す", () => {
+    expect(stripInvalidXmlChars("a\u0000b😀c\uD800d\uDC00e\tf\ng\rh￿")).toBe("ab😀cde\tf\ng\rh");
+  });
+
+  it("当たらなければ同じ文字列を返す", () => {
+    const value = "ふつうの文字列 😀";
+    expect(stripInvalidXmlChars(value)).toBe(value);
+  });
+
+  it("自分で組み立てた data URL の href は、画面へ出すときに走査しない", () => {
+    const href = "data:image/png;base64,\u0001AAAA";
+    const markup = renderToStaticMarkup(
+      <svg>{svgElToReact(el("image", { href, title: "x\u0001y" }))}</svg>,
+    );
+    // href はそのまま (検査を飛ばした)、ほかの属性は除く
+    expect(markup).toContain(`href="${href}"`);
+    expect(markup).toContain('title="xy"');
+  });
+});
+
+describe("macOS 12 の WKWebView で読める構文 (§6.1)", () => {
+  it("src のどこにも正規表現の後読みがない", () => {
+    const root = path.resolve(__dirname, "../../../..");
+    const hits: string[] = [];
+    let scanned = 0;
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.(ts|tsx)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+          scanned++;
+          const text = readFileSync(full, "utf8");
+          if (text.includes("(?<=") || text.includes("(?<!")) hits.push(path.relative(root, full));
+        }
+      }
+    };
+    walk(root);
+    expect(scanned).toBeGreaterThan(100);
+    expect(hits).toEqual([]);
   });
 });

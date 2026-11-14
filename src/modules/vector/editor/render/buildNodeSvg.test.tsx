@@ -422,33 +422,106 @@ describe("buildNodeSvg: 塗り・影の定義", () => {
     expect((wrapper?.children[0] as SvgEl).attrs["clip-path"]).toBe("url(#t-i-clip)");
   });
 
-  it("frame の影: 塗りがあれば塗りの矩形、なければ線の矩形", () => {
-    const shadow = { x: 0, y: 2, blur: 4, color: "#000000", opacity: 0.5 };
-    const withFill = build(
-      docOf([createFrame({ id: "f", clip: false, shadow, children: [] })], ["f"]),
-      "f",
-    );
-    const rects = findAll(withFill, "rect");
-    expect(rects[0]?.attrs["filter"]).toBe("url(#t-f-shadow)");
-    const strokeOnly = build(
+  it("frame の影: 塗りと線の矩形が落とし、必ず子の背面に描く (影だけを出す要素を先頭に置く)", () => {
+    const shadow = { x: 0, y: 2, blur: 4, color: "#112233", opacity: 0.5 };
+    const stroke = { color: "#000000", opacity: 1, width: 6 };
+    const frameDoc = (init: Parameters<typeof createFrame>[0]) =>
       docOf(
         [
-          createFrame({
-            id: "f",
-            clip: false,
-            fill: null,
-            stroke: { color: "#000000", opacity: 1, width: 1 },
-            shadow,
-            children: [],
-          }),
+          createFrame({ id: "f", clip: false, shadow, children: ["c"], ...init }),
+          createRect({ id: "c" }),
         ],
         ["f"],
-      ),
-      "f",
-    );
-    expect(findAll(strokeOnly, "rect").find((r) => r.attrs["stroke"])?.attrs["filter"]).toBe(
+      );
+    const body = (tree: SvgEl) =>
+      (tree.children as SvgEl[]).filter((child) => child.tag !== "defs");
+
+    // 塗りと線: 影の要素 → 塗り → 子 → 線。影の要素は塗りと線の両方を持つ (線の外側も影を落とす)
+    const both = build(frameDoc({ stroke }), "f");
+    const [shadowRect, fillRect, content, strokeRect] = body(both);
+    expect(shadowRect?.attrs).toMatchObject({
+      fill: "#FFFFFF",
+      stroke: "#000000",
+      "stroke-width": 6,
+      filter: "url(#t-f-shadow)",
+    });
+    expect(fillRect?.attrs["filter"]).toBeUndefined();
+    expect(content?.children[0]).toMatchObject({ tag: "rect" });
+    expect(strokeRect?.attrs).toMatchObject({ fill: "none", stroke: "#000000" });
+    expect(strokeRect?.attrs["filter"]).toBeUndefined();
+
+    // 影だけを出すフィルタ (元の図形を重ねて描かない)
+    const filter = find(both, "filter");
+    expect(filter.children.map((child) => (child as SvgEl).tag)).toEqual([
+      "feGaussianBlur",
+      "feOffset",
+      "feFlood",
+      "feComposite",
+    ]);
+    expect((filter.children[0] as SvgEl).attrs).toEqual({ in: "SourceAlpha", stdDeviation: 2 });
+    expect((filter.children[2] as SvgEl).attrs).toEqual({
+      "flood-color": "#112233",
+      "flood-opacity": 0.5,
+    });
+
+    // 線だけ: 影の要素は子より前 (子の上に影が重ならない)
+    const strokeOnly = body(build(frameDoc({ fill: null, stroke }), "f"));
+    expect(strokeOnly.map((child) => child.attrs["filter"] ?? child.tag)).toEqual([
       "url(#t-f-shadow)",
-    );
+      "g",
+      "rect",
+    ]);
+    expect(strokeOnly[0]?.attrs["fill"]).toBe("none");
+
+    // 塗りも線もなければ影もない
+    const neither = build(frameDoc({ fill: null, stroke: null }), "f");
+    expect(findAll(neither, "filter")).toEqual([]);
+  });
+
+  it("大きさ 0 の外接矩形のグラデーションは、先頭の停止点の色の単色にする", () => {
+    const fill = {
+      type: "linear" as const,
+      from: { x: 0, y: 0 },
+      to: { x: 1, y: 0 },
+      stops: [
+        { offset: 0, color: "#123456", opacity: 0.4 },
+        { offset: 1, color: "#FFFFFF", opacity: 1 },
+      ],
+    };
+    const text = createText({ id: "t", text: "a", width: 0, height: 0, fill });
+    const out = build(docOf([text], ["t"]), "t");
+    expect(out.tag).toBe("text");
+    expect(out.attrs).toMatchObject({ fill: "#123456", "fill-opacity": 0.4 });
+    expect(findAll(out, "linearGradient")).toEqual([]);
+    const flat = build(docOf([createRect({ id: "r", width: 10, height: 0, fill })], ["r"]), "r");
+    expect(flat.attrs["fill"]).toBe("#123456");
+  });
+
+  it("テキストの影の領域は、斜体や行の高さからはみ出す字形が欠けないよう広げる", () => {
+    const text = createText({
+      id: "t",
+      x: 100,
+      y: 200,
+      width: 96,
+      height: 48,
+      text: "fgjy",
+      fontSize: 48,
+      lineHeight: 48,
+      italic: true,
+      shadow: { x: 0, y: 1, blur: 0, color: "#000000", opacity: 1 },
+    });
+    const filter = find(build(docOf([text], ["t"]), "t"), "filter");
+    const { x, y, width, height } = filter.attrs as unknown as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+    // 左右と上下に フォントサイズ × 0.5 = 24 以上の余裕
+    expect(x).toBeLessThanOrEqual(100 - 24);
+    expect(y).toBeLessThanOrEqual(200 - 24);
+    expect(x + width).toBeGreaterThanOrEqual(100 + 96 + 24);
+    expect(y + height).toBeGreaterThanOrEqual(200 + 48 + 24);
   });
 
   it("定義の ID は idPrefix + ノード ID + 種類で、文書の中で重ならない", () => {
