@@ -76,6 +76,22 @@ describe("buildExportFiles", () => {
     expect(svg).toContain('width="120" height="90" viewBox="150 70 40 30"');
   });
 
+  it("言語は SVG のファイルにも PNG の中間の SVG にも付ける", async () => {
+    const doc = exportDocument();
+    const plan = planExport(doc, "p1", ["fn"], measurer);
+    const [file] = await buildExportFiles(doc, plan, {
+      format: "svg",
+      scale: 2,
+      measurer,
+      lang: "ja",
+    });
+    expect(file?.data).toContain(' lang="ja" xml:lang="ja" style="-webkit-locale:&quot;ja&quot;"');
+    const render = vi.fn(async () => FAKE_PNG);
+    await buildExportFiles(doc, plan, { format: "png", scale: 2, measurer, lang: "ja", render });
+    const [svg] = render.mock.calls[0] as unknown as [string];
+    expect(svg).toContain(' lang="ja" xml:lang="ja" style="-webkit-locale:&quot;ja&quot;"');
+  });
+
   it("どれか 1 つでも PNG の上限を超えれば、何も描かずに理由を投げる", async () => {
     const doc = updateNodes(exportDocument(), ["fb"], { width: 6000, height: 500 });
     const plan = planExport(doc, "p1", ["fa", "fb"], measurer);

@@ -5,6 +5,10 @@
  * `svgElToString` で文字列にする (描画の規則と XML のエスケープを書き出し側に書き直さない)。
  * `viewBox` は範囲のページ座標なので、各ノードは親の座標系の原点 (ページ座標) へ移すだけでよい。
  * 背景は透明 (frame の塗りは frame のノードとして描かれる)。
+ *
+ * ルートには文書の言語 (`<html lang>`) を付ける (`exportLanguageAttrs`)。言語のない SVG を画像として描くと、
+ * 総称フォント (`sans-serif` など)・その PC にないフォント・欧文フォントの中の和文の代わりのフォントが、
+ * 画面 (`lang="ja"` の文書の SVG) と別のフォントになり、画面のフォントで決めた行の位置と折り返しに合わない。
  */
 import { nodeOrigin } from "../model/geometry";
 import type { CanvasDocument } from "../model/types";
@@ -34,6 +38,27 @@ export interface ExportSvgOptions {
    * 大きさを書き出す大きさにそろえ、拡大した描画がぼけないようにする。既定は 1
    */
   scale?: number;
+  /**
+   * 文書の言語 (`<html lang>` の値)。呼び出し側が文書から読んで渡す (書き出しの関数は DOM を読まない)。
+   * 空か言語タグの形でなければ付けない
+   */
+  lang?: string | undefined;
+}
+
+/** 言語タグの形 (BCP 47 の大まかな形。`ja`、`ja-JP`、`zh-Hant-TW` など)。 */
+const LANGUAGE_TAG = /^[A-Za-z]{1,8}(-[A-Za-z0-9]{1,8})*$/;
+
+/**
+ * ルートに付ける言語の属性。言語がなければ空。
+ * - `lang` (SVG 2) と `xml:lang` (SVG 1.1): Chromium と Safari のブラウザ、ほかの SVG を読むソフト向け
+ * - `-webkit-locale` (WebKit の、フォントの選択に使う言語の CSS プロパティ): システムの WKWebView (アプリ) は、
+ *   画像として読み込んだ SVG では `lang` / `xml:lang` をフォントの選択に使わないが、これは効く
+ *   (macOS 26 の WKWebView で実測)。知らないプロパティは無視されるので、ほかのソフトには害がない
+ */
+export function exportLanguageAttrs(lang: string | undefined): Record<string, string> {
+  const tag = lang?.trim() ?? "";
+  if (!LANGUAGE_TAG.test(tag)) return {};
+  return { lang: tag, "xml:lang": tag, style: `-webkit-locale:"${tag}"` };
 }
 
 /** 対象を描いた `SvgEl` (ルートの `<svg>`)。 */
@@ -61,6 +86,7 @@ export function buildExportSvgEl(
     "svg",
     {
       xmlns: SVG_NS,
+      ...exportLanguageAttrs(options.lang),
       width: bounds.width * scale,
       height: bounds.height * scale,
       viewBox: [bounds.x, bounds.y, bounds.width, bounds.height].map(formatNumber).join(" "),
