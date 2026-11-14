@@ -138,7 +138,6 @@ pub fn register_invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Bu
         crate::modules::diagram::protocol::diagram_editor_url,
         crate::modules::diagram::commands::diagram_read_file,
         crate::modules::diagram::commands::diagram_write_file,
-        crate::modules::vector::protocol::vector_editor_url,
         crate::modules::vector::commands::vector_read_file,
         crate::modules::vector::commands::vector_read_image,
         crate::modules::vector::commands::vector_write_file,

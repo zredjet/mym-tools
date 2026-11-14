@@ -37,7 +37,6 @@ permissions = [
   "allow-linkmemo-normalize-target",
   "allow-linkmemo-open",
   "allow-diagram-editor-url",
-  "allow-vector-editor-url",
   "allow-vector-read-file",
   "allow-vector-read-image",
   "allow-vector-write-file",

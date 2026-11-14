@@ -1,9 +1,6 @@
 //! payload v1 (`{ svg, text }`) から v2 (シーン形式) への変換 (ADR-0026、
 //! `docs/canvas-editor-design.md` §3.7)。v1 の SVG を編集できない埋め込み SVG 1 個の文書に包む。
-//!
-//! 切替 PR までは `VectorModule::upgrade_payload` から呼ばれず、テストからだけ使う。
-// 切替 PR で外す (ADR-0026)。
-#![cfg_attr(not(test), allow(dead_code))]
+//! `VectorModule::upgrade_payload(1, ..)` がこの `upgrade_v1` を呼ぶ。
 
 use super::scene::{clip_reason, search_text, validate, LIMITS};
 use crate::module::ModuleError;

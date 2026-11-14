@@ -33,7 +33,6 @@ fn main() {
         "http_send_request",
         "linkmemo_normalize_target",
         "linkmemo_open",
-        "vector_editor_url",
         "vector_read_file",
         "vector_read_image",
         "vector_write_file",

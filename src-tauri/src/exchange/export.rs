@@ -3,7 +3,8 @@
 //! 高レベル StorageService API を介して全 stateful モジュール × 全プロジェクトの
 //! items を集め、`ExportData` を構築する。Eager-on-Read は読込み時に発火するため、
 //! 出力上の `payload_schema_version` は各モジュールの現行版に揃う (`data-model.md`
-//! §12.2)。
+//! §12.2)。アップグレードに失敗した item だけは、古い payload と版のまま書き出す
+//! (`data-model.md` §7.6)。
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -89,7 +90,15 @@ fn build_for_projects(
                     let item = if it.payload_schema_version == current_version {
                         it
                     } else {
-                        storage.get_item_eager(m.id(), &it.id, m.as_ref())?
+                        match storage.get_item_eager(m.id(), &it.id, m.as_ref()) {
+                            Ok(upgraded) => upgraded,
+                            // アップグレードできない item は、古い payload と版のまま書き出す
+                            // (`data-model.md` §7.6)。エクスポート全体を止めたり、アプリで
+                            // 開けなかった item をエクスポートから落としたりしない。行は
+                            // Eager-on-Read が書き換えていないので、一覧で読んだ内容のまま
+                            Err(AppError::PayloadUpgradeFailed { .. }) => it,
+                            Err(error) => return Err(error),
+                        }
                     };
                     items_out.push(ItemExport::from_item(item));
                 }
@@ -308,6 +317,77 @@ mod tests {
         let data = build_export_data(&storage, &modules, "0.1.0")?;
         assert_eq!(data.projects[0].items.len(), 1);
         assert_eq!(data.projects[0].items[0].module_id, "prompt");
+        Ok(())
+    }
+
+    /// v1 → v2 のアップグレードが `upgrade_ok` が false の payload で失敗するモジュール (テスト用)。
+    struct FailingUpgradeModule;
+    impl ModuleBackend for FailingUpgradeModule {
+        fn id(&self) -> &'static str {
+            "prompt"
+        }
+        fn current_payload_version(&self) -> u32 {
+            2
+        }
+        fn upgrade_payload(
+            &self,
+            from_version: u32,
+            payload: serde_json::Value,
+        ) -> Result<serde_json::Value, crate::module::ModuleError> {
+            if from_version == 1 && payload["upgrade_ok"] == true {
+                Ok(json!({ "body": payload["body"], "v": 2 }))
+            } else {
+                Err(crate::module::ModuleError::UpgradeFailed {
+                    reason: "cannot upgrade".into(),
+                })
+            }
+        }
+        fn index_text(&self, payload: &serde_json::Value) -> String {
+            payload["body"].as_str().unwrap_or("").to_string()
+        }
+    }
+
+    /// `data-model.md` §7.6: アップグレードに失敗した item は、エクスポート全体を止めず、
+    /// 古い payload と版のまま書き出す。行も書き換えない。
+    #[test]
+    fn items_that_fail_to_upgrade_are_exported_unchanged() -> Result<(), AppError> {
+        let storage: Arc<dyn StorageService> =
+            Arc::new(SqliteStorage::open(":memory:").expect("open"));
+        let modules: Vec<Arc<dyn ModuleBackend>> = vec![Arc::new(FailingUpgradeModule)];
+        let p = storage.create_project("P", None)?;
+        let broken = json!({ "body": "broken", "upgrade_ok": false });
+        storage.create_item("prompt", &p.id, "Broken", &[], 1, &broken, "Broken broken")?;
+        storage.create_item(
+            "prompt",
+            &p.id,
+            "Fine",
+            &[],
+            1,
+            &json!({ "body": "fine", "upgrade_ok": true }),
+            "Fine fine",
+        )?;
+        let revision = storage.data_revision()?;
+
+        for data in [
+            build_export_data(&storage, &modules, "0.1.0")?,
+            build_project_export_data(&storage, &modules, "0.1.0", &p.id)?,
+        ] {
+            assert_eq!(data.module_versions["prompt"], 2);
+            let items = &data.projects[0].items;
+            assert_eq!(items.len(), 2);
+            let broken_out = items.iter().find(|item| item.title == "Broken").unwrap();
+            assert_eq!(broken_out.payload_schema_version, 1);
+            assert_eq!(broken_out.payload, broken);
+            let fine_out = items.iter().find(|item| item.title == "Fine").unwrap();
+            assert_eq!(fine_out.payload_schema_version, 2);
+            assert_eq!(fine_out.payload, json!({ "body": "fine", "v": 2 }));
+        }
+        // 失敗した行は v1 のまま残る。Eager-on-Read は data_revision を増やさない
+        let rows = storage.list_items("prompt", &p.id, 100, 0)?;
+        let row = rows.iter().find(|item| item.title == "Broken").unwrap();
+        assert_eq!(row.payload_schema_version, 1);
+        assert_eq!(row.payload, broken);
+        assert_eq!(storage.data_revision()?, revision);
         Ok(())
     }
 }

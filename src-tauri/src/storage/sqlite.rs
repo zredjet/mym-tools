@@ -1711,25 +1711,75 @@ mod tests {
         SqliteStorage::open(":memory:").expect("in-memory storage")
     }
 
+    /// キャンバスの契約データ (`docs/canvas-editor-design.md` §3、`model/fixtures/payload-v2.json`)。
+    fn canvas_case(section: &str, name: &str) -> JsonValue {
+        let contract: JsonValue = serde_json::from_str(include_str!(
+            "../../../src/modules/vector/editor/model/fixtures/payload-v2.json"
+        ))
+        .unwrap();
+        contract[section]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["name"] == name)
+            .unwrap_or_else(|| panic!("{section} case {name}"))
+            .clone()
+    }
+
+    fn vector_backend() -> Arc<dyn ModuleBackend> {
+        Arc::new(crate::modules::vector::VectorModule)
+    }
+
+    /// v1 の作品を、切替前のアプリが書いた形 (payload_schema_version = 1) で入れる。
+    fn insert_vector_v1(
+        storage: &dyn StorageService,
+        project_id: &ProjectId,
+        title: &str,
+        payload: &JsonValue,
+    ) -> ItemId {
+        let text = payload["text"].as_str().unwrap();
+        storage
+            .create_item(
+                "vector",
+                project_id,
+                title,
+                &[],
+                1,
+                payload,
+                &format!("{title} {text}"),
+            )
+            .unwrap()
+    }
+
+    /// 1 件だけの vector の行を、Eager-on-Read を通さずに読む。
+    fn raw_vector_row(storage: &dyn StorageService, project_id: &ProjectId, id: &ItemId) -> Item {
+        storage
+            .list_items("vector", project_id, 100, 0)
+            .unwrap()
+            .into_iter()
+            .find(|item| &item.id == id)
+            .unwrap()
+    }
+
     #[test]
-    fn vector_summaries_and_previews_never_return_svg_and_keep_other_modules() {
+    fn vector_summaries_and_previews_never_return_assets_and_keep_other_modules() {
         let storage = Arc::new(in_memory_storage());
         let p = storage.create_project("Vectors", None).unwrap();
-        let module: Arc<dyn ModuleBackend> = Arc::new(crate::modules::vector::VectorModule);
-        let scoped = storage.clone().scoped_for(module);
+        let module = vector_backend();
+        let scoped = storage.clone().scoped_for(module.clone());
         let text = format!("検索 sample {}", "文字".repeat(200));
         let svg = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>{text}</text><!--{}--></svg>",
             "large embedded document".repeat(10000)
         );
+        // 大きな埋め込み SVG を持つ v2 の文書 (v1 から変換した形)
+        let payload = module
+            .upgrade_payload(1, serde_json::json!({"svg":svg,"text":text}))
+            .unwrap();
+        assert_eq!(payload["text"], serde_json::json!(text));
         for _ in 0..3 {
             scoped
-                .create_item(
-                    &p.id,
-                    "作品",
-                    &["design".into()],
-                    serde_json::json!({"svg":svg,"text":text}),
-                )
+                .create_item(&p.id, "作品", &["design".into()], payload.clone())
                 .unwrap();
         }
         let list = storage
@@ -1738,6 +1788,7 @@ mod tests {
         assert_eq!(list.len(), 3);
         let encoded = serde_json::to_string(&list).unwrap();
         assert!(!encoded.contains("payload"));
+        assert!(!encoded.contains("assets"));
         assert!(!encoded.contains("svg"));
         assert!(encoded.len() < 2000);
         let projections = vec![("vector".into(), "text".into())];
@@ -1747,7 +1798,8 @@ mod tests {
                 .unwrap();
             assert_eq!(hits.len(), 3);
             for hit in hits {
-                assert!(hit.payload.get("svg").is_none());
+                assert!(hit.payload.get("assets").is_none());
+                assert!(hit.payload.get("nodes").is_none());
                 assert_eq!(hit.payload["text"].as_str().unwrap().chars().count(), 120);
             }
         }
@@ -1755,7 +1807,7 @@ mod tests {
             .search(&SearchScope::Global, "sample", None, 100, 0)
             .unwrap()[0]
             .payload
-            .get("svg")
+            .get("assets")
             .is_some());
         seed_search_data(&storage);
         let old = storage
@@ -1796,61 +1848,262 @@ mod tests {
             .map(|m| (m.id().to_owned(), m.clone()))
             .collect();
         let module = modules.iter().find(|m| m.id() == "vector").unwrap().clone();
+        assert_eq!(module.current_payload_version(), 2);
         let p = storage.create_project("図", None).unwrap();
-        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../scripts/svgedit/validation-fixtures.json"
-        ))
-        .unwrap();
-        let svg = fixtures[1]["svg"].as_str().unwrap();
+        // 画像と埋め込み SVG を含む v2 の文書
+        let full = canvas_case("valid", "full")["payload"].clone();
         let scoped = storage.clone().scoped_for(module.clone());
         let id = scoped
-            .create_item(
-                &p.id,
-                "画像作品",
-                &["tag".into()],
-                serde_json::json!({"svg":svg,"text":""}),
-            )
+            .create_item(&p.id, "画像作品", &["tag".into()], full.clone())
             .unwrap();
         for exported in [
             build_export_data(&storage, &modules, "test").unwrap(),
             build_project_export_data(&storage, &modules, "test", &p.id).unwrap(),
         ] {
+            assert_eq!(exported.module_versions["vector"], 2);
+            assert_eq!(exported.projects[0].items[0].payload_schema_version, 2);
             let parsed = parse_export_json(&serde_json::to_string(&exported).unwrap()).unwrap();
             let target: Arc<dyn StorageService> = Arc::new(in_memory_storage());
             let result = apply_import(&target, &registry, &parsed);
-            assert_eq!(result.items_inserted, 1);
-            assert_eq!(
-                target
-                    .clone()
-                    .scoped_for(module.clone())
-                    .get_item(&id)
-                    .unwrap()
-                    .payload["svg"],
-                svg
-            );
-            let mut bad = parsed;
-            bad.projects[0].items[0].payload = serde_json::json!({"svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"evil()\"/>","text":""});
-            let rejected: Arc<dyn StorageService> = Arc::new(in_memory_storage());
-            assert_eq!(apply_import(&rejected, &registry, &bad).items_failed, 1);
-            assert!(rejected
-                .list_item_summaries(&p.id, "vector", 100, 0)
+            assert_eq!(result.items_inserted, 1, "{:?}", result.failures);
+            let imported = target
+                .clone()
+                .scoped_for(module.clone())
+                .get_item(&id)
+                .unwrap();
+            assert_eq!(imported.payload_schema_version, 2);
+            assert_eq!(imported.payload, full);
+            // 検索用テキストが文書と合わない v2 と、ポリシーを通らない埋め込み SVG は取り込まない
+            let mut forged = parsed.clone();
+            forged.projects[0].items[0].payload["text"] = serde_json::json!("forged");
+            let mut unsafe_svg = parsed.clone();
+            for asset in unsafe_svg.projects[0].items[0].payload["assets"]
+                .as_object_mut()
                 .unwrap()
-                .is_empty());
+                .values_mut()
+            {
+                if asset["kind"] == "svg" {
+                    asset["svg"] = serde_json::json!(
+                        "<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"evil()\"/>"
+                    );
+                    asset["text"] = serde_json::json!("");
+                }
+            }
+            for bad in [forged, unsafe_svg] {
+                let rejected: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+                assert_eq!(apply_import(&rejected, &registry, &bad).items_failed, 1);
+                assert!(rejected
+                    .list_item_summaries(&p.id, "vector", 100, 0)
+                    .unwrap()
+                    .is_empty());
+            }
         }
         let dir = tempfile::tempdir().unwrap();
         let backup = dir.path().join("backup.sqlite");
         storage.take_online_backup_to(&backup).unwrap();
         scoped.delete_item(&id).unwrap();
         storage.restore_online_backup_from(&backup).unwrap();
-        assert_eq!(scoped.get_item(&id).unwrap().payload["svg"], svg);
+        let restored = scoped.get_item(&id).unwrap();
+        assert_eq!(restored.payload_schema_version, 2);
+        assert_eq!(restored.payload, full);
+        let mut forged = full.clone();
+        forged["text"] = serde_json::json!("forged");
         assert!(scoped
-            .create_item(
-                &p.id,
-                "invalid index",
-                &[],
-                serde_json::json!({"svg":svg,"text":"forged"})
-            )
+            .create_item(&p.id, "invalid index", &[], forged)
             .is_err());
+        // v1 の形は、もう新しく保存できない
+        let v1 = canvas_case("upgrade", "svgedit-document")["v1"].clone();
+        assert!(scoped.create_item(&p.id, "v1", &[], v1).is_err());
+    }
+
+    /// 切替前に保存した v1 の作品は、読んだときに v2 へ変換して書き戻す (Eager-on-Read、ADR-0006)。
+    /// 利用者の編集ではないので data_revision も updated_at も変えない。
+    #[test]
+    fn vector_v1_items_are_upgraded_on_read_without_bumping_data_revision() {
+        let storage: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+        let p = storage.create_project("図", None).unwrap();
+        let case = canvas_case("upgrade", "svgedit-document");
+        let id = insert_vector_v1(storage.as_ref(), &p.id, "古い作品", &case["v1"]);
+        let before = raw_vector_row(storage.as_ref(), &p.id, &id);
+        assert_eq!(before.payload_schema_version, 1);
+        let revision = storage.data_revision().unwrap();
+
+        let module = vector_backend();
+        let scoped = storage.clone().scoped_for(module.clone());
+        let item = scoped.get_item(&id).unwrap();
+        assert_eq!(item.payload_schema_version, 2);
+        assert_eq!(item.payload, case["v2"]);
+        assert_eq!(item.title, "古い作品");
+        module.validate_payload(&item.payload).unwrap();
+        // 見た目は v1 の SVG のまま (埋め込み SVG のアセットが元の SVG を持つ)
+        assert_eq!(item.payload["assets"]["legacy"]["svg"], case["v1"]["svg"]);
+
+        let after = raw_vector_row(storage.as_ref(), &p.id, &id);
+        assert_eq!(after.payload_schema_version, 2);
+        assert_eq!(after.payload, case["v2"]);
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(storage.data_revision().unwrap(), revision);
+        let projections = vec![("vector".into(), "text".into())];
+        let hits = storage
+            .search_previews(
+                &SearchScope::Global,
+                "こんにちは",
+                None,
+                100,
+                0,
+                &projections,
+            )
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].payload["text"], case["v2"]["text"]);
+
+        // 2 回目の読み込みは何も変えない
+        assert_eq!(scoped.get_item(&id).unwrap().payload, case["v2"]);
+        assert_eq!(storage.data_revision().unwrap(), revision);
+        // 保存は v2 で書き、利用者の編集として data_revision を増やす
+        scoped
+            .update_item(&id, "古い作品", &[], item.payload.clone())
+            .unwrap();
+        assert_eq!(storage.data_revision().unwrap(), revision + 1);
+    }
+
+    /// 変換に失敗する v1 の作品 (今の SVG ポリシーを通らない古い作品など) は、v1 のまま残す。
+    /// 開くとエラーになるが、一覧には出て、エクスポートとバックアップでは元の形のまま運ばれる
+    /// (`data-model.md` §7.6)。
+    #[test]
+    fn vector_v1_items_that_cannot_be_upgraded_stay_v1() {
+        use crate::exchange::{
+            export::{build_export_data, build_project_export_data},
+            import::{apply_import, parse_export_json},
+        };
+        let storage: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+        let modules = crate::modules::registry::module_backends();
+        let registry = modules
+            .iter()
+            .map(|m| (m.id().to_owned(), m.clone()))
+            .collect();
+        let module = vector_backend();
+        let p = storage.create_project("図", None).unwrap();
+        let broken = serde_json::json!({
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>",
+            "text": ""
+        });
+        let broken_id = insert_vector_v1(storage.as_ref(), &p.id, "読めない作品", &broken);
+        let case = canvas_case("upgrade", "svgedit-document");
+        let good_id = insert_vector_v1(storage.as_ref(), &p.id, "古い作品", &case["v1"]);
+        let revision = storage.data_revision().unwrap();
+
+        let scoped = storage.clone().scoped_for(module.clone());
+        let error = scoped.get_item(&broken_id).unwrap_err();
+        assert!(
+            matches!(&error, AppError::PayloadUpgradeFailed { module_id, reason }
+                if module_id == "vector" && reason.contains("検証を通りません")),
+            "{error:?}"
+        );
+        let row = raw_vector_row(storage.as_ref(), &p.id, &broken_id);
+        assert_eq!(row.payload_schema_version, 1);
+        assert_eq!(row.payload, broken);
+        assert_eq!(storage.data_revision().unwrap(), revision);
+        assert_eq!(
+            storage
+                .list_item_summaries(&p.id, "vector", 100, 0)
+                .unwrap()
+                .len(),
+            2
+        );
+
+        for exported in [
+            build_export_data(&storage, &modules, "test").unwrap(),
+            build_project_export_data(&storage, &modules, "test", &p.id).unwrap(),
+        ] {
+            let items = &exported.projects[0].items;
+            let broken_out = items.iter().find(|item| item.id == broken_id).unwrap();
+            assert_eq!(broken_out.payload_schema_version, 1);
+            assert_eq!(broken_out.payload, broken);
+            let good_out = items.iter().find(|item| item.id == good_id).unwrap();
+            assert_eq!(good_out.payload_schema_version, 2);
+            assert_eq!(good_out.payload, case["v2"]);
+            // 取り込む側でも変換に失敗し、失敗として数える (黙って捨てない)
+            let parsed = parse_export_json(&serde_json::to_string(&exported).unwrap()).unwrap();
+            let target: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+            let result = apply_import(&target, &registry, &parsed);
+            assert_eq!(result.items_inserted, 1);
+            assert_eq!(result.items_failed, 1);
+            assert_eq!(result.failures[0].id, broken_id.as_str());
+        }
+        // エクスポートが変換した作品も、利用者の編集ではないので data_revision は変わらない
+        assert_eq!(storage.data_revision().unwrap(), revision);
+
+        let dir = tempfile::tempdir().unwrap();
+        let backup = dir.path().join("backup.sqlite");
+        storage.take_online_backup_to(&backup).unwrap();
+        scoped.delete_item(&broken_id).unwrap();
+        storage.restore_online_backup_from(&backup).unwrap();
+        let restored = raw_vector_row(storage.as_ref(), &p.id, &broken_id);
+        assert_eq!(restored.payload_schema_version, 1);
+        assert_eq!(restored.payload, broken);
+    }
+
+    /// 切替前のアプリが書き出した JSON (vector は payload v1) を取り込むと、v2 で入る。
+    #[test]
+    fn vector_v1_items_in_an_old_export_file_are_imported_as_v2() {
+        use crate::exchange::import::{apply_import, parse_export_json};
+        let modules = crate::modules::registry::module_backends();
+        let registry = modules
+            .iter()
+            .map(|m| (m.id().to_owned(), m.clone()))
+            .collect();
+        let cases = [
+            "svgedit-document",
+            "size-from-viewbox",
+            "size-fallback",
+            "text-renormalized",
+        ]
+        .map(|name| canvas_case("upgrade", name));
+        let items: Vec<JsonValue> = cases
+            .iter()
+            .enumerate()
+            .map(|(index, case)| {
+                serde_json::json!({
+                    "id": format!("old-vector-{index}"),
+                    "module_id": "vector",
+                    "title": format!("古い作品 {index}"),
+                    "tags": ["svg"],
+                    "payload_schema_version": 1,
+                    "payload": case["v1"],
+                    "position": index,
+                    "created_at": "2026-09-20T10:00:00.000+09:00",
+                    "updated_at": "2026-09-20T10:00:00.000+09:00"
+                })
+            })
+            .collect();
+        let file = serde_json::json!({
+            "schema_version": 1,
+            "exported_at": "2026-09-20T10:00:00.000+09:00",
+            "app_version": "0.1.0-alpha.19",
+            "scope": "app",
+            "module_versions": { "vector": 1, "memo": 1 },
+            "projects": [{
+                "id": "old-project",
+                "name": "古いプロジェクト",
+                "description": null,
+                "position": 0,
+                "created_at": "2026-09-20T10:00:00.000+09:00",
+                "updated_at": "2026-09-20T10:00:00.000+09:00",
+                "items": items
+            }]
+        });
+        let parsed = parse_export_json(&file.to_string()).unwrap();
+        let storage: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+        let result = apply_import(&storage, &registry, &parsed);
+        assert_eq!(result.items_inserted, cases.len(), "{:?}", result.failures);
+        let project = ProjectId::new("old-project");
+        for (index, case) in cases.iter().enumerate() {
+            let id = ItemId::new(format!("old-vector-{index}"));
+            let row = raw_vector_row(storage.as_ref(), &project, &id);
+            assert_eq!(row.payload_schema_version, 2);
+            assert_eq!(row.payload, case["v2"], "{}", case["name"]);
+        }
     }
 
     // -------- schema initialization --------

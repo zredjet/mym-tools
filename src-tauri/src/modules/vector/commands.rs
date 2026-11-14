@@ -60,14 +60,24 @@ fn read_image(path: String) -> Result<String, AppError> {
     }
     Ok(data)
 }
+/// 書き出す SVG の上限 (`docs/canvas-editor-design.md` §4.9)。埋め込み SVG と画像は base64 で
+/// 4/3 倍になるので、20 MiB の埋め込み SVG を持つ文書も書き出せる大きさにする。
+/// TypeScript の `MAX_EXPORT_SVG_BYTES` (`editor/export/svg.ts`) と同じ値。
+pub const MAX_EXPORT_SVG_BYTES: usize = 28 * 1024 * 1024;
+
 fn write_file(path: String, format: String, data: String) -> Result<(), AppError> {
     let path = Path::new(&path);
     if extension(path) != format {
         return Err(error("出力形式と拡張子が一致しません。"));
     }
     match format.as_str() {
+        // 書き出す SVG はエディタが作った出力で、埋め込み SVG を `data:image/svg+xml` の `<image>` で持つ。
+        // 取込用の SVG ポリシー (`validate_svg`) は data URL の SVG を拒否するので当てず、
+        // UTF-8 (`String` なので保証済み) と大きさだけを確かめる (§4.9)。
         "svg" => {
-            validate_svg(&data)?;
+            if data.trim().is_empty() || data.len() > MAX_EXPORT_SVG_BYTES {
+                return Err(error("SVGは空でなく28MiB以下にしてください。"));
+            }
             write_atomically(path, data.as_bytes())
         }
         "png" => {
@@ -120,10 +130,47 @@ mod tests {
         let loaded = read_file(path.clone()).unwrap();
         assert_eq!(loaded.svg, svg);
         assert_eq!(loaded.text, "日本語");
-        assert!(write_file(path.clone(), "svg".into(), "<script/>".into()).is_err());
+        // 失敗した書き出しは既存のファイルを変えない
+        let too_large = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><!--{}--></svg>",
+            "a".repeat(MAX_EXPORT_SVG_BYTES)
+        );
+        assert!(write_file(path.clone(), "svg".into(), too_large).is_err());
+        assert!(write_file(path.clone(), "svg".into(), " \n".into()).is_err());
         assert!(write_file(path, "png".into(), "invalid".into()).is_err());
         assert_eq!(std::fs::read_to_string(file).unwrap(), svg);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    /// 書き出す SVG は取込用の SVG ポリシーで検証しない (§4.9)。埋め込み SVG を
+    /// `data:image/svg+xml` の `<image>` で持つ出力も、28 MiB までなら書ける。
+    #[test]
+    fn exported_svg_is_checked_for_size_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("書き出し.svg");
+        let path_text = path.to_string_lossy().to_string();
+        let embedded = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><image href=\"data:image/svg+xml;base64,{}\" width=\"10\" height=\"10\"/></svg>",
+            STANDARD.encode("<svg xmlns=\"http://www.w3.org/2000/svg\"/>")
+        );
+        assert!(
+            validate_svg(&embedded).is_err(),
+            "取込用のポリシーは拒否する"
+        );
+        write_file(path_text.clone(), "svg".into(), embedded.clone()).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), embedded);
+
+        let head = "<svg xmlns=\"http://www.w3.org/2000/svg\"><!--";
+        let tail = "--></svg>";
+        let exact = format!(
+            "{head}{}{tail}",
+            "a".repeat(MAX_EXPORT_SVG_BYTES - head.len() - tail.len())
+        );
+        assert_eq!(exact.len(), MAX_EXPORT_SVG_BYTES);
+        assert_eq!(MAX_EXPORT_SVG_BYTES, 29_360_128);
+        write_file(path_text.clone(), "svg".into(), exact.clone()).unwrap();
+        assert!(write_file(path_text, "svg".into(), format!("{exact} ")).is_err());
+        assert_eq!(std::fs::read(&path).unwrap().len(), MAX_EXPORT_SVG_BYTES);
     }
     #[test]
     fn image_formats_are_checked_before_read_and_write() {
