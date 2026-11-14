@@ -8,7 +8,7 @@ import type { CanvasDocument, TextNode } from "../model/types";
 import { canvasTextMeasurer } from "../render/measureText";
 import { editorStore } from "../state/store";
 import { finishTextEditSession, getTextEditSession, startTextCreation } from "./editSession";
-import { editorTextColor } from "./editorStyle";
+import { editorStyle, editorTextColor } from "./editorStyle";
 import { TextEditOverlay } from "./TextEditOverlay";
 
 const page = { kind: "page", id: FIRST_PAGE_ID } as const;
@@ -25,7 +25,8 @@ function documentWithText(): CanvasDocument {
       text: "abc",
       x: 10,
       y: 20,
-      width: 30,
+      // jsdom の計測で求め直した幅 ("abc" は 9.6 × 3 + 字間 3 = 31.8 → 32)
+      width: 32,
       height: 23,
       fontFamily: "Hiragino Sans",
       fontWeight: 700,
@@ -68,7 +69,7 @@ describe("TextEditOverlay: 表示", () => {
     expect(element.style.left).toBe("118px");
     expect(element.style.top).toBe("98px");
     expect(element.style.transform).toBe("scale(2)");
-    expect(element.style.width).toBe("30px");
+    expect(element.style.width).toBe("32px");
     expect(element.style.fontFamily).toContain("Hiragino Sans");
     expect(element.style.fontWeight).toBe("700");
     expect(element.style.letterSpacing).toBe("1px");
@@ -110,6 +111,34 @@ describe("TextEditOverlay: 表示", () => {
     expect(container.querySelectorAll("text")).toHaveLength(0);
     act(() => state().endTextEdit());
     expect(container.querySelectorAll("text")).toHaveLength(1);
+  });
+
+  it("auto-width で編集欄 (HTML) の行が描画より広く組まれるときは、入力欄を広げ、揃えの基準をノードに合わせる", () => {
+    // 単位ごとに組むエンジンの代わり: 単位ごとの和が描画の幅 (ノードの幅) より 6 広い
+    vi.spyOn(canvasTextMeasurer, "measure").mockImplementation((value: string) =>
+      value === "あいう" ? 30 : Array.from(value).length * 12,
+    );
+    vi.spyOn(
+      canvasTextMeasurer as Required<typeof canvasTextMeasurer>,
+      "lineBreakOptions",
+    ).mockReturnValue({ shapePerUnit: true });
+    const at = (align: TextNode["align"]) =>
+      editorStyle(
+        createText({ text: "あいう", width: 30, height: 23, sizing: "auto-width", align }),
+        { x: 0, y: 0 },
+        { x: 0, y: 0, zoom: 2 },
+      );
+    // 入力欄の中身の幅は 36 (= 12 × 3)。左揃えはそのまま、中央は 3、右は 6 だけ左へ (画面では 2 倍)
+    expect(at("left")).toMatchObject({ width: 36, left: -2 });
+    expect(at("center")).toMatchObject({ width: 36, left: -2 - 6 });
+    expect(at("right")).toMatchObject({ width: 36, left: -2 - 12 });
+    // 折り返すテキストは枠の幅のまま (判定の幅が描画以上なので、HTML の行も枠に収まる)
+    const wrapped = editorStyle(
+      createText({ text: "あいう", width: 30, height: 23, sizing: "auto-height" }),
+      { x: 0, y: 0 },
+      { x: 0, y: 0, zoom: 1 },
+    );
+    expect(wrapped).toMatchObject({ width: 30 });
   });
 
   it("文字の色は塗りの色。塗りがなければ薄い前景色、グラデーションは先頭の色", () => {

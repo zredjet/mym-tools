@@ -145,7 +145,16 @@ function wrapParagraph(
 ): void {
   const limit = wrapLimit(maxWidth);
   const units = breakUnits(paragraph, options);
-  const visibleWidth = (parts: readonly string[]) => measure(trimTrailingSpaces(parts.join("")));
+  // 折り返すかどうかの判定の幅は、編集欄 (HTML) が組む幅にそろえる。WebKit は単位ごとに組むので単位ごとの
+  // 幅の和、Chromium は行全体の幅。行の幅 (描画と揃え) は、どちらも行全体の幅で求める (pushRow)
+  const visibleWidth = options.shapePerUnit
+    ? (parts: readonly string[]) => {
+        let width = 0;
+        const last = parts.length - 1;
+        for (let i = 0; i < last; i++) width += measure(parts[i] as string);
+        return last >= 0 ? width + measure(trimTrailingSpaces(parts[last] as string)) : 0;
+      }
+    : (parts: readonly string[]) => measure(trimTrailingSpaces(parts.join("")));
   const pushRow = (text: string) => rows.push({ text, width: measure(trimTrailingSpaces(text)) });
   let next = 0;
   while (next < units.length) {
@@ -229,6 +238,25 @@ function computeLayout(node: TextNode, measurer: TextMeasurer): TextLayout {
     width: row.width,
   }));
   return { lines, width, height: rows.length * lineHeight };
+}
+
+/**
+ * 編集欄 (`<textarea>`) が組む、いちばん広い行の幅 (`auto-width` の編集中に入力欄の幅を決めるのに使う)。
+ * WebKit は HTML を折り返せる単位ごとに組み、単位をまたぐカーニングを入れないので、描画の幅 (= ノードの幅)
+ * より最大 1% ほど広い。ほかのエンジンでは行分割の幅と同じ。
+ */
+export function editorLineWidth(node: TextNode, measurer: TextMeasurer): number {
+  const layout = layoutText(node, measurer);
+  const options = lineBreakOptionsOf(measurer);
+  if (!options.shapePerUnit) return layout.width;
+  const font = textFontSpec(node);
+  let width = 0;
+  for (const line of layout.lines) {
+    let sum = 0;
+    for (const unit of breakUnits(line.text, options)) sum += measurer.measure(unit, font);
+    width = Math.max(width, sum);
+  }
+  return width;
 }
 
 const caches = new WeakMap<TextMeasurer, WeakMap<TextNode, TextLayout>>();

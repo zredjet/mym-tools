@@ -7,7 +7,7 @@ import { pageToScreen } from "../canvas/viewport";
 import type { Paint, TextNode } from "../model/types";
 import { cssFontFamily } from "../render/buildNodeSvg";
 import { canvasTextMeasurer } from "../render/measureText";
-import { layoutText, lineHeightOf } from "./layout";
+import { ceilSize, editorLineWidth, layoutText, lineHeightOf } from "./layout";
 
 /** 入力欄の周りの余白 (画面 px)。行末のカーソルが欄の外に出て中身がスクロールしないようにする。 */
 const CARET_PAD = 2;
@@ -37,11 +37,17 @@ export function editorStyle(
   const layout = layoutText(node, canvasTextMeasurer);
   const color = editorTextColor(node.fill, node.opacity);
   const autoWidth = node.sizing === "auto-width";
+  // auto-width は折り返さない。編集欄 (HTML) の行が描画の幅 (ノードの幅) より広く組まれる (WebKit) ときは、
+  // 文字が切れないよう入力欄を広げ、揃えの基準 (左端・中心・右端) がノードと同じ位置に来るようにずらす
+  const extra = autoWidth
+    ? Math.max(0, ceilSize(editorLineWidth(node, canvasTextMeasurer)) - node.width)
+    : 0;
+  const shift = node.align === "center" ? extra / 2 : node.align === "right" ? extra : 0;
   return {
     position: "absolute",
-    left: screen.x - CARET_PAD,
+    left: screen.x - CARET_PAD - shift * zoom,
     top: screen.y - CARET_PAD,
-    width: node.width,
+    width: node.width + extra,
     // fixed で本文が高さを超えたときは、描画と同じくはみ出した行も見せる
     height: Math.max(node.height, layout.height),
     padding: pad,

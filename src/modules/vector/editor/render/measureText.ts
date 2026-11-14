@@ -264,9 +264,51 @@ export function createDomFontMetrics(
 
 /**
  * エンジンによって違う折り返しの規則を、編集欄と同じ CSS の要素で 1 回だけ確かめる。測れない環境では既定 (空)。
- * `/` の後: 等幅フォントで `xx aaaa/bbbb` を 8.5 文字の幅に置き、`aaaa/` が 1 行目に残れば `/` の後で折り返す
- * (WebKit)。折り返さなければ単語ごと次の行へ送られる (Chromium)。
+ * - `/` の後: 等幅フォントで `xx aaaa/bbbb` を 8.5 文字の幅に置き、`aaaa/` が 1 行目に残れば `/` の後で折り返す
+ *   (WebKit)。折り返さなければ単語ごと次の行へ送られる (Chromium)
+ * - 単位ごとの組み: かなの並びを、ふつうと `word-break: keep-all` (和文の間で折り返さない = 単位に分けない)
+ *   で組んだ幅を比べ、違えば HTML は折り返せる単位ごとに組んでいる (WebKit)。かなをカーニングするフォント
+ *   (ヒラギノなど) が見つからなければ、違いが出ないので決めない (行全体で判定する)
  */
+/** かなの並び (ヒラギノなどはかなの組をカーニングする)。単位ごとに組むと、単位をまたぐ分だけ広くなる。 */
+export const UNIT_SHAPING_PROBE = "テキストテキストテキストテキスト";
+export const UNIT_SHAPING_PROBE_FAMILIES = [
+  "Hiragino Sans",
+  "Hiragino Kaku Gothic ProN",
+  "Yu Gothic",
+  "Meiryo",
+  "sans-serif",
+] as const;
+
+/** HTML が折り返せる単位ごとに組むか (`createLineBreakProbe` の一部)。 */
+function shapesPerUnit(doc: Document): boolean {
+  const box = doc.createElement("div");
+  box.setAttribute("aria-hidden", "true");
+  box.setAttribute("lang", "ja");
+  box.setAttribute(
+    "style",
+    `${HIDDEN_STYLE};white-space:pre-wrap;overflow-wrap:break-word;line-break:strict`,
+  );
+  const normal = doc.createElement("span");
+  const kept = doc.createElement("span");
+  normal.textContent = UNIT_SHAPING_PROBE;
+  kept.textContent = UNIT_SHAPING_PROBE;
+  kept.setAttribute("style", "word-break:keep-all");
+  box.append(normal, doc.createElement("br"), kept);
+  attach(doc, box);
+  try {
+    for (const family of UNIT_SHAPING_PROBE_FAMILIES) {
+      box.style.font = `32px ${cssFontFamily(family)}`;
+      const split = normal.getBoundingClientRect().width;
+      const whole = kept.getBoundingClientRect().width;
+      if (split > 0 && whole > 0 && Math.abs(split - whole) > 0.5) return true;
+    }
+    return false;
+  } finally {
+    box.remove();
+  }
+}
+
 export function createLineBreakProbe(
   getDocument: () => Document | null = defaultMeasureDocument,
 ): () => LineBreakOptions {
@@ -300,7 +342,8 @@ export function createLineBreakProbe(
       const last = topOf(11);
       box.remove();
       // 行が分かれていない (レイアウトのない環境) なら決めない
-      if (last > first) result = { breakAfterSolidus: solidus === first };
+      if (last > first)
+        result = { breakAfterSolidus: solidus === first, shapePerUnit: shapesPerUnit(doc) };
     } catch {
       // 確かめられなければ既定の規則
     }

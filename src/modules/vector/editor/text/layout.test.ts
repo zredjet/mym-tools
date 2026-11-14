@@ -3,7 +3,7 @@ import { createText } from "../model/create";
 import type { TextNode } from "../model/types";
 import { fixedWidthMeasurer } from "../render/testing";
 import type { FontSpec, TextMeasurer } from "../render/types";
-import { ceilSize, layoutText, lineHeightOf, wrapLimit } from "./layout";
+import { ceilSize, editorLineWidth, layoutText, lineHeightOf, wrapLimit } from "./layout";
 import type { MetricsTextMeasurer } from "./metrics";
 
 // フォントサイズ 10: 1 文字 (コードポイント) の幅は 5、行の高さは 14
@@ -138,6 +138,45 @@ describe("layoutText: 折り返し", () => {
       lineBreakOptions: () => ({ breakAfterSolidus: true }),
     };
     expect(lineTexts(node, webkit)).toEqual(["see foo/", "barbaz"]);
+  });
+
+  describe("単位ごとに組むエンジン (WebKit)", () => {
+    // 行全体を測ると隣り合う文字の間ごとに 1 狭い (カーニング)。単位ごとに測ると、その分は入らない
+    const kerned: TextMeasurer = {
+      measure: (value: string, font: FontSpec) =>
+        measurer.measure(value, font) - Math.max(0, Array.from(value).length - 1),
+    };
+    const perUnit: MetricsTextMeasurer = {
+      measure: kerned.measure,
+      fontMetrics: () => null,
+      lineBreakOptions: () => ({ shapePerUnit: true }),
+    };
+
+    it("折り返すかどうかは単位ごとの幅の和で判定し、行の幅と揃えは行全体の幅 (描画) で求める", () => {
+      // "あいうえお" は行全体で 25 - 4 = 21、単位ごとの和なら 25
+      const node = text({ text: "あいうえお", sizing: "auto-height", width: 22, align: "right" });
+      expect(lineTexts(node, kerned)).toEqual(["あいうえお"]);
+      const layout = layoutText(node, perUnit);
+      expect(layout.lines.map((line) => line.text)).toEqual(["あいうえ", "お"]);
+      // 行の幅は描画の幅 (あいうえ: 20 - 3 = 17)。右揃えの x は 22 - 17
+      expect(layout.lines.map((line) => [line.width, line.x])).toEqual([
+        [17, 5],
+        [5, 17],
+      ]);
+    });
+
+    it("単位の中のカーニングは入る (行頭禁則でまとめた単位)", () => {
+      // "ちょっ" は 1 単位で 15 - 2 = 13。"ちょっと" は 13 + 5 = 18 で幅 18 に入る
+      const node = text({ text: "ちょっと", sizing: "auto-height", width: 18 });
+      expect(lineTexts(node, perUnit)).toEqual(["ちょっと"]);
+    });
+
+    it("編集欄の行の幅 (auto-width の入力欄の幅) は単位ごとの和。行全体で組むエンジンでは描画の幅", () => {
+      const node = text({ text: "あいうえお\nab" });
+      expect(editorLineWidth(node, perUnit)).toBe(25);
+      expect(layoutText(node, perUnit).width).toBe(21);
+      expect(editorLineWidth(node, kerned)).toBe(21);
+    });
   });
 
   it("段落ごとに折り返し、空行を残す", () => {

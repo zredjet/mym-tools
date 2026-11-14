@@ -86,6 +86,12 @@ export interface LineBreakOptions {
    * Chromium は折り返さない
    */
   breakAfterSolidus?: boolean;
+  /**
+   * HTML が文字列を折り返せる単位ごとに組み、単位をまたぐカーニングを入れないか (WebKit)。
+   * そのときは、折り返すかどうかを単位ごとの幅の和で判定する (編集欄の `<textarea>` と同じ)。
+   * Chromium は行全体を組むので、行全体の幅で判定する
+   */
+  shapePerUnit?: boolean;
 }
 
 function classify(grapheme: string, options: LineBreakOptions): BreakClass {

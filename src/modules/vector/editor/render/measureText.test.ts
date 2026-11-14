@@ -341,16 +341,52 @@ describe("createLineBreakProbe (DOM のコード)", () => {
     delete (Range.prototype as { getBoundingClientRect?: unknown }).getBoundingClientRect;
   });
 
-  it("`aaaa/` が 1 行目に残れば (WebKit)、/ の後で折り返す", () => {
+  /** 単位ごとの組みの確かめの span の幅。keep-all の span だけ `kept`、ふつうの span は `split`。 */
+  function stubSpanWidths(split: number, kept: number) {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const keepAll = this.getAttribute("style")?.includes("keep-all") === true;
+      return { width: keepAll ? kept : split } as DOMRect;
+    });
+  }
+
+  it("`aaaa/` が 1 行目に残り、かなの並びを単位ごとに組めば (WebKit)、/ の後で折り返し、単位ごとの幅で判定する", () => {
     // WebKit は、折り返した直後の文字の範囲を前の行の末尾として返す
     stubRangeTops((offset) => (offset <= 8 ? 0 : 20));
-    expect(createLineBreakProbe(() => document)()).toEqual({ breakAfterSolidus: true });
+    stubSpanWidths(384, 379.2);
+    expect(createLineBreakProbe(() => document)()).toEqual({
+      breakAfterSolidus: true,
+      shapePerUnit: true,
+    });
     expect(document.querySelector("[data-canvas-text-measure]")).toBeNull();
   });
 
-  it("単語ごと次の行へ送られれば (Chromium)、/ の後で折り返さない", () => {
+  it("単語ごと次の行へ送られ、かなの並びを行全体で組めば (Chromium)、どちらもしない", () => {
     stubRangeTops((offset) => (offset <= 2 ? 0 : 20));
-    expect(createLineBreakProbe(() => document)()).toEqual({ breakAfterSolidus: false });
+    stubSpanWidths(379.2, 379.2);
+    expect(createLineBreakProbe(() => document)()).toEqual({
+      breakAfterSolidus: false,
+      shapePerUnit: false,
+    });
+  });
+
+  it("単位ごとの組みは、かなをカーニングするフォントが見つかるまで候補を順に試す", () => {
+    stubRangeTops((offset) => (offset <= 2 ? 0 : 20));
+    const fonts: string[] = [];
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const box = this.parentElement;
+      const font = box?.style.font ?? "";
+      if (!this.getAttribute("style")?.includes("keep-all")) fonts.push(font);
+      // 3 つ目の候補 (Yu Gothic) で初めて違いが出る
+      const kerns = font.includes("Yu Gothic");
+      const keepAll = this.getAttribute("style")?.includes("keep-all") === true;
+      return { width: kerns && keepAll ? 370 : 384 } as DOMRect;
+    });
+    expect(createLineBreakProbe(() => document)().shapePerUnit).toBe(true);
+    expect(fonts).toHaveLength(3);
   });
 
   it("行が分かれていなければ (レイアウトがない) 決めない。結果は 1 回だけ求める", () => {
