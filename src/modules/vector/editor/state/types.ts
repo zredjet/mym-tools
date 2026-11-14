@@ -56,22 +56,26 @@ export interface EditorState {
 export type DocRecipe = (doc: CanvasDocument) => CanvasDocument;
 
 export interface EditorActions {
-  /** 文書を読み込む。履歴・選択・スコープを捨て、revision を 0 に戻す */
+  /** 文書を読み込む。履歴・選択・スコープを捨て、revision を 0 に戻す。表示位置と表示の設定は残し、ツールは選択に戻す */
   load(doc: CanvasDocument): void;
 
-  /** 文書を変えて履歴に 1 件積む。同じ文書が返れば何もしない */
+  /** 文書を変えて履歴に 1 件積む。同じ文書が返れば何もしない。ジェスチャーの途中なら、先にそれを確定する */
   apply(recipe: DocRecipe): void;
 
   /**
    * 連続する操作 (ドラッグ)。`updateGesture` の recipe には毎回 `beginGesture` 時点の文書が渡る。
-   * `commitGesture` で履歴に 1 件だけ積み、`cancelGesture` で開始時点へ戻す。
+   * `commitGesture` で履歴に 1 件だけ積み (文書が変わっていなければ積まない)、`cancelGesture` で文書と選択を
+   * 開始時点へ戻す。途中の `updateGesture` では revision を増やさない。
    */
   beginGesture(): void;
   updateGesture(recipe: DocRecipe): void;
   commitGesture(): void;
   cancelGesture(): void;
 
-  /** 履歴は文書と選択を組で持ち、戻すと選択も戻る。スコープと本文の編集は解除する。上限 100 件 */
+  /**
+   * 履歴は文書と選択を組で持ち、戻すと選択も戻る。スコープと本文の編集は解除する。上限 100 件。
+   * ジェスチャーの途中なら、ジェスチャーを取り消すだけにする。
+   */
   undo(): void;
   redo(): void;
 

@@ -1,6 +1,6 @@
 # キャンバス (自作エディタ) の設計
 
-最終更新: 2026-11-14 / ステータス: Draft v0.1
+最終更新: 2026-11-14 / ステータス: Draft v0.2
 
 ADR-0026 の決定を実装するための設計。保存形式、エディタ内部の境界、画面、実装の分担を定める。
 
@@ -81,14 +81,19 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 - group の `children` は 1 個以上。frame は 0 個でもよい
 - 深さは `maxDepth` 以下 (ページ直下を 1 とする)
 - ノード、ページ、アセットの ID は別々の名前空間で、書式はどれも `idPattern`
+- `__proto__` は ID に使えない (JavaScript でオブジェクトを表として使うと、この名前だけ正しく扱えないため)
 
 ### 3.4 アセット
 
-- `image`: PNG / JPEG / WebP の base64。`mime` と中身の先頭バイトが一致すること。PNG は 1 辺と総画素数の上限を確かめる
-- `svg`: 既存の SVG ポリシー (`scripts/svgedit/policy.json`、`validate_svg`) を通った SVG と、そこから抽出した `text`
+- `image`: PNG / JPEG / WebP の base64。標準の字母 (`+` `/`) で、パディングは必須、空は不可
+- `image` の `mime` と中身の先頭バイトが一致すること (既存の `validate_image` と同じ判定)。PNG は 24 バイト以上でシグネチャが合う、JPEG は 4 バイト以上で `FF D8 FF` から始まる、WebP は 12 バイト以上で `RIFF` から始まり 8〜11 バイト目が `WEBP`
+- PNG は IHDR の幅と高さが 1 以上 `maxImageSide` 以下、積が `maxImagePixels` 以下
+- `svg`: 既存の SVG ポリシー (`scripts/svgedit/policy.json`、`validate_svg`) を通った SVG と、そこから抽出した `text` (v1 と同じ抽出結果と完全に一致すること)
+- アセットの `width` / `height` は image も svg も、0 より大きく `maxSize` 以下。画像の実際の大きさと一致するかは確かめない
 - アセットはノードから参照されているものだけを持つ。エディタは保存の前に参照されていないアセットを落とす
 - 同じ画像を 2 回置いたら、アセットは 1 つを共有する (挿入時に中身を比べる)
-- 全アセットの合計 (image の `data` の長さ + svg の UTF-8 の長さ) は `payloadBytes` 以下
+- 全アセットの合計 (image の `data` の文字数 + svg の UTF-8 の長さ) は `payloadBytes` 以下
+- base64 の判定は 20 MiB の文字列でも正しく動くこと。繰り返しを入れ子にした正規表現を全体に当てると、JavaScript のエンジンによっては数 MiB で誤判定や例外になる
 
 ### 3.5 ノードの規則
 
@@ -96,7 +101,7 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 
 | 対象 | 規則 |
 |---|---|
-| `name` | `maxNameLength` 文字以下。空でもよい |
+| ノードとページの `name` | `maxNameLength` 文字以下。空でもよい |
 | `opacity` (ノード、塗り、線、影、停止点) | 0 以上 1 以下 |
 | `x` `y` `x1` `y1` `x2` `y2`、ガイド線の `position` | 絶対値が `maxCoordinate` 以下 |
 | `width` `height` | 0 以上 `maxSize` 以下 |
@@ -105,10 +110,11 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 | 線の `width` | 0 より大きく `maxStrokeWidth` 以下。線なしは `stroke: null` |
 | 影 | `x` `y` は絶対値が `maxShadowOffset` 以下、`blur` は 0 以上 `maxShadowBlur` 以下 |
 | グラデーション | 停止点は `minGradientStops`〜`maxGradientStops` 個、`offset` は 0〜1 で昇順 (同値可)。`from` `to` `center` の各成分は絶対値 100 以下、`radius` は 0 より大きく 100 以下 |
-| テキスト | `text` は `maxTextLength` 文字以下。`fontFamily` は 1〜`maxFontFamilyLength` 文字で制御文字を含まない。`fontSize` は `minFontSize`〜`maxFontSize`。`fontWeight` は 100〜900 の 100 刻み。`lineHeight` は null か、0 より大きく `maxLineHeight` 以下。`letterSpacing` は絶対値が `maxLetterSpacing` 以下 |
+| テキスト | `text` は `maxTextLength` 文字以下。`fontFamily` は 1〜`maxFontFamilyLength` 文字で制御文字 (U+0000〜U+001F、U+007F〜U+009F) を含まない。`fontSize` は `minFontSize`〜`maxFontSize`。`fontWeight` は 100〜900 の 100 刻み。`lineHeight` は null か、0 より大きく `maxLineHeight` 以下。`letterSpacing` は絶対値が `maxLetterSpacing` 以下 |
 | image / svg ノード | `assetId` が同じ種類のアセットを指す |
 | ページ | 1〜`maxPages` 個、ID は重複しない。ガイド線は `maxGuidesPerPage` 本以下 |
-| 全体 | ノードは `maxNodes` 個以下 |
+| 全体 | ノードは `maxNodes` 個以下。全テキストノードの `text` の合計は UTF-8 で `maxTotalTextBytes` 以下 |
+| 文字列 | 対になっていないサロゲートを含まない。Rust の JSON の読み込みが受け付けないので、TypeScript 側の検証で拒否する |
 
 文字数は Unicode のコードポイント数で数える。
 
@@ -133,7 +139,9 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 - ノードは 1 つ (`id: "legacy"`、`type: "svg"`、`name: "SVG"`、位置 0,0、表示・ロックなし・不透明度 1)
 - アセットは 1 つ (`id: "legacy"`、`svg` と `text` は v1 のまま)
 - 大きさは、ルートの `width` / `height` 属性 (数値、`px` 付きも可) が両方とも正ならその値。なければ `viewBox` の幅と高さ。それもなければ 640 × 480。1 以上 `maxSize` 以下に収める
-- `text` は v1 の `text`
+- アセットの `text` は v1 の `text` のまま。文書の `text` は、変換後の文書から §3.6 の規則で求める。v1 の抽出は空白の集合が違う (U+0085 を空白として扱わない) ので、その文字を含む作品では v1 の `text` と違う値になる。それ以外では同じ値になる
+
+変換の結果は v2 の検証を通ること。通らない場合 (今の SVG ポリシーを通らなくなった古い作品など) は変換を失敗として返し、v1 のまま残す。壊れた v2 を書き込まない。
 
 この書き換えは戻せない (ADR-0006 の通常の挙動)。`data_revision` は増やさない。
 
@@ -167,6 +175,13 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 - 履歴は文書と選択の組のスナップショットで、上限 100 件。大きな画像の文字列はアセットのオブジェクトごと共有されるので複製されない
 - `revision` は文書が変わるたびに増える。呼び出し側は保存した時点の `revision` と比べて未保存かどうかを判定する
 - コンポーネントは必要な部分だけを selector で購読し、ノード 1 個の変更で全体を描き直さない
+- ジェスチャーの途中で `apply` か `beginGesture` を呼ぶと、先に今のジェスチャーを確定する。途中の `undo` / `redo` はジェスチャーを取り消すだけ
+- `cancelGesture` は文書と選択を開始時点へ戻す
+- `revision` は `apply`、`commitGesture` (文書が変わったとき)、`undo`、`redo` で 1 増える。`updateGesture` の途中では増えない
+- 中身が変わらない操作は、引数の文書そのものを返す。履歴も `revision` も増やさない
+- 選択は表示中のページのノードに絞る。消えたノードは選択、ホバー、スコープ、本文の編集中から外す
+- `load` は表示位置と表示の設定を残し、ツールを選択に戻す
+- 保存は、進行中のジェスチャーを確定してから行う (途中の文書を保存して取り消すと、保存内容と画面がずれる)
 
 ### 4.3 描画
 
@@ -204,8 +219,11 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 - 移動: Shift で水平・垂直に固定、Alt で複製。矢印キーは 1 px、Shift と一緒なら 10 px
 - リサイズ: 8 個のハンドル。Shift で縦横比を固定、Alt で中心から。画像は既定で縦横比を固定し、Shift で解除する
 - 複数選択と group のリサイズは、子孫の位置と大きさを比例させる。テキストはフォントサイズを変えずに枠だけ変える。角丸と線の太さは変えない
-- frame のリサイズは子を動かさない
-- テキストは、横に引くと `auto-height`、縦にも引くと `fixed` になる
+- frame のリサイズは子を動かさない。複数選択や group の中の frame も同じで、frame の枠だけが比例して変わる
+- 複製と貼り付けは、元の位置から右下へ 10 px ずらす
+- テキストは、横に引くと `auto-height`、縦にも引くと `fixed` になる。どちらに引いたかは、リサイズ前後の外接矩形の幅と高さの比で決める (結果の数値の差では決めない)。縦に引いていなければ、テキストの `height` と `y` 方向の大きさは丸めでも変えない
+- 線の `stroke` は null にできない。複数選択に「線なし」を当てたときは、線だけを対象から外す
+- group の解除では、group の不透明度を子に掛け合わせ、group が非表示なら子を非表示に、ロック中なら子をロックにする
 - ドロップした位置が別の frame の上なら、その frame の子にする。見た目の位置は変えない
 - スナップの候補は、同じ親の兄弟と親 frame の辺・中心、ガイド線、グリッド (`snapToGrid` のとき)。6 画面 px 以内でいちばん近いものに吸着し、そろった線を重ね描きする。Cmd/Ctrl を押している間は吸着しない
 - ガイド線はルーラーから引き出して作り、ルーラーへ戻すと消える
@@ -219,13 +237,14 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 - テキストツールは、クリックで `auto-width`、ドラッグで幅を決めた `auto-height` を作る
 - フォントは同梱しない。候補 (§5.9) のうち、その PC にあるものを一覧に出し、ほかは名前を直接入力する。あるかどうかは、そのフォントを先頭に置いたときと総称フォントだけのときの幅を比べて判定する (`document.fonts.check` はシステムフォントの有無を返さないので使わない)
 - 文書のフォントがその PC になければ、プロパティに注意を出し、総称フォントで描く
-- `auto-width` / `auto-height` の大きさは開いたときに求め直す。求め直しただけでは `revision` を増やさない
+- `auto-width` / `auto-height` の大きさは開いたときに求め直す。呼び出し側が `load` に渡す前に求め直すので、履歴にも `revision` にも数えない
 
 ### 4.8 画像と SVG の取込
 
 - ファイル選択 (`plugin-dialog`) と OS からのドロップで受け取り、path を既存の `vector_read_image` / `vector_read_file` に渡す。検証は Rust が行う
 - 置く位置は、表示範囲の中央か、ドロップした位置。大きすぎる画像は表示範囲に収まる大きさに縮める (アセットは元のまま)
 - SVG ファイルは埋め込み SVG として置く。draw.io の SVG の変換と `notices` の表示は今のまま使う
+- 取り込む前に、TypeScript 側の `validateSvg` でも文字を抽出し、Rust が返した `text` と一致することを確かめる。違えば取り込まず、理由を表示する (U+0085 をそのまま含む SVG は Rust とブラウザで抽出が違い、置いても保存できないため)
 
 ### 4.9 書き出し
 
@@ -235,6 +254,16 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 - ファイルへの書き込みは注入された関数を通す。切替 PR で `vector_write_file` につなぐ
 - 書き出す SVG は自分で作った出力なので、取込用の SVG ポリシーでは検証しない (埋め込み SVG を `data:image/svg+xml` で持つため)。UTF-8 と大きさだけを確かめる。この変更は切替 PR で入れる
 - 埋め込み SVG を含む文書の PNG 書き出しが WKWebView と WebView2 で正しく出るかは、実アプリで確かめる
+
+### 4.10 コピーと貼り付け
+
+- クリップボードはエディタの中だけで持ち、別の作品へも貼れる。子孫と必要なアセットごと運び、貼るたびに新しい ID を振る
+- 貼り付け先は次の順で決める
+  1. frame を 1 つだけ選んでいて、それがコピーしたノード自身でなければ、その frame の中
+  2. コピー元の親が今の文書にあれば、その親 (コピー元の兄弟になる)
+  3. スコープがあればその中、なければページ直下
+- 位置は元のページ座標から右下へ 10 px ずらし、続けて貼るたびにさらに 10 px ずらす。貼り付け先の frame の矩形と重ならない位置になるときは、frame の中央に置く
+- 複製 (Cmd/Ctrl+D、Alt を押しながらのドラッグ) は、元と同じ親の、元のすぐ前面に入れる。ドラッグでの複製は開始時に 1 回だけ行い、ドラッグの間は同じ複製を動かす
 
 ## 5. 画面
 
@@ -378,6 +407,7 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 
 - `VectorWorkspacePage.tsx` を `EditorRoot` と `editorStore` につなぐ (読み込み、保存、未保存の確認、作品の切替、新規、取込、書き出し、削除)
 - Rust の `current_payload_version` を 2 にし、`upgrade_payload` と `validate_payload` を v2 へつなぐ。未使用の `allow` を外す
+- 保存の処理は、進行中のジェスチャーを確定してから文書を取り出す。読み込みでは、テキストの大きさを求め直してから `load` に渡す
 - `vector_write_file` の SVG の検証を §4.9 のとおりに変える
 - `src/modules/vector/index.ts` の表示名を「キャンバス」にし、検索結果の表示を確かめる
 - SVG-Edit 一式を消す: npm の `svgedit`、`prepare:vector`、`test:vector:*`、`predev` / `prebuild` の該当部分、`scripts/svgedit/` の adapter 群、`protocol.rs` と `vector_editor_url` (`registry.rs`、`build.rs`、`permissions/default.toml`)、`bridge.ts`、`third_party/svgedit-NOTICES.txt`、About と `THIRD_PARTY_NOTICES.md` の表記
@@ -390,3 +420,4 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 | 日付 | 版 | 内容 |
 |---|---|---|
 | 2026-11-14 | 0.1 | 初版。ADR-0026 の決定を受けて、保存形式、構造、画面、分担を定める |
+| 2026-11-14 | 0.2 | 実装とレビューで見つかった不足を補う。§3.3 `__proto__` の禁止、§3.4 アセットの大きさと base64・画像の判定、§3.5 文字列とテキスト合計の上限、§3.7 文書の `text` の求め方と変換結果の検証、§4.2 ジェスチャーと `revision` の取り決め、§4.6 テキストの大きさの決め方・線の `stroke`・group の解除、§4.8 取込時の照合、§4.10 コピーと貼り付け |
