@@ -252,9 +252,12 @@ function VectorWorkspacePage({
     alive.current = true;
     if (!projectId) return;
     let cancelled = false;
+    /** 開こうとした作品の一覧の行 (作品を読めなかったときにタイトルを出す) */
+    let known: ItemSummary | undefined;
     void (async () => {
       const list = await listItemSummaries({ projectId, moduleId: "vector" });
       if (cancelled) return;
+      known = list.find((entry) => entry.id === itemId);
       if (landing && list[0]) {
         allowNavigation.current = true;
         navigate(modulePath(projectId, "vector", `/edit/${list[0].id}`), { replace: true });
@@ -285,6 +288,9 @@ function VectorWorkspacePage({
       openDocument(parsed.doc, { id: item.id, title: item.title, tags: item.tags.join(", ") });
     })().catch((cause) => {
       if (cancelled) return;
+      // 開けなかった作品のタイトルを、新しい作品の既定のタイトルのまま見せない
+      setTitle(known?.title ?? "");
+      setTags(known?.tags.join(", ") ?? "");
       setError(describeOpenError(cause));
       setPhase("failed");
     });
@@ -611,6 +617,7 @@ function VectorWorkspacePage({
           <span className="min-w-0 break-words">{error}</span>
           {phase === "failed" && (
             <Button
+              className="shrink-0"
               onClick={() => {
                 setError(null);
                 setPhase("loading");

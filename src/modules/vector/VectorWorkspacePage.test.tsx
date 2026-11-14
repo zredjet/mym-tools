@@ -191,6 +191,7 @@ describe("読み込み", () => {
   });
 
   it("v1 から変換できなかった作品は、理由を出して開かない", async () => {
+    vi.mocked(items.listItemSummaries).mockResolvedValue([summary("broken", "古い作品")]);
     vi.mocked(items.getItem).mockRejectedValue({
       code: "payload_upgrade_failed",
       message: { module_id: "vector", reason: "変換した文書が検証を通りません: script" },
@@ -202,6 +203,9 @@ describe("読み込み", () => {
     expect(alert).toHaveTextContent("検証を通りません: script");
     expect(editor()).toBeNull();
     expect(screen.getByRole("button", { name: "再試行" })).toBeVisible();
+    // 新しい作品の既定のタイトルではなく、一覧のタイトルを出す
+    expect(screen.getByLabelText("タイトル")).toHaveValue("古い作品");
+    expect(saveButton()).toBeDisabled();
   });
 
   it("StrictMode でも 1 回だけ開き、新規では作品を読まない", async () => {
