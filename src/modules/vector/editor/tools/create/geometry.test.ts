@@ -88,6 +88,41 @@ describe("dragBox", () => {
   });
 });
 
+describe("小数の押下点", () => {
+  it("dragBox: 押した点を先に整数にし、吸着した辺がずれない", () => {
+    // 押した点 (40.5, 400.5)、x = 100 に吸着
+    const box = dragBox({ x: 40.5, y: 400.5 }, { x: 100, y: 450 }, O, plain);
+    expect(box.x + box.width).toBe(100);
+    expect(box.y + box.height).toBe(450);
+    // 左上へ
+    const back = dragBox({ x: 40.5, y: 400.5 }, { x: 0, y: 350 }, O, plain);
+    expect(back).toMatchObject({ x: 0, y: 350 });
+    // 親の原点が小数でも
+    const inner = dragBox({ x: 140.5, y: 60.25 }, { x: 200, y: 90 }, { x: 100.5, y: 50.25 }, plain);
+    expect(inner.x + inner.width).toBe(roundLocal(200, 100.5));
+  });
+
+  it("dragLine: Shift の 45° は丸めても 45°", () => {
+    expect(
+      dragLine({ x: 10.5, y: 10 }, { x: 16.1, y: 15.6 }, O, { constrain: true, fromCenter: false }),
+    ).toEqual({ x1: 11, y1: 10, x2: 16, y2: 15 });
+    for (let i = 0; i < 50; i++) {
+      const start = { x: 3.3 + i * 0.37, y: 7.9 - i * 0.21 };
+      const pointer = { x: start.x + 20 + i * 1.13, y: start.y - 18 - i * 0.97 };
+      const line = dragLine(
+        start,
+        pointer,
+        { x: 0.5, y: 0.25 },
+        { constrain: true, fromCenter: i % 2 === 1 },
+      );
+      expect(line).not.toBeNull();
+      if (line) expect(Math.abs(line.x2 - line.x1)).toBe(Math.abs(line.y2 - line.y1));
+    }
+  });
+});
+
+const roundLocal = (v: number, origin: number) => Math.round(v - origin);
+
 describe("clickBox", () => {
   it("押した点を左上にし、親の座標系の整数にする", () => {
     expect(clickBox({ x: 120.4, y: 80.6 }, { x: 100, y: 50 }, { width: 393, height: 852 })).toEqual(

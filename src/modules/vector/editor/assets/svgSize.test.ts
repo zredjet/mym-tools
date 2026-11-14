@@ -19,6 +19,16 @@ describe("svgIntrinsicSize", () => {
     });
   });
 
+  it("絶対単位 (pt pc mm cm in) は px に直す", () => {
+    expect(root('width="75pt" height="37.5PT"')).toEqual({ width: 100, height: 50 });
+    expect(root('width="1in" height="6pc"')).toEqual({ width: 96, height: 96 });
+    const mm = root('width="25.4mm" height="2.54cm"');
+    expect(mm.width).toBeCloseTo(96);
+    expect(mm.height).toBeCloseTo(96);
+    // % や em、片方だけは今のまま
+    expect(root('width="50%" height="10pt"')).toEqual({ width: 640, height: 480 });
+  });
+
   it("使えなければ viewBox", () => {
     const expected = { width: 300, height: 150 };
     for (const attributes of [

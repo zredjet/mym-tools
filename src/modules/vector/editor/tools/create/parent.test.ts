@@ -3,7 +3,7 @@ import { createFrame } from "../../model/create";
 import { insertNode } from "../../model/structure";
 import { sampleDocument } from "../../model/testing";
 import { updateNode } from "../../model/transform";
-import { creationParent, parentCoordinateFrame, scopeForParent } from "./parent";
+import { containingParent, creationParent, parentCoordinateFrame, scopeForParent } from "./parent";
 
 // sampleDocument: ページ直下の frame `f` (100,50 400×300) の中に r1、group `grp` (r2, l1)、
 // 入れ子の frame `f2` (f の中の 200,100 100×100 = ページ座標 300,150)。ページ直下に r0
@@ -40,6 +40,19 @@ describe("creationParent", () => {
     // スコープの外なら、点の下の frame
     expect(creationParent(doc, "p1", "grp", { x: 400, y: 300 })).toEqual(node("f"));
     expect(creationParent(doc, "p1", "f2", { x: 350, y: 200 })).toEqual(node("f2"));
+  });
+
+  it("ロック中・非表示のスコープは親にしない", () => {
+    let doc = updateNode(sampleDocument(), "grp", { locked: true });
+    expect(creationParent(doc, "p1", "grp", { x: 150, y: 100 })).toEqual(node("f"));
+    doc = updateNode(sampleDocument(), "f2", { visible: false });
+    expect(creationParent(doc, "p1", "f2", { x: 350, y: 200 })).toEqual(node("f"));
+    // 祖先がロック中でも同じ
+    doc = updateNode(sampleDocument(), "f", { locked: true });
+    expect(creationParent(doc, "p1", "f2", { x: 350, y: 200 })).toEqual(page);
+    expect(containingParent(doc, "p1", "f2", { x: 320, y: 170, width: 10, height: 10 })).toEqual(
+      page,
+    );
   });
 
   it("スコープの中の frame の上なら、その frame", () => {

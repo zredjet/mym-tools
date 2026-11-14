@@ -8,9 +8,8 @@
  * ファイル選択を開くとウィンドウのフォーカスが外れて `onCancel` が呼ばれるが、取込は続ける
  * (このツールは文書のジェスチャーを開かない)。
  */
-import { importFromPicker } from "../assets/importFile";
+import { importFromPicker, notifyImport } from "../assets/importFile";
 import { getImportFileReader } from "../assets/reader";
-import { showImportNotice } from "../assets/status";
 import type { Point } from "../model/types";
 import type { Tool } from "./types";
 
@@ -33,7 +32,7 @@ export const imageTool: Tool = {
     press = null;
     if (!at) return;
     if (!getImportFileReader()) {
-      showImportNotice({ tone: "error", message: "この画面では画像を取り込めません。" });
+      notifyImport(store, { tone: "error", message: "この画面では画像を取り込めません。" });
       store.getState().setTool("select");
       return;
     }

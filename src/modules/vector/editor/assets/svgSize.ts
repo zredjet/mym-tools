@@ -1,7 +1,8 @@
 /**
- * 取り込んだ SVG の大きさ。v1 からの変換 (§3.7、Rust の `upgrade.rs` の `svg_size`) と同じ規則にする。
+ * 取り込んだ SVG の大きさ。v1 からの変換 (§3.7、Rust の `upgrade.rs` の `svg_size`) と同じ規則に、
+ * 絶対単位 (pt など) の読み取りを足したもの。
  *
- * - ルートの `width` / `height` 属性 (単位なしか `px`) が両方とも正ならその値
+ * - ルートの `width` / `height` 属性 (単位なしか絶対単位。px に直す) が両方とも正ならその値
  * - なければ `viewBox` の幅と高さ (4 つの数を空白か、前後に空白を置いてよいカンマ 1 個で区切る)
  * - それもなければ 640 × 480
  * - 1 以上 `maxSize` 以下に収める
@@ -21,12 +22,36 @@ export function parseSvgNumber(token: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-/** `width` / `height` 属性の値。単位なしか `px` の正の数だけ (`%` や `em` は読まない)。 */
+/** 絶対単位を px に直す倍率 (CSS の 1in = 96px)。 */
+const ABSOLUTE_UNITS: Record<string, number> = {
+  px: 1,
+  pt: 96 / 72,
+  pc: 16,
+  mm: 96 / 25.4,
+  cm: 96 / 2.54,
+  in: 96,
+};
+
+/**
+ * `width` / `height` 属性の値 (px)。単位なしか絶対単位 (`px` `pt` `pc` `mm` `cm` `in`、大文字小文字を問わない)
+ * の正の数だけ。`%` や `em` は読まない。Rust の v1 からの変換 (`upgrade.rs`) は単位なしと `px` だけを読むが、
+ * 取込では pt などで書かれた SVG の縦横比を保つため、絶対単位も px に直す。
+ */
 export function parseSvgLength(value: string): number | null {
-  let text = value.trim();
-  if (text.length >= 2 && text.slice(-2).toLowerCase() === "px") text = text.slice(0, -2);
-  const n = parseSvgNumber(text);
-  return n !== null && n > 0 ? n : null;
+  const text = value.trim();
+  let scale = 1;
+  let body = text;
+  if (text.length >= 2) {
+    const unit = ABSOLUTE_UNITS[text.slice(-2).toLowerCase()];
+    if (unit !== undefined) {
+      scale = unit;
+      body = text.slice(0, -2);
+    }
+  }
+  const n = parseSvgNumber(body);
+  if (n === null || !(n > 0)) return null;
+  const px = n * scale;
+  return Number.isFinite(px) ? px : null;
 }
 
 /** `viewBox` の幅と高さ。どちらも正でなければ null。 */

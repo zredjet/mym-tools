@@ -45,6 +45,27 @@ describe("Toolbar の「画像」", () => {
     expect(state().doc.nodes[state().selection[0] ?? ""]?.type).toBe("svg");
   });
 
+  it("続けて押しても取込は 1 回だけ。取込中はボタンを無効にする", async () => {
+    let resolve!: (file: null) => void;
+    const reader = vi.fn(
+      () =>
+        new Promise<null>((r) => {
+          resolve = r;
+        }),
+    );
+    setImportFileReader(reader);
+    render(<Toolbar />);
+    fireEvent.click(imageButton());
+    fireEvent.click(imageButton());
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(imageButton()).toBeDisabled();
+    await act(async () => resolve(null));
+    expect(imageButton()).toBeEnabled();
+    fireEvent.click(imageButton());
+    expect(reader).toHaveBeenCalledTimes(2);
+    await act(async () => resolve(null));
+  });
+
   it("取り消したら何もせず、選択ツールのまま", async () => {
     setImportFileReader(async () => null);
     render(<Toolbar />);

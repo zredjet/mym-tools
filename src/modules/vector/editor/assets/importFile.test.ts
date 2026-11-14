@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createText } from "../model/create";
+import { insertNode } from "../model/structure";
 import { sampleDocument } from "../model/testing";
 import { getParent } from "../model/tree";
 import { fixedWidthMeasurer } from "../render/testing";
@@ -177,6 +179,109 @@ describe("importFile", () => {
     gate.resolve({ width: 200, height: 100 });
     await pending;
     expect(getImportStatus().busy).toBe(false);
+  });
+});
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe("ジェスチャー・作品の入れ替え・本文の編集", () => {
+  it("読み込みが終わったときにジェスチャーが開いていれば、閉じるのを待ってから置く (途中で確定しない)", async () => {
+    const { store, s } = setup();
+    const gate = deferred<{ width: number; height: number }>();
+    const pending = importFile(store, image(), { ...options, measureImage: () => gate.promise });
+    const before = s().doc;
+    // ほかの操作のドラッグ (r0 を動かす)
+    store.getState().beginGesture();
+    store.getState().updateGesture((doc) => ({
+      ...doc,
+      nodes: { ...doc.nodes, r0: { ...doc.nodes.r0!, x: 50 } as (typeof doc.nodes)[string] },
+    }));
+    gate.resolve({ width: 200, height: 100 });
+    await tick();
+    await tick();
+    expect(s().gestureActive).toBe(true);
+    expect(s().revision).toBe(0);
+    // 持ち主が Esc で取り消せば、取り消した文書に置く
+    store.getState().cancelGesture();
+    expect(await pending).toBe(true);
+    expect(s().revision).toBe(1);
+    expect(s().doc.nodes.r0).toBe(before.nodes.r0);
+    store.getState().undo();
+    expect(s().doc).toBe(before);
+  });
+
+  it("ジェスチャーが確定されたら、その後に置く (履歴は 2 件)", async () => {
+    const { store, s } = setup();
+    const gate = deferred<{ width: number; height: number }>();
+    const pending = importFile(store, image(), { ...options, measureImage: () => gate.promise });
+    store.getState().beginGesture();
+    store.getState().updateGesture((doc) => ({ ...doc }));
+    gate.resolve({ width: 200, height: 100 });
+    await tick();
+    store.getState().commitGesture();
+    expect(await pending).toBe(true);
+    expect(s().revision).toBe(2);
+  });
+
+  it("未変更の作品でジェスチャーの途中に別の作品が開かれたら置かない", async () => {
+    const { store, s } = setup();
+    const gate = deferred<{ width: number; height: number }>();
+    const pending = importFile(store, image(), { ...options, measureImage: () => gate.promise });
+    store.getState().beginGesture();
+    store.getState().updateGesture((doc) => ({ ...doc }));
+    const other = sampleDocument();
+    store.getState().load(other);
+    gate.resolve({ width: 200, height: 100 });
+    expect(await pending).toBe(false);
+    expect(s().doc).toBe(other);
+    expect(s().revision).toBe(0);
+  });
+
+  it("編集済みの作品から別の作品が開かれたら置かない", async () => {
+    const { store, s } = setup();
+    store.getState().apply((doc) => ({ ...doc }));
+    store.getState().apply((doc) => ({ ...doc }));
+    const gate = deferred<{ width: number; height: number }>();
+    const pending = importFile(store, image(), { ...options, measureImage: () => gate.promise });
+    const other = sampleDocument();
+    store.getState().load(other);
+    gate.resolve({ width: 200, height: 100 });
+    expect(await pending).toBe(false);
+    expect(s().doc).toBe(other);
+  });
+
+  it("別の作品が開かれたら、取込の知らせを消す", async () => {
+    const { store } = setup();
+    await importFile(store, { ...svg, text: "違う" }, options);
+    expect(getImportStatus().notice?.tone).toBe("error");
+    store.getState().apply((doc) => ({ ...doc })); // 編集では消さない
+    expect(getImportStatus().notice?.tone).toBe("error");
+    store.getState().load(sampleDocument());
+    expect(getImportStatus().notice).toBeNull();
+  });
+
+  it("取込の途中にドロップされたら、取込中であることを知らせる", async () => {
+    const { store } = setup();
+    const gate = deferred<{ width: number; height: number }>();
+    const pending = importFile(store, image(), { ...options, measureImage: () => gate.promise });
+    expect(await importFile(store, image(10, 10, 1), { ...options, at: { x: 0, y: 0 } })).toBe(
+      false,
+    );
+    expect(getImportStatus().notice?.message).toContain("取り込んでいる途中");
+    gate.resolve({ width: 200, height: 100 });
+    await pending;
+  });
+
+  it("本文の編集中なら、編集を終えてから置く", async () => {
+    const { store, s } = setup();
+    const text = createText({ id: "t1", x: 1400, y: 1300, text: "あ" });
+    store.getState().apply((doc) => insertNode(doc, text, { kind: "page", id: "p1" }));
+    store.getState().setSelection(["t1"]);
+    store.getState().startTextEdit("t1");
+    expect(s().editingTextId).toBe("t1");
+    expect(await importFile(store, image(), options)).toBe(true);
+    expect(s().editingTextId).toBeNull();
+    expect(s().doc.nodes[s().selection[0] ?? ""]?.type).toBe("image");
   });
 });
 

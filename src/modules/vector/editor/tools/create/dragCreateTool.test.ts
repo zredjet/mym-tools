@@ -11,7 +11,7 @@ import { TOOLS } from "../registry";
 import { getSelectOverlay } from "../select/overlayState";
 import type { CanvasPointerEvent, ToolContext } from "../types";
 import { createDragTool, type DragCreateTool, type ShapeKind } from "./dragCreateTool";
-import { getLastFrameSize, resetLastFrameSize } from "./frameSize";
+import { getLastFrameSize, rememberFrameSize, resetLastFrameSize } from "./frameSize";
 
 type Mods = Partial<Pick<CanvasPointerEvent, "shift" | "alt" | "mod" | "clickCount" | "button">>;
 
@@ -19,8 +19,9 @@ type Mods = Partial<Pick<CanvasPointerEvent, "shift" | "alt" | "mod" | "clickCou
  * キャンバス (`useCanvasInput`) と同じく、ツールが変わったら前のツールの `onCancel` を呼ぶ。
  * 作成ツールが自分のハンドラの中で `setTool("select")` を呼んでも、作ったものが残ることを確かめる。
  */
-function setup(kind: ShapeKind, doc: CanvasDocument = sampleDocument()) {
+function setup(kind: ShapeKind, doc: CanvasDocument = sampleDocument(), zoom = 1) {
   const store = createEditorStore(doc);
+  store.getState().setViewport({ x: 0, y: 0, zoom });
   const tool: DragCreateTool = createDragTool(kind);
   const tools = { ...TOOLS, [kind]: tool };
   const ctx: ToolContext = { store, measurer: fixedWidthMeasurer(), setCursor: vi.fn() };
@@ -33,7 +34,7 @@ function setup(kind: ShapeKind, doc: CanvasDocument = sampleDocument()) {
   store.getState().setTool(kind);
   const event = (x: number, y: number, mods: Mods = {}): CanvasPointerEvent => ({
     page: { x, y },
-    screen: { x, y },
+    screen: { x: x * zoom, y: y * zoom },
     button: 0,
     clickCount: 1,
     shift: false,
@@ -181,6 +182,95 @@ describe("スナップ", () => {
   });
 });
 
+describe("小数の押下点 (100% 以外の倍率)", () => {
+  it("吸着した辺がそのまま辺になり、スマートガイドも出る", () => {
+    const { down, move, up, created } = setup("rect", sampleDocument(), 2);
+    down(540.5, 400.5); // 近くに候補のない所。押した点は整数に丸める
+    move(560, 420);
+    up(560, 420);
+    expect(created()).toMatchObject({ x: 541, y: 401 });
+    // 左上へ引いて f の右下 (500, 350) に吸着
+    const b = setup("rect", sampleDocument(), 2);
+    b.down(540.5, 400.5);
+    b.move(520, 380);
+    b.move(501.5, 351.5);
+    expect(getSelectOverlay().guides.length).toBeGreaterThan(0);
+    b.up(501.5, 351.5);
+    expect(b.created()).toMatchObject({ x: 500, y: 350, width: 41, height: 51 });
+    // 右下へ引いて吸着 (押した点 (40.5, 400.5)、x = 100 は f の左辺)
+    const c = setup("rect", sampleDocument(), 2);
+    c.down(40.5, 400.5);
+    c.move(70, 420);
+    c.move(98.5, 420);
+    expect(getSelectOverlay().guides.some((g) => g.axis === "x" && g.pos === 100)).toBe(true);
+    c.up(98.5, 420);
+    const node = c.created();
+    expect(node?.type === "rect" && node.x + node.width).toBe(100);
+  });
+
+  it("Shift の線は丸めても 45°", () => {
+    const { drag, created } = setup("line", sampleDocument(), 2);
+    drag([600.5, 600], [606.1, 605.6], { shift: true });
+    const line = created();
+    expect(line?.type).toBe("line");
+    if (line?.type === "line")
+      expect(Math.abs(line.x2 - line.x1)).toBe(Math.abs(line.y2 - line.y1));
+  });
+});
+
+describe("吸着の規則", () => {
+  it("Cmd/Ctrl で押したら、押した点も吸着しない", () => {
+    const a = setup("rect");
+    a.drag([502, 600], [560, 640], { mod: true });
+    expect(a.created()).toMatchObject({ x: 502, y: 600 });
+  });
+
+  it("Shift の線は吸着しない (近くに候補があっても)", () => {
+    // 終点の近くに f の右辺 (x = 500) と下辺 (y = 350)
+    const a = setup("line");
+    a.drag([600, 450], [503, 353], { shift: true });
+    const line = a.created();
+    expect(line).toMatchObject({ x1: 600, y1: 450 });
+    if (line?.type === "line") {
+      expect(line.x2).not.toBe(500);
+      expect(Math.abs(line.x2 - 600)).toBe(Math.abs(line.y2 - 450));
+    }
+    // Shift なしなら吸着する
+    const b = setup("line");
+    b.drag([600, 450], [503, 353]);
+    expect(b.created()).toMatchObject({ x2: 500, y2: 350 });
+  });
+});
+
+describe("押してから文書が変わったとき", () => {
+  it("ドラッグを始める前に Undo されたら、何も作らない", () => {
+    const { down, move, up, s, store } = setup("rect");
+    // f を 300 px 右へ動かしてから、その f の上で押す
+    store.getState().apply((doc) => ({
+      ...doc,
+      nodes: { ...doc.nodes, f: { ...doc.nodes.f!, x: 400 } as CanvasNode },
+    }));
+    down(450, 300);
+    store.getState().undo();
+    const afterUndo = s().doc;
+    move(480, 330);
+    up(480, 330);
+    expect(s().doc).toBe(afterUndo);
+    expect(s().gestureActive).toBe(false);
+  });
+
+  it("クリックを確定する前に文書が変わったら、何も作らない", () => {
+    const { down, up, s, store } = setup("rect");
+    store.getState().apply((doc) => ({ ...doc }));
+    down(600, 400);
+    store.getState().undo();
+    const afterUndo = s().doc;
+    up(600, 400);
+    expect(s().doc).toBe(afterUndo);
+    expect(s().toolId).toBe("rect");
+  });
+});
+
 describe("クリックで作る", () => {
   it("矩形と楕円は 100 × 100 で、押した点を左上にする。履歴 1 件", () => {
     const { down, up, s, created } = setup("rect");
@@ -191,18 +281,19 @@ describe("クリックで作る", () => {
     expect(s().toolId).toBe("select");
   });
 
-  it("フレームは直前に作ったフレームの大きさ (初回は iPhone)", () => {
+  it("フレームはプリセットで直前に選んだ大きさ (初回は iPhone)。ドラッグで作った大きさは覚えない", () => {
     const a = setup("frame");
     a.down(600, 400);
     a.up(600, 400);
     expect(a.created()).toMatchObject({ type: "frame", width: 393, height: 852 });
     const b = setup("frame");
-    b.drag([2000, 0], [2120, 80]);
-    expect(getLastFrameSize()).toEqual({ width: 120, height: 80 });
+    b.drag([2000, 0], [2004, 3]);
+    expect(getLastFrameSize()).toEqual({ width: 393, height: 852 });
+    rememberFrameSize({ width: 1200, height: 630 });
     const c = setup("frame");
     c.down(600, 400);
     c.up(600, 400);
-    expect(c.created()).toMatchObject({ width: 120, height: 80 });
+    expect(c.created()).toMatchObject({ width: 1200, height: 630 });
   });
 
   it("線はクリックでは作らない (履歴も revision も増えない)", () => {

@@ -206,6 +206,23 @@ describe("キー", () => {
     expect(spy.onPointerUp).not.toHaveBeenCalled();
   });
 
+  it("ドラッグの途中は、Esc のほかのキーをツールにもショートカットにも渡さない", () => {
+    const { canvas } = setup();
+    editorStore.getState().setSelection(["r0"]);
+    const before = editorStore.getState().doc;
+    fireEvent.pointerDown(canvas, pointer());
+    for (const key of ["Delete", "ArrowRight", "r", "z"])
+      fireEvent.keyDown(document.body, { key, code: key, metaKey: key === "z" });
+    expect(spy.onKeyDown).not.toHaveBeenCalled();
+    expect(editorStore.getState().doc).toBe(before);
+    expect(editorStore.getState().toolId).toBe("select");
+    fireEvent.pointerUp(canvas, pointer());
+    // 離した後は渡す
+    fireEvent.keyDown(document.body, { key: "Delete", code: "Delete" });
+    expect(spy.onKeyDown).toHaveBeenCalledTimes(1);
+    expect(editorStore.getState().doc).not.toBe(before);
+  });
+
   it("ドラッグの途中の Esc は、ツールが取り消さなくても文書を戻す", () => {
     const { canvas } = setup();
     const before = editorStore.getState().doc;

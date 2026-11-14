@@ -5,8 +5,9 @@
  *   親は押したときに決め、ドラッグの途中では変えない (切り抜く frame の外へはみ出しても、見た目の位置は変えない)
  * - 押してから `DRAG_THRESHOLD` 画面 px 動いたらドラッグ。ドラッグの間は作ったノードを文書に入れて描く
  *   (`beginGesture` / `updateGesture` / `commitGesture` で履歴 1 件)
- * - 動かさずに離したら (クリック)、フレームは直前に使った大きさ、矩形と楕円は 100 × 100 で、押した点を左上にして作る。
- *   線は作らない
+ * - 動かさずに離したら (クリック)、フレームはプロパティパネルで直前に選んだプリセットの大きさ (初回は iPhone)、
+ *   矩形と楕円は 100 × 100 で、押した点を左上にして作る。線は作らない
+ * - 押してからドラッグを始める (またはクリックを確定する) までに文書が変わったら、何も作らない
  * - 作ったら、そのノードを選んで選択ツールへ戻る。`setTool` は自分の `onCancel` を呼ぶので、先に
  *   ジェスチャーの確定と内部状態の片付けを済ませる
  * - Esc とフォーカス喪失 (`onCancel`) では、自分のドラッグが開いたジェスチャーだけを取り消し、何も残さない
@@ -38,7 +39,7 @@ import type { EditorStore } from "../../state/types";
 import { resetSelectOverlay, setSelectOverlay } from "../select/overlayState";
 import { DRAG_THRESHOLD } from "../selectTool";
 import type { CanvasPointerEvent, Tool, ToolContext } from "../types";
-import { getLastFrameSize, rememberFrameSize } from "./frameSize";
+import { getLastFrameSize } from "./frameSize";
 import { clickBox, dragBox, dragLine, type Size } from "./geometry";
 import { creationParent, parentCoordinateFrame, scopeForParent } from "./parent";
 
@@ -51,6 +52,8 @@ interface Press {
   /** 押した点 (ページ座標、吸着の後) */
   page: Point;
   screen: Point;
+  /** 押したときの文書。ドラッグを始めるまでに変わったら (Undo など) 何も作らない */
+  doc: EditorStore["doc"];
   /** 押す前の選択 (作らずに終えたら戻す) */
   selection: readonly NodeId[];
   parent: ParentRef;
@@ -130,7 +133,6 @@ export function createDragTool(kind: ShapeKind): DragCreateTool {
     if (!node) return;
     state.setScope(scopeForParent(state.doc, parent));
     state.setSelection([id]);
-    if (node.type === "frame") rememberFrameSize(node);
     // ここで自分の onCancel が呼ばれるが、状態は片付け済みなので何もしない
     state.setTool("select");
   };
@@ -216,6 +218,7 @@ export function createDragTool(kind: ShapeKind): DragCreateTool {
       press: {
         page,
         screen: event.screen,
+        doc,
         selection: state.selection,
         parent,
         origin: parentOrigin(doc, parent),
@@ -233,8 +236,11 @@ export function createDragTool(kind: ShapeKind): DragCreateTool {
       if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
       const state = ctx.store.getState();
       const id = createId(state.doc.nodes);
-      // ノード数・深さの上限で入れられないなら作らない
-      if (insertNode(state.doc, probeNode(kind, id), press.parent) === state.doc) {
+      // 押してから文書が変わった (原点と親が古い) か、ノード数・深さの上限で入れられないなら作らない
+      if (
+        state.doc !== press.doc ||
+        insertNode(state.doc, probeNode(kind, id), press.parent) === state.doc
+      ) {
         phase = { kind: "inert" };
         return;
       }
@@ -261,6 +267,8 @@ export function createDragTool(kind: ShapeKind): DragCreateTool {
       ownsGesture = false;
       if (kind === "line") return;
       const press = current.press;
+      // 押してから文書が変わったら (原点と親が古い) 作らない
+      if (store.getState().doc !== press.doc) return;
       const size = kind === "frame" ? getLastFrameSize() : CLICK_SHAPE_SIZE;
       const state = store.getState();
       const id = createId(state.doc.nodes);
