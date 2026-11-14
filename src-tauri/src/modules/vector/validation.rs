@@ -18,8 +18,10 @@ struct Policy {
     css_properties: Vec<String>,
 }
 static POLICY: LazyLock<Policy> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../../../../scripts/svgedit/policy.json"))
-        .expect("checked-in SVG policy")
+    serde_json::from_str(include_str!(
+        "../../../../src/modules/vector/policy/policy.json"
+    ))
+    .expect("checked-in SVG policy")
 });
 pub fn error(reason: impl Into<String>) -> AppError {
     AppError::Validation {
@@ -310,7 +312,7 @@ mod tests {
     #[test]
     fn shared_browser_fixtures() {
         let fixtures: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../scripts/svgedit/validation-fixtures.json"
+            "../../../../src/modules/vector/policy/validation-fixtures.json"
         ))
         .unwrap();
         for case in fixtures.as_array().unwrap() {

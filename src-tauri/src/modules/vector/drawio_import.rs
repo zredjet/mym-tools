@@ -473,7 +473,7 @@ mod tests {
     fn converted_draw_io_export_matches_the_shared_fixture() {
         // 共通 fixture の変換結果と、31.4.1 の書出しを今の変換器に通した結果が 1 バイトも違わないこと。
         let fixtures: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../scripts/svgedit/validation-fixtures.json"
+            "../../../../src/modules/vector/policy/validation-fixtures.json"
         ))
         .unwrap();
         let expected = fixtures

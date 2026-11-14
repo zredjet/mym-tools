@@ -4,8 +4,8 @@
  *
  * model の中で DOM に依存するのはここの SVG の検証 (`validateSvg` が DOMParser を使う) だけ。
  */
-import policy from "../../../../../scripts/svgedit/policy.json";
-import { validateSvg } from "../../../../../scripts/svgedit/svg-policy.js";
+import policy from "../../policy/policy.json";
+import { validateSvg } from "../../policy/svg-policy.js";
 import { totalAssetBytes, utf8Length } from "./assets";
 import { hasOwn } from "./ids";
 import { CANVAS_LIMITS, HEX_COLOR_PATTERN, NODE_ID_PATTERN } from "./limits";

@@ -27,7 +27,6 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "@/components/ui/Button";
 import { formatInvokeError } from "@/lib/error";
 import shotqNotices from "../../third_party/shotq-NOTICES.txt?raw";
-import vectorNotices from "../../third_party/svgedit-NOTICES.txt?raw";
 
 const RELEASES_URL = "https://github.com/zredjet/mym-tools/releases";
 const REPO_URL = "https://github.com/zredjet/mym-tools";
@@ -197,22 +196,6 @@ export function AboutPage() {
             Bundled components
           </h3>
           <ul className="space-y-1 text-[12px] text-[var(--fg-muted)]">
-            <li>
-              <button
-                type="button"
-                className="underline underline-offset-2 hover:text-[var(--fg)]"
-                onClick={() => void openExternal("https://github.com/SVG-Edit/svgedit/tree/v7.4.2")}
-              >
-                SVG-Edit 7.4.2
-              </button>{" "}
-              — MIT / Apache-2.0 ほか
-              <details className="mt-1">
-                <summary className="cursor-pointer">同梱部品のライセンス全文</summary>
-                <pre className="mt-2 max-h-64 overflow-auto text-[11px] whitespace-pre-wrap">
-                  {vectorNotices}
-                </pre>
-              </details>
-            </li>
             <li>
               <button
                 type="button"

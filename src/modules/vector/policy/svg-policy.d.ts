@@ -11,4 +11,3 @@ export function utf8Size(value: string): number;
 export function validateCss(value: string): void;
 export function validateImageData(value: string): void;
 export function validateSvg(svg: string, policy: SvgPolicy): { svg: string; text: string };
-export function renderPng(svg: string, policy: SvgPolicy): Promise<string>;

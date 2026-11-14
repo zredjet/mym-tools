@@ -32,14 +32,14 @@ function formatJst(epochMs) {
   return `${new Date(epochMs + JST_OFFSET_MS).toISOString().replace("Z", "")}+09:00`;
 }
 
-function item(moduleId, title, payload, tags = []) {
+function item(moduleId, title, payload, tags = [], payloadSchemaVersion = 1) {
   const at = timestamp();
   return {
     id: id(),
     module_id: moduleId,
     title,
     tags,
-    payload_schema_version: 1,
+    payload_schema_version: payloadSchemaVersion,
     payload,
     created_at: at,
     updated_at: at,
@@ -381,31 +381,100 @@ const diagrams = [
   item("diagram", "システム構成", { xml: diagramXml, text: diagramLabels.join(" ") }),
 ];
 
-// SVG-Edit が保存する形 (レイヤーは title 付きの g)。text は Rust の抽出規則
-// (text / title / desc の文字列を空白で区切る) と一致させる
-const vectorSvg = [
-  '<svg width="640" height="480" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg">',
-  "<defs>",
-  '<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">',
-  '<stop offset="0" stop-color="#2563EB"/>',
-  '<stop offset="1" stop-color="#7C3AED"/>',
-  "</linearGradient>",
-  "</defs>",
-  '<g class="layer">',
-  "<title>レイヤー 1</title>",
-  '<rect id="svg_1" x="200" y="60" width="240" height="240" rx="56" fill="url(#bg)"/>',
-  '<path id="svg_2" d="M260 240 V130 L320 195 L380 130 V240" fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>',
-  '<circle id="svg_3" cx="404" cy="96" r="18" fill="#F59E0B"/>',
-  '<text id="svg_4" x="320" y="370" font-family="sans-serif" font-size="40" font-weight="bold" text-anchor="middle" fill="#0F172A">MyMyTools</text>',
-  '<text id="svg_5" x="320" y="410" font-family="sans-serif" font-size="20" text-anchor="middle" fill="#64748B">アイコン案 A</text>',
-  "</g>",
-  "</svg>",
-].join("");
+// キャンバスの payload v2 (`docs/canvas-editor-design.md` §3)。`text` は §3.6 の規則
+// (frame の名前、テキストの本文を、ページの深さ優先の順に空白 1 個でつなぐ) と一致させる
+const common = (id, name) => ({ id, name, visible: true, locked: false, opacity: 1 });
+const solid = (color, opacity = 1) => ({ type: "solid", color, opacity });
+const label = (id, name, text, x, y, width, fontSize, fontWeight, color) => ({
+  ...common(id, name),
+  type: "text",
+  x,
+  y,
+  width,
+  height: Math.ceil(fontSize * 1.4),
+  text,
+  fontFamily: "Hiragino Sans",
+  fontSize,
+  fontWeight,
+  italic: false,
+  lineHeight: null,
+  letterSpacing: 0,
+  align: "center",
+  sizing: "fixed",
+  fill: solid(color),
+  shadow: null,
+});
+const vectorNodes = [
+  {
+    ...common("frame1", "アプリアイコン案"),
+    type: "frame",
+    x: 0,
+    y: 0,
+    width: 640,
+    height: 480,
+    children: ["badge", "mark", "dot", "title", "caption"],
+    clip: true,
+    fill: solid("#FFFFFF"),
+    stroke: null,
+    radius: 0,
+    shadow: null,
+  },
+  {
+    ...common("badge", "背景"),
+    type: "rect",
+    x: 200,
+    y: 60,
+    width: 240,
+    height: 240,
+    fill: {
+      type: "linear",
+      stops: [
+        { offset: 0, color: "#2563EB", opacity: 1 },
+        { offset: 1, color: "#7C3AED", opacity: 1 },
+      ],
+      from: { x: 0, y: 0 },
+      to: { x: 1, y: 1 },
+    },
+    stroke: null,
+    radius: 56,
+    shadow: { x: 0, y: 12, blur: 24, color: "#1E1B4B", opacity: 0.25 },
+  },
+  {
+    ...common("mark", "M"),
+    type: "line",
+    x1: 260,
+    y1: 240,
+    x2: 380,
+    y2: 130,
+    stroke: { color: "#FFFFFF", opacity: 1, width: 22 },
+  },
+  {
+    ...common("dot", "点"),
+    type: "ellipse",
+    x: 386,
+    y: 78,
+    width: 36,
+    height: 36,
+    fill: solid("#F59E0B"),
+    stroke: null,
+    shadow: null,
+  },
+  label("title", "名前", "MyMyTools", 120, 340, 400, 40, 700, "#0F172A"),
+  label("caption", "説明", "アイコン案 A", 120, 396, 400, 20, 400, "#64748B"),
+];
 const vectors = [
-  item("vector", "アプリアイコン案", {
-    svg: vectorSvg,
-    text: "レイヤー 1 MyMyTools アイコン案 A",
-  }),
+  item(
+    "vector",
+    "アプリアイコン案",
+    {
+      pages: [{ id: "page1", name: "ページ 1", children: ["frame1"], guides: [] }],
+      nodes: Object.fromEntries(vectorNodes.map((node) => [node.id, node])),
+      assets: {},
+      text: "アプリアイコン案 MyMyTools アイコン案 A",
+    },
+    [],
+    2,
+  ),
 ];
 
 const projects = [
@@ -439,11 +508,15 @@ const document = {
   exported_at: formatJst(now),
   app_version: "0.1.0-alpha.21",
   scope: "app",
-  module_versions: Object.fromEntries(
-    ["prompt", "linkmemo", "memo", "color", "palette", "mermaid", "diagram", "vector"].map(
-      (moduleId) => [moduleId, 1],
+  module_versions: {
+    ...Object.fromEntries(
+      ["prompt", "linkmemo", "memo", "color", "palette", "mermaid", "diagram"].map((moduleId) => [
+        moduleId,
+        1,
+      ]),
     ),
-  ),
+    vector: 2,
+  },
   projects,
 };
 

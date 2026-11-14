@@ -11,8 +11,8 @@
  *   __canvasImport.importAt(file, { x, y })                   OS からのドロップの代わり
  *   __canvasImport.pngDataUrl(width, height, color)          試し用の PNG を作る
  */
-import policy from "../../../../../scripts/svgedit/policy.json";
-import { validateSvg } from "../../../../../scripts/svgedit/svg-policy.js";
+import policy from "../../policy/policy.json";
+import { validateSvg } from "../../policy/svg-policy.js";
 import { importFile } from "../assets/importFile";
 import type { ImportedFile, ImportFileReader } from "../assets/types";
 import type { Point } from "../model/types";

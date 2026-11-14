@@ -1,5 +1,6 @@
-// Shared browser boundary: checked before SVG enters the editor or PNG renderer.
-// Rust applies the same policy on every persistent/file boundary.
+// SVG ポリシーのブラウザ側の判定 (キャンバスの埋め込み SVG と SVG ファイルの取込)。
+// Rust (`src-tauri/src/modules/vector/validation.rs`) が同じ policy.json で同じ判定を行い、
+// 抽出した検索用テキストが一致することを validation-fixtures.json で確かめる。
 export const MAX_SVG_BYTES = 20 * 1024 * 1024;
 export const MAX_TEXT_BYTES = 1024 * 1024;
 export const MAX_PNG_SIDE = 16_384;
@@ -7,26 +8,6 @@ export const MAX_PNG_PIXELS = 16_777_216;
 export const SVG_NS = "http://www.w3.org/2000/svg";
 const XLINK_NS = "http://www.w3.org/1999/xlink";
 export const utf8Size = (value) => new TextEncoder().encode(value).length;
-
-export async function decodeImage(data) {
-  const img = new Image();
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      img.src = "";
-      reject(new Error("画像の読み込みがタイムアウトしました。"));
-    }, 30_000);
-    img.onload = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-    img.onerror = () => {
-      clearTimeout(timer);
-      reject(new Error("画像を読み込めません。"));
-    };
-    img.src = data;
-  });
-  return img;
-}
 
 export function validateCss(value) {
   if (/[\\@<>]/.test(value) || value.includes("/*"))
@@ -117,51 +98,4 @@ export function validateSvg(svg, policy) {
   const text = parts.join(" ").replace(/\s+/g, " ").trim();
   if (utf8Size(text) > MAX_TEXT_BYTES) throw new Error("検索用テキストは1MiB以下にしてください。");
   return { svg, text };
-}
-
-export async function renderPng(svg, policy) {
-  validateSvg(svg, policy);
-  const root = new DOMParser().parseFromString(svg, "image/svg+xml").documentElement;
-  const box = root
-    .getAttribute("viewBox")
-    ?.trim()
-    .split(/[\s,]+/)
-    .map(Number);
-  const length = (name, fallback) => {
-    const value = root.getAttribute(name);
-    if (value && /^\d+(?:\.\d+)?(?:px)?$/.test(value)) return Number.parseFloat(value);
-    return fallback;
-  };
-  const width = Math.ceil(length("width", box?.[2]));
-  const height = Math.ceil(length("height", box?.[3]));
-  if (
-    ![width, height].every((n) => Number.isFinite(n) && n > 0 && n <= MAX_PNG_SIDE) ||
-    width * height > MAX_PNG_PIXELS
-  )
-    throw new Error("PNGの寸法が上限を超えています。");
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
-  try {
-    const img = await decodeImage(url);
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("PNG描画を初期化できません。");
-    ctx.drawImage(img, 0, 0, width, height);
-    const blob = await new Promise((resolve, reject) =>
-      canvas.toBlob(
-        (value) => (value ? resolve(value) : reject(new Error("PNG生成に失敗しました。"))),
-        "image/png",
-      ),
-    );
-    if (blob.size > MAX_SVG_BYTES) throw new Error("PNGは20MiB以下にしてください。");
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  } finally {
-    URL.revokeObjectURL(url);
-  }
 }
