@@ -233,3 +233,32 @@ describe("貼り付け先と位置 (§4.10)", () => {
     });
   });
 });
+
+describe("Object.prototype と同じ名前の ID のコピー・切り取り・貼り付け", () => {
+  it("__proto__ と constructor を切り取って貼ると、2 個とも新しい ID で戻る", () => {
+    const json = JSON.stringify({
+      pages: [{ id: "p", name: "", children: ["PROTO", "CTOR"], guides: [] }],
+      nodes: {
+        PROTO: { ...sampleDocument().nodes["r0"]!, id: "PROTO" },
+        CTOR: { ...sampleDocument().nodes["r1"]!, id: "CTOR" },
+      },
+      assets: {},
+    })
+      .split('"PROTO"')
+      .join('"__proto__"')
+      .split('"CTOR"')
+      .join('"constructor"');
+    const store = createEditorStore(deepFreeze(JSON.parse(json)));
+    store.getState().setSelection(["__proto__", "constructor"]);
+    expect(store.getState().selection).toEqual(["__proto__", "constructor"]);
+
+    const clipboard = new EditorClipboard();
+    cutSelection(store, clipboard);
+    expect(Object.keys(store.getState().doc.nodes)).toEqual([]);
+    pasteClipboard(store, clipboard);
+    const pasted = store.getState().selection;
+    expect(pasted).toHaveLength(2);
+    expect(store.getState().doc.pages[0]!.children).toEqual(pasted);
+    expect(getPageBounds(store.getState().doc, pasted[0]!)).toMatchObject({ x: 10, y: 10 });
+  });
+});
