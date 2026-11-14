@@ -6,6 +6,10 @@
  * - 選択がなければ、ページのすべてのノードを 1 ファイル。範囲は同じく描く範囲の和
  *
  * 非表示のノード (祖先が非表示のものを含む) は書き出さない。範囲は外側へ整数に丸める。
+ *
+ * - frame の範囲は frame の矩形ちょうど。frame の線の外側半分、影、はみ出した子は入らない
+ *   (書き出す画像の大きさを frame の大きさと一致させるため)
+ * - 入れ子のノードは、親の座標系の原点へ移して位置だけを合わせる。祖先の切り抜きと不透明度は反映しない
  */
 import { renderBounds } from "../canvas/culling";
 import { DEFAULT_NODE_NAMES } from "../model/create";
@@ -88,10 +92,12 @@ export function planExport(
     return { ok: true, kind: "page", targets: [target] };
   }
 
+  // 祖先も選ばれているノードは祖先だけにする (frame とその中の frame を選んだら祖先の 1 ファイル)。
+  // 非表示のノードを先に除いてから frame だけかを判定する (非表示が混ざっても書き出し方を変えない)
   const ids = topLevelIds(doc, selection);
-  const allFrames = ids.length > 0 && ids.every((id) => getNode(doc, id)?.type === "frame");
-  const kind: ExportKind = allFrames ? "frames" : "selection";
   const visible = ids.filter((id) => isEffectivelyVisible(doc, id));
+  const allFrames = visible.length > 0 && visible.every((id) => getNode(doc, id)?.type === "frame");
+  const kind: ExportKind = allFrames ? "frames" : "selection";
   if (visible.length === 0) return failure(kind, "選択したノードはすべて非表示です。");
 
   if (allFrames) {

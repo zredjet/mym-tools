@@ -67,7 +67,8 @@ export async function buildExportFiles(
     if (!size) continue;
     // 画像としての大きさを書き出す大きさにそろえる (倍率は整数なので範囲の整数 × 倍率と一致する)
     const svg = buildExportSvg(doc, target, { measurer, scale });
-    const problem = checkExportSvg(svg);
+    // 中間の SVG はファイルにしないので大きさは見ない (上限は PNG の大きさで確かめる)
+    const problem = checkExportSvg(svg, null);
     if (problem) throw new ExportError(problem);
     const data = await render(svg, size.width, size.height);
     files.push({ fileName: names[index] ?? "", format, data });

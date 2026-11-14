@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createRect, createText } from "../model/create";
+import { createFrame, createGroup, createRect, createText } from "../model/create";
 import { insertNode } from "../model/structure";
 import { deepFreeze, fixtureDocument } from "../model/testing";
 import { updateNodes } from "../model/transform";
@@ -150,6 +150,84 @@ describe("buildExportSvg", () => {
   });
 });
 
+describe("入れ子のノードの位置", () => {
+  /**
+   * ```
+   * page p1
+   * └─ fo frame (100, 50) 300×300 不透明度 0.5、切り抜き
+   *    └─ fi frame (20, 30) 200×200
+   *       └─ gr group
+   *          └─ rr rect (5, 7) 10×10
+   * ```
+   */
+  function nestedDocument(): CanvasDocument {
+    const nodes = [
+      createFrame({
+        id: "fo",
+        x: 100,
+        y: 50,
+        width: 300,
+        height: 300,
+        opacity: 0.5,
+        clip: true,
+        children: ["fi"],
+      }),
+      createFrame({ id: "fi", x: 20, y: 30, width: 200, height: 200, children: ["gr"] }),
+      createGroup(["rr"], { id: "gr" }),
+      createRect({ id: "rr", x: 5, y: 7, width: 10, height: 10 }),
+    ];
+    return {
+      pages: [{ id: "p1", name: "ページ 1", children: ["fo"], guides: [] }],
+      nodes: Object.fromEntries(nodes.map((node) => [node.id, node])),
+      assets: {},
+    };
+  }
+
+  /** 要素とその祖先の translate を足したページ座標の位置。 */
+  function pagePosition(element: Element): { x: number; y: number } {
+    let x = Number(element.getAttribute("x"));
+    let y = Number(element.getAttribute("y"));
+    for (let node = element.parentElement; node; node = node.parentElement) {
+      const match = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(node.getAttribute("transform") ?? "");
+      if (match) {
+        x += Number(match[1]);
+        y += Number(match[2]);
+      }
+    }
+    return { x, y };
+  }
+
+  it("frame が 2 段と group の中の矩形は、ページ座標 (125, 87) に置き、範囲もそこになる", () => {
+    const doc = nestedDocument();
+    const parsed = parse(buildExportSvg(doc, onlyTarget(doc, ["rr"]), { measurer }));
+    expect(parsed.documentElement.getAttribute("viewBox")).toBe("125 87 10 10");
+    const rects = parsed.querySelectorAll('rect[width="10"]');
+    expect(rects).toHaveLength(1);
+    expect(pagePosition(rects[0]!)).toEqual({ x: 125, y: 87 });
+  });
+
+  it("入れ子の frame は (120, 80) に置き、子はその中の (125, 87) に描く", () => {
+    const doc = nestedDocument();
+    const parsed = parse(buildExportSvg(doc, onlyTarget(doc, ["fi"]), { measurer }));
+    expect(parsed.documentElement.getAttribute("viewBox")).toBe("120 80 200 200");
+    const fill = parsed.querySelector('rect[width="200"]:not(clipPath rect)');
+    expect(fill && pagePosition(fill)).toEqual({ x: 120, y: 80 });
+    const child = parsed.querySelector('rect[width="10"]');
+    expect(child && pagePosition(child)).toEqual({ x: 125, y: 87 });
+  });
+
+  it("祖先の切り抜きと不透明度は反映しない (位置だけを合わせる)", () => {
+    const doc = nestedDocument();
+    const svg = buildExportSvg(doc, onlyTarget(doc, ["fi"]), { measurer });
+    expect(svg).not.toContain("fo-clip");
+    expect(svg).not.toContain('opacity="0.5"');
+    // 外側の frame を書き出せば、どちらも入る
+    const outer = buildExportSvg(doc, onlyTarget(doc, ["fo"]), { measurer });
+    expect(outer).toContain(`${EXPORT_ID_PREFIX}fo-clip`);
+    expect(outer).toContain('opacity="0.5"');
+  });
+});
+
 describe("utf8ByteLength / checkExportSvg", () => {
   it("UTF-8 のバイト数を数え、対になっていないサロゲートは null", () => {
     expect(utf8ByteLength("a")).toBe(1);
@@ -161,10 +239,13 @@ describe("utf8ByteLength / checkExportSvg", () => {
     expect(utf8ByteLength("")).toBe(0);
   });
 
-  it("20 MiB を超えれば理由を返す", () => {
+  it("28 MiB を超えれば理由を返す。maxBytes が null なら大きさを見ない", () => {
+    expect(MAX_EXPORT_SVG_BYTES).toBe(29_360_128);
     expect(checkExportSvg("a".repeat(MAX_EXPORT_SVG_BYTES))).toBeNull();
+    expect(checkExportSvg("a".repeat(MAX_EXPORT_SVG_BYTES + 1), null)).toBeNull();
+    expect(checkExportSvg("\uD800", null)).toBe("SVG に UTF-8 にできない文字があります。");
     expect(checkExportSvg("a".repeat(MAX_EXPORT_SVG_BYTES + 1))).toBe(
-      "SVG は 20 MiB 以下にしてください。",
+      "SVG は 28 MiB 以下にしてください。",
     );
     expect(checkExportSvg("\uD800")).toBe("SVG に UTF-8 にできない文字があります。");
   });

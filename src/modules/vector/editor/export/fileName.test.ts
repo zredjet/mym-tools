@@ -23,6 +23,14 @@ describe("sanitizeFileStem", () => {
     expect(sanitizeFileStem("CON")).toBe("_CON");
     expect(sanitizeFileStem("com1")).toBe("_com1");
     expect(sanitizeFileStem("console")).toBe("console");
+    // 最初のピリオドより前が予約名なら、拡張子のようなものが付いていても置き換える
+    expect(sanitizeFileStem("nul.tar")).toBe("_nul.tar");
+    expect(sanitizeFileStem("aux.v2")).toBe("_aux.v2");
+    expect(sanitizeFileStem("LPT1.backup")).toBe("_LPT1.backup");
+    expect(sanitizeFileStem("con .txt")).toBe("_con .txt");
+    expect(sanitizeFileStem("COM\u00b9")).toBe("_COM\u00b9");
+    expect(sanitizeFileStem("auxiliary.v2")).toBe("auxiliary.v2");
+    expect(sanitizeFileStem("my.nul")).toBe("my.nul");
   });
 
   it("対になっていないサロゲートを置き換え、正しい組は残す", () => {
@@ -52,6 +60,14 @@ describe("uniqueFileNames", () => {
       "a (3).svg",
       "a (2).svg",
     ]);
+  });
+
+  it("NFC にそろえてから比べ、ファイル名も NFC にする", () => {
+    const nfd = "か\u3099"; // 「か」+ 結合用の濁点
+    const nfc = "が";
+    expect(nfd).not.toBe(nfc);
+    expect(uniqueFileNames([nfc, nfd], "png")).toEqual(["が.png", "が (2).png"]);
+    expect(uniqueFileNames([nfd], "svg")).toEqual(["が.svg"]);
   });
 
   it("置き換えた結果で比べる", () => {

@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { createImage } from "../model/create";
 import { deepFreeze } from "../model/testing";
+import type { CanvasDocument } from "../model/types";
 import { updateNodes } from "../model/transform";
 import { fixedWidthMeasurer } from "../render/testing";
 import { planExport } from "./plan";
 import { MAX_PNG_PIXELS, MAX_PNG_SIDE, pngSize } from "./png";
 import { buildExportFiles, ExportError, runExport } from "./run";
+import { MAX_EXPORT_SVG_BYTES } from "./svg";
 import { exportDocument } from "./testing";
 import type { ExportWriter } from "./types";
 
@@ -84,6 +87,34 @@ describe("buildExportFiles", () => {
     await expect(
       buildExportFiles(doc, plan, { format: "png", scale: 2, measurer, render }),
     ).resolves.toHaveLength(2);
+  });
+
+  it("PNG の中間の SVG は大きさを見ない (大きな画像を複製して置いても PNG は書き出せる)", async () => {
+    // アセットは共有でも、SVG にはノードごとに data URL が入る
+    const base = exportDocument();
+    const data = "A".repeat(15 * 1024 * 1024);
+    const doc: CanvasDocument = {
+      ...base,
+      pages: [{ ...base.pages[0]!, children: ["i1", "i2"] }],
+      nodes: {
+        ...base.nodes,
+        i1: createImage("big", { id: "i1", x: 0, y: 0, width: 100, height: 100 }),
+        i2: createImage("big", { id: "i2", x: 100, y: 0, width: 100, height: 100 }),
+      },
+      assets: { big: { kind: "image", mime: "image/jpeg", data, width: 100, height: 100 } },
+    };
+    const plan = planExport(doc, "p1", [], measurer);
+    const render = vi.fn(async (svg: string) => {
+      expect(svg.length).toBeGreaterThan(MAX_EXPORT_SVG_BYTES);
+      return FAKE_PNG;
+    });
+    await expect(
+      buildExportFiles(doc, plan, { format: "png", scale: 1, measurer, render }),
+    ).resolves.toEqual([{ fileName: "ページ 1.png", format: "png", data: FAKE_PNG }]);
+    // SVG のファイルとしては上限を超える
+    await expect(
+      buildExportFiles(doc, plan, { format: "svg", scale: 1, measurer }),
+    ).rejects.toThrow("SVG は 28 MiB 以下にしてください。");
   });
 
   it("書き出せない対象は理由を投げる", async () => {

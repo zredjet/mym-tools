@@ -1,5 +1,5 @@
 import { Download } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 
@@ -67,10 +67,22 @@ function describe(plan: ExportPlan): string {
   return count <= 1 ? "選択したノードを 1 ファイルに" : `選択した ${count} 個を 1 ファイルに`;
 }
 
+/**
+ * 処理の状態と結果の表示。
+ * - 失敗は、対象 (選択や文書) や形式が変わっても、次に書き出すまで出し続ける (途中で選択を変えても見落とさない)
+ * - 成功は、終えた時点の対象・形式・倍率のままの間だけ出す (どれかを変えたら消す)
+ */
 type Status =
   | { kind: "busy" }
-  | { kind: "done"; message: string; plan: ExportPlan }
-  | { kind: "error"; message: string; plan: ExportPlan };
+  | {
+      kind: "done";
+      message: string;
+      /** 終えた時点の対象 */
+      plan: ExportPlan;
+      format: ExportFormat;
+      scale: ExportScale;
+    }
+  | { kind: "error"; message: string };
 
 function doneMessage(written: number, total: number): string {
   if (written === 0) return "書き出しを取り消しました。";
@@ -89,9 +101,15 @@ export function ExportSection() {
   const [scale, setScale] = useState<ExportScale>(2);
   const [status, setStatus] = useState<Status | null>(null);
 
+  // 押した直後 (描き直す前) の 2 回目の押下でも書き込みが 2 回にならないよう、ref でも止める
+  const running = useRef(false);
+
   const busy = status?.kind === "busy";
-  // 結果の表示は、そのときの対象のままの間だけ出す (選択や文書が変われば消す)
-  const shownStatus = status && (status.kind === "busy" || status.plan === plan) ? status : null;
+  const shownStatus =
+    status?.kind === "done" &&
+    !(status.plan === plan && status.format === format && status.scale === scale)
+      ? null
+      : status;
 
   let problem: string | null = plan.ok ? null : plan.reason;
   let sizeText: string | null = null;
@@ -113,7 +131,8 @@ export function ExportSection() {
   }
 
   const run = async () => {
-    if (!writer || busy) return;
+    if (!writer || running.current) return;
+    running.current = true;
     // 押した時点の文書と対象を使う (文書は変えない)
     const { doc, pageId, selection } = editorStore.getState();
     const target = currentPlan(doc, pageId, selection);
@@ -124,13 +143,24 @@ export function ExportSection() {
         scale,
         measurer: canvasTextMeasurer,
       });
-      setStatus({ kind: "done", message: doneMessage(result.written, result.total), plan: target });
+      // 成功の表示は、終えた時点の対象に結び付ける (押してから選択が変わっていても結果は出し、
+      // そのあと対象・形式・倍率のどれかを変えたら消す)
+      const now = editorStore.getState();
+      setStatus({
+        kind: "done",
+        message: doneMessage(result.written, result.total),
+        plan: currentPlan(now.doc, now.pageId, now.selection),
+        format,
+        scale,
+      });
     } catch (error) {
       const message =
         error instanceof ExportError
           ? error.message
           : `書き出しに失敗しました: ${error instanceof Error ? error.message : String(error)}`;
-      setStatus({ kind: "error", message, plan: target });
+      setStatus({ kind: "error", message });
+    } finally {
+      running.current = false;
     }
   };
 

@@ -7,6 +7,12 @@ import { setExportWriter } from "../../export/writer";
 import { editorStore } from "../../state/store";
 import { ExportSection } from "./ExportSection";
 
+// jsdom では画像を読み込めず PNG を描けないので、描く関数だけを差し替える
+vi.mock("../../export/png", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../export/png")>()),
+  renderPng: vi.fn(async () => "data:image/png;base64,AAAA"),
+}));
+
 const state = () => editorStore.getState();
 const exportButton = () => screen.getByRole("button", { name: /を書き出す/ });
 
@@ -90,6 +96,75 @@ describe("ExportSection", () => {
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent("書き出しを取り消しました。"),
     );
+  });
+
+  it("書き出しの途中で選択が変わっても、失敗を表示する。失敗は形式を変えても残る", async () => {
+    let fail: (error: Error) => void = () => {};
+    setExportWriter(
+      () =>
+        new Promise((_, reject) => {
+          fail = reject;
+        }),
+    );
+    render(<ExportSection />);
+    fireEvent.click(exportButton());
+    expect(await screen.findByRole("button", { name: /書き出し中/ })).toBeDisabled();
+    act(() => state().setSelection(["fb"]));
+    await act(async () => fail(new Error("disk full")));
+    expect(screen.getByRole("alert")).toHaveTextContent("書き出しに失敗しました: disk full");
+    fireEvent.click(screen.getByRole("button", { name: "PNG" }));
+    act(() => state().setSelection(["fa"]));
+    expect(screen.getByRole("alert")).toHaveTextContent("書き出しに失敗しました: disk full");
+  });
+
+  it("書き出しの途中で選択が変わっても、成功を表示する", async () => {
+    let finish: (value: { written: number }) => void = () => {};
+    setExportWriter(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(<ExportSection />);
+    fireEvent.click(exportButton());
+    expect(await screen.findByRole("button", { name: /書き出し中/ })).toBeDisabled();
+    act(() => state().setSelection(["fb"]));
+    await act(async () => finish({ written: 1 }));
+    expect(screen.getByRole("status")).toHaveTextContent("書き出しました。");
+  });
+
+  it("成功の表示は、形式・倍率・対象を変えたら消す", async () => {
+    setExportWriter(async (files) => ({ written: files.length }));
+    render(<ExportSection />);
+    const exportOnce = async () => {
+      fireEvent.click(exportButton());
+      await screen.findByRole("status");
+    };
+    await exportOnce();
+    fireEvent.click(screen.getByRole("button", { name: "PNG" }));
+    expect(screen.queryByRole("status")).toBeNull();
+
+    await exportOnce();
+    fireEvent.click(screen.getByRole("button", { name: "3x" }));
+    expect(screen.queryByRole("status")).toBeNull();
+
+    await exportOnce();
+    act(() => state().setSelection(["fb"]));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("続けて押しても、書き込みは 1 回だけ", async () => {
+    const writer = vi.fn<ExportWriter>(async (files) => ({ written: files.length }));
+    setExportWriter(writer);
+    render(<ExportSection />);
+    const button = exportButton();
+    fireEvent.click(button);
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await screen.findByRole("status");
+    expect(writer).toHaveBeenCalledTimes(1);
+    fireEvent.click(exportButton());
+    await waitFor(() => expect(writer).toHaveBeenCalledTimes(2));
   });
 
   it("選択がすべて非表示なら理由を出す", () => {

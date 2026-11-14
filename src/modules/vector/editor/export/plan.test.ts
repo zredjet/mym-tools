@@ -130,6 +130,40 @@ describe("planExport", () => {
     ]);
   });
 
+  it("非表示のノードが混ざっても、frame だけの書き出し方を変えない", () => {
+    const doc = exportDocument(); // hid は非表示の矩形
+    const two = planExport(doc, "p1", ["fa", "fb", "hid"], measurer);
+    expect(two.kind).toBe("frames");
+    expect(targets(two).map((target) => target.nodeIds)).toEqual([["fa"], ["fb"]]);
+    const one = planExport(doc, "p1", ["fb", "hid"], measurer);
+    expect(one.kind).toBe("frames");
+    expect(targets(one)).toEqual([
+      { nodeIds: ["fb"], bounds: { x: 400, y: 50, width: 100, height: 100 }, name: "表紙" },
+    ]);
+    // 祖先が非表示のノードも同じ
+    const hiddenParent = updateNodes(doc, ["g"], { visible: false });
+    expect(planExport(hiddenParent, "p1", ["fb", "e1"], measurer).kind).toBe("frames");
+  });
+
+  it("frame の範囲は矩形ちょうどで、線の外側半分は入らない", () => {
+    const doc = updateNodes(exportDocument(), ["fb"], {
+      stroke: { color: "#000000", opacity: 1, width: 10 },
+    });
+    expect(targets(planExport(doc, "p1", ["fb"], measurer))[0]?.bounds).toEqual({
+      x: 400,
+      y: 50,
+      width: 100,
+      height: 100,
+    });
+    // frame でないノードと一緒なら、描く範囲 (線の外側を含む)
+    expect(targets(planExport(doc, "p1", ["fb", "r2"], measurer))[0]?.bounds).toEqual({
+      x: 60,
+      y: 45,
+      width: 445,
+      height: 285,
+    });
+  });
+
   it("大きさが 0 の frame は理由を返す", () => {
     const doc = updateNodes(exportDocument(), ["fb"], { width: 0 });
     expect(planExport(doc, "p1", ["fa", "fb"], measurer)).toEqual({

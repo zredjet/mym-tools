@@ -13,8 +13,13 @@ import { el, formatNumber, SVG_NS, svgElToString } from "../render/svgEl";
 import type { SvgEl, TextMeasurer } from "../render/types";
 import type { ExportTarget } from "./types";
 
-/** 書き出す SVG の上限 (UTF-8 のバイト数)。Rust の `vector_write_file` と同じ 20 MiB。 */
-export const MAX_EXPORT_SVG_BYTES = 20 * 1024 * 1024;
+/**
+ * 書き出す SVG の上限 (UTF-8 のバイト数)。28 MiB。
+ * 埋め込み SVG と画像は base64 の data URL で入り 4/3 倍になるので、v1 の上限いっぱい (20 MiB) の
+ * 作品を v2 に包んだものも書き出せるよう、20 MiB × 4/3 に余裕を足した値にする。
+ * Rust の `vector_write_file` の上限 (今は 20 MiB) は切替 PR でこの値に合わせる。
+ */
+export const MAX_EXPORT_SVG_BYTES = 28 * 1024 * 1024;
 
 /**
  * `<defs>` の ID の接頭辞。1 つの文書の中ではノード ID が重ならないので、
@@ -95,10 +100,18 @@ export function utf8ByteLength(value: string): number | null {
   return bytes;
 }
 
-/** 書き出す SVG が UTF-8 にでき、上限以下か。だめなら理由。 */
-export function checkExportSvg(svg: string): string | null {
+/**
+ * 書き出す SVG が UTF-8 にでき、上限以下か。だめなら理由。
+ * `maxBytes` が null なら大きさを見ない (PNG の中間の SVG。同じアセットを使うノードごとに data URL が入って
+ * 大きくなるが、ファイルには書かず、上限は PNG のほうで確かめる)。
+ */
+export function checkExportSvg(
+  svg: string,
+  maxBytes: number | null = MAX_EXPORT_SVG_BYTES,
+): string | null {
   const bytes = utf8ByteLength(svg);
   if (bytes === null) return "SVG に UTF-8 にできない文字があります。";
-  if (bytes > MAX_EXPORT_SVG_BYTES) return "SVG は 20 MiB 以下にしてください。";
+  if (maxBytes !== null && bytes > maxBytes)
+    return `SVG は ${Math.floor(maxBytes / 1024 / 1024)} MiB 以下にしてください。`;
   return null;
 }
