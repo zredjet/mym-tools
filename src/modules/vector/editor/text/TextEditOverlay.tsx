@@ -178,6 +178,8 @@ function TextEditor({ id }: { id: NodeId }) {
       ref={ref}
       data-canvas-text-editor=""
       aria-label="テキストの本文"
+      // 禁則 (line-break: strict) は内容の言語で変わる。ページの言語に関係なく行分割 (lineBreak.ts) とそろえる
+      lang="ja"
       defaultValue={initialText}
       wrap={node.sizing === "auto-width" ? "off" : "soft"}
       rows={1}

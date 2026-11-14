@@ -19,8 +19,8 @@ import { CANVAS_LIMITS } from "../model/limits";
 import type { TextAlign, TextNode } from "../model/types";
 import type { FontSpec, LayoutText, TextLayout, TextLine, TextMeasurer } from "../render/types";
 import { splitGraphemes } from "./graphemes";
-import { breakUnits, trimTrailingSpaces } from "./lineBreak";
-import { fontMetricsOf } from "./metrics";
+import { breakUnits, trimTrailingSpaces, type LineBreakOptions } from "./lineBreak";
+import { fontMetricsOf, lineBreakOptionsOf } from "./metrics";
 
 /** `lineHeight` が null のときの行の高さ (フォントサイズに対する倍率)。 */
 export const AUTO_LINE_HEIGHT = 1.4;
@@ -140,10 +140,11 @@ function wrapParagraph(
   paragraph: string,
   maxWidth: number,
   measure: (text: string) => number,
+  options: LineBreakOptions,
   rows: Row[],
 ): void {
   const limit = wrapLimit(maxWidth);
-  const units = breakUnits(paragraph);
+  const units = breakUnits(paragraph, options);
   const visibleWidth = (parts: readonly string[]) => measure(trimTrailingSpaces(parts.join("")));
   const pushRow = (text: string) => rows.push({ text, width: measure(trimTrailingSpaces(text)) });
   let next = 0;
@@ -160,16 +161,21 @@ function wrapParagraph(
       next++;
     }
     // 2. 行全体の実際の幅で確かめる。はみ出すなら後ろから戻し、まだ入るなら次の単位も取る
-    while (line.length > 1 && visibleWidth(line) >= limit) {
+    let current = visibleWidth(line);
+    while (line.length > 1 && current >= limit) {
       line.pop();
       next--;
+      current = visibleWidth(line);
     }
-    while (next < units.length && visibleWidth([...line, units[next] as string]) < limit) {
+    while (current < limit && next < units.length) {
+      const candidate = visibleWidth([...line, units[next] as string]);
+      if (candidate >= limit) break;
       line.push(units[next] as string);
       next++;
+      current = candidate;
     }
     // 3. 1 単位だけでも入らなければ、書記素クラスタで割る。収まる残りは次の行の先頭の単位にする
-    if (line.length === 1 && visibleWidth(line) >= limit) {
+    if (line.length === 1 && current >= limit) {
       const { lines, rest } = breakLongUnit(line[0] as string, limit, measure);
       for (const text of lines) pushRow(text);
       if (rest !== "") {
@@ -188,14 +194,27 @@ function alignOffset(align: TextAlign, boxWidth: number, lineWidth: number): num
   return 0;
 }
 
+/** これより長い文字列の幅は、1 回のレイアウトの間だけ覚えて測り直さない (計測は長い文字列を覚えない)。 */
+const LONG_TEXT_LENGTH = 64;
+
 function computeLayout(node: TextNode, measurer: TextMeasurer): TextLayout {
   const font = textFontSpec(node);
-  const measure = (text: string) => measurer.measure(text, font);
+  const long = new Map<string, number>();
+  const measure = (text: string) => {
+    if (text.length < LONG_TEXT_LENGTH) return measurer.measure(text, font);
+    let width = long.get(text);
+    if (width === undefined) {
+      width = measurer.measure(text, font);
+      long.set(text, width);
+    }
+    return width;
+  };
   const lineHeight = lineHeightOf(node);
   const wrap = node.sizing !== "auto-width";
+  const options = wrap ? lineBreakOptionsOf(measurer) : {};
   const rows: Row[] = [];
   for (const paragraph of node.text.split("\n")) {
-    if (wrap) wrapParagraph(paragraph, node.width, measure, rows);
+    if (wrap) wrapParagraph(paragraph, node.width, measure, options, rows);
     else rows.push({ text: paragraph, width: measure(paragraph) });
   }
   let width = 0;

@@ -79,8 +79,18 @@ function isIdeographic(cp: number): boolean {
   );
 }
 
-function classify(grapheme: string): BreakClass {
+/** エンジンによって違う折り返しの規則。編集欄 (`<textarea>`) と行分割をそろえるため、計測がエンジンから求める。 */
+export interface LineBreakOptions {
+  /**
+   * `/` の後で折り返すか (数字の前を除く)。WebKit は折り返し (URL やパスを `/` の後で折る)、
+   * Chromium は折り返さない
+   */
+  breakAfterSolidus?: boolean;
+}
+
+function classify(grapheme: string, options: LineBreakOptions): BreakClass {
   const cp = grapheme.codePointAt(0) ?? 0;
+  if (cp === 0x2f && options.breakAfterSolidus === true) return "hyphen";
   if (SPACE.has(cp)) return "space";
   if (cp === 0x200b) return "zw";
   if (GLUE.has(cp)) return "glue";
@@ -101,9 +111,13 @@ interface BreakInfo {
   digit: boolean;
 }
 
-function infoOf(grapheme: string): BreakInfo {
+function infoOf(grapheme: string, options: LineBreakOptions): BreakInfo {
   const cp = grapheme.codePointAt(0) ?? 0;
-  return { cls: classify(grapheme), wide: isIdeographic(cp), digit: cp >= 0x30 && cp <= 0x39 };
+  return {
+    cls: classify(grapheme, options),
+    wide: isIdeographic(cp),
+    digit: cp >= 0x30 && cp <= 0x39,
+  };
 }
 
 /** `before` と `after` の間で折り返せるか。 */
@@ -124,13 +138,13 @@ function canBreakBetween(before: BreakInfo, after: BreakInfo): boolean {
  * 1 段落 (改行を含まない文字列) を、間で折り返してよい単位に分ける。
  * 単位の末尾の空白はその単位に含める (行末でぶら下がる)。単位をつなぐと元の文字列に戻る。
  */
-export function breakUnits(paragraph: string): string[] {
+export function breakUnits(paragraph: string, options: LineBreakOptions = {}): string[] {
   const graphemes = splitGraphemes(paragraph);
   const units: string[] = [];
   let current = "";
   let previous: BreakInfo | null = null;
   for (const grapheme of graphemes) {
-    const info = infoOf(grapheme);
+    const info = infoOf(grapheme, options);
     if (previous !== null && canBreakBetween(previous, info)) {
       units.push(current);
       current = "";

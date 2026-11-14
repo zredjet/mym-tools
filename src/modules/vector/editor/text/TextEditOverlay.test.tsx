@@ -75,6 +75,8 @@ describe("TextEditOverlay: 表示", () => {
     expect(element.style.textAlign).toBe("center");
     expect(element.style.whiteSpace).toBe("pre");
     expect(element.style.pointerEvents).toBe("auto");
+    // 禁則 (line-break: strict) はページの言語に関係なく日本語の規則
+    expect(element.getAttribute("lang")).toBe("ja");
     expect(document.activeElement).toBe(element);
 
     act(() => state().setViewport({ x: 0, y: 0, zoom: 1 }));

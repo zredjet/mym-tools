@@ -1,15 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fontMetricsOf } from "../text/metrics";
+import { fontMetricsOf, lineBreakOptionsOf } from "../text/metrics";
 import {
+  AGREEMENT_PROBES,
+  AGREEMENT_TOLERANCE,
   canvasTextMeasurer,
+  CJK,
   createCanvasTextMeasurer,
   createDomFontMetrics,
+  createLineBreakProbe,
   createMeasureContext,
   createSvgTextMeasure,
+  EMOJI,
+  KERNING_PROBE,
+  LATIN,
   letterSpacingWidth,
   MAX_CACHED_TEXT_LENGTH,
   MAX_CACHED_TOTAL_LENGTH,
   mayContainEmoji,
+  OTHER,
+  scriptClasses,
 } from "./measureText";
 import type { FontSpec } from "./types";
 
@@ -21,24 +30,40 @@ const font: FontSpec = {
   letterSpacing: 0,
 };
 
-/** canvas の 2D コンテキストの代わり。1 文字 (UTF-16) の幅を 10 とし、設定したフォントを覚える。 */
-function fakeContext(metrics: Partial<TextMetrics> = {}) {
+const KERNED_PAIRS = ["AV", "VA", "WA", "To", "Yo"];
+
+/** カーニングを含む幅 (1 文字 10、カーニングの組ごとに 2 狭い)。canvas の代わり。 */
+function kernedWidth(text: string): number {
+  let width = Array.from(text).length * 10;
+  for (let i = 0; i + 1 < text.length; i++)
+    if (KERNED_PAIRS.includes(text.slice(i, i + 2))) width -= 2;
+  return width;
+}
+
+/** canvas の 2D コンテキストの代わり。設定したフォントを覚える。 */
+function fakeContext(
+  measure: (text: string) => number = kernedWidth,
+  extra: Partial<TextMetrics> = {},
+) {
   const fonts: string[] = [];
   const ctx = {
     set font(value: string) {
       fonts.push(value);
     },
-    measureText: vi.fn((text: string) => ({ width: text.length * 10, ...metrics })),
+    measureText: vi.fn((text: string) => ({ width: measure(text), ...extra })),
   };
   return { ctx: ctx as unknown as CanvasRenderingContext2D, fonts };
 }
 
-/** SVG での計測の代わり。canvas と同じ幅 (1 文字 10) を返すので、どのフォントも canvas で測る。 */
-const agreeingSvg = () => vi.fn((text: string) => text.length * 10);
+/** Chromium の SVG の代わり: 描画と同じ幅 (カーニングを含む)。 */
+const chromiumSvg = () => vi.fn((text: string) => kernedWidth(text));
+/** WebKit の SVG の代わり: カーニングを含まない幅。 */
+const webkitSvg = () => vi.fn((text: string) => Array.from(text).length * 10);
 
 afterEach(() => {
   vi.restoreAllMocks();
   document.body.innerHTML = "";
+  for (const element of document.querySelectorAll("[data-canvas-text-measure]")) element.remove();
 });
 
 describe("letterSpacingWidth", () => {
@@ -50,51 +75,91 @@ describe("letterSpacingWidth", () => {
   });
 });
 
-describe("mayContainEmoji", () => {
-  it("絵文字として描かれうる文字を見つける", () => {
-    expect(mayContainEmoji("abc 日本語、。")).toBe(false);
-    expect(mayContainEmoji("👍")).toBe(true);
+describe("scriptClasses", () => {
+  it("欧文・和文・絵文字・そのほかを見分ける", () => {
+    expect(scriptClasses("Hello, world — …")).toBe(LATIN);
+    expect(scriptClasses("テキスト、漢字。ＡＢＣ한국")).toBe(CJK);
+    expect(scriptClasses("𠮷")).toBe(CJK);
+    expect(scriptClasses("abc日本")).toBe(LATIN | CJK);
+    expect(scriptClasses("👍🏽")).toBe(EMOJI);
+    expect(scriptClasses("1\ufe0f\u20e3")).toBe(LATIN | EMOJI);
+    expect(scriptClasses("●★")).toBe(EMOJI);
+    expect(scriptClasses("Ελληνικά")).toBe(OTHER);
+    expect(mayContainEmoji("abc 日本語")).toBe(false);
     expect(mayContainEmoji("🇯🇵")).toBe(true);
-    expect(mayContainEmoji("✅")).toBe(true);
-    expect(mayContainEmoji("●")).toBe(true);
-    expect(mayContainEmoji("1\ufe0f\u20e3")).toBe(true);
-    expect(mayContainEmoji("𠮷")).toBe(false);
   });
 });
 
-describe("createCanvasTextMeasurer", () => {
-  it("canvas と SVG の幅が合うフォントは、描画と同じ font で canvas を使い、字間を足し、結果を覚える", () => {
-    const { ctx, fonts } = fakeContext();
-    const svg = agreeingSvg();
+describe("createCanvasTextMeasurer: 経路の選び方", () => {
+  it("SVG のレイアウトの幅がカーニングを含まない (WebKit) なら、絵文字も含めてすべて canvas で測る", () => {
+    const { ctx } = fakeContext();
+    const svg = webkitSvg();
     const measurer = createCanvasTextMeasurer({ getContext: () => ctx, measureWithSvg: svg });
-    const bold = { ...font, weight: 700, italic: true };
-    expect(measurer.measure("ab", { ...bold, letterSpacing: 1.5 })).toBe(23);
-    expect(fonts).toEqual(['italic 700 16px "Hiragino Sans", sans-serif']);
-    const svgCalls = svg.mock.calls.length; // フォントごとの最初の比較
-    expect(measurer.measure("ab", bold)).toBe(20);
-    expect(measurer.measure("cd", bold)).toBe(20);
-    expect(svg.mock.calls.length).toBe(svgCalls);
-    expect(measurer.measure("", font)).toBe(0);
+    expect(measurer.measure("AVAV", font)).toBe(34);
+    expect(measurer.measure("👍", font)).toBe(10);
+    expect(measurer.measure("テキスト", font)).toBe(40);
+    expect(measurer.measure("Ελληνικά", font)).toBe(80);
+    expect(measurer.pathInfo.svgMatchesDrawing).toBe(false);
+    // SVG は、カーニングを含むかを確かめる 1 回だけ
+    expect(svg.mock.calls.map(([text]) => text)).toEqual([KERNING_PROBE]);
   });
 
-  it("絵文字を含む文字列は SVG で測る (canvas は描画と幅が違う)", () => {
+  it("SVG のレイアウトの幅が描画と同じ (Chromium) なら、絵文字とそのほかの文字だけ SVG で測る", () => {
     const { ctx } = fakeContext();
-    const svg = vi.fn((text: string) => (text === "👍" ? 16 : text.length * 10));
+    const svg = vi.fn((text: string) => (text === "👍" ? 16 : kernedWidth(text)));
     const measurer = createCanvasTextMeasurer({ getContext: () => ctx, measureWithSvg: svg });
     expect(measurer.measure("👍", font)).toBe(16);
-    expect(svg).toHaveBeenCalledWith("👍", font);
+    expect(measurer.measure("Ελληνικά", font)).toBe(80);
+    expect(measurer.pathInfo.svgMatchesDrawing).toBe(true);
+    const before = svg.mock.calls.length;
+    // 欧文と和文は、そのフォントで canvas と描画が合うので canvas で測る
+    expect(measurer.measure("Hello AV", font)).toBe(78);
+    expect(measurer.measure("テキスト", font)).toBe(40);
+    const measured = svg.mock.calls.slice(before).map(([text]) => text);
+    expect(measured).not.toContain("Hello AV");
+    expect(measured).not.toContain("テキスト");
   });
 
-  it("canvas と SVG の幅が合わないフォントは、すべて SVG で測る", () => {
+  it("フォントと文字の種類の組ごとに、比べる文字列のどれか 1 つでも合わなければ、その種類を含む文字列を SVG で測る", () => {
+    for (const cls of [LATIN, CJK] as const) {
+      const probes = AGREEMENT_PROBES[cls];
+      const lastProbe = probes[probes.length - 1] as string;
+      expect(probes.length).toBeGreaterThan(1);
+      const { ctx } = fakeContext();
+      // 最後の比べる文字列だけ、描画が canvas より 1 狭い (代わりのフォントの違いなど)
+      const svg = vi.fn((text: string) => kernedWidth(text) - (text === lastProbe ? 1 : 0));
+      const measurer = createCanvasTextMeasurer({ getContext: () => ctx, measureWithSvg: svg });
+      const latin = "Latin text";
+      const cjk = "和文のテキスト";
+      measurer.measure(latin, font);
+      measurer.measure(cjk, font);
+      const viaSvg = svg.mock.calls.map(([text]) => text);
+      if (cls === LATIN) {
+        expect(viaSvg).toContain(latin);
+        expect(viaSvg).not.toContain(cjk);
+      } else {
+        expect(viaSvg).toContain(cjk);
+        expect(viaSvg).not.toContain(latin);
+      }
+      // 別のフォントは別に確かめる (Times New Roman などのカーニングの確かめとは別)
+      measurer.measure(latin, { ...font, family: "Other" });
+    }
+  });
+
+  it("SVG の幅の 1/64 px の丸めの差は、合っているとみなす", () => {
     const { ctx } = fakeContext();
-    // system-ui の欧文だけ canvas と描画で幅が違う、という PC の代わり
-    const svg = vi.fn((text: string, spec: FontSpec) =>
-      spec.family === "system-ui" ? text.length * 9 : text.length * 10,
-    );
+    const svg = vi.fn((text: string) => kernedWidth(text) + AGREEMENT_TOLERANCE / 2);
     const measurer = createCanvasTextMeasurer({ getContext: () => ctx, measureWithSvg: svg });
-    expect(measurer.measure("abc", { ...font, family: "system-ui" })).toBe(27);
-    expect(measurer.measure("abc", font)).toBe(30);
-    expect(svg.mock.calls.some(([text]) => text === "abc")).toBe(true);
+    expect(measurer.measure("テキスト and text", font)).toBe(kernedWidth("テキスト and text"));
+  });
+
+  it("どのフォントもカーニングしなければ判定できないので、canvas だけで測る", () => {
+    const { ctx } = fakeContext((text) => Array.from(text).length * 10);
+    const svg = chromiumSvg();
+    const measurer = createCanvasTextMeasurer({ getContext: () => ctx, measureWithSvg: svg });
+    expect(measurer.measure("👍", font)).toBe(10);
+    expect(measurer.pathInfo.svgMatchesDrawing).toBe(false);
+    expect(svg).not.toHaveBeenCalled();
   });
 
   it("SVG で測れなければ canvas、canvas もなければフォントサイズ × 0.6 を 1 文字の幅とみなす", () => {
@@ -103,16 +168,33 @@ describe("createCanvasTextMeasurer", () => {
       getContext: () => ctx,
       measureWithSvg: () => null,
     });
-    expect(viaCanvas.measure("👍", font)).toBe(20);
+    expect(viaCanvas.measure("👍", font)).toBe(10);
     const none = createCanvasTextMeasurer({ getContext: () => null, measureWithSvg: () => null });
     expect(none.measure("a👍🏽", font)).toBeCloseTo(19.2);
   });
 
+  it("描画と同じ font で測り、字間を足し、結果を覚える", () => {
+    const { ctx, fonts } = fakeContext();
+    const measurer = createCanvasTextMeasurer({
+      getContext: () => ctx,
+      measureWithSvg: webkitSvg(),
+    });
+    const bold = { ...font, weight: 700, italic: true };
+    expect(measurer.measure("ab", { ...bold, letterSpacing: 1.5 })).toBe(23);
+    expect(fonts).toContain('italic 700 16px "Hiragino Sans", sans-serif');
+    const calls = vi.mocked(ctx.measureText).mock.calls.length;
+    expect(measurer.measure("ab", bold)).toBe(20);
+    expect(vi.mocked(ctx.measureText).mock.calls.length).toBe(calls);
+    expect(measurer.measure("", font)).toBe(0);
+  });
+});
+
+describe("createCanvasTextMeasurer: 覚える量とアセント・ディセント", () => {
   it("長い文字列は覚えず、覚える量は文字列の合計の長さで抑える", () => {
     const { ctx } = fakeContext();
     const measurer = createCanvasTextMeasurer({
       getContext: () => ctx,
-      measureWithSvg: agreeingSvg(),
+      measureWithSvg: webkitSvg(),
     });
     const long = "a".repeat(MAX_CACHED_TEXT_LENGTH + 1);
     measurer.measure("x", font);
@@ -121,7 +203,6 @@ describe("createCanvasTextMeasurer", () => {
     measurer.measure(long, font);
     expect(measurer.cachedLength).toBe(before);
     expect(vi.mocked(ctx.measureText).mock.calls.filter(([text]) => text === long)).toHaveLength(2);
-    // 覚えられる長さの文字列を合計の上限を超えるまで測っても、上限を超えて覚えない
     const piece = "b".repeat(MAX_CACHED_TEXT_LENGTH - 6);
     const count = Math.ceil((MAX_CACHED_TOTAL_LENGTH * 1.5) / piece.length);
     for (let i = 0; i < count; i++) measurer.measure(`${i}`.padStart(6, "0") + piece, font);
@@ -130,49 +211,62 @@ describe("createCanvasTextMeasurer", () => {
   });
 
   it("アセントとディセントは編集欄と同じ HTML の行の箱から求め、だめなら canvas の fontBoundingBox", () => {
+    const withBoundingBox = () =>
+      fakeContext(kernedWidth, { fontBoundingBoxAscent: 14, fontBoundingBoxDescent: 3 }).ctx;
     const fromDom = createCanvasTextMeasurer({
-      getContext: () => fakeContext({ fontBoundingBoxAscent: 14, fontBoundingBoxDescent: 3 }).ctx,
-      measureWithSvg: agreeingSvg(),
+      getContext: withBoundingBox,
+      measureWithSvg: webkitSvg(),
       measureFontMetrics: () => ({ ascent: 15, descent: 4 }),
     });
     expect(fontMetricsOf(fromDom, font)).toEqual({ ascent: 15, descent: 4 });
     const fromCanvas = createCanvasTextMeasurer({
-      getContext: () => fakeContext({ fontBoundingBoxAscent: 14, fontBoundingBoxDescent: 3 }).ctx,
-      measureWithSvg: agreeingSvg(),
+      getContext: withBoundingBox,
+      measureWithSvg: webkitSvg(),
       measureFontMetrics: () => null,
     });
     expect(fontMetricsOf(fromCanvas, font)).toEqual({ ascent: 14, descent: 3 });
     const without = createCanvasTextMeasurer({
       getContext: () => fakeContext().ctx,
-      measureWithSvg: agreeingSvg(),
+      measureWithSvg: webkitSvg(),
       measureFontMetrics: () => null,
     });
     expect(fontMetricsOf(without, font)).toBeNull();
     expect(fontMetricsOf({ measure: () => 1 }, font)).toBeNull();
   });
 
-  it("jsdom では canvas と SVG を使わずに測る", () => {
+  it("折り返しの規則はエンジンから求めたものを返す", () => {
+    const measurer = createCanvasTextMeasurer({
+      getContext: () => null,
+      detectLineBreaks: () => ({ breakAfterSolidus: true }),
+    });
+    expect(lineBreakOptionsOf(measurer)).toEqual({ breakAfterSolidus: true });
+    expect(lineBreakOptionsOf({ measure: () => 1 })).toEqual({});
+  });
+
+  it("jsdom では canvas と SVG を使わずに測り、計測用の要素を置かない", () => {
     expect(canvasTextMeasurer.measure("abc", font)).toBeCloseTo(28.8);
     expect(canvasTextMeasurer.measure("👍", font)).toBeCloseTo(9.6);
     expect(fontMetricsOf(canvasTextMeasurer, font)).toBeNull();
+    expect(lineBreakOptionsOf(canvasTextMeasurer)).toEqual({});
     expect(document.querySelector("[data-canvas-text-measure]")).toBeNull();
   });
 });
 
 describe("createSvgTextMeasure (DOM のコード)", () => {
-  it("見えない SVG の text を body に置き、空白を保つ設定と描画と同じフォントで測る", () => {
-    const lengths: string[] = [];
+  it("見えない SVG の text を html の直下に置き、空白を保つ設定と描画と同じフォントで測り、測り終えたら空にする", () => {
+    const seen: string[] = [];
     Object.defineProperty(SVGElement.prototype, "getComputedTextLength", {
       configurable: true,
       value(this: SVGElement) {
-        lengths.push(this.textContent ?? "");
+        seen.push(this.textContent ?? "");
         return (this.textContent ?? "").length * 8;
       },
     });
     try {
       const measure = createSvgTextMeasure(() => document);
-      expect(measure("😀   😀", { ...font, weight: 700, italic: true })).toBe(5 * 8 + 2 * 8);
+      expect(measure("😀   😀", { ...font, weight: 700, italic: true })).toBe(7 * 8);
       const svg = document.querySelector("svg[data-canvas-text-measure]");
+      expect(svg?.parentElement).toBe(document.documentElement);
       const text = svg?.querySelector("text");
       expect(svg?.getAttribute("aria-hidden")).toBe("true");
       expect(svg?.getAttribute("style")).toContain("visibility:hidden");
@@ -185,7 +279,9 @@ describe("createSvgTextMeasure (DOM のコード)", () => {
       expect(text?.getAttribute("font-size")).toBe("16");
       expect(text?.getAttribute("font-weight")).toBe("700");
       expect(text?.getAttribute("font-style")).toBe("italic");
-      expect(lengths).toEqual(["😀   😀"]);
+      expect(seen).toEqual(["😀   😀"]);
+      // 本文を残さない
+      expect(text?.textContent).toBe("");
       // 外されていたら置き直す
       svg?.remove();
       expect(measure("ab", font)).toBe(16);
@@ -202,16 +298,20 @@ describe("createSvgTextMeasure (DOM のコード)", () => {
 });
 
 describe("createDomFontMetrics (DOM のコード)", () => {
-  it("内容の箱とベースラインの印からアセントとディセントを求める", () => {
+  it("内容の箱とベースラインの印から求め、物差しで割って UI スケール (zoom) に関係なくする", () => {
+    // zoom 1.25 の画面: 長さがすべて 1.25 倍で返る
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
       this: HTMLElement,
     ) {
-      const isMarker = this.getAttribute("style")?.includes("inline-block") === true;
-      return (isMarker ? { top: 114 } : { top: 100, bottom: 118 }) as DOMRect;
+      const style = this.getAttribute("style") ?? "";
+      if (style.includes("width:100px")) return { width: 125 } as DOMRect;
+      if (style.includes("inline-block")) return { top: 117.5 } as DOMRect;
+      return { top: 100, bottom: 122.5 } as DOMRect;
     });
     const metrics = createDomFontMetrics(() => document);
     expect(metrics({ ...font, weight: 700 })).toEqual({ ascent: 14, descent: 4 });
     const box = document.querySelector<HTMLElement>("div[data-canvas-text-measure]");
+    expect(box?.parentElement).toBe(document.documentElement);
     expect(box?.style.font).toContain("Hiragino Sans");
     expect(box?.style.lineHeight).toBe("normal");
     expect(box?.getAttribute("aria-hidden")).toBe("true");
@@ -220,6 +320,47 @@ describe("createDomFontMetrics (DOM のコード)", () => {
   it("測れなければ null", () => {
     expect(createDomFontMetrics(() => document)(font)).toBeNull(); // jsdom は大きさ 0
     expect(createDomFontMetrics(() => null)(font)).toBeNull();
+  });
+});
+
+describe("createLineBreakProbe (DOM のコード)", () => {
+  /** jsdom の Range は getBoundingClientRect を持たないので、文字の位置ごとの行の上端を返すものを置く。 */
+  function stubRangeTops(topOf: (offset: number) => number) {
+    const calls: number[] = [];
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value(this: Range) {
+        calls.push(this.startOffset);
+        return { top: topOf(this.startOffset) } as DOMRect;
+      },
+    });
+    return calls;
+  }
+
+  afterEach(() => {
+    delete (Range.prototype as { getBoundingClientRect?: unknown }).getBoundingClientRect;
+  });
+
+  it("`aaaa/` が 1 行目に残れば (WebKit)、/ の後で折り返す", () => {
+    // WebKit は、折り返した直後の文字の範囲を前の行の末尾として返す
+    stubRangeTops((offset) => (offset <= 8 ? 0 : 20));
+    expect(createLineBreakProbe(() => document)()).toEqual({ breakAfterSolidus: true });
+    expect(document.querySelector("[data-canvas-text-measure]")).toBeNull();
+  });
+
+  it("単語ごと次の行へ送られれば (Chromium)、/ の後で折り返さない", () => {
+    stubRangeTops((offset) => (offset <= 2 ? 0 : 20));
+    expect(createLineBreakProbe(() => document)()).toEqual({ breakAfterSolidus: false });
+  });
+
+  it("行が分かれていなければ (レイアウトがない) 決めない。結果は 1 回だけ求める", () => {
+    const calls = stubRangeTops(() => 0);
+    const probe = createLineBreakProbe(() => document);
+    expect(probe()).toEqual({});
+    const count = calls.length;
+    expect(probe()).toEqual({});
+    expect(calls.length).toBe(count);
+    expect(createLineBreakProbe(() => null)()).toEqual({});
   });
 });
 

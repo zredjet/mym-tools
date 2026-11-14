@@ -13,6 +13,7 @@
  *   ない追加の口 (`text/metrics.ts`) で、持たない計測では既定の比率を使う
  */
 import { graphemeCount } from "../text/graphemes";
+import type { LineBreakOptions } from "../text/lineBreak";
 import type { FontMetrics, MetricsTextMeasurer } from "../text/metrics";
 import { cssFont, cssFontFamily } from "./buildNodeSvg";
 import type { FontSpec } from "./types";
@@ -76,55 +77,96 @@ export function createMeasureContext(
   };
 }
 
+/** 文字の種類 (`scriptClasses` のビット)。canvas と描画の幅が合うかを、フォントとこの種類の組で見る。 */
+export const LATIN = 1;
+export const CJK = 2;
+/** そのほかの文字 (ギリシャ・キリル・アラビア文字、記号など)。どのフォントで描かれるかが読めない */
+export const OTHER = 4;
+export const EMOJI = 8;
+
+function isEmojiCode(code: number): boolean {
+  return (
+    code === 0x200d ||
+    code === 0x20e3 ||
+    code === 0xfe0f ||
+    (code >= 0x2300 && code <= 0x23ff) ||
+    (code >= 0x25a0 && code <= 0x27bf) ||
+    (code >= 0x2b00 && code <= 0x2bff)
+  );
+}
+
+function isCjkCode(code: number): boolean {
+  return (
+    (code >= 0x1100 && code <= 0x11ff) ||
+    (code >= 0x2e80 && code <= 0x9fff) ||
+    (code >= 0xa960 && code <= 0xa97f) ||
+    (code >= 0xac00 && code <= 0xd7af) ||
+    (code >= 0xf900 && code <= 0xfaff) ||
+    (code >= 0xfe30 && code <= 0xfe4f) ||
+    (code >= 0xff00 && code <= 0xffef)
+  );
+}
+
 /**
- * 絵文字として描かれうる文字を含むか。canvas の幅が描画と違うので、SVG で測る。
- * 記号 (U+2300〜U+23FF、U+25A0〜U+27BF、U+2B00〜U+2BFF)、U+1F000 以降、異体字セレクタ 16 (U+FE0F)、
- * ZWJ (U+200D)、囲みのキーキャップ (U+20E3)、タグ文字を見る。
+ * 文字列に含まれる文字の種類 (`LATIN` | `CJK` | `OTHER` | `EMOJI` のビットの和)。
+ * 欧文はラテン文字と一般句読点 (U+0000〜U+024F、U+2000〜U+206F)。和文は CJK の記号・かな・漢字・
+ * ハングル・全角形と、U+20000 以降の漢字。絵文字は U+1F000 以降、タグ文字、絵文字になりうる記号と
+ * ZWJ・異体字セレクタ 16・キーキャップ。
  */
-export function mayContainEmoji(text: string): boolean {
+export function scriptClasses(text: string): number {
+  let classes = 0;
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
-    if (code < 0x200d) continue;
-    if (code >= 0xd800 && code <= 0xdbff) {
-      // U+10000 以降。U+1F000 以降 (絵文字、地域指示記号) と U+E0000 台 (タグ) は上位サロゲートで分かる
-      if (code === 0xd83c || code === 0xd83d || code === 0xd83e || code === 0xdb40) return true;
+    if (code < 0x250 || (code >= 0x2000 && code <= 0x206f && code !== 0x200d)) classes |= LATIN;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      // 上位サロゲートで分かる: U+1F000〜U+1FFFF (絵文字、地域指示記号)、U+20000〜U+3FFFF (漢字)、U+E0000 (タグ)
+      if (code >= 0xd83c && code <= 0xd83f) classes |= EMOJI;
+      else if (code >= 0xd840 && code <= 0xd8bf) classes |= CJK;
+      else if (code === 0xdb40) classes |= EMOJI;
+      else classes |= OTHER;
       i++;
-      continue;
-    }
-    if (
-      code === 0x200d ||
-      code === 0x20e3 ||
-      code === 0xfe0f ||
-      (code >= 0x2300 && code <= 0x23ff) ||
-      (code >= 0x25a0 && code <= 0x27bf) ||
-      (code >= 0x2b00 && code <= 0x2bff)
-    )
-      return true;
+    } else if (isEmojiCode(code)) classes |= EMOJI;
+    else if (isCjkCode(code)) classes |= CJK;
+    else classes |= OTHER;
   }
-  return false;
+  return classes;
+}
+
+/** 絵文字として描かれうる文字を含むか。 */
+export function mayContainEmoji(text: string): boolean {
+  return (scriptClasses(text) & EMOJI) !== 0;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const XML_NS = "http://www.w3.org/XML/1998/namespace";
 
-/** 計測用の要素を置く (画面の外、見えない、ポインターを受けない)。 */
+/**
+ * 計測用の要素を置く (画面の外、見えない、ポインターを受けない)。body ではなく html の直下に置き、
+ * アプリの UI スケール (`body { zoom }`) の影響を受けないようにする。
+ */
 const HIDDEN_STYLE =
   "position:absolute;left:-10000px;top:-10000px;visibility:hidden;pointer-events:none;contain:layout style";
 
+function attach(doc: Document, element: Element): void {
+  if (!element.isConnected) doc.documentElement.appendChild(element);
+}
+
 /**
- * 見えない SVG の `<text>` で幅を測る (描画と同じ組版)。測れない環境では null を返す。
+ * 見えない SVG の `<text>` で幅を測る (`getComputedTextLength`)。測れない環境では null を返す。
+ * Chromium では描画と同じ幅 (カーニングを含む) を返すが、WebKit はカーニングを含まない値を返すので、
+ * 使うかどうかは `createCanvasTextMeasurer` が実測で決める。
  * 空白は描画 (`xml:space="preserve"`) と同じく保つ。属性は XML の名前空間に置かないと効かないので
- * `setAttributeNS` を使い、CSS の `white-space: pre` も付ける。
- * 要素は最初に使うときに body に置き、外されていたら置き直す。
+ * `setAttributeNS` を使い、CSS の `white-space: pre` も付ける。測り終えたら本文を空にする。
  */
 export function createSvgTextMeasure(
   getDocument: () => Document | null = defaultMeasureDocument,
 ): (text: string, font: FontSpec) => number | null {
   let element: SVGTextElement | null | undefined;
+  let doc: Document | null = null;
   const ensure = (): SVGTextElement | null => {
     if (element === undefined) {
       try {
-        const doc = getDocument();
+        doc = getDocument();
         if (!doc) element = null;
         else {
           const svg = doc.createElementNS(SVG_NS, "svg");
@@ -141,8 +183,8 @@ export function createSvgTextMeasure(
         element = null;
       }
     }
-    const svg = element?.ownerSVGElement ?? element?.parentNode;
-    if (element && !element.isConnected && svg) element.ownerDocument.body.appendChild(svg);
+    const svg = element?.parentNode;
+    if (doc && svg instanceof Element) attach(doc, svg);
     return element;
   };
   return (text, font) => {
@@ -154,6 +196,7 @@ export function createSvgTextMeasure(
     target.setAttribute("font-style", font.italic ? "italic" : "normal");
     target.textContent = text;
     const width = target.getComputedTextLength();
+    target.textContent = "";
     return Number.isFinite(width) ? width : null;
   };
 }
@@ -161,12 +204,22 @@ export function createSvgTextMeasure(
 /**
  * フォントのアセントとディセントを、HTML の行の箱から求める (編集欄の `<textarea>` と同じ組版)。
  * インラインの要素の内容の箱 (アセント + ディセント) と、高さ 0 のインラインブロックで示したベースラインを測る。
+ * 要素は html の直下に置き、さらに幅 100px の物差しで割って、UI スケール (`zoom`) に関係なく CSS px で返す。
  * 測れない環境では null。
  */
 export function createDomFontMetrics(
   getDocument: () => Document | null = defaultMeasureDocument,
 ): (font: FontSpec) => FontMetrics | null {
-  let parts: { box: HTMLElement; text: HTMLElement; marker: HTMLElement } | null | undefined;
+  let parts:
+    | {
+        doc: Document;
+        box: HTMLElement;
+        text: HTMLElement;
+        marker: HTMLElement;
+        ruler: HTMLElement;
+      }
+    | null
+    | undefined;
   const ensure = () => {
     if (parts === undefined) {
       try {
@@ -181,14 +234,16 @@ export function createDomFontMetrics(
           text.textContent = "x";
           const marker = doc.createElement("span");
           marker.setAttribute("style", "display:inline-block;width:0;height:0");
-          box.append(text, marker);
-          parts = { box, text, marker };
+          const ruler = doc.createElement("div");
+          ruler.setAttribute("style", "width:100px;height:0");
+          box.append(text, marker, ruler);
+          parts = { doc, box, text, marker, ruler };
         }
       } catch {
         parts = null;
       }
     }
-    if (parts && !parts.box.isConnected) parts.box.ownerDocument.body.appendChild(parts.box);
+    if (parts) attach(parts.doc, parts.box);
     return parts;
   };
   return (font) => {
@@ -196,12 +251,60 @@ export function createDomFontMetrics(
     if (!current) return null;
     current.box.style.font = cssFont(font);
     current.box.style.lineHeight = "normal";
+    const scale = current.ruler.getBoundingClientRect().width / 100;
+    if (!Number.isFinite(scale) || scale <= 0) return null;
     const content = current.text.getBoundingClientRect();
     const baseline = current.marker.getBoundingClientRect().top;
-    const ascent = baseline - content.top;
-    const descent = content.bottom - baseline;
+    const ascent = (baseline - content.top) / scale;
+    const descent = (content.bottom - baseline) / scale;
     if (!Number.isFinite(ascent) || !Number.isFinite(descent) || ascent + descent <= 0) return null;
     return { ascent, descent };
+  };
+}
+
+/**
+ * エンジンによって違う折り返しの規則を、編集欄と同じ CSS の要素で 1 回だけ確かめる。測れない環境では既定 (空)。
+ * `/` の後: 等幅フォントで `xx aaaa/bbbb` を 8.5 文字の幅に置き、`aaaa/` が 1 行目に残れば `/` の後で折り返す
+ * (WebKit)。折り返さなければ単語ごと次の行へ送られる (Chromium)。
+ */
+export function createLineBreakProbe(
+  getDocument: () => Document | null = defaultMeasureDocument,
+): () => LineBreakOptions {
+  let result: LineBreakOptions | undefined;
+  return () => {
+    if (result !== undefined) return result;
+    result = {};
+    try {
+      const doc = getDocument();
+      if (!doc) return result;
+      const box = doc.createElement("div");
+      box.setAttribute("aria-hidden", "true");
+      box.setAttribute("lang", "ja");
+      box.setAttribute(
+        "style",
+        `${HIDDEN_STYLE};font:16px monospace;line-height:20px;width:8.5ch;white-space:pre-wrap;` +
+          "overflow-wrap:break-word;word-break:normal;line-break:strict",
+      );
+      const text = doc.createTextNode("xx aaaa/bbbb");
+      box.appendChild(text);
+      attach(doc, box);
+      const range = doc.createRange();
+      const topOf = (index: number) => {
+        range.setStart(text, index);
+        range.setEnd(text, index + 1);
+        return range.getBoundingClientRect().top;
+      };
+      const first = topOf(0);
+      const solidus = topOf(7);
+      // 行が分かれたかは最後の文字で見る (WebKit は、折り返した直後の文字の範囲を前の行の末尾として返す)
+      const last = topOf(11);
+      box.remove();
+      // 行が分かれていない (レイアウトのない環境) なら決めない
+      if (last > first) result = { breakAfterSolidus: solidus === first };
+    } catch {
+      // 確かめられなければ既定の規則
+    }
+    return result;
   };
 }
 
@@ -243,41 +346,87 @@ class WidthCache {
   }
 }
 
-/** canvas と SVG の幅が合うかを確かめる文字列 (カーニングの組、かな、句読点、数字、system-ui の欧文)。 */
-const AGREEMENT_PROBES = [
-  "Ta To AV WA Yo ff fi",
-  "テキスト、「かな」。漢字",
-  "Hello, world! 0123456789",
-];
-/** canvas と SVG の幅の差がこれ以下なら一致とみなす (px)。 */
-const AGREEMENT_EPSILON = 0.01;
+/**
+ * SVG のレイアウトの幅 (`getComputedTextLength`) がカーニングを含むかを確かめる文字列とフォント。
+ * カーニングするフォントが 1 つ見つかればよい (macOS と Windows のどちらかに必ずある)。
+ */
+export const KERNING_PROBE = "AVAVAVAV WAWAWA ToToTo YoYoYo";
+export const KERNING_PROBE_FAMILIES = [
+  "Times New Roman",
+  "Helvetica",
+  "Arial",
+  "Georgia",
+  "serif",
+  "sans-serif",
+] as const;
+
+/**
+ * canvas と描画の幅が合うかを確かめる文字列。文字の種類ごとに複数持ち、どれか 1 つでも合わなければ、
+ * そのフォントのその種類の文字を含む文字列は SVG で測る (代わりのフォントの選び方が canvas と描画で違う、など)。
+ */
+export const AGREEMENT_PROBES: Readonly<Record<typeof LATIN | typeof CJK, readonly string[]>> = {
+  [LATIN]: [
+    "Ta To AV WA Yo ff fi fl",
+    "Hello, world! 0123456789 (a)[b]{c}",
+    "“quotes” ‘s’ — – … ¥€£ äöüé",
+  ],
+  [CJK]: ["テキスト、「かな」。漢字", "(「かぎ」)【括弧】ー〜…", "ＡＢＣ１２３ｶﾀｶﾅ 한국어"],
+};
+
+/**
+ * canvas と SVG の幅が合うとみなす差 (px)。Chromium の SVG の幅は 1/64 px に丸まるので、その分を見込む。
+ * 代わりのフォントが違うときの差は 1 文字で 0.5 px を超える。
+ */
+export const AGREEMENT_TOLERANCE = 0.05;
 const FONT_TABLE_LIMIT = 1_000;
 
 export interface CanvasMeasurerOptions {
   getContext?: () => CanvasRenderingContext2D | null;
   measureWithSvg?: (text: string, font: FontSpec) => number | null;
   measureFontMetrics?: (font: FontSpec) => FontMetrics | null;
+  detectLineBreaks?: () => LineBreakOptions;
+}
+
+/** 計測の経路を選ぶ規則 (テストと検証のために公開する)。 */
+export interface MeasurePathInfo {
+  /** SVG のレイアウトの幅が描画と同じ (カーニングを含む) か。null はまだ確かめていない */
+  svgMatchesDrawing: boolean | null;
 }
 
 /**
- * ブラウザでの計測 (§4.7)。SVG の描画と同じ幅を返す。
+ * ブラウザでの計測 (§4.7)。SVG の `<text>` が実際に描かれる幅と同じ値を返す。
  *
- * - 速さのため canvas の `measureText` を使う。ただし、フォントごとに最初に canvas と SVG で決まった文字列を
- *   測り比べ、違えば (Chromium の `system-ui` など) そのフォントは SVG で測る
- * - 絵文字を含む文字列はいつも SVG で測る (canvas は絵文字の幅が描画と違う)
- * - 結果はフォントと文字列の組で覚える。長い文字列は覚えず、覚える量は文字列の合計の長さで抑える
- * - canvas が使えない環境 (jsdom) では、フォントサイズ × 0.6 を 1 文字の幅とみなす
+ * どのエンジンでも、まず canvas の `measureText` で測る (速い)。WebKit (Safari、WKWebView) の canvas は
+ * 描画と同じ幅を返す (カーニング、絵文字、`system-ui`、欧文フォントの中の和文を含めて実測で一致)。
+ * Chromium の canvas は絵文字の幅と、代わりのフォントの選び方が描画と違うことがあるので、次の文字列だけは
+ * SVG のレイアウトの幅 (`getComputedTextLength`。Chromium では描画と同じ) で測る:
+ * - 絵文字とそのほかの文字 (`EMOJI` / `OTHER`) を含む文字列
+ * - そのフォントで、canvas と SVG の幅が `AGREEMENT_PROBES` のどれかで合わない種類 (`LATIN` / `CJK`) の
+ *   文字を含む文字列 (フォントと種類の組ごとに 1 回だけ比べる)
+ *
+ * どちらのエンジンかは名前で決めず、SVG のレイアウトの幅がカーニングを含むかを最初に 1 回だけ確かめて決める
+ * (`KERNING_PROBE`)。含まなければ (WebKit) SVG では測らない。
+ *
+ * 結果はフォントと文字列の組で覚える。長い文字列は覚えず、覚える量は文字列の合計の長さで抑える。
+ * canvas が使えない環境 (jsdom) では、フォントサイズ × 0.6 を 1 文字の幅とみなす。
  */
 export function createCanvasTextMeasurer(
   options: CanvasMeasurerOptions = {},
 ): MetricsTextMeasurer & {
   /** 覚えている文字列の合計の長さ (テスト用) */
   readonly cachedLength: number;
+  /** 経路の選び方の状態 (テストと検証用) */
+  readonly pathInfo: MeasurePathInfo;
 } {
   const getContext = options.getContext ?? createMeasureContext();
   const measureWithSvg = options.measureWithSvg ?? createSvgTextMeasure();
   const measureFontMetrics = options.measureFontMetrics ?? createDomFontMetrics();
+  const detectLineBreaks = options.detectLineBreaks ?? createLineBreakProbe();
   const widths = new WidthCache();
+  const metrics = new Map<string, FontMetrics | null>();
+  /** フォントごとに、確かめた文字の種類と、canvas と描画が合わない種類 (ビットの和) */
+  const agreement = new Map<string, { checked: number; disagreeing: number }>();
+  let svgMatchesDrawing: boolean | null = null;
   // 行分割は 1 つのノードで同じ FontSpec を何度も渡すので、font の文字列を組み立て直さない
   const fontStrings = new WeakMap<FontSpec, string>();
   const fontStringOf = (font: FontSpec) => {
@@ -288,9 +437,6 @@ export function createCanvasTextMeasurer(
     }
     return value;
   };
-  const metrics = new Map<string, FontMetrics | null>();
-  /** フォントごとに、SVG で測るか */
-  const svgFonts = new Map<string, boolean>();
   // `ctx.font` は読み返すと書き方が変わる (正規化される) ので、最後に設定した文字列を覚えて比べる
   let currentFont = "";
   const applyFont = (ctx: CanvasRenderingContext2D, fontString: string) => {
@@ -304,23 +450,57 @@ export function createCanvasTextMeasurer(
     applyFont(ctx, fontString);
     return ctx.measureText(text).width;
   };
-  const prefersSvg = (font: FontSpec, fontString: string): boolean => {
-    let result = svgFonts.get(fontString);
-    if (result === undefined) {
-      result = false;
-      for (const probe of AGREEMENT_PROBES) {
+
+  /** SVG のレイアウトの幅が描画と同じか (カーニングを含むか)。最初に 1 回だけ確かめる。 */
+  const svgIsDrawing = (): boolean => {
+    if (svgMatchesDrawing !== null) return svgMatchesDrawing;
+    svgMatchesDrawing = false;
+    for (const family of KERNING_PROBE_FAMILIES) {
+      const font: FontSpec = { family, size: 32, weight: 400, italic: false, letterSpacing: 0 };
+      const fontString = cssFont(font);
+      const kerned = canvasWidth(KERNING_PROBE, fontString);
+      if (kerned === null) break;
+      let separate = 0;
+      for (const char of KERNING_PROBE) separate += canvasWidth(char, fontString) ?? 0;
+      if (separate - kerned < 1) continue; // このフォントはカーニングしない
+      const viaSvg = measureWithSvg(KERNING_PROBE, font);
+      svgMatchesDrawing = viaSvg !== null && Math.abs(viaSvg - kerned) <= AGREEMENT_TOLERANCE;
+      break;
+    }
+    return svgMatchesDrawing;
+  };
+
+  /** そのフォントで、canvas と描画が合わない文字の種類。種類ごとに最初に使うときに比べる。 */
+  const disagreeingClasses = (font: FontSpec, fontString: string, classes: number): number => {
+    let entry = agreement.get(fontString);
+    if (!entry) {
+      if (agreement.size >= FONT_TABLE_LIMIT) agreement.clear();
+      entry = { checked: 0, disagreeing: 0 };
+      agreement.set(fontString, entry);
+    }
+    for (const cls of [LATIN, CJK] as const) {
+      if ((classes & cls) === 0 || (entry.checked & cls) !== 0) continue;
+      entry.checked |= cls;
+      for (const probe of AGREEMENT_PROBES[cls]) {
         const viaSvg = measureWithSvg(probe, font);
-        if (viaSvg === null) break; // SVG で測れなければ canvas を使う
         const viaCanvas = canvasWidth(probe, fontString);
-        if (viaCanvas === null || Math.abs(viaCanvas - viaSvg) > AGREEMENT_EPSILON) {
-          result = true;
+        if (viaSvg === null || viaCanvas === null) break;
+        if (Math.abs(viaSvg - viaCanvas) > AGREEMENT_TOLERANCE) {
+          entry.disagreeing |= cls;
           break;
         }
       }
-      if (svgFonts.size >= FONT_TABLE_LIMIT) svgFonts.clear();
-      svgFonts.set(fontString, result);
     }
-    return result;
+    return entry.disagreeing;
+  };
+
+  /** 描画と同じ幅を得るために SVG で測るか。 */
+  const needsSvg = (text: string, font: FontSpec, fontString: string): boolean => {
+    // WebKit は canvas が描画と同じ幅を返し、SVG のレイアウトの幅はカーニングを含まない
+    if (!svgIsDrawing()) return false;
+    const classes = scriptClasses(text);
+    if ((classes & (EMOJI | OTHER)) !== 0) return true;
+    return (disagreeingClasses(font, fontString, classes) & classes) !== 0;
   };
 
   return {
@@ -330,8 +510,7 @@ export function createCanvasTextMeasurer(
       const fontString = fontStringOf(font);
       const cached = widths.get(fontString, text);
       if (cached !== undefined) return cached + spacing;
-      let width =
-        mayContainEmoji(text) || prefersSvg(font, fontString) ? measureWithSvg(text, font) : null;
+      let width = needsSvg(text, font, fontString) ? measureWithSvg(text, font) : null;
       width ??= canvasWidth(text, fontString);
       width ??= graphemeCount(text) * font.size * 0.6;
       widths.set(fontString, text, width);
@@ -358,8 +537,16 @@ export function createCanvasTextMeasurer(
       return result;
     },
 
+    lineBreakOptions(): LineBreakOptions {
+      return detectLineBreaks();
+    },
+
     get cachedLength() {
       return widths.size;
+    },
+
+    get pathInfo() {
+      return { svgMatchesDrawing };
     },
   };
 }

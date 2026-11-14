@@ -129,6 +129,17 @@ describe("layoutText: 折り返し", () => {
     ]);
   });
 
+  it("計測が返すエンジンの折り返しの規則に従う (WebKit は / の後で折り返す)", () => {
+    const node = text({ text: "see foo/barbaz", sizing: "auto-height", width: 40 });
+    expect(lineTexts(node)).toEqual(["see ", "foo/barb", "az"]);
+    const webkit: MetricsTextMeasurer = {
+      measure: measurer.measure,
+      fontMetrics: () => null,
+      lineBreakOptions: () => ({ breakAfterSolidus: true }),
+    };
+    expect(lineTexts(node, webkit)).toEqual(["see foo/", "barbaz"]);
+  });
+
   it("段落ごとに折り返し、空行を残す", () => {
     expect(
       lineTexts(text({ text: "あいうえお\n\nかき", sizing: "auto-height", width: 20 })),

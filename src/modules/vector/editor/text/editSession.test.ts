@@ -276,6 +276,19 @@ describe("commitTextEdit", () => {
     expect(store.getState()).toMatchObject({ editingTextId: null, revision: 1 });
   });
 
+  it("編集中ではないが、編集欄が閉じる前のセッションが残っていれば、開いているジェスチャーを確定する", () => {
+    const store = createEditorStore(docWithText());
+    store.getState().startTextEdit("t1");
+    openTextEditSession(store, "t1", measurer).setText("abcd");
+    // ほかの操作が編集を終えた直後 (編集欄の後片付けはまだ)
+    store.getState().endTextEdit();
+    expect(store.getState()).toMatchObject({ editingTextId: null, gestureActive: true });
+    commitTextEdit(store, measurer);
+    expect(store.getState()).toMatchObject({ gestureActive: false, revision: 1 });
+    expect(textOf(store.getState().doc)?.text).toBe("abcd");
+    expect(getTextEditSession()).toBeNull();
+  });
+
   it("編集中でなければ何もしない", () => {
     const store = createEditorStore(docWithText());
     const before = store.getState();

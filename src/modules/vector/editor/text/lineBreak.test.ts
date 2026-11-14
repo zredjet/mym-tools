@@ -53,6 +53,19 @@ describe("breakUnits", () => {
     expect(breakUnits("あ-い")).toEqual(["あ-", "い"]);
   });
 
+  it("breakAfterSolidus (WebKit) なら / の後で折り返す。数字の前と、/ の並びの間では折り返さない", () => {
+    const webkit = { breakAfterSolidus: true };
+    expect(breakUnits("qux/quux", webkit)).toEqual(["qux/", "quux"]);
+    expect(breakUnits("1/2", webkit)).toEqual(["1/2"]);
+    expect(breakUnits("https://example.com/path?q=1", webkit)).toEqual([
+      "https://",
+      "example.com/",
+      "path?",
+      "q=1",
+    ]);
+    expect(breakUnits("qux/quux", { breakAfterSolidus: false })).toEqual(["qux/quux"]);
+  });
+
   it("ノーブレークスペースの前後とゼロ幅スペースの扱い", () => {
     expect(breakUnits("a\u00a0b c")).toEqual(["a\u00a0b ", "c"]);
     expect(breakUnits("ab\u200bcd")).toEqual(["ab\u200b", "cd"]);
