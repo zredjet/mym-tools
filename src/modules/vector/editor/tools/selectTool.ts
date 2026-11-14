@@ -4,14 +4,15 @@
  * 押してから `DRAG_THRESHOLD` 画面 px 動くまではクリックとして扱い、動かないクリックは文書を変えない
  * (履歴も revision も増えない)。しきい値を越えたらドラッグを始める。文書を変えるドラッグは
  * `beginGesture` / `updateGesture` / `commitGesture` で 1 件の履歴にし、Esc とフォーカス喪失
- * (`onCancel`) で `cancelGesture` する。
+ * (`onCancel`) で取り消す。取り消すのは自分のドラッグが開いたジェスチャーだけ (§4.4)。
+ * 押してから取り消したら、選択とスコープは押す前に戻す (§4.5)。
  *
  * 計算はページ座標で行う。ドラッグの途中でホイールやピンチにより表示位置が変わると、キャンバスが
  * 今のポインター位置で `onPointerMove` を呼ぶので、そのまま追従する。
  *
  * 状態はモジュールの変数に持つ (ツールは 1 つだけで、同時に追うポインターも 1 本だけ)。
  */
-import { canEnter, hitFrameLabel, hitTestPath, pickTarget } from "../hit/hitTest";
+import { canEnter, hitFrameLabel, hitTestPath, isInteractive, pickTarget } from "../hit/hitTest";
 import {
   guideAt,
   guideCursor,
@@ -39,7 +40,7 @@ import {
 } from "../model/geometry";
 import { duplicateNodes } from "../model/structure";
 import { resizeNodes, updateNode } from "../model/transform";
-import { getNode, getPage, getParent, type ParentRef } from "../model/tree";
+import { getNode, getPage, getParent, isAncestorOf, type ParentRef } from "../model/tree";
 import type { CanvasDocument, NodeId, Point } from "../model/types";
 import { geometryWithinLimits } from "../panels/limits";
 import type { EditorStore } from "../state/types";
@@ -55,7 +56,7 @@ import {
   type SnapTargets,
 } from "../snap/snap";
 import { fitTextNodes } from "../text/fit";
-import { transformableIds } from "./select/actions";
+import { addToSelection, transformableIds } from "./select/actions";
 import {
   beginMoveGuide,
   endGuideDrag,
@@ -78,14 +79,24 @@ export const DRAG_THRESHOLD = 3;
 interface Press {
   page: Point;
   screen: Point;
+  /** 押す前の選択とスコープ (取り消したら戻す) */
+  selection: readonly NodeId[];
+  scopeId: NodeId | null;
 }
+
+/**
+ * 移動でつかんだもの。
+ * - `node`: ノードの上。ポインターの下の frame が今の親と違えば付け替える
+ * - `space`: frame のラベルや選択の中の何もない場所。押した点の下と違う frame に入ったときだけ付け替える
+ */
+type Grab = "node" | "space";
 
 /** しきい値を越えたときに始めるドラッグ。 */
 type DragIntent =
-  | { kind: "move" }
+  | { kind: "move"; grab: Grab }
   | { kind: "resize"; handle: ResizeHandle }
   | { kind: "lineEnd"; id: NodeId; end: LineEnd }
-  | { kind: "marquee"; scopeId: NodeId | null; base: readonly NodeId[]; before: readonly NodeId[] }
+  | { kind: "marquee"; scopeId: NodeId | null; base: readonly NodeId[] }
   | { kind: "guide"; index: number };
 
 interface MoveDrag {
@@ -97,11 +108,11 @@ interface MoveDrag {
   duplicated: boolean;
   start: Rect;
   frames: DropFrame[];
-  /**
-   * 押した位置の下の frame (null はページ直下)。ポインターが別の frame へ入ったときだけ親を変える
-   * (選択範囲の何もない場所やラベルをつかんだとき、押しただけで親が変わらないように)
-   */
+  grab: Grab;
+  /** 押した点の下の frame (null はページ直下)。`grab` が `space` のときの基準 */
   startTarget: NodeId | null;
+  /** 動かすノードの座標系の frame がすべて同じならその ID (ページ直下は null)、ばらばらなら undefined */
+  ownFrame: NodeId | null | undefined;
   snapCache: Map<string, SnapTargets>;
 }
 
@@ -111,7 +122,7 @@ interface ResizeDrag {
   ids: readonly NodeId[];
   start: Rect;
   offset: Point;
-  /** 画像 (と埋め込み SVG) だけなら、既定で縦横比を固定する */
+  /** 画像と埋め込み SVG だけなら、既定で縦横比を固定する */
   lockAspect: boolean;
   hasText: boolean;
   targets: SnapTargets;
@@ -132,8 +143,6 @@ interface MarqueeDrag {
   kind: "marquee";
   candidates: MarqueeCandidate[];
   base: readonly NodeId[];
-  /** Esc で戻す、押す前の選択 */
-  before: readonly NodeId[];
 }
 
 interface GuideDragState {
@@ -154,11 +163,14 @@ type Phase =
 
 let phase: Phase = { kind: "idle" };
 let lastCursor: string | null = null;
+/** 今のドラッグが開いたジェスチャーが開いているか (ほかが開いたジェスチャーは閉じない) */
+let ownsGesture = false;
 
 /** テスト用: 状態を捨てる。 */
 export function resetSelectTool(): void {
   phase = { kind: "idle" };
   lastCursor = null;
+  ownsGesture = false;
   resetSelectOverlay();
 }
 
@@ -190,7 +202,7 @@ function isSingleLine(doc: CanvasDocument, ids: readonly NodeId[]): boolean {
   return ids.length === 1 && getNode(doc, ids[0] as NodeId)?.type === "line";
 }
 
-/** ハンドルを出す選択か (選択ツールのとき、本文の編集中でないとき)。 */
+/** ハンドルを出す選択 (本文の編集中のノードを含むなら出さない)。 */
 function handleTargets(state: EditorStore): readonly NodeId[] {
   const ids = transformableIds(state.doc, state.selection);
   if (state.editingTextId !== null && ids.includes(state.editingTextId)) return [];
@@ -236,13 +248,23 @@ function pickAt(
   measurer: ToolContext["measurer"],
 ) {
   const label = hitFrameLabel(state.doc, state.pageId, point, state.viewport.zoom, measurer);
-  if (label !== null) return { id: label, scopeId: null, path: null, label: true };
+  if (label !== null) return { id: label, scopeId: null, label: true };
   const path = hitTestPath(state.doc, state.pageId, point, state.viewport.zoom);
-  return { ...pickTarget(state.doc, path, state.scopeId, { deep }), path, label: false };
+  return { ...pickTarget(state.doc, path, state.scopeId, { deep, point }), label: false };
 }
 
 function sameIds(a: readonly NodeId[], b: readonly NodeId[]): boolean {
   return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
+/** Shift のクリック: 選択済みなら外し、そうでなければ足す (祖先・子孫は入れ替える)。 */
+function toggleInSelection(store: Store, id: NodeId): void {
+  const state = store.getState();
+  state.setSelection(
+    state.selection.includes(id)
+      ? state.selection.filter((other) => other !== id)
+      : addToSelection(state.doc, state.selection, [id]),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +273,6 @@ function sameIds(a: readonly NodeId[], b: readonly NodeId[]): boolean {
 
 function updateHover(event: CanvasPointerEvent, ctx: ToolContext): void {
   const state = ctx.store.getState();
-  if (state.gestureActive) return; // ルーラーからガイド線を引き出している間など
   const handle = hitHandle(state, event.page);
   if (handle) {
     setCursor(ctx, handle.kind === "resize" ? handleCursor(handle.handle) : LINE_END_CURSOR);
@@ -273,20 +294,9 @@ function updateHover(event: CanvasPointerEvent, ctx: ToolContext): void {
 // 押したとき
 // ---------------------------------------------------------------------------
 
-function press(event: CanvasPointerEvent): Press {
-  return { page: event.page, screen: event.screen };
-}
-
-function pending(
-  event: CanvasPointerEvent,
-  intent: DragIntent,
-  onClick: (() => void) | null,
-): void {
-  phase = { kind: "pending", press: press(event), intent, onClick };
-}
-
 function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
   resetSelectOverlay();
+  ownsGesture = false;
   if (event.button !== 0) {
     phase = { kind: "inert" };
     return;
@@ -294,6 +304,15 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
   const store = ctx.store;
   const state = store.getState();
   state.setHovered(null);
+  const press: Press = {
+    page: event.page,
+    screen: event.screen,
+    selection: state.selection,
+    scopeId: state.scopeId,
+  };
+  const pending = (intent: DragIntent, onClick: (() => void) | null = null) => {
+    phase = { kind: "pending", press, intent, onClick };
+  };
 
   // ダブルクリックはハンドルとガイド線より中のノードを優先する
   // (group の辺に重なる線をダブルクリックしても中に入れるように)
@@ -302,14 +321,14 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
   // 1. ハンドル (線の端点)。動かさずに離したら、下にあるものをクリックしたことにする
   const handle = double ? null : hitHandle(state, event.page);
   if (handle) {
-    pending(event, handle, () => clickThrough(event, ctx));
+    pending(handle, () => clickThrough(event, ctx));
     return;
   }
 
   // 2. ガイド線。動かさずに離したら、下にあるものをクリックしたことにする
   const guide = double ? null : hitGuide(state, event.page);
   if (guide !== null) {
-    pending(event, { kind: "guide", index: guide }, () => clickThrough(event, ctx));
+    pending({ kind: "guide", index: guide }, () => clickThrough(event, ctx));
     return;
   }
 
@@ -326,61 +345,120 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
   );
   if (label !== null) {
     state.setScope(null);
-    selectAndPend(event, store, label, selected.has(label), () =>
-      store.getState().setSelection([label]),
-    );
+    if (event.shift) {
+      if (selected.has(label))
+        pending({ kind: "move", grab: "space" }, () => toggleInSelection(store, label));
+      else {
+        toggleInSelection(store, label);
+        pending({ kind: "move", grab: "space" });
+      }
+    } else if (selected.has(label))
+      pending({ kind: "move", grab: "space" }, () => store.getState().setSelection([label]));
+    else {
+      state.setSelection([label]);
+      pending({ kind: "move", grab: "space" });
+    }
     return;
   }
 
   // 4. ノード
-  const path = hitTestPath(state.doc, state.pageId, event.page, state.viewport.zoom);
-  const pick = pickTarget(state.doc, path, state.scopeId, { deep: event.mod, selection: selected });
-  if (pick.scopeId !== state.scopeId) state.setScope(pick.scopeId);
-
-  if (pick.id !== null && event.clickCount >= 2 && !event.shift) {
-    const id = pick.id;
-    const node = getNode(state.doc, id);
-    if (node?.type === "text") {
-      store.getState().startTextEdit(id);
-      phase = { kind: "inert" };
-      return;
-    }
-    if (canEnter(state.doc, id)) {
-      store.getState().setScope(id);
-      const inner = pickTarget(state.doc, path, id).id;
-      store.getState().setSelection(inner === null ? [] : [inner]);
-      if (inner === null) phase = { kind: "inert" };
-      else pending(event, { kind: "move" }, null);
-      return;
-    }
-  }
+  const point = event.page;
+  const path = hitTestPath(state.doc, state.pageId, point, state.viewport.zoom);
+  const pick = pickTarget(state.doc, path, state.scopeId, {
+    deep: event.mod,
+    selection: selected,
+    point,
+  });
+  const plainPick = () =>
+    pickTarget(store.getState().doc, path, store.getState().scopeId, { deep: event.mod, point }).id;
 
   if (pick.id !== null) {
+    if (pick.scopeId !== state.scopeId) state.setScope(pick.scopeId);
     const id = pick.id;
-    selectAndPend(event, store, id, selected.has(id), () => {
-      // 動かさずに離したら、選択済みのものを優先せずに選び直す (frame を選んだまま子を押したときなど)
-      const current = store.getState();
-      const plain = pickTarget(current.doc, path, current.scopeId, { deep: event.mod }).id;
-      current.setSelection(plain === null ? [] : [plain]);
-    });
+
+    if (double && !event.shift) {
+      const node = getNode(state.doc, id);
+      if (node?.type === "text") {
+        store.getState().startTextEdit(id);
+        phase = { kind: "inert" };
+        return;
+      }
+      if (canEnter(state.doc, id)) {
+        store.getState().setScope(id);
+        const inner = pickTarget(state.doc, path, id, { point }).id;
+        store.getState().setSelection(inner === null ? [] : [inner]);
+        if (inner === null) phase = { kind: "inert" };
+        else pending({ kind: "move", grab: "node" });
+        return;
+      }
+    }
+
+    if (event.shift) {
+      shiftPress(store, path, id, plainPick(), pending);
+      return;
+    }
+    if (selected.has(id)) {
+      // 選んだままドラッグできる。動かさずに離したら、押した位置で選び直す
+      pending({ kind: "move", grab: "node" }, () => {
+        const plain = plainPick();
+        store.getState().setSelection(plain === null ? [] : [plain]);
+      });
+    } else {
+      state.setSelection([id]);
+      pending({ kind: "move", grab: "node" });
+    }
     return;
   }
 
-  // 5. 何もない場所。選択範囲の中なら選択を動かす (クリックだけなら選択を解除する)
+  // 5. 何もない場所。選択の外接矩形の中なら選択を動かす (クリックだけなら選択を解除する)。
+  //    このときスコープは変えない
   const movable = transformableIds(state.doc, selection);
   const bounds = movable.length > 0 ? getSelectionBounds(state.doc, movable) : null;
-  if (!event.shift && bounds && rectContainsPoint(bounds, event.page)) {
-    pending(event, { kind: "move" }, () => store.getState().setSelection([]));
+  if (!event.shift && bounds && rectContainsPoint(bounds, point)) {
+    pending({ kind: "move", grab: "space" }, () => store.getState().setSelection([]));
     return;
   }
+  if (pick.scopeId !== state.scopeId) state.setScope(pick.scopeId);
   // 範囲選択。Shift なら今の選択に足す
-  const before = selection;
   if (!event.shift) state.setSelection([]);
-  pending(
-    event,
-    { kind: "marquee", scopeId: pick.scopeId, base: event.shift ? selection : [], before },
-    null,
-  );
+  pending({ kind: "marquee", scopeId: pick.scopeId, base: event.shift ? selection : [] });
+}
+
+/**
+ * Shift を押してノードを押したとき (§4.5)。足すのは、ふつうのクリックで当たるノード。
+ * - 押した所の選択済みのノードが、ふつうのクリックで当たるノードの祖先なら、それを足して祖先と入れ替える
+ *   (frame を選んだまま、その子を Shift+クリック)
+ * - 選択済みの group / frame そのものに当たるときは、その中の押した所の子を足して入れ替える
+ * - 選択済みの葉は、動かさずに離したときに外す (ドラッグなら選択ごと動かす)
+ * - 選ばれていなければ足す (祖先・子孫は入れ替える)
+ */
+function shiftPress(
+  store: Store,
+  path: readonly NodeId[] | null,
+  picked: NodeId,
+  plain: NodeId | null,
+  pending: (intent: DragIntent, onClick?: (() => void) | null) => void,
+): void {
+  const state = store.getState();
+  const add = (id: NodeId) => {
+    state.setSelection(addToSelection(state.doc, state.selection, [id]));
+    pending({ kind: "move", grab: "node" });
+  };
+  if (!state.selection.includes(picked)) {
+    add(picked);
+    return;
+  }
+  if (plain !== null && plain !== picked && isAncestorOf(state.doc, picked, plain)) {
+    add(plain);
+    return;
+  }
+  const index = path ? path.indexOf(picked) : -1;
+  const inner = index >= 0 ? path?.[index + 1] : undefined;
+  if (plain === picked && inner !== undefined && isInteractive(state.doc, inner)) {
+    add(inner);
+    return;
+  }
+  pending({ kind: "move", grab: "node" }, () => toggleInSelection(store, picked));
 }
 
 /**
@@ -390,51 +468,13 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
 function clickThrough(event: CanvasPointerEvent, ctx: ToolContext): void {
   const state = ctx.store.getState();
   const picked = pickAt(state, event.page, event.mod, ctx.measurer);
-  const scopeId = picked.label ? null : picked.scopeId;
-  if (scopeId !== state.scopeId) state.setScope(scopeId);
+  if (picked.scopeId !== state.scopeId) state.setScope(picked.scopeId);
   const id = picked.id;
   if (event.shift) {
-    if (id === null) return;
-    const current = ctx.store.getState().selection;
-    ctx.store
-      .getState()
-      .setSelection(
-        current.includes(id) ? current.filter((other) => other !== id) : [...current, id],
-      );
+    if (id !== null) toggleInSelection(ctx.store, id);
     return;
   }
   ctx.store.getState().setSelection(id === null ? [] : [id]);
-}
-
-/**
- * ノードを押したとき。Shift なら選択に足し (選択済みなら、動かさずに離したときに外す)、
- * そうでなければ選択済みならそのまま (複数をまとめて動かせる)、未選択ならそれだけを選ぶ。
- */
-function selectAndPend(
-  event: CanvasPointerEvent,
-  store: Store,
-  id: NodeId,
-  alreadySelected: boolean,
-  onPlainClick: () => void,
-): void {
-  const state = store.getState();
-  if (event.shift) {
-    if (alreadySelected) {
-      pending(event, { kind: "move" }, () => {
-        const current = store.getState();
-        current.setSelection(current.selection.filter((other) => other !== id));
-      });
-    } else {
-      state.setSelection([...state.selection, id]);
-      pending(event, { kind: "move" }, null);
-    }
-    return;
-  }
-  if (alreadySelected) pending(event, { kind: "move" }, onPlainClick);
-  else {
-    state.setSelection([id]);
-    pending(event, { kind: "move" }, null);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -451,12 +491,13 @@ function startDrag(
   const state = store.getState();
   switch (intent.kind) {
     case "move":
-      return startMove(state, event.alt, start.page);
+      return startMove(state, event.alt, start.page, intent.grab);
     case "resize": {
       const ids = handleTargets(state);
       const bounds = getSelectionBounds(state.doc, ids);
       if (!bounds) return null;
       state.beginGesture();
+      ownsGesture = true;
       const nodes = ids.map((id) => getNode(state.doc, id));
       return {
         kind: "resize",
@@ -473,6 +514,7 @@ function startDrag(
       const line = getNode(state.doc, intent.id);
       if (line?.type !== "line") return null;
       state.beginGesture();
+      ownsGesture = true;
       const origin = nodeOrigin(state.doc, intent.id);
       const p1 = { x: origin.x + line.x1, y: origin.y + line.y1 };
       const p2 = { x: origin.x + line.x2, y: origin.y + line.y2 };
@@ -493,12 +535,12 @@ function startDrag(
         kind: "marquee",
         candidates: marqueeCandidates(state.doc, state.pageId, intent.scopeId),
         base: intent.base,
-        before: intent.before,
       };
     case "guide": {
-      const drag = beginMoveGuide(store, intent.index);
       const guide = getPage(state.doc, state.pageId)?.guides[intent.index];
+      const drag = guide ? beginMoveGuide(store, intent.index) : null;
       if (!drag || !guide) return null;
+      ownsGesture = true;
       const pressed = guide.axis === "x" ? start.page.x : start.page.y;
       return { kind: "guide", drag, offset: guide.position - pressed };
     }
@@ -522,27 +564,26 @@ function ownSnapTargets(state: EditorStore, ids: readonly NodeId[], doc = state.
   return collectSnapTargets(doc, state.pageId, { parents, frames, exclude: new Set(ids) });
 }
 
-function startMove(state: EditorStore, alt: boolean, pressed: Point): MoveDrag | null {
+function startMove(state: EditorStore, alt: boolean, pressed: Point, grab: Grab): MoveDrag | null {
   let ids = transformableIds(state.doc, state.selection);
   if (ids.length === 0) return null;
-  state.beginGesture();
   let doc = state.doc;
   let duplicated = false;
-  // Alt: 開始時に 1 回だけ複製し、ドラッグの間は同じ複製を動かす (§4.10)
+  // Alt: 開始時に 1 回だけ複製し、ドラッグの間は同じ複製を動かす (§4.10)。
+  // 複製できない (ノード数の上限など) ときは、元を動かさずに何もしない (§4.6)
   if (alt) {
     const result = duplicateNodes(doc, ids);
-    if (result.doc !== doc && geometryWithinLimits(result.doc, result.ids)) {
-      doc = result.doc;
-      ids = result.ids;
-      duplicated = true;
-    }
+    if (result.doc === doc || !geometryWithinLimits(result.doc, result.ids)) return null;
+    doc = result.doc;
+    ids = result.ids;
+    duplicated = true;
   }
   const start = getSelectionBounds(doc, ids);
-  if (!start) {
-    state.cancelGesture();
-    return null;
-  }
+  if (!start) return null;
+  state.beginGesture();
+  ownsGesture = true;
   const frames = dropFrames(doc, state.pageId, new Set(ids));
+  const ownFrames = ids.map((id) => coordinateFrameId(doc, id));
   const snapCache = new Map<string, SnapTargets>();
   snapCache.set("own", ownSnapTargets(state, ids, doc));
   return {
@@ -552,21 +593,37 @@ function startMove(state: EditorStore, alt: boolean, pressed: Point): MoveDrag |
     duplicated,
     start,
     frames,
+    grab,
     startTarget: dropTargetAt(frames, pressed),
+    ownFrame: ownFrames.every((frame) => frame === ownFrames[0])
+      ? (ownFrames[0] ?? null)
+      : undefined,
     snapCache,
   };
 }
 
 /**
- * ドロップ先に合わせたスナップの候補。親を変えないとき (`target` が undefined) は
- * 動かすノードの兄弟と座標系の frame、変えるときはドロップ先の子と frame。
+ * 移動の付け替え先 (§4.6)。undefined は親を変えない。
+ * ノードをつかんだときは、ポインターの下の最も前面の frame (なければページ直下)。
+ * ラベルや選択の中の何もない場所をつかんだときは、押した点の下と違う frame に入ったときだけ。
+ */
+function moveDropTarget(drag: MoveDrag, pointer: Point): NodeId | null | undefined {
+  const under = dropTargetAt(drag.frames, pointer);
+  if (drag.grab === "space" && under === drag.startTarget) return undefined;
+  return under;
+}
+
+/**
+ * スナップの候補。親を変えないときは動かすノードの兄弟と座標系の frame、
+ * 変えるときはドロップ先の子と frame。
  */
 function moveSnapTargets(
   state: EditorStore,
   drag: MoveDrag,
   target: NodeId | null | undefined,
 ): SnapTargets {
-  if (target === undefined) return drag.snapCache.get("own") ?? EMPTY_SNAP_TARGETS;
+  if (target === undefined || (drag.ownFrame !== undefined && drag.ownFrame === target))
+    return drag.snapCache.get("own") ?? EMPTY_SNAP_TARGETS;
   const key = `t:${target ?? ""}`;
   let targets = drag.snapCache.get(key);
   if (!targets) {
@@ -594,10 +651,9 @@ function updateDrag(drag: Drag, start: Press, event: CanvasPointerEvent, ctx: To
       let raw = { x: event.page.x - start.page.x, y: event.page.y - start.page.y };
       if (event.shift) raw = constrainAxis(raw);
       const axes = event.shift ? { x: raw.x !== 0, y: raw.y !== 0 } : { x: true, y: true };
-      // ポインターが押したときと別の frame (かページ) に入ったときだけ、親を変える
-      const under = dropTargetAt(drag.frames, event.page);
-      const target = under === drag.startTarget ? undefined : under;
-      const snapping = !event.mod;
+      const target = moveDropTarget(drag, event.page);
+      // 押した位置へ戻したら吸着もしない (文書を変えない)
+      const snapping = !event.mod && (raw.x !== 0 || raw.y !== 0);
       const targets = snapping ? moveSnapTargets(state, drag, target) : null;
       let delta = raw;
       if (targets) {
@@ -687,9 +743,8 @@ function updateDrag(drag: Drag, start: Press, event: CanvasPointerEvent, ctx: To
     case "marquee": {
       const rect = rectFromPoints(start.page, event.page);
       const hits = marqueeSelect(drag.candidates, rect);
-      const base = new Set(drag.base);
       state.setSelection(
-        drag.base.length === 0 ? hits : [...drag.base, ...hits.filter((id) => !base.has(id))],
+        drag.base.length === 0 ? hits : addToSelection(state.doc, drag.base, hits),
       );
       setSelectOverlay({ marquee: rect });
       return;
@@ -729,9 +784,9 @@ function resizeGuides(doc: CanvasDocument, drag: ResizeDrag, targets: SnapTarget
   ];
 }
 
-/** ジェスチャーを使うドラッグか (外から取り消されたかを確かめる)。 */
-function usesGesture(drag: Drag): boolean {
-  return drag.kind !== "marquee";
+/** 自分のドラッグが開いたジェスチャーが、まだ開いているか。 */
+function ownGestureOpen(store: Store): boolean {
+  return ownsGesture && store.getState().gestureActive;
 }
 
 function onPointerMove(event: CanvasPointerEvent, ctx: ToolContext): void {
@@ -752,8 +807,9 @@ function onPointerMove(event: CanvasPointerEvent, ctx: ToolContext): void {
     phase = { kind: "drag", press: phase.press, drag };
   }
   if (phase.kind !== "drag") return;
-  // Undo などで外からジェスチャーが取り消されたら、それ以上動かさない
-  if (usesGesture(phase.drag) && !ctx.store.getState().gestureActive) {
+  // Undo などで外からジェスチャーが閉じられたら、それ以上動かさない
+  if (phase.drag.kind !== "marquee" && !ownGestureOpen(ctx.store)) {
+    ownsGesture = false;
     phase = { kind: "inert" };
     resetSelectOverlay();
     return;
@@ -764,25 +820,26 @@ function onPointerMove(event: CanvasPointerEvent, ctx: ToolContext): void {
 function onPointerUp(event: CanvasPointerEvent, ctx: ToolContext): void {
   const current = phase;
   phase = { kind: "idle" };
+  const store = ctx.store;
   if (current.kind === "pending") current.onClick?.();
   else if (current.kind === "drag") {
     const drag = current.drag;
-    const store = ctx.store;
-    const active = store.getState().gestureActive;
-    if (drag.kind === "guide") {
-      endGuideDrag(
-        store,
-        drag.drag,
-        guidePointer(drag, event),
-        isOverRuler(drag.drag.axis, event.screen, store.getState().view.rulers),
-      );
-    } else if (drag.kind === "marquee") {
-      updateDrag(drag, current.press, event, ctx);
-    } else if (active) {
-      updateDrag(drag, current.press, event, ctx);
-      store.getState().commitGesture();
+    if (drag.kind === "marquee") updateDrag(drag, current.press, event, ctx);
+    else if (ownGestureOpen(store)) {
+      if (drag.kind === "guide")
+        endGuideDrag(
+          store,
+          drag.drag,
+          guidePointer(drag, event),
+          isOverRuler(drag.drag.axis, event.screen, store.getState().view.rulers),
+        );
+      else {
+        updateDrag(drag, current.press, event, ctx);
+        store.getState().commitGesture();
+      }
     }
   }
+  ownsGesture = false;
   resetSelectOverlay();
   updateHover(event, ctx);
 }
@@ -792,13 +849,18 @@ function onCancel(ctx: ToolContext): void {
   phase = { kind: "idle" };
   resetSelectOverlay();
   lastCursor = null;
-  const state = ctx.store.getState();
-  if (current.kind !== "drag") return;
-  if (current.drag.kind === "marquee") {
-    state.setSelection(current.drag.before);
-    return;
+  const store = ctx.store;
+  store.getState().setHovered(null);
+  // 取り消すのは自分のドラッグが開いたジェスチャーだけ (本文の編集や色の選択のジェスチャーは残す)
+  if (current.kind === "drag" && current.drag.kind !== "marquee" && ownGestureOpen(store))
+    store.getState().cancelGesture();
+  ownsGesture = false;
+  // 押してから取り消したら、選択とスコープは押す前に戻す
+  if (current.kind === "pending" || current.kind === "drag") {
+    const { selection, scopeId } = current.press;
+    store.getState().setScope(scopeId);
+    store.getState().setSelection(selection);
   }
-  if (state.gestureActive) state.cancelGesture();
 }
 
 export const selectTool: Tool = {

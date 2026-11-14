@@ -6,7 +6,7 @@
  * ルーラーを押してキャンバスへ引き出すとガイド線を作る (上のルーラーは横、左のルーラーは縦)。
  * ルーラーの上で離すと作らない。ジェスチャー 1 回で履歴 1 件 (`tools/select/guideDrag.ts`)。
  */
-import { useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { useShallow } from "zustand/shallow";
 import { getSelectionBounds } from "../model/geometry";
 import type { Guide } from "../model/types";
@@ -23,10 +23,37 @@ import { isEditableTarget } from "./input";
 import { formatRulerValue, RULER_SIZE, rulerTicks } from "./rulerTicks";
 import { screenToPage, type Size } from "./viewport";
 
-/** ルーラーを押して引き出すガイド線。上のルーラー (`x`) からは横のガイド線 (`y`)。 */
+/** 引き出している途中のガイド線。 */
+interface PullState {
+  pointerId: number;
+  element: Element;
+  guide: GuideDrag;
+  /** ウィンドウとドキュメントに付けたリスナーを外す */
+  detach: () => void;
+}
+
+/**
+ * ルーラーを押して引き出すガイド線。上のルーラー (`x`) からは横のガイド線 (`y`)。
+ * 自分で開いたジェスチャーは自分で閉じる (§4.4): 離したら確定、ポインターの取消・捕捉の喪失・
+ * Esc・ウィンドウからのフォーカス喪失・アンマウント (途中で Shift+R など) では取り消す。
+ */
 function useGuidePull(rulerAxis: "x" | "y") {
   const guideAxis: Guide["axis"] = rulerAxis === "x" ? "y" : "x";
-  const drag = useRef<{ id: number; guide: GuideDrag } | null>(null);
+  const pull = useRef<PullState | null>(null);
+
+  /** 引き出しを終える。`cancel` なら開いたジェスチャーを取り消す。 */
+  const finish = useCallback((cancel: boolean) => {
+    const current = pull.current;
+    if (!current) return;
+    pull.current = null;
+    current.detach();
+    if (current.element.hasPointerCapture?.(current.pointerId))
+      current.element.releasePointerCapture(current.pointerId);
+    if (cancel && editorStore.getState().gestureActive) editorStore.getState().cancelGesture();
+  }, []);
+
+  // アンマウントで取り消す (作りかけのガイド線とジェスチャーを残さない)
+  useEffect(() => () => finish(true), [finish]);
 
   const locate = (event: ReactPointerEvent<Element>) => {
     const canvas = event.currentTarget.closest("[data-canvas-view]");
@@ -39,15 +66,13 @@ function useGuidePull(rulerAxis: "x" | "y") {
     };
   };
 
-  const release = (event: ReactPointerEvent<Element>) => {
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId))
-      event.currentTarget.releasePointerCapture(event.pointerId);
-  };
+  const ownsEvent = (event: ReactPointerEvent<Element>) =>
+    pull.current !== null && pull.current.pointerId === event.pointerId;
 
   return {
     onPointerDown(event: ReactPointerEvent<Element>) {
-      if (event.button !== 0 || drag.current) return;
-      // 入力欄の値を確定させ、キーを (Esc での取消を含め) キャンバスが受けられるようにする
+      if (event.button !== 0 || pull.current) return;
+      // 入力欄の値を確定させ、キーをキャンバスが受けられるようにする
       const focused = document.activeElement;
       if (focused instanceof HTMLElement && isEditableTarget(focused)) focused.blur();
       const canvas = event.currentTarget.closest<HTMLElement>("[data-canvas-view]");
@@ -55,7 +80,29 @@ function useGuidePull(rulerAxis: "x" | "y") {
       const guide = beginNewGuide(editorStore, guideAxis);
       if (!guide) return;
       event.preventDefault();
-      drag.current = { id: event.pointerId, guide };
+      // Esc はキャンバスより先に受けて取り消す (キャンバスが選択の解除などに使わないように)
+      const onKeyDown = (keyEvent: KeyboardEvent) => {
+        if (keyEvent.key !== "Escape") return;
+        keyEvent.preventDefault();
+        finish(true);
+      };
+      const onBlur = () => finish(true);
+      const onVisibility = () => {
+        if (document.visibilityState === "hidden") finish(true);
+      };
+      window.addEventListener("keydown", onKeyDown, true);
+      window.addEventListener("blur", onBlur);
+      document.addEventListener("visibilitychange", onVisibility);
+      pull.current = {
+        pointerId: event.pointerId,
+        element: event.currentTarget,
+        guide,
+        detach: () => {
+          window.removeEventListener("keydown", onKeyDown, true);
+          window.removeEventListener("blur", onBlur);
+          document.removeEventListener("visibilitychange", onVisibility);
+        },
+      };
       try {
         event.currentTarget.setPointerCapture?.(event.pointerId);
       } catch {
@@ -63,37 +110,29 @@ function useGuidePull(rulerAxis: "x" | "y") {
       }
     },
     onPointerMove(event: ReactPointerEvent<Element>) {
-      const current = drag.current;
-      if (!current || current.id !== event.pointerId) return;
-      // Esc やフォーカス喪失でジェスチャーが取り消されたら、それ以上作らない
+      const current = pull.current;
+      if (!current || !ownsEvent(event)) return;
+      // Undo などでジェスチャーが閉じられたら、それ以上作らない
       if (!editorStore.getState().gestureActive) {
-        drag.current = null;
-        release(event);
+        finish(false);
         return;
       }
       const { page, remove } = locate(event);
       updateGuideDrag(editorStore, current.guide, page, remove);
     },
     onPointerUp(event: ReactPointerEvent<Element>) {
-      const current = drag.current;
-      if (!current || current.id !== event.pointerId) return;
-      drag.current = null;
-      release(event);
+      const current = pull.current;
+      if (!current || !ownsEvent(event)) return;
       const { page, remove } = locate(event);
+      finish(false);
       endGuideDrag(editorStore, current.guide, page, remove);
     },
     onPointerCancel(event: ReactPointerEvent<Element>) {
-      const current = drag.current;
-      if (!current || current.id !== event.pointerId) return;
-      drag.current = null;
-      if (editorStore.getState().gestureActive) editorStore.getState().cancelGesture();
+      if (ownsEvent(event)) finish(true);
     },
     onLostPointerCapture(event: ReactPointerEvent<Element>) {
-      // pointerup の後にも来るが、そのときは drag が空なので何もしない
-      const current = drag.current;
-      if (!current || current.id !== event.pointerId) return;
-      drag.current = null;
-      if (editorStore.getState().gestureActive) editorStore.getState().cancelGesture();
+      // pointerup の後にも来るが、そのときは終えているので何もしない
+      if (ownsEvent(event)) finish(true);
     },
   };
 }

@@ -92,6 +92,15 @@ describe("SelectionOverlay", () => {
     expect(container.querySelector("[data-canvas-selection-box]")).not.toBeNull();
   });
 
+  it("ホバーの枠は選択ツールのときだけ", () => {
+    const { container } = renderOverlay();
+    act(() => editorStore.getState().setHovered("r1"));
+    expect(container.querySelector("[data-canvas-hover]")).not.toBeNull();
+    act(() => editorStore.getState().setTool("rect"));
+    expect(container.querySelector("[data-canvas-hover]")).toBeNull();
+    act(() => editorStore.getState().setTool("select"));
+  });
+
   it("ホバーの枠 (選択していないノードだけ)", () => {
     const { container } = renderOverlay();
     act(() => editorStore.getState().setHovered("r1"));
@@ -161,5 +170,72 @@ describe("ルーラーからガイド線を引き出す", () => {
       button: 2,
     });
     expect(editorStore.getState().gestureActive).toBe(false);
+  });
+
+  /** 横のガイド線を途中まで引き出す。 */
+  function startPull() {
+    const view = render(<Rulers size={{ width: 800, height: 600 }} />);
+    const top = view.container.querySelector("[data-canvas-ruler='x']")!;
+    fireEvent.pointerDown(top, pointer(100, 10));
+    fireEvent.pointerMove(top, pointer(100, 80));
+    expect(guides()).toEqual([{ axis: "y", position: 80 }]);
+    expect(editorStore.getState().gestureActive).toBe(true);
+    return { ...view, top };
+  }
+
+  const expectCancelled = () => {
+    expect(guides()).toEqual([]);
+    expect(editorStore.getState()).toMatchObject({ gestureActive: false, revision: 0 });
+  };
+
+  it("pointercancel で取り消す", () => {
+    const { top } = startPull();
+    fireEvent.pointerCancel(top, pointer(100, 80));
+    expectCancelled();
+    fireEvent.pointerUp(top, pointer(100, 120));
+    expectCancelled();
+  });
+
+  it("ポインターの捕捉を失ったら取り消す", () => {
+    const { top } = startPull();
+    fireEvent.lostPointerCapture(top, pointer(100, 80));
+    expectCancelled();
+  });
+
+  it("途中でアンマウントされたら (Shift+R でルーラーを消すなど) 取り消す", () => {
+    const { unmount } = startPull();
+    unmount();
+    expectCancelled();
+  });
+
+  it("Esc で取り消し、キャンバスへは回さない (選択を解除しない)", () => {
+    editorStore.getState().setSelection(["r1"]);
+    startPull();
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    document.body.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expectCancelled();
+    expect(editorStore.getState().selection).toEqual(["r1"]);
+  });
+
+  it("ウィンドウからフォーカスが外れたら取り消す", () => {
+    startPull();
+    act(() => {
+      window.dispatchEvent(new Event("blur"));
+    });
+    expectCancelled();
+  });
+
+  it("ほかの Esc やフォーカス喪失は、引き出していなければ何もしない", () => {
+    render(<Rulers size={{ width: 800, height: 600 }} />);
+    act(() => {
+      editorStore.getState().beginGesture(); // パネルの色の選択などが開いたもの
+    });
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    document.body.dispatchEvent(event);
+    window.dispatchEvent(new Event("blur"));
+    expect(event.defaultPrevented).toBe(false);
+    expect(editorStore.getState().gestureActive).toBe(true);
+    act(() => editorStore.getState().cancelGesture());
   });
 });

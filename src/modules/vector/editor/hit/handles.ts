@@ -16,9 +16,9 @@ export const CORNER_HIT = 6;
 export const EDGE_HIT = 4;
 /**
  * 画面上の幅か高さがこれより小さい選択は、枠の内側でハンドルに当てない
- * (小さな図形でも中を押せば動かせるように)。
+ * (小さな図形でも中を押せば動かせるように。§4.6)。
  */
-export const SMALL_SELECTION = 16;
+export const SMALL_SELECTION = 32;
 /** ガイド線が当たる距離 (画面 px)。 */
 export const GUIDE_HIT = 3;
 

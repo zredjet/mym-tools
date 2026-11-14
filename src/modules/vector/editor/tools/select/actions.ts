@@ -8,7 +8,7 @@
 import type { StoreApi } from "zustand";
 import { insertFragment } from "../../model/fragment";
 import { duplicateNodes } from "../../model/structure";
-import { getNode, getParentNode, topLevelIds } from "../../model/tree";
+import { getNode, getParentNode, isAncestorOf, topLevelIds } from "../../model/tree";
 import type { CanvasDocument, NodeId } from "../../model/types";
 import { geometryWithinLimits } from "../../panels/limits";
 import { editorClipboard, PASTE_OFFSET, type EditorClipboard } from "../../state/clipboard";
@@ -40,6 +40,23 @@ export function transformableIds(
   const ids = topLevelIds(doc, selection).filter((id) => isInteractive(doc, id));
   lastTransformable = { doc, selection, ids };
   return ids;
+}
+
+/**
+ * 選択にノードを足す。祖先と子孫は同時に選ばないので、足すノードの祖先や子孫が選択にあれば
+ * 外して入れ替える (§4.5)。足すノード同士は互いに祖先・子孫でないこと。
+ */
+export function addToSelection(
+  doc: CanvasDocument,
+  selection: readonly NodeId[],
+  ids: readonly NodeId[],
+): NodeId[] {
+  if (ids.length === 0) return [...selection];
+  const adding = new Set(ids);
+  const related = (id: NodeId) =>
+    adding.has(id) ||
+    ids.some((other) => isAncestorOf(doc, id, other) || isAncestorOf(doc, other, id));
+  return [...selection.filter((id) => !related(id)), ...adding];
 }
 
 /** 矢印キー: 選択を動かす (1 px、Shift で 10 px)。動かせるものがなければ false。 */

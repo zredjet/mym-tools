@@ -160,7 +160,8 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
 
   // ---- 編集 ----
   // 文書の操作は `state/commands.ts`、範囲の確認・Enter・Esc は `tools/select/actions.ts`。
-  // Cmd/Ctrl+S と Cmd/Ctrl+N は作品バーの担当なので、ここには置かない
+  // Cmd/Ctrl+S と Cmd/Ctrl+N は作品バーの担当なので、ここには置かない。
+  // 押しっぱなしの繰り返しを受けるのは、矢印と Undo / Redo だけ (§5.4)
   {
     id: "edit.undo",
     keys: [{ key: ["z"], mod: true }],
@@ -173,34 +174,34 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
   },
   {
     id: "edit.copy",
-    keys: [{ key: ["c"], mod: true }],
+    keys: [{ key: ["c"], mod: true, repeat: false }],
     run: ({ store }) => {
       copySelection(store);
     },
   },
   {
     id: "edit.cut",
-    keys: [{ key: ["x"], mod: true }],
+    keys: [{ key: ["x"], mod: true, repeat: false }],
     run: ({ store }) => cutSelection(store),
   },
   {
     id: "edit.paste",
-    keys: [{ key: ["v"], mod: true }],
+    keys: [{ key: ["v"], mod: true, repeat: false }],
     run: ({ store }) => pasteWithinLimits(store),
   },
   {
     id: "edit.duplicate",
-    keys: [{ key: ["d"], mod: true }],
+    keys: [{ key: ["d"], mod: true, repeat: false }],
     run: ({ store }) => duplicateWithinLimits(store),
   },
   {
     id: "edit.selectAll",
-    keys: [{ key: ["a"], mod: true }],
+    keys: [{ key: ["a"], mod: true, repeat: false }],
     run: ({ store }) => selectAll(store),
   },
   {
     id: "edit.delete",
-    keys: [{ key: ["Delete", "Backspace"] }],
+    keys: [{ key: ["Delete", "Backspace"], repeat: false }],
     run: ({ store }) => {
       if (store.getState().selection.length === 0) return false;
       deleteSelection(store);
@@ -223,32 +224,32 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
   ),
   {
     id: "edit.group",
-    keys: [{ key: ["g"], mod: true }],
+    keys: [{ key: ["g"], mod: true, repeat: false }],
     run: ({ store }) => groupSelection(store),
   },
   {
     id: "edit.ungroup",
-    keys: [{ key: ["g"], mod: true, shift: true }],
+    keys: [{ key: ["g"], mod: true, shift: true, repeat: false }],
     run: ({ store }) => ungroupSelection(store),
   },
   {
     id: "edit.bringForward",
-    keys: [{ key: ["]"], mod: true }],
+    keys: [{ key: ["]"], mod: true, repeat: false }],
     run: ({ store }) => reorderSelection(store, "forward"),
   },
   {
     id: "edit.sendBackward",
-    keys: [{ key: ["["], mod: true }],
+    keys: [{ key: ["["], mod: true, repeat: false }],
     run: ({ store }) => reorderSelection(store, "backward"),
   },
   {
     id: "edit.bringToFront",
-    keys: [{ key: ["]"] }],
+    keys: [{ key: ["]"], repeat: false }],
     run: ({ store }) => reorderSelection(store, "front"),
   },
   {
     id: "edit.sendToBack",
-    keys: [{ key: ["["] }],
+    keys: [{ key: ["["], repeat: false }],
     run: ({ store }) => reorderSelection(store, "back"),
   },
   {
@@ -261,8 +262,20 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
     // 何もしていないときの Esc: 本文の編集の終了 → スコープを 1 段外へ → 選択の解除
     // (操作の途中の Esc は CanvasView が先に取り消す。ほかのツールの Esc は上の tool.escape)
     id: "edit.escape",
-    keys: [{ key: ["Escape"] }],
+    keys: [{ key: ["Escape"], repeat: false }],
     run: ({ store }) => escapeSelection(store),
+  },
+  {
+    // 上の編集のキーの押しっぱなしの繰り返しは、何もせずに受ける
+    // (ブラウザのすべて選択や検索などへ回さない)
+    id: "edit.ignoreRepeat",
+    keys: [
+      { key: ["c", "x", "v", "d", "a"], mod: true },
+      { key: ["g"], mod: true, shift: "any" },
+      { key: ["[", "]"], mod: "any" },
+      { key: ["Delete", "Backspace"] },
+    ],
+    run: () => {},
   },
 ];
 

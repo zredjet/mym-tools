@@ -29,9 +29,9 @@ function setup() {
     size: { width: 800, height: 600 },
     measurer: fixedWidthMeasurer(),
   };
-  // macOS の割当で調べる (mod = Cmd)
-  const run = (patch: Partial<KeyInput>) =>
-    runShortcut(key(patch), env, undefined, true)?.id ?? null;
+  // 既定は macOS の割当 (mod = Cmd)。Windows は mac = false (mod = Ctrl)
+  const run = (patch: Partial<KeyInput>, mac = true) =>
+    runShortcut(key(patch), env, undefined, mac)?.id ?? null;
   return { store, run, s: () => store.getState() };
 }
 
@@ -69,7 +69,10 @@ describe("編集のショートカット", () => {
     expect(s().doc.nodes[copy]).toMatchObject({ x: 20, y: 20 });
     expect(run({ key: "Backspace" })).toBe("edit.delete");
     expect(s().doc.nodes[copy]).toBeUndefined();
-    expect(run({ key: "Delete" })).toBeNull(); // 選択がなければ処理しない
+    // 選択がなければ削除はせず、ブラウザへも回さない
+    const before = s().doc;
+    expect(run({ key: "Delete" })).toBe("edit.ignoreRepeat");
+    expect(s().doc).toBe(before);
     s().setSelection([pasted]);
     expect(run({ key: "x", metaKey: true })).toBe("edit.cut");
     expect(s().doc.nodes[pasted]).toBeUndefined();
@@ -124,5 +127,49 @@ describe("編集のショートカット", () => {
     const { run } = setup();
     expect(run({ key: "s", metaKey: true })).toBeNull();
     expect(run({ key: "n", metaKey: true })).toBeNull();
+  });
+
+  it("押しっぱなしの繰り返しを受けるのは矢印と Undo / Redo だけ。ほかは何もせずに受ける", () => {
+    const { run, s } = setup();
+    s().setSelection(["r1", "grp"]);
+    expect(run({ key: "g", metaKey: true, repeat: true })).toBe("edit.ignoreRepeat");
+    expect(s().revision).toBe(0);
+    expect(run({ key: "g", metaKey: true })).toBe("edit.group");
+    const group = s().selection[0]!;
+    // 押しっぱなしで group が入れ子に増えない
+    expect(run({ key: "g", metaKey: true, repeat: true })).toBe("edit.ignoreRepeat");
+    expect(s().selection).toEqual([group]);
+    expect(s().revision).toBe(1);
+    for (const k of ["d", "a", "c", "v", "x"])
+      expect(run({ key: k, metaKey: true, repeat: true })).toBe("edit.ignoreRepeat");
+    expect(run({ key: "]", repeat: true })).toBe("edit.ignoreRepeat");
+    expect(run({ key: "Backspace", repeat: true })).toBe("edit.ignoreRepeat");
+    expect(s().revision).toBe(1);
+    expect(run({ key: "Enter", repeat: true })).toBeNull();
+    expect(run({ key: "Escape", repeat: true })).toBeNull();
+    // 矢印と Undo / Redo は繰り返す
+    expect(run({ key: "ArrowRight", repeat: true })).toBe("edit.nudge.ArrowRight.1");
+    expect(run({ key: "z", metaKey: true, repeat: true })).toBe("edit.undo");
+    expect(run({ key: "z", metaKey: true, shiftKey: true, repeat: true })).toBe("edit.redo");
+  });
+
+  it("Windows の割当 (mod = Ctrl)", () => {
+    const { run, s } = setup();
+    editorClipboard.clear();
+    s().setSelection(["r0"]);
+    expect(run({ key: "ArrowRight" }, false)).toBe("edit.nudge.ArrowRight.1");
+    expect(run({ key: "z", ctrlKey: true }, false)).toBe("edit.undo");
+    expect(s().doc.nodes.r0).toMatchObject({ x: 0 });
+    expect(run({ key: "Z", ctrlKey: true, shiftKey: true }, false)).toBe("edit.redo");
+    expect(run({ key: "d", ctrlKey: true }, false)).toBe("edit.duplicate");
+    expect(run({ key: "a", ctrlKey: true }, false)).toBe("edit.selectAll");
+    s().setSelection(["r1", "grp"]);
+    expect(run({ key: "g", ctrlKey: true }, false)).toBe("edit.group");
+    expect(run({ key: "G", ctrlKey: true, shiftKey: true }, false)).toBe("edit.ungroup");
+    expect(run({ key: "]", ctrlKey: true }, false)).toBe("edit.bringForward");
+    // Windows で Cmd (meta) は mod ではない
+    expect(run({ key: "z", metaKey: true }, false)).toBeNull();
+    expect(run({ key: "s", ctrlKey: true }, false)).toBeNull();
+    editorClipboard.clear();
   });
 });

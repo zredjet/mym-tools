@@ -2,7 +2,7 @@
  * 選択の重ね描き (§4.3 / §4.5)。現在のツールに関係なくキャンバスが重ね描き用 SVG の
  * ページ座標の `<g>` に置く。描くもの:
  *
- * - ホバーの枠 (選択していないノード)
+ * - ホバーの枠 (選択していないノード。選択ツールのときだけ)
  * - 選択したノードの枠と、動かせる選択の外接矩形・リサイズハンドル (選択ツールのとき)。
  *   線を 1 本だけ選んだときのハンドルは始点と終点の 2 個。本文の編集中のノードにはハンドルを出さない
  * - 範囲選択の矩形とスマートガイド (`overlayState.ts`)
@@ -83,8 +83,13 @@ function Handle({ at, unit }: { at: Point; unit: number }) {
 }
 
 function HoverOutline() {
+  // ホバーの枠は選択ツールのときだけ (§4.5)
   const hoveredId = useEditorStore((state) =>
-    state.hoveredId !== null && !state.selection.includes(state.hoveredId) ? state.hoveredId : null,
+    state.toolId === "select" &&
+    state.hoveredId !== null &&
+    !state.selection.includes(state.hoveredId)
+      ? state.hoveredId
+      : null,
   );
   const doc = useEditorStore((state) => state.doc);
   const outline = useMemo(

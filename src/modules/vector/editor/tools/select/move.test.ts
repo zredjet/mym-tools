@@ -28,6 +28,20 @@ describe("translateRounded", () => {
     expect(translateRounded(doc, ["grp", "r2"], 5, 0).nodes.r2).toMatchObject({ x: 55 });
   });
 
+  it("丸めるのは動かした向きだけ。動かしていない向きの小数は変えない", () => {
+    const fractional = updateNode(doc, "r1", { x: 10.5, y: 0.5 });
+    expect(translateRounded(fractional, ["r1"], 3, 0).nodes.r1).toMatchObject({ x: 14, y: 0.5 });
+    expect(translateRounded(fractional, ["r1"], 0, 2).nodes.r1).toMatchObject({ x: 10.5, y: 3 });
+    expect(translateRounded(fractional, ["r1"], 0, 0)).toBe(fractional);
+    const line = updateNode(doc, "l1", { y1: 40.5, y2: 40.5 });
+    expect(translateRounded(line, ["l1"], 1, 0).nodes.l1).toMatchObject({
+      x1: 41,
+      y1: 40.5,
+      x2: 81,
+      y2: 40.5,
+    });
+  });
+
   it("変わらなければ同じ文書", () => {
     expect(translateRounded(doc, ["r1"], 0, 0)).toBe(doc);
     expect(translateRounded(doc, ["r1"], 0.2, -0.3)).toBe(doc);

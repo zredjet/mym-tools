@@ -200,6 +200,21 @@ describe("pickTarget", () => {
     expect(pick(600, 600, "grp")).toEqual({ id: null, scopeId: null });
   });
 
+  it("group のスコープは外接矩形の中の何もない場所もスコープの中 (point を渡す)", () => {
+    // grp の外接矩形 (140..180, 90..120)。(170, 105) は子のない場所 (道は [f])
+    const at = (x: number, y: number) => pickTarget(doc, path(x, y), "grp", { point: { x, y } });
+    expect(at(170, 105)).toEqual({ id: null, scopeId: "grp" });
+    // 外接矩形の外は出る
+    expect(at(250, 300)).toEqual({ id: null, scopeId: null });
+    // 外接矩形の中でも、スコープの外のノードに当たったら出る
+    const overlapped = updateNode(doc, "r1", { x: 65, y: 50 }); // ページ (165..185, 100..120)
+    expect(
+      pickTarget(overlapped, path(170, 105, overlapped), "grp", { point: { x: 170, y: 105 } }),
+    ).toEqual({ id: "r1", scopeId: null });
+    // point を渡さなければ、従来どおり道だけで決める
+    expect(pickTarget(doc, path(170, 105), "grp")).toEqual({ id: null, scopeId: null });
+  });
+
   it("deep (Cmd/Ctrl) はいちばん深いノード。ページ直下の frame の何もない場所は null", () => {
     expect(pick(155, 115, null, { deep: true }).id).toBe("r2");
     expect(pick(310, 160, null, { deep: true }).id).toBe("r3");

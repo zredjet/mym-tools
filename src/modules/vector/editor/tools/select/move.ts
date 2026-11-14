@@ -30,23 +30,22 @@ function movedLeaves(doc: CanvasDocument, ids: readonly NodeId[]): NodeId[] {
 }
 
 function translatePatch(node: CanvasNode, dx: number, dy: number): NodePatch | null {
+  // 動かした向きだけ丸める。動かしていない向きの小数の座標は変えない
+  const mx = (v: number) => (dx === 0 ? v : round(v + dx));
+  const my = (v: number) => (dy === 0 ? v : round(v + dy));
   switch (node.type) {
     case "group":
       return null;
     case "line":
-      return {
-        x1: round(node.x1 + dx),
-        y1: round(node.y1 + dy),
-        x2: round(node.x2 + dx),
-        y2: round(node.y2 + dy),
-      };
+      return { x1: mx(node.x1), y1: my(node.y1), x2: mx(node.x2), y2: my(node.y2) };
     default:
-      return { x: round(node.x + dx), y: round(node.y + dy) };
+      return { x: mx(node.x), y: my(node.y) };
   }
 }
 
 /**
- * ノードを (dx, dy) 動かし、動かしたノードの座標を整数に丸める (§4.6「移動の結果は整数」)。
+ * ノードを (dx, dy) 動かし、動かした向きの座標を整数に丸める (§4.6)。
+ * 動かしていない向き (0) の座標は変えず、(0, 0) なら文書をそのまま返す。
  * 祖先も選ばれているノードは祖先と一緒に動くので重ねて動かさない。
  */
 export function translateRounded(
@@ -55,6 +54,7 @@ export function translateRounded(
   dx: number,
   dy: number,
 ): CanvasDocument {
+  if (dx === 0 && dy === 0) return doc;
   return mapNodes(doc, movedLeaves(doc, ids), (node) => translatePatch(node, dx, dy));
 }
 

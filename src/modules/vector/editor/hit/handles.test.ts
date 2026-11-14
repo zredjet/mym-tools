@@ -39,6 +39,11 @@ describe("リサイズハンドル", () => {
   });
 
   it("画面上で小さい選択は、枠の内側ではハンドルに当てない (中を押せば動かせる)", () => {
+    // 32 画面 px 未満が小さい選択。20 px の図形の右辺の 3 px 内側は動かす場所
+    const twenty = { x: 0, y: 0, width: 20, height: 20 };
+    expect(handleAt(twenty, { x: 17, y: 10 }, 1)).toBeNull();
+    expect(handleAt(twenty, { x: 23, y: 10 }, 1)).toBe("e");
+    expect(handleAt(twenty, { x: 19, y: 10 }, 2)).toBe("e"); // 画面で 40 px なので内側も辺
     const small = { x: 0, y: 0, width: 10, height: 10 };
     expect(handleAt(small, { x: 2, y: 2 }, 1)).toBeNull();
     expect(handleAt(small, { x: -2, y: -2 }, 1)).toBe("nw");

@@ -8,7 +8,7 @@
  * ページ直下の frame の名前のラベルは `hitFrameLabel` で別に調べる (ラベルは文書より前面に描く)。
  */
 import { frameLabelRect } from "../canvas/frameLabels";
-import type { Rect } from "../model/geometry";
+import { getPageBounds, rectContainsPoint, type Rect } from "../model/geometry";
 import { getAncestors, getNode, getPage, getParent } from "../model/tree";
 import type { CanvasDocument, CanvasNode, NodeId, PageId, Point } from "../model/types";
 import type { TextMeasurer } from "../render/types";
@@ -175,6 +175,8 @@ export interface PickOptions {
   deep?: boolean;
   /** 今の選択。点の下に選択済みのノードがあれば、それを選ぶ (選択したままドラッグできるように) */
   selection?: ReadonlySet<NodeId>;
+  /** 押した点 (ページ座標)。group のスコープの外接矩形の中かを調べる */
+  point?: Point;
 }
 
 export interface PickResult {
@@ -188,19 +190,28 @@ export interface PickResult {
 }
 
 /**
- * スコープの外を押したときに出る先。スコープとその祖先のうち、道に入っている最も内側のもの。
- * ページ直下の frame まで出たら、ページ直下 (null) として扱う。
+ * 押した場所に合うスコープ。スコープとその祖先 (内側から) のうち、
+ * - 道に入っているもの (押した所がその中のノードか、frame の中の何もない場所)
+ * - group で、押した所がその外接矩形の中の何もない場所 (道がスコープの祖先だけか、何もない)
+ * の最も内側のもの。ページ直下の frame まで出たら、ページ直下 (null) として扱う。
  */
 function effectiveScope(
   doc: CanvasDocument,
   path: readonly NodeId[] | null,
   scopeId: NodeId | null,
+  point: Point | undefined,
 ): NodeId | null {
-  if (scopeId === null || !path) return null;
-  if (path.includes(scopeId)) return scopeId;
-  for (const ancestor of getAncestors(doc, scopeId)) {
-    if (!path.includes(ancestor.id)) continue;
-    return isTopLevelFrame(doc, ancestor.id) ? null : ancestor.id;
+  if (scopeId === null) return null;
+  if (path?.includes(scopeId)) return scopeId;
+  const chain = [scopeId, ...getAncestors(doc, scopeId).map((ancestor) => ancestor.id)];
+  // 押した所にスコープの外のノードがなければ、group の外接矩形の中はスコープの中
+  const empty = !path || path.every((id) => chain.includes(id));
+  for (const id of chain) {
+    if (path?.includes(id)) return isTopLevelFrame(doc, id) ? null : id;
+    if (empty && point && getNode(doc, id)?.type === "group") {
+      const bounds = getPageBounds(doc, id);
+      if (bounds && rectContainsPoint(bounds, point)) return id;
+    }
   }
   return null;
 }
@@ -210,7 +221,8 @@ function effectiveScope(
  *
  * - ページ直下の frame の中の何もない場所は選ばない (null)。frame の子は直接選べる
  * - group と入れ子の frame は、スコープの外からは全体が選ばれる (ダブルクリックで中へ)
- * - スコープの中では、スコープの子を選ぶ。スコープの frame の中の何もない場所は null
+ * - スコープの中では、スコープの子を選ぶ。スコープの中の何もない場所は null
+ *   (group のスコープは外接矩形の中がスコープの中。`point` を渡す)
  * - `deep` (Cmd/Ctrl) はいちばん深いノード
  * - それ以外で、道に選択済みのノードがあれば、その最も深いものを選ぶ
  */
@@ -220,7 +232,7 @@ export function pickTarget(
   scopeId: NodeId | null,
   options: PickOptions = {},
 ): PickResult {
-  const scope = effectiveScope(doc, path, scopeId);
+  const scope = effectiveScope(doc, path, scopeId, options.point);
   if (!path || path.length === 0) return { id: null, scopeId: scope };
   const last = path[path.length - 1] as NodeId;
   const emptyArea = (id: NodeId) => id === scope || (path.length === 1 && isTopLevelFrame(doc, id));
@@ -236,7 +248,7 @@ export function pickTarget(
 
   if (scope !== null) {
     const index = path.indexOf(scope);
-    return { id: path[index + 1] ?? null, scopeId: scope };
+    return { id: index < 0 ? null : (path[index + 1] ?? null), scopeId: scope };
   }
   const top = path[0] as NodeId;
   if (isTopLevelFrame(doc, top)) return { id: path[1] ?? null, scopeId: null };

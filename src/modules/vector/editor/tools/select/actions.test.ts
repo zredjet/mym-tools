@@ -6,6 +6,7 @@ import { updateNode } from "../../model/transform";
 import { EditorClipboard } from "../../state/clipboard";
 import { createEditorStore } from "../../state/store";
 import {
+  addToSelection,
   duplicateWithinLimits,
   enterSelection,
   escapeSelection,
@@ -20,6 +21,16 @@ describe("transformableIds", () => {
   it("祖先も選ばれたものと、ロック中・非表示 (祖先を含む) を除く", () => {
     const doc = updateNode(sampleDocument(), "f2", { locked: true });
     expect(transformableIds(doc, ["grp", "r2", "r3", "r1"])).toEqual(["r1", "grp"]);
+  });
+});
+
+describe("addToSelection", () => {
+  it("足すノードの祖先と子孫を外して入れ替える", () => {
+    const doc = sampleDocument();
+    expect(addToSelection(doc, ["f", "r0"], ["r1"])).toEqual(["r0", "r1"]);
+    expect(addToSelection(doc, ["r2", "r3", "r0"], ["grp"])).toEqual(["r3", "r0", "grp"]);
+    expect(addToSelection(doc, ["r0", "r1"], ["r1"])).toEqual(["r0", "r1"]);
+    expect(addToSelection(doc, ["r0"], [])).toEqual(["r0"]);
   });
 });
 
