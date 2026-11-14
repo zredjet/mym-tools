@@ -60,7 +60,13 @@ SVG-Edit (ADR-0021) の時の検証記録は、このファイルの git の履�
 
 ## portable ZIP
 
-CI (`build-tauri`) の成果物で測る。SVG-Edit の資産 (約 3.6 MB、347 ファイル) がなくなるので、`v0.1.0-alpha.14` で SVG-Edit を足したときの増分 (macOS +975,324 / Windows +955,081 bytes) に近い分だけ減る見込み。実測は PR の本文と次の版のこのファイルに書く
+| 対象 | 結果 |
+|---|---|
+| macOS arm64 (手元のビルド。CI と同じ `npm run tauri -- build --target aarch64-apple-darwin --bundles app -- --locked` と `ditto -c -k --sequesterRsrc --keepParent`) | **55,406,056 bytes**、上限 80,000,000 bytes まで 24,593,944 bytes。`unzip -t` 成功、SVG-Edit の資産なし (20 ファイル) |
+| 比較: 公開版 `v0.1.0-alpha.23` の macOS | 56,166,970 bytes (この版は 760,914 bytes 小さい。alpha.23 以降に入ったキャンバスのエディタなどを含んだうえで、SVG-Edit の資産が抜けた分) |
+| Windows x64 | 手元では作っていない。CI (`build-tauri`) の成果物で確かめる。公開版 `v0.1.0-alpha.23` は 56,069,917 bytes |
+
+手元のビルドは公開用のリリースではない (SHA-256 `3f7c0311eb5eb17c2cfdbb73d282710b5298fbbfd7c320be00cca33fd1095e04`)。
 
 ## 再実行
 
