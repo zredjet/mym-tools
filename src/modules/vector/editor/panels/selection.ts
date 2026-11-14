@@ -40,3 +40,18 @@ export function applyToSelection(
   const { selection, apply } = editorStore.getState();
   apply((doc) => change(doc, selection));
 }
+
+const selectionSets = new WeakMap<readonly NodeId[], ReadonlySet<NodeId>>();
+
+/**
+ * 選択の集合。選択の配列ごとに 1 回だけ作るので、各行が `has` で引いても
+ * 行の数 × 選択の数にならない (§5.2)。
+ */
+export function selectionSet(selection: readonly NodeId[]): ReadonlySet<NodeId> {
+  let set = selectionSets.get(selection);
+  if (!set) {
+    set = new Set(selection);
+    selectionSets.set(selection, set);
+  }
+  return set;
+}

@@ -1,15 +1,9 @@
 import { Plus, X } from "lucide-react";
+import { useRef } from "react";
 
 import { CANVAS_LIMITS } from "../../model/limits";
-import { jsonEqual, mapNodes, updateNodes } from "../../model/transform";
-import type {
-  CanvasDocument,
-  GradientStop,
-  LinearGradientPaint,
-  NodeId,
-  Paint,
-  RadialGradientPaint,
-} from "../../model/types";
+import { jsonEqual, mapNodes } from "../../model/transform";
+import type { CanvasDocument, GradientStop, NodeId, Paint } from "../../model/types";
 import { editorStore } from "../../state/store";
 import { ColorField } from "../fields/ColorField";
 import { NumberField } from "../fields/NumberField";
@@ -17,13 +11,15 @@ import { FieldGrid, IconButton, Section, Segmented } from "../fields/Section";
 import { commonValue, fromPercent, MIXED, PERCENT, toPercent } from "../fields/values";
 import {
   addGradientStop,
+  patchGradient,
+  patchStop,
+  type Gradient,
   convertPaint,
   linearAngle,
   MAX_GRADIENT_COORD,
   PAINT_KIND_LABELS,
   paintKind,
   removeGradientStop,
-  updateGradientStop,
   withLinearAngle,
   withRadial,
   type PaintKind,
@@ -83,16 +79,19 @@ export function FillSection({ nodes }: { nodes: readonly FillNode[] }) {
 /** 単色の色と不透明度。欄ごとに「混在」を出し、入力した欄だけをそれぞれのノードに当てる。 */
 function SolidFields({ ids, fills }: { ids: NodeId[]; fills: (Paint | null)[] }) {
   const solids = fills.filter((paint) => paint?.type === "solid");
-  const patchSolid = (patch: { color?: string; opacity?: number }) => (doc: CanvasDocument) =>
-    mapNodes(doc, ids, (node) =>
-      "fill" in node && node.fill?.type === "solid" ? { fill: { ...node.fill, ...patch } } : null,
-    );
+  const patchSolid =
+    (patch: { color?: string; opacity?: number }, targets: readonly NodeId[]) =>
+    (doc: CanvasDocument) =>
+      mapNodes(doc, targets, (node) =>
+        "fill" in node && node.fill?.type === "solid" ? { fill: { ...node.fill, ...patch } } : null,
+      );
   return (
     <FieldGrid>
       <ColorField
         ariaLabel="塗りの色"
         value={commonValue(solids.map((paint) => paint.color.toUpperCase()))}
-        toRecipe={(color) => patchSolid({ color })}
+        targets={ids}
+        toRecipe={(color, targets) => patchSolid({ color }, targets)}
       />
       <NumberField
         label=""
@@ -100,7 +99,8 @@ function SolidFields({ ids, fills }: { ids: NodeId[]; fills: (Paint | null)[] })
         suffix="%"
         value={toPercent(commonValue(solids.map((paint) => paint.opacity)))}
         {...PERCENT}
-        onCommit={(value) => apply(patchSolid({ opacity: fromPercent(value) }))}
+        targets={ids}
+        onCommit={(value, targets) => apply(patchSolid({ opacity: fromPercent(value) }, targets))}
       />
     </FieldGrid>
   );
@@ -118,17 +118,26 @@ function stopsPreview(stops: readonly GradientStop[]): string {
 }
 
 /** グラデーションの停止点と向き。選んだノードの塗りがすべて同じときだけ出す。 */
-function GradientFields({
-  ids,
-  paint,
-}: {
-  ids: NodeId[];
-  paint: LinearGradientPaint | RadialGradientPaint;
-}) {
-  const setPaint = (next: Paint) => (doc: CanvasDocument) => updateNodes(doc, ids, { fill: next });
-  const setStops = (stops: GradientStop[]) => setPaint({ ...paint, stops });
-  const added = addGradientStop(paint.stops);
+function GradientFields({ ids, paint }: { ids: NodeId[]; paint: Gradient }) {
+  const canAdd = paint.stops.length < CANVAS_LIMITS.maxGradientStops;
   const canRemove = paint.stops.length > CANVAS_LIMITS.minGradientStops;
+  /**
+   * 削除ボタンを押し始めた時点の停止点。位置の欄に打ったまま削除を押すと、先に位置が確定して
+   * 並びが変わる。押し始めた時点と同じ停止点がその位置になければ消さない (別の停止点を消さない)
+   */
+  const pressed = useRef<{ index: number; stop: GradientStop } | null>(null);
+
+  const remove = (index: number, stop: GradientStop) => {
+    const expected = pressed.current?.index === index ? pressed.current.stop : stop;
+    pressed.current = null;
+    apply(
+      patchGradient(ids, (current) => {
+        if (!jsonEqual(current.stops[index], expected)) return null;
+        const stops = removeGradientStop(current.stops, index);
+        return stops ? { ...current, stops } : null;
+      }),
+    );
+  };
 
   return (
     <>
@@ -141,10 +150,15 @@ function GradientFields({
         <span className="text-[11px] text-[var(--fg-muted)]">停止点</span>
         <IconButton
           label="停止点を追加"
-          disabled={added === null}
-          onClick={() => {
-            if (added) apply(setStops(added));
-          }}
+          disabled={!canAdd}
+          onClick={() =>
+            apply(
+              patchGradient(ids, (current) => {
+                const stops = addGradientStop(current.stops);
+                return stops ? { ...current, stops } : null;
+              }),
+            )
+          }
         >
           <Plus size={14} />
         </IconButton>
@@ -160,7 +174,7 @@ function GradientFields({
       <ul className="flex flex-col gap-1" aria-label="停止点">
         {paint.stops.map((stop, index) => (
           <li
-            // 停止点は ID を持たないので位置で区別する (並べ替えると欄が入れ替わる)
+            // 停止点は ID を持たないので位置で区別する。確定は位置で対象の停止点を引き直す
             key={index}
             className="grid grid-cols-[40px_minmax(0,1fr)_40px_20px] items-center gap-1"
           >
@@ -170,39 +184,37 @@ function GradientFields({
               precision={1}
               value={stop.offset * 100}
               {...PERCENT}
-              onCommit={(value) =>
-                apply(
-                  setStops(updateGradientStop(paint.stops, index, { offset: fromPercent(value) })),
-                )
+              targets={ids}
+              onCommit={(value, targets) =>
+                apply(patchGradient(targets, patchStop(index, { offset: fromPercent(value) })))
               }
             />
             <ColorField
               ariaLabel={`停止点 ${index + 1} の色`}
               value={stop.color.toUpperCase()}
-              toRecipe={(color) => setStops(updateGradientStop(paint.stops, index, { color }))}
+              targets={ids}
+              toRecipe={(color, targets) => patchGradient(targets, patchStop(index, { color }))}
             />
             <NumberField
               label=""
               ariaLabel={`停止点 ${index + 1} の不透明度`}
               value={toPercent(stop.opacity)}
               {...PERCENT}
-              onCommit={(value) =>
-                apply(
-                  setStops(updateGradientStop(paint.stops, index, { opacity: fromPercent(value) })),
-                )
+              targets={ids}
+              onCommit={(value, targets) =>
+                apply(patchGradient(targets, patchStop(index, { opacity: fromPercent(value) })))
               }
             />
-            <IconButton
-              compact
-              label={`停止点 ${index + 1} を削除`}
-              disabled={!canRemove}
-              onClick={() => {
-                const next = removeGradientStop(paint.stops, index);
-                if (next) apply(setStops(next));
-              }}
-            >
-              <X size={14} />
-            </IconButton>
+            <span onPointerDown={() => (pressed.current = { index, stop })}>
+              <IconButton
+                compact
+                label={`停止点 ${index + 1} を削除`}
+                disabled={!canRemove}
+                onClick={() => remove(index, stop)}
+              >
+                <X size={14} />
+              </IconButton>
+            </span>
           </li>
         ))}
       </ul>
@@ -216,10 +228,14 @@ function GradientFields({
             value={linearAngle(paint)}
             min={-360}
             max={360}
-            onCommit={(value) => {
-              const next = withLinearAngle(paint, value);
-              if (next) apply(setPaint(next));
-            }}
+            targets={ids}
+            onCommit={(value, targets) =>
+              apply(
+                patchGradient(targets, (current) =>
+                  current.type === "linear" ? withLinearAngle(current, value) : null,
+                ),
+              )
+            }
           />
         </FieldGrid>
       ) : (
@@ -231,9 +247,14 @@ function GradientFields({
             precision={1}
             value={paint.center.x * 100}
             {...GRADIENT_COORD}
-            onCommit={(value) =>
+            targets={ids}
+            onCommit={(value, targets) =>
               apply(
-                setPaint(withRadial(paint, { center: { ...paint.center, x: fromPercent(value) } })),
+                patchGradient(targets, (current) =>
+                  current.type === "radial"
+                    ? withRadial(current, { center: { ...current.center, x: fromPercent(value) } })
+                    : null,
+                ),
               )
             }
           />
@@ -244,9 +265,14 @@ function GradientFields({
             precision={1}
             value={paint.center.y * 100}
             {...GRADIENT_COORD}
-            onCommit={(value) =>
+            targets={ids}
+            onCommit={(value, targets) =>
               apply(
-                setPaint(withRadial(paint, { center: { ...paint.center, y: fromPercent(value) } })),
+                patchGradient(targets, (current) =>
+                  current.type === "radial"
+                    ? withRadial(current, { center: { ...current.center, y: fromPercent(value) } })
+                    : null,
+                ),
               )
             }
           />
@@ -259,7 +285,16 @@ function GradientFields({
             min={0}
             minExclusive
             max={MAX_GRADIENT_COORD * 100}
-            onCommit={(value) => apply(setPaint(withRadial(paint, { radius: fromPercent(value) })))}
+            targets={ids}
+            onCommit={(value, targets) =>
+              apply(
+                patchGradient(targets, (current) =>
+                  current.type === "radial"
+                    ? withRadial(current, { radius: fromPercent(value) })
+                    : null,
+                ),
+              )
+            }
           />
         </FieldGrid>
       )}

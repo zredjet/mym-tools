@@ -15,6 +15,7 @@ import { hasRadius } from "./propertyOps";
 export function AppearanceSection({ nodes }: { nodes: readonly CanvasNode[] }) {
   const ids = nodes.map((node) => node.id);
   const rounded = nodes.filter(hasRadius);
+  const radiusIds = rounded.map((node) => node.id);
   const apply = editorStore.getState().apply;
   return (
     <Section title="見た目">
@@ -25,8 +26,9 @@ export function AppearanceSection({ nodes }: { nodes: readonly CanvasNode[] }) {
           suffix="%"
           value={toPercent(commonValue(nodes.map((node) => node.opacity)))}
           {...PERCENT}
-          onCommit={(value) =>
-            apply((doc) => updateNodes(doc, ids, { opacity: fromPercent(value) }))
+          targets={ids}
+          onCommit={(value, targets) =>
+            apply((doc) => updateNodes(doc, targets, { opacity: fromPercent(value) }))
           }
         />
         {rounded.length > 0 && (
@@ -37,14 +39,9 @@ export function AppearanceSection({ nodes }: { nodes: readonly CanvasNode[] }) {
             value={commonValue(rounded.map((node) => node.radius))}
             min={0}
             max={CANVAS_LIMITS.maxRadius}
-            onCommit={(value) =>
-              apply((doc) =>
-                updateNodes(
-                  doc,
-                  rounded.map((node) => node.id),
-                  { radius: value },
-                ),
-              )
+            targets={radiusIds}
+            onCommit={(value, targets) =>
+              apply((doc) => updateNodes(doc, targets, { radius: value }))
             }
           />
         )}
