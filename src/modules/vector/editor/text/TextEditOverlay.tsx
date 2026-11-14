@@ -9,7 +9,9 @@
  *   描かない (`DocumentLayer`)。入力欄の文字をそのまま見せる
  * - 表示位置や倍率、ノードの位置・大きさが変わったら追従する
  * - 終了は Esc と、入力欄からフォーカスが外れたとき。日本語入力の変換中の Enter と Esc は変換の操作として扱う。
- *   ウィンドウのフォーカスが外れただけ (アプリの切替) なら終えない
+ *   ウィンドウのフォーカスが外れただけ (アプリの切替) なら終えない。Chromium は入力欄に focusout も送るので
+ *   `document.hasFocus()` で見分ける。WebKit (Safari 15〜17.5 相当) は blur だけで focusout を送らないので、
+ *   React の onBlur は呼ばれない。どちらでもキャンバスは開いているジェスチャーに触らない (§4.4)
  * - 入力欄の中の Cmd/Ctrl+Z は入力欄の取り消しとして働く (キャンバスは入力欄にフォーカスがある間のキーを取らない)
  * - StrictMode の effect の後片付けが表示の直後に 1 回余分に走っても、編集を終えない
  *   (後片付けで終えるのは次のマイクロタスクで、すぐに effect が走り直したら取りやめる)
@@ -167,14 +169,9 @@ function TextEditor({ id }: { id: NodeId }) {
 
   const onBlur = (event: FocusEvent<HTMLTextAreaElement>) => {
     // ウィンドウのフォーカスが外れただけ (アプリの切替) なら終えない。入力欄は戻ったときにまたフォーカスを持つ
-    if (!document.hasFocus() && document.activeElement === event.currentTarget) {
-      session()?.markInterrupted();
-      return;
-    }
+    if (!document.hasFocus() && document.activeElement === event.currentTarget) return;
     if (session()) finishTextEditSession();
   };
-
-  const onFocus = () => session()?.clearInterrupted();
 
   return (
     <textarea
@@ -194,7 +191,6 @@ function TextEditor({ id }: { id: NodeId }) {
       onCompositionEnd={onCompositionEnd}
       onKeyDown={onKeyDown}
       onBlur={onBlur}
-      onFocus={onFocus}
     />
   );
 }

@@ -16,7 +16,7 @@ import { ceilSize, layoutText } from "./layout";
  * `ids` が null なら、文書のすべてのテキストを対象にする (読み込みの前)。
  *
  * - `auto-width`: 幅と高さを行分割の結果に合わせる。幅が変わるときは、揃えが左なら左端、
- *   中央なら中心、右なら右端を保つ
+ *   中央なら中心、右なら右端を保つ。中央揃えの `x` は丸めない (0.5 刻みになりうる)
  * - `auto-height`: 高さだけを合わせる (幅は折り返しの幅としてそのまま使う)
  * - `fixed`: 変えない
  * - 大きさは切り上げた整数にし、`maxSize` を超えない
@@ -42,14 +42,6 @@ function withDescendants(doc: CanvasDocument, ids: readonly NodeId[]): NodeId[] 
   return [...result];
 }
 
-/**
- * 中央揃えで幅が変わったときの左端のずれ。整数の位置を保つため半分を丸める。0 から遠い方へ丸めるので、
- * 広げてから同じだけ狭めると元の位置へ戻る (片側へ少しずつずれていかない)。
- */
-function halfAwayFromZero(value: number): number {
-  return Math.sign(value) * Math.round(Math.abs(value) / 2);
-}
-
 function clampCoordinate(value: number): number {
   return Math.min(CANVAS_LIMITS.maxCoordinate, Math.max(-CANVAS_LIMITS.maxCoordinate, value));
 }
@@ -64,6 +56,7 @@ function fitPatch(node: CanvasNode, measurer: TextMeasurer): NodePatch | null {
   const width = ceilSize(layout.width);
   const grown = width - node.width;
   const shift =
-    node.align === "center" ? halfAwayFromZero(grown) : node.align === "right" ? grown : 0;
+    // 中央揃えの x は丸めない (0.5 刻みになりうる)。丸めると、同じ向きの変更を重ねるたびに片側へずれていく
+    node.align === "center" ? grown / 2 : node.align === "right" ? grown : 0;
   return { x: clampCoordinate(node.x - shift), width, height };
 }

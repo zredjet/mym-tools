@@ -27,7 +27,7 @@ import { isComposing } from "../fields/keys";
 import { NumberField } from "../fields/NumberField";
 import { CheckboxField, FieldGrid, IconButton, Section, Segmented } from "../fields/Section";
 import { liveTargets } from "../fields/targets";
-import { commonValue, MIXED, type Mixed } from "../fields/values";
+import { commonValue, MIXED } from "../fields/values";
 import { useSelectedNodes } from "../selection";
 
 const isText = (node: CanvasNode): node is TextNode => node.type === "text";
@@ -75,12 +75,13 @@ function FontFamilyInput({
   value,
   targets,
 }: {
-  value: string | Mixed;
+  /** 選択のテキストのフォント。そろっていなければ null (「混在」) */
+  value: string | null;
   targets: readonly NodeId[];
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const session = useRef<FamilySession | null>(null);
-  const shown = value === MIXED ? "" : value;
+  const shown = value ?? "";
 
   // 打ったまま欄が外れたら確定する (フォーカスのある要素が消えても blur は来ないため)
   useEffect(
@@ -119,7 +120,7 @@ function FontFamilyInput({
       aria-label="フォント名"
       className={cn(SELECT_CLASS, "flex-1 placeholder:text-[var(--fg-muted)]")}
       value={draft ?? shown}
-      placeholder={value === MIXED ? "混在" : undefined}
+      placeholder={value === null ? "混在" : undefined}
       spellCheck={false}
       autoComplete="off"
       onFocus={(event) => event.currentTarget.select()}
@@ -143,11 +144,12 @@ function FontFamilyPicker({
   value,
   targets,
 }: {
-  value: string | Mixed;
+  /** 選択のテキストのフォント。そろっていなければ null (「混在」) */
+  value: string | null;
   targets: readonly NodeId[];
 }) {
   const groups = fontDetector.availableGroups();
-  const listed = groups.some((group) => group.families.includes(value as string));
+  const listed = value !== null && groups.some((group) => group.families.includes(value));
   return (
     <div
       title="候補から選ぶ"
@@ -160,7 +162,7 @@ function FontFamilyPicker({
       <select
         aria-label="フォントの候補"
         className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-        value={value === MIXED || !listed ? "" : value}
+        value={value === null || !listed ? "" : value}
         onChange={(event) => {
           const family = parseFontFamilyInput(event.target.value);
           const live = liveTargets(targets);
@@ -168,7 +170,7 @@ function FontFamilyPicker({
         }}
       >
         <option value="" disabled>
-          {value === MIXED ? "混在" : value}
+          {value ?? "混在"}
         </option>
         {groups.map((group) => (
           <optgroup key={group.label} label={group.label}>
@@ -188,7 +190,9 @@ export function TextSection() {
   const texts = useSelectedNodes().filter(isText);
   if (texts.length === 0) return null;
   const ids = texts.map((node) => node.id);
-  const family = commonValue(texts.map((node) => node.fontFamily));
+  // フォント名は自由な文字列なので、「混在」の番兵 (`MIXED`) と区別できるよう null で表す
+  const families = texts.map((node) => node.fontFamily);
+  const family = families.every((name) => name === families[0]) ? (families[0] ?? null) : null;
   const missing = [...new Set(texts.map((node) => node.fontFamily))].filter(
     (name) => !fontDetector.isAvailable(name),
   );

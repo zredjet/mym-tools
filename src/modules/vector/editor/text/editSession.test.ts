@@ -7,6 +7,7 @@ import { fixedWidthMeasurer } from "../render/testing";
 import { createEditorStore } from "../state/store";
 import {
   checkText,
+  commitTextEdit,
   finishTextEditSession,
   getTextEditSession,
   openTextEditSession,
@@ -119,23 +120,6 @@ describe("既存のテキストの編集", () => {
     expect(store.getState().revision).toBe(0);
   });
 
-  it("ウィンドウのフォーカス喪失で取り消されたら、同じ内容で開き直して編集を続ける", () => {
-    const store = createEditorStore(docWithText());
-    store.getState().startTextEdit("t1");
-    const session = openTextEditSession(store, "t1", measurer);
-    session.setText("abcd");
-    session.markInterrupted();
-    store.getState().cancelGesture(); // キャンバスの blur の処理
-    expect(textOf(store.getState().doc)?.text).toBe("abcd");
-    expect(store.getState().gestureActive).toBe(true);
-    session.clearInterrupted();
-    session.setText("abcde");
-    session.finish();
-    expect(store.getState().revision).toBe(1);
-    store.getState().undo();
-    expect(textOf(store.getState().doc)?.text).toBe("abc");
-  });
-
   it("ほかの操作が編集を終えたら、開いているジェスチャーを確定するだけにする", () => {
     const store = createEditorStore(docWithText());
     store.getState().startTextEdit("t1");
@@ -220,19 +204,6 @@ describe("テキストツールで作ったテキストの編集", () => {
     expect(store.getState()).toMatchObject({ doc, revision: 0, canUndo: false });
   });
 
-  it("ウィンドウのフォーカス喪失で取り消されても、ノードを入れ直して編集を続ける", () => {
-    const store = createEditorStore(docWithText());
-    startTextCreation(store, created(), page, measurer);
-    const session = getTextEditSession();
-    session?.setText("ab");
-    session?.markInterrupted();
-    store.getState().cancelGesture();
-    expect(store.getState()).toMatchObject({ editingTextId: "new", gestureActive: true });
-    expect(textOf(store.getState().doc, "new")?.text).toBe("ab");
-    session?.finish();
-    expect(store.getState().revision).toBe(1);
-  });
-
   it("Undo で作成ごと取り消されたら、編集を終える (何も残さない)", () => {
     const store = createEditorStore(docWithText());
     const doc = store.getState().doc;
@@ -271,5 +242,44 @@ describe("文書に入れない本文", () => {
     expect(checkText("\uDC00", 0)).toBe("lone-surrogate");
     expect(checkText("あ", 4 * 1024 * 1024 - 3)).toBeNull();
     expect(checkText("あ", 4 * 1024 * 1024 - 2)).toBe("total-too-large");
+  });
+});
+
+describe("commitTextEdit", () => {
+  it("編集中なら、打った本文をその場で確定して編集を終える (履歴 1 件)", () => {
+    const store = createEditorStore(docWithText());
+    store.getState().startTextEdit("t1");
+    openTextEditSession(store, "t1", measurer).setText("abcd");
+    commitTextEdit(store, measurer);
+    expect(store.getState()).toMatchObject({
+      editingTextId: null,
+      gestureActive: false,
+      revision: 1,
+    });
+    expect(textOf(store.getState().doc)?.text).toBe("abcd");
+    expect(getTextEditSession()).toBeNull();
+  });
+
+  it("作った直後の空のテキストは何も残さずに終える", () => {
+    const store = createEditorStore(docWithText());
+    const doc = store.getState().doc;
+    startTextCreation(store, createText({ id: "new", text: "" }), page, measurer);
+    commitTextEdit(store, measurer);
+    expect(store.getState()).toMatchObject({ doc, revision: 0, editingTextId: null });
+  });
+
+  it("編集欄がまだセッションを開いていなくても終える。空の既存のテキストは消す", () => {
+    const store = createEditorStore(docWithText(""));
+    store.getState().startTextEdit("t1");
+    commitTextEdit(store, measurer);
+    expect(store.getState().doc.nodes.t1).toBeUndefined();
+    expect(store.getState()).toMatchObject({ editingTextId: null, revision: 1 });
+  });
+
+  it("編集中でなければ何もしない", () => {
+    const store = createEditorStore(docWithText());
+    const before = store.getState();
+    commitTextEdit(store, measurer);
+    expect(store.getState()).toBe(before);
   });
 });

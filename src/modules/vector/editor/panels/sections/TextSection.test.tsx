@@ -78,6 +78,22 @@ describe("TextSection", () => {
     expect(screen.getByRole("button", { name: "行の高さを自動にする" })).toBeDisabled();
   });
 
+  it("フォント名が「mixed」でも混在とは見なさない。そろっていなければ混在", () => {
+    act(() =>
+      state().apply((doc) => ({
+        ...doc,
+        nodes: { ...doc.nodes, t1: { ...(doc.nodes.t1 as TextNode), fontFamily: "mixed" } },
+      })),
+    );
+    render(<TextSection />);
+    select("t1");
+    expect(field("フォント名")).toHaveValue("mixed");
+    expect(field("フォント名")).not.toHaveAttribute("placeholder");
+    select("t1", "t2");
+    expect(field("フォント名")).toHaveValue("");
+    expect(field("フォント名")).toHaveAttribute("placeholder", "混在");
+  });
+
   it("行の高さを数値にし、自動に戻す", () => {
     render(<TextSection />);
     select("t1");

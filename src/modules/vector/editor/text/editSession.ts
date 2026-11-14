@@ -10,9 +10,9 @@
  * - 作ってすぐ空のまま終えたら、ジェスチャーを取り消す (履歴にも `revision` にも残らない)。
  *   既存のテキストを空にして終えたら、削除として履歴 1 件
  * - 途中でほかの操作 (`apply` など) がジェスチャーを確定したら、次の入力から新しいジェスチャーにする
- * - ウィンドウのフォーカスが外れると、キャンバスは開いているジェスチャーを取り消す。本文の編集は
- *   続けるので、そのときだけは取り消された直後に同じ内容でジェスチャーを開き直す
- *   (`markInterrupted`。ほかの理由の取消、たとえば Undo はそのまま受け入れる)
+ * - ジェスチャーを閉じるのはこのセッション。キャンバスはウィンドウのフォーカス喪失や画面から外れるときに
+ *   開いているジェスチャーに触らない (§4.2 / §4.4)。Undo などでほかから取り消されたら受け入れる
+ * - 保存などの前に編集をその場で終えるには `commitTextEdit` を呼ぶ
  *
  * 上限 (`maxTextLength`、`maxTotalTextBytes`) を超える本文と、対になっていないサロゲートを含む本文は
  * 文書に入れない (`setText` が false を返し、編集欄が元に戻す)。
@@ -25,8 +25,9 @@ import { updateNode } from "../model/transform";
 import { getNode, type ParentRef } from "../model/tree";
 import type { CanvasDocument, NodeId, TextNode } from "../model/types";
 import { hasLoneSurrogate } from "../model/validate";
-import { codePointLength } from "../render/measureText";
+import { canvasTextMeasurer, codePointLength } from "../render/measureText";
 import type { TextMeasurer } from "../render/types";
+import { editorStore } from "../state/store";
 import type { DocRecipe, EditorStore } from "../state/types";
 import { fitTextNodes } from "./fit";
 
@@ -70,7 +71,6 @@ export class TextEditSession {
   private readonly otherBytes: number;
   /** このセッションが開いたジェスチャーの開始時点の文書。開いていなければ null */
   private base: CanvasDocument | null = null;
-  private interrupted = false;
   private closed = false;
   private readonly unsubscribe: () => void;
 
@@ -137,24 +137,11 @@ export class TextEditSession {
   setText(text: string): boolean {
     if (this.closed) return false;
     if (checkText(text, this.otherBytes) !== null) return false;
-    this.interrupted = false;
     this.text = text;
     const node = getNode(this.store.getState().doc, this.nodeId);
     if (this.base === null && node?.type === "text" && node.text === text) return true;
     this.push(text);
     return true;
-  }
-
-  /**
-   * ウィンドウのフォーカスが外れた (入力欄の blur のうち、文書がフォーカスを失ったもの)。
-   * 直後にキャンバスがジェスチャーを取り消すので、開き直す。入力欄にフォーカスが戻ったら解除する。
-   */
-  markInterrupted(): void {
-    this.interrupted = true;
-  }
-
-  clearInterrupted(): void {
-    this.interrupted = false;
   }
 
   /** 開いていたジェスチャーが閉じた (自分で閉じた、ほかの操作が確定した、取り消された)。 */
@@ -165,13 +152,6 @@ export class TextEditSession {
     const state = this.store.getState();
     const canceled = state.doc === base;
     if (!canceled) return; // 確定された。次の入力から新しいジェスチャーにする
-    if (this.interrupted) {
-      // ウィンドウのフォーカス喪失による取消。同じ内容で開き直し、編集を続ける
-      this.push(this.text);
-      if (this.store.getState().editingTextId !== this.nodeId)
-        this.store.getState().startTextEdit(this.nodeId);
-      return;
-    }
     // Undo などによる取消は受け入れる。ノードが残っていれば、その本文から編集を続ける
     const node = getNode(state.doc, this.nodeId);
     if (node?.type === "text" && node.text !== this.text) {
@@ -280,5 +260,24 @@ export function startTextCreation(
 /** 今のセッションを終える。`byOthers` は `TextEditSession.finish` と同じ。 */
 export function finishTextEditSession(byOthers = false): void {
   getTextEditSession()?.finish(byOthers);
+  current = null;
+}
+
+/**
+ * 本文の編集をその場で (同期で) 終える (§4.7)。切替後の画面が、保存・作品の切替・画面を離れる前の
+ * 未保存の確認の前に呼ぶ。打った本文を確定し (空なら規則どおり消す。作った直後なら何も残さない)、
+ * `editingTextId` を外す。編集中でなければ何もしない。
+ */
+export function commitTextEdit(
+  store: Store = editorStore,
+  measurer: TextMeasurer = canvasTextMeasurer,
+): void {
+  const id = store.getState().editingTextId;
+  if (id === null) {
+    // 編集欄が閉じる途中 (後片付けの前) のセッションが残っていれば、開いているジェスチャーを閉じる
+    finishTextEditSession(true);
+    return;
+  }
+  openTextEditSession(store, id, measurer).finish();
   current = null;
 }

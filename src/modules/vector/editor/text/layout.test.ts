@@ -3,7 +3,7 @@ import { createText } from "../model/create";
 import type { TextNode } from "../model/types";
 import { fixedWidthMeasurer } from "../render/testing";
 import type { FontSpec, TextMeasurer } from "../render/types";
-import { ceilSize, layoutText, lineHeightOf } from "./layout";
+import { ceilSize, layoutText, lineHeightOf, wrapLimit } from "./layout";
 import type { MetricsTextMeasurer } from "./metrics";
 
 // フォントサイズ 10: 1 文字 (コードポイント) の幅は 5、行の高さは 14
@@ -184,6 +184,43 @@ describe("layoutText: 折り返し", () => {
   });
 });
 
+describe("layoutText: 空白のない長い文字列", () => {
+  /** 計測に渡した文字列の長さの合計を数える (時間の代わりに、仕事の量を決まった値で比べる)。 */
+  function run(n: number, width: number) {
+    let chars = 0;
+    const counting: TextMeasurer = {
+      measure(value, font) {
+        chars += value.length;
+        return measurer.measure(value, font);
+      },
+    };
+    const node = text({ text: "a".repeat(n), sizing: "auto-height", width });
+    const started = performance.now();
+    const layout = layoutText(node, counting);
+    return { chars, ms: performance.now() - started, layout };
+  }
+
+  for (const width of [300, 5]) {
+    it(`幅 ${width}: 文字数を 2 倍にしても、仕事の量と時間は 4 倍にならない`, () => {
+      const small = run(50_000, width);
+      const large = run(100_000, width);
+      expect(large.layout.lines.map((line) => line.text).join("")).toBe("a".repeat(100_000));
+      expect(large.layout.lines.every((line) => line.width <= Math.max(width, 5))).toBe(true);
+      expect(large.chars).toBeLessThan(small.chars * 2.5);
+      expect(large.ms).toBeLessThan(small.ms * 4 + 50);
+      // 上限いっぱい (100,000 文字) でも固まらない
+      expect(large.ms).toBeLessThan(2_000);
+    });
+  }
+
+  it("長い単語を割った残りは、続く単語と同じ行に並ぶ", () => {
+    const node = text({ text: `${"a".repeat(10)} bb cc`, sizing: "auto-height", width: 20 });
+    expect(lineTexts(node)).toEqual(["aaaa", "aaaa", "aa ", "bb ", "cc"]);
+    const wide = text({ text: `${"a".repeat(10)} b`, sizing: "auto-height", width: 30 });
+    expect(lineTexts(wide)).toEqual(["aaaaaa", "aaaa b"]);
+  });
+});
+
 describe("layoutText: 揃え", () => {
   it("auto-height と fixed はノードの幅の中で揃える", () => {
     const at = (align: TextNode["align"]) =>
@@ -220,6 +257,26 @@ describe("layoutText: 使い回し", () => {
     expect(layoutText(node, measurer)).toBe(first);
     expect(layoutText({ ...node }, measurer)).not.toBe(first);
     expect(layoutText(node, fixedWidthMeasurer(1)).width).toBe(30);
+  });
+});
+
+describe("wrapLimit", () => {
+  it("行の幅を 1/64 px に四捨五入して枠と比べる (ブラウザと同じ)", () => {
+    const fits = (width: number, box: number) => width < wrapLimit(box);
+    expect(fits(130, 130)).toBe(true);
+    expect(fits(130.015625, 130)).toBe(false); // 1/64 px はみ出す
+    expect(fits(100.632, 100.625)).toBe(true); // 端数 0.448 / 64 は切り捨てられて収まる
+    expect(fits(100.6328125 + 0.001, 100.625)).toBe(false); // 端数が 0.5 / 64 を超えると収まらない
+    // auto-width を同じ幅の auto-height にしても折り返さない
+    expect(fits(99.9995, ceilSize(99.9995))).toBe(true);
+  });
+
+  it("行の幅がちょうど 1/64 px はみ出すなら折り返す", () => {
+    const measure: TextMeasurer = { measure: (value) => (value === "ab" ? 130.015625 : 65) };
+    const node = text({ text: "ab", sizing: "auto-height", width: 130 });
+    expect(lineTexts(node, measure)).toEqual(["a", "b"]);
+    const fitting: TextMeasurer = { measure: (value) => (value === "ab" ? 130.007 : 65) };
+    expect(lineTexts(node, fitting)).toEqual(["ab"]);
   });
 });
 

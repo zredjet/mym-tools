@@ -203,24 +203,6 @@ describe("TextEditOverlay: 入力と終了", () => {
     expect(element.value).toBe("abc");
   });
 
-  it("ウィンドウのフォーカスが外れただけなら終えず、キャンバスの取消からも本文を守る", () => {
-    render(<TextEditOverlay />);
-    act(() => state().startTextEdit("t1"));
-    const element = textarea();
-    fireEvent.change(element, { target: { value: "abcd" } });
-    // ウィンドウが非アクティブになると、入力欄はフォーカスを持ったまま blur が届く
-    vi.spyOn(document, "hasFocus").mockReturnValue(false);
-    fireEvent.blur(element);
-    expect(state().editingTextId).toBe("t1");
-    act(() => state().cancelGesture()); // キャンバスの window の blur の処理
-    expect(textOf()?.text).toBe("abcd");
-    vi.mocked(document.hasFocus).mockReturnValue(true);
-    fireEvent.focus(element);
-    fireEvent.change(element, { target: { value: "abcde" } });
-    fireEvent.keyDown(element, { key: "Escape" });
-    expect(state().revision).toBe(1);
-  });
-
   it("StrictMode の後片付けが余分に走っても、編集を終えない", async () => {
     render(
       <StrictMode>

@@ -34,6 +34,16 @@ export const DEFAULT_ASCENT_MINUS_DESCENT = 0.7;
  */
 export const SIZE_EPSILON = 1e-3;
 
+/**
+ * 折り返しで、行が幅 `maxWidth` に収まる幅の上限 (この値より狭ければ収まる)。
+ * ブラウザは行の幅を 1/64 px 単位 (LayoutUnit) に四捨五入して枠の幅と比べる (Chromium で実測。
+ * 端数が 1/128 px 未満なら収まり、それ以上なら収まらない)。編集欄の `<textarea>` と折り返しをそろえるため
+ * 同じ規則にする。`ceilSize` の許容差より大きいので、`auto-width` を同じ幅の `auto-height` にしても折り返さない。
+ */
+export function wrapLimit(maxWidth: number): number {
+  return (Math.round(maxWidth * 64) + 0.5) / 64;
+}
+
 /** 行の高さ (px)。 */
 export function lineHeightOf(node: Pick<TextNode, "lineHeight" | "fontSize">): number {
   return node.lineHeight ?? node.fontSize * AUTO_LINE_HEIGHT;
@@ -70,30 +80,55 @@ interface Row {
 }
 
 /**
- * 1 単位 (`breakUnits` の 1 つ) が行に収まらないとき、書記素クラスタで割る。
- * 前半は 1 つ以上の書記素クラスタを含み、末尾の空白はぶら下げる。
+ * 1 単位 (`breakUnits` の 1 つ) が行に収まらないとき、書記素クラスタで割る (幅に収まらない単語)。
+ * 収まる行をすべて返し、最後の収まりきる残りは `rest` として返す (呼び出し側が、続く単位と同じ行に並べる)。
+ * 各行は 1 つ以上の書記素クラスタを含み、末尾の空白はぶら下げる。
+ *
+ * 時間は単位の長さにほぼ比例させる (空白のない長い文字列、base64 や URL で固まらないように)。
+ * 書記素クラスタへの分割と 1 文字ずつの幅は 1 回だけ求め、残りの文字列を作り直さない。
+ * 行ごとに、1 文字ずつの幅の和で見積もってから、その行だけを実際に測って確かめる。
  */
-function splitToFit(
+function breakLongUnit(
   unit: string,
   limit: number,
   measure: (text: string) => number,
-): [string, string] {
+): { lines: string[]; rest: string } {
   const graphemes = splitGraphemes(unit);
-  const prefix = (count: number) => graphemes.slice(0, count).join("");
-  // まず 1 文字ずつの幅の和で見積もり、実際の幅で確かめる
-  let count = 1;
-  let estimate = measure(graphemes[0] ?? "");
-  while (count < graphemes.length) {
-    const grapheme = graphemes[count] as string;
-    const width = measure(grapheme);
-    if (trimTrailingSpaces(grapheme) !== "" && estimate + width > limit) break;
-    estimate += width;
-    count++;
+  // 同じ文字は 1 回だけ測る (`"a".repeat(n)` や `━━━` の連続)
+  const seen = new Map<string, number>();
+  const widths = graphemes.map((grapheme) => {
+    let width = seen.get(grapheme);
+    if (width === undefined) {
+      width = measure(grapheme);
+      seen.set(grapheme, width);
+    }
+    return width;
+  });
+  const count = graphemes.length;
+  const text = (from: number, to: number) => graphemes.slice(from, to).join("");
+  const fits = (from: number, to: number) => measure(trimTrailingSpaces(text(from, to))) < limit;
+  const lines: string[] = [];
+  let start = 0;
+  while (start < count) {
+    // 1 文字ずつの幅の和で、入るところまで (空白は行末にぶら下げる)
+    let end = start + 1;
+    let estimate = widths[start] ?? 0;
+    while (end < count) {
+      const width = widths[end] ?? 0;
+      if (trimTrailingSpaces(graphemes[end] as string) !== "" && estimate + width >= limit) break;
+      estimate += width;
+      end++;
+    }
+    // 残りが見積もりで収まるなら、続く単位と並べられるよう呼び出し側へ返す (そこで実際の幅で確かめる)
+    if (end === count && start > 0) return { lines, rest: text(start, count) };
+    // その行だけを実際に測って確かめる
+    while (end > start + 1 && !fits(start, end)) end--;
+    while (end < count && fits(start, end + 1)) end++;
+    if (end === count && start > 0) return { lines, rest: text(start, count) };
+    lines.push(text(start, end));
+    start = end;
   }
-  while (count > 1 && measure(trimTrailingSpaces(prefix(count))) > limit) count--;
-  while (count < graphemes.length && measure(trimTrailingSpaces(prefix(count + 1))) <= limit)
-    count++;
-  return [prefix(count), graphemes.slice(count).join("")];
+  return { lines, rest: "" };
 }
 
 /**
@@ -107,9 +142,10 @@ function wrapParagraph(
   measure: (text: string) => number,
   rows: Row[],
 ): void {
-  const limit = maxWidth + SIZE_EPSILON;
+  const limit = wrapLimit(maxWidth);
   const units = breakUnits(paragraph);
   const visibleWidth = (parts: readonly string[]) => measure(trimTrailingSpaces(parts.join("")));
+  const pushRow = (text: string) => rows.push({ text, width: measure(trimTrailingSpaces(text)) });
   let next = 0;
   while (next < units.length) {
     const line: string[] = [];
@@ -118,31 +154,31 @@ function wrapParagraph(
     while (next < units.length) {
       const unit = units[next] as string;
       const visible = trimTrailingSpaces(unit);
-      if (line.length > 0 && visible !== "" && estimate + measure(visible) > limit) break;
+      if (line.length > 0 && visible !== "" && estimate + measure(visible) >= limit) break;
       line.push(unit);
       estimate += measure(unit);
       next++;
     }
     // 2. 行全体の実際の幅で確かめる。はみ出すなら後ろから戻し、まだ入るなら次の単位も取る
-    while (line.length > 1 && visibleWidth(line) > limit) {
+    while (line.length > 1 && visibleWidth(line) >= limit) {
       line.pop();
       next--;
     }
-    while (next < units.length && visibleWidth([...line, units[next] as string]) <= limit) {
+    while (next < units.length && visibleWidth([...line, units[next] as string]) < limit) {
       line.push(units[next] as string);
       next++;
     }
-    // 3. 1 単位だけでも入らなければ、書記素クラスタで割る (幅に収まらない単語)
-    if (line.length === 1 && visibleWidth(line) > limit) {
-      const [head, rest] = splitToFit(line[0] as string, limit, measure);
-      line[0] = head;
+    // 3. 1 単位だけでも入らなければ、書記素クラスタで割る。収まる残りは次の行の先頭の単位にする
+    if (line.length === 1 && visibleWidth(line) >= limit) {
+      const { lines, rest } = breakLongUnit(line[0] as string, limit, measure);
+      for (const text of lines) pushRow(text);
       if (rest !== "") {
         next--;
         units[next] = rest;
       }
+      continue;
     }
-    const text = line.join("");
-    rows.push({ text, width: measure(trimTrailingSpaces(text)) });
+    pushRow(line.join(""));
   }
 }
 
