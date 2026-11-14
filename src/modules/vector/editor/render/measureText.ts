@@ -829,6 +829,11 @@ export function createCanvasTextMeasurer(
     return sum;
   };
 
+  /**
+   * 最後に測った長い文字列 (`WidthCache` が覚えない長さ)。行分割は同じ行を編集欄の幅 (`editorWidth`) と
+   * 描画の幅で続けて測るので、2 回目は測り直さない
+   */
+  let lastLong: { key: string; text: string; width: number } | null = null;
   const measure = (text: string, font: FontSpec): number => {
     if (text === "") return 0;
     const fontString = fontStringOf(font);
@@ -836,10 +841,12 @@ export function createCanvasTextMeasurer(
     const key = spacing === 0 ? fontString : `${fontString}\u0001${spacing}`;
     const cached = widths.get(key, text);
     if (cached !== undefined) return cached;
+    if (lastLong !== null && lastLong.key === key && lastLong.text === text) return lastLong.width;
     const width =
       drawnWidth(text, font, fontString) ??
       graphemeCount(text) * font.size * 0.6 + letterSpacingWidth(text, spacing);
     widths.set(key, text, width);
+    if (text.length > MAX_CACHED_TEXT_LENGTH) lastLong = { key, text, width };
     return width;
   };
 

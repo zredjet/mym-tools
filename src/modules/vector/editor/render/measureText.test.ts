@@ -250,19 +250,28 @@ describe("createCanvasTextMeasurer: 経路の選び方", () => {
 });
 
 describe("createCanvasTextMeasurer: 覚える量とアセント・ディセント", () => {
-  it("長い文字列は覚えず、覚える量は文字列の合計の長さで抑える", () => {
+  it("長い文字列は覚えず (最後の 1 つだけ使い回す)、覚える量は文字列の合計の長さで抑える", () => {
     const { ctx } = fakeContext();
     const measurer = createCanvasTextMeasurer({
       getContext: () => ctx,
       measureWithSvg: webkitSvg(),
     });
     const long = "a".repeat(MAX_CACHED_TEXT_LENGTH + 1);
+    const measured = () =>
+      vi.mocked(ctx.measureText).mock.calls.filter(([text]) => text === long).length;
     measurer.measure("x", font);
     const before = measurer.cachedLength;
     measurer.measure(long, font);
-    measurer.measure(long, font);
     expect(measurer.cachedLength).toBe(before);
-    expect(vi.mocked(ctx.measureText).mock.calls.filter(([text]) => text === long)).toHaveLength(2);
+    // 最後に測った長い文字列だけは使い回す (行分割は同じ行を編集欄の幅と描画の幅で続けて測る)
+    expect(measurer.measure(long, font)).toBe(kernedWidth(long));
+    expect(measured()).toBe(1);
+    // 間に別の長い文字列を測ったり、フォントが違ったりすれば測り直す
+    measurer.measure("c".repeat(MAX_CACHED_TEXT_LENGTH + 1), font);
+    measurer.measure(long, font);
+    expect(measured()).toBe(2);
+    measurer.measure(long, { ...font, size: font.size + 1 });
+    expect(measured()).toBe(3);
     const piece = "b".repeat(MAX_CACHED_TEXT_LENGTH - 6);
     const count = Math.ceil((MAX_CACHED_TOTAL_LENGTH * 1.5) / piece.length);
     for (let i = 0; i < count; i++) measurer.measure(`${i}`.padStart(6, "0") + piece, font);

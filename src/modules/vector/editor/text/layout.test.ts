@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createText } from "../model/create";
 import type { TextNode } from "../model/types";
 import { fixedWidthMeasurer } from "../render/testing";
-import type { FontSpec, TextMeasurer } from "../render/types";
+import type { FontSpec, LayoutText, TextMeasurer } from "../render/types";
 import { ceilSize, editorLineWidth, layoutText, lineHeightOf, wrapLimit } from "./layout";
+import type { FitProbe } from "./lineFit";
 import type { MetricsTextMeasurer } from "./metrics";
 
 // フォントサイズ 10: 1 文字 (コードポイント) の幅は 5、行の高さは 14
@@ -381,6 +382,187 @@ describe("layoutText: 空白のない長い文字列", () => {
     expect(lineTexts(node)).toEqual(["aaaa", "aaaa", "aa ", "bb ", "cc"]);
     const wide = text({ text: `${"a".repeat(10)} b`, sizing: "auto-height", width: 30 });
     expect(lineTexts(wide)).toEqual(["aaaaaa", "aaaa b"]);
+  });
+});
+
+describe("layoutText: 見積もりがカーニングで大きく外れる長い行", () => {
+  /**
+   * 行全体を測ると、隣り合う文字の間ごとに 1 狭い (フォントサイズ 20 で 1 文字 10)。1 文字ずつの幅の和の
+   * 見積もりは、1 行 (1 万字余り) で 1,000 字ほど外れる。計測の呼び出しと、渡した文字数を数える
+   */
+  function kerned(options: { perUnit?: boolean } = {}) {
+    const work = { calls: 0, chars: 0, longCalls: 0 };
+    const width = (value: string, font: FontSpec) =>
+      measurer.measure(value, font) - Math.max(0, Array.from(value).length - 1);
+    const counted = (value: string, font: FontSpec) => {
+      work.calls++;
+      work.chars += value.length;
+      if (value.length >= 1000) work.longCalls++;
+      return width(value, font);
+    };
+    const perUnit: MetricsTextMeasurer = {
+      measure: counted,
+      editorWidth: counted,
+      fontMetrics: () => null,
+      lineBreakOptions: () => ({ shapePerUnit: true }),
+    };
+    const kernedMeasurer: TextMeasurer = options.perUnit ? perUnit : { measure: counted };
+    return { measurer: kernedMeasurer, work, width };
+  }
+
+  /** 1 行を確かめる回数の上限 (`lineFit.ts` の 2 log2(個数) + 7。個数は 100,000 字)。 */
+  const PROBES_PER_LINE = 2 * Math.ceil(Math.log2(100_001)) + 7;
+
+  for (const [name, body, options] of [
+    ["空白のない 1 つの単位 (AV の繰り返し)", "AV".repeat(50_000), {}],
+    ["1 文字ずつ折り返せる和文", "あ".repeat(100_000), {}],
+    ["単位ごとに組むエンジン (WebKit) の 1 つの単位", "AV".repeat(50_000), { perUnit: true }],
+  ] as const) {
+    it(`${name}: 100,000 字・幅 100,000 でも、行全体を測る回数は行ごとに上限の内`, () => {
+      const { measurer: m, work, width } = kerned(options);
+      const node = text({ text: body, fontSize: 20, sizing: "auto-height", width: 100_000 });
+      const layout = layoutText(node, m);
+      const lines = layout.lines.map((line) => line.text);
+      expect(lines.join("")).toBe(body);
+      // 各行は収まる最大の文字数 (1 文字ずつ足して確かめる前の実装と同じ結果)
+      const limit = wrapLimit(100_000);
+      const font = {
+        family: node.fontFamily,
+        size: 20,
+        weight: 400,
+        italic: false,
+        letterSpacing: 0,
+      };
+      lines.forEach((line, index) => {
+        expect(width(line, font)).toBeLessThan(limit);
+        const next = lines[index + 1];
+        if (next) expect(width(line + next.slice(0, 1), font)).toBeGreaterThanOrEqual(limit);
+      });
+      // 行全体 (1,000 字以上) を測るのは行ごとに上限の内で、渡す文字数も本文の 20 倍まで
+      // (1 文字ずつ伸ばしては測り直すと、行ごとに 1,000 回以上・合わせて 1 億字を超える)
+      expect(work.longCalls).toBeLessThanOrEqual(lines.length * PROBES_PER_LINE);
+      expect(work.chars).toBeLessThan(body.length * 20);
+    });
+  }
+});
+
+describe("layoutText: 前の探し方 (見積もりから 1 つずつ確かめる) と同じ結果", () => {
+  /** `largestFitting` を前の探し方に差し替えた `layoutText` を読み込む。 */
+  async function importLinearLayout(): Promise<LayoutText> {
+    vi.resetModules();
+    vi.doMock("./lineFit", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("./lineFit")>()),
+      largestFitting(lo: number, hi: number, guess: number, probe: (count: number) => FitProbe) {
+        let count = Math.min(hi, Math.max(lo, guess));
+        while (count > lo && !probe(count).fits) count--;
+        if (probe(count).fits) while (count < hi && probe(count + 1).fits) count++;
+        return count;
+      },
+    }));
+    try {
+      return (await import("./layout")).layoutText;
+    } finally {
+      vi.doUnmock("./lineFit");
+      vi.resetModules();
+    }
+  }
+
+  /** 決まった種から作る乱数 (テストを毎回同じにする)。 */
+  function random(seed: number): () => number {
+    let state = seed;
+    return () => {
+      state = (state * 1103515245 + 12345) & 0x7fffffff;
+      return state / 0x7fffffff;
+    };
+  }
+
+  const PIECES = [
+    ..."あいうかき「」、。・ーっゃ漢字",
+    " ",
+    "　",
+    ..."AVWTaobé12-/.,",
+    "\t",
+    "👍🏽",
+    "AVAVAVAVAVAV",
+    "aaaaaaaaaaaaaaaaaaaa",
+    "https://example.com/abc/def",
+  ];
+  const pairs = ["AV", "VA", "To", "WA", "Wa"];
+  /** 行全体を測ると、カーニングする組ごとに 2 狭い (1 文字は 5) */
+  const kernedWidth = (value: string, font: FontSpec) => {
+    let pairCount = 0;
+    for (const pair of pairs) pairCount += value.split(pair).length - 1;
+    return measurer.measure(value, font) - pairCount * 2;
+  };
+  const measurers: [string, TextMeasurer & Partial<MetricsTextMeasurer>][] = [
+    ["字幅どおり", { measure: measurer.measure }],
+    ["カーニング", { measure: kernedWidth }],
+    [
+      "行全体が 3 % 狭い",
+      {
+        measure: (value, font) =>
+          measurer.measure(value, font) * (Array.from(value).length > 1 ? 0.97 : 1),
+      },
+    ],
+    [
+      "行全体が 1 文字につき 0.3 広い",
+      {
+        measure: (value, font) => {
+          const count = Array.from(value).length;
+          return measurer.measure(value, font) + (count > 1 ? count * 0.3 : 0);
+        },
+      },
+    ],
+    [
+      "行末の約物を詰める (Chromium)",
+      {
+        measure: (value, font) =>
+          measurer.measure(value, font) - 2.5 * (value.split("、。").length - 1),
+        lineEndTrim: (previous, last) =>
+          last === "」" || last === "。" || (last === "、" && previous === "」") ? 0.5 : 0,
+      },
+    ],
+    [
+      "単位ごとに組む (WebKit)",
+      {
+        measure: kernedWidth,
+        editorWidth: measurer.measure,
+        fontMetrics: () => null,
+        lineBreakOptions: () => ({
+          shapePerUnit: true,
+          breakAfterSolidus: true,
+          keepIdeographicSpace: true,
+        }),
+      },
+    ],
+  ];
+
+  it("ランダムな本文・幅・字間で、行と幅と位置が同じ", async () => {
+    const linearLayout = await importLinearLayout();
+    const next = random(5);
+    for (const [name, m] of measurers) {
+      for (let trial = 0; trial < 150; trial++) {
+        let body = "";
+        const length = trial % 25 === 0 ? 400 : 1 + Math.floor(next() * 40);
+        for (let i = 0; i < length; i++) {
+          body += PIECES[Math.floor(next() * PIECES.length)] as string;
+          if (next() < 0.01) body += "\n";
+        }
+        const node = text({
+          text: body,
+          sizing: "auto-height",
+          width: Math.round((3 + next() * (trial % 25 === 0 ? 1500 : 300)) * 4) / 4,
+          letterSpacing: [0, 0, 1, -0.5][trial % 4] as number,
+          align: (["left", "center", "right"] as const)[trial % 3] ?? "left",
+        });
+        const expected = linearLayout(node, m);
+        expect({ name, body, layout: layoutText(node, m) }).toEqual({
+          name,
+          body,
+          layout: expected,
+        });
+      }
+    }
   });
 });
 

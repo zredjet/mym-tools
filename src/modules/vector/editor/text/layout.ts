@@ -25,6 +25,7 @@ import {
   trimTrailingSpaces,
   type LineBreakOptions,
 } from "./lineBreak";
+import { largestFitting, predictCount, type FitProbe } from "./lineFit";
 import { editorWidthOf, fontMetricsOf, lineBreakOptionsOf, lineEndTrimOf } from "./metrics";
 
 /** `lineHeight` が null のときの行の高さ (フォントサイズに対する倍率)。 */
@@ -100,6 +101,9 @@ interface WrapContext {
   squeeze: (visible: string, next?: string) => number;
 }
 
+/** 予測 (`predictCount`) で 1 つずつの幅の和を求める範囲 (見積もった個数の 2 倍 + この数まで)。 */
+const PREDICT_MARGIN = 64;
+
 /**
  * 1 単位 (`breakUnits` の 1 つ) が行に収まらないとき、書記素クラスタで割る (幅に収まらない単語)。
  * 収まる行をすべて返し、最後の収まりきる残りは `rest` として返す (呼び出し側が、続く単位と同じ行に並べる)。
@@ -107,13 +111,14 @@ interface WrapContext {
  *
  * 時間は単位の長さにほぼ比例させる (空白のない長い文字列、base64 や URL で固まらないように)。
  * 書記素クラスタへの分割と 1 文字ずつの幅は 1 回だけ求め、残りの文字列を作り直さない。
- * 行ごとに、1 文字ずつの幅の和で見積もってから、その行だけを実際に測って確かめる。
+ * 行ごとに、1 文字ずつの幅の和で見積もってから、その行だけを実際に測って確かめる。見積もりがカーニングで
+ * 外れても、行全体を測る回数は `largestFitting` の上限 (行の文字数の対数) で済む。
  */
 function breakLongUnit(
   unit: string,
   context: WrapContext,
-  fitsText: (text: string, next: string) => boolean,
-): { lines: { text: string; next: string }[]; rest: string } {
+  probeText: (text: string, next: string) => FitProbe,
+): { lines: { text: string; next: string; width: number }[]; rest: string } {
   const { limit, measure, options } = context;
   const graphemes = splitGraphemes(unit);
   // 同じ文字は 1 回だけ測る (`"a".repeat(n)` や `━━━` の連続)
@@ -127,9 +132,11 @@ function breakLongUnit(
     return width;
   });
   const count = graphemes.length;
+  // 先頭からの 1 文字ずつの幅の和 (予測に使う)
+  const sums = [0];
+  for (const width of widths) sums.push((sums[sums.length - 1] as number) + width);
   const text = (from: number, to: number) => graphemes.slice(from, to).join("");
-  const fits = (from: number, to: number) => fitsText(text(from, to), graphemes[to] ?? "");
-  const lines: { text: string; next: string }[] = [];
+  const lines: { text: string; next: string; width: number }[] = [];
   let start = 0;
   while (start < count) {
     // 1 文字ずつの幅の和で、入るところまで (空白は行末にぶら下げる)
@@ -144,11 +151,33 @@ function breakLongUnit(
     }
     // 残りが見積もりで収まるなら、続く単位と並べられるよう呼び出し側へ返す (そこで実際の幅で確かめる)
     if (end === count && start > 0) return { lines, rest: text(start, count) };
-    // その行だけを実際に測って確かめる
-    while (end > start + 1 && !fits(start, end)) end--;
-    while (end < count && fits(start, end + 1)) end++;
+    // その行だけを実際に測って確かめる (先頭から何文字入るか)
+    const from = start;
+    const probes = new Map<number, FitProbe & { text: string }>();
+    const probe = (length: number) => {
+      let result = probes.get(length);
+      if (!result) {
+        const value = text(from, from + length);
+        result = { ...probeText(value, graphemes[from + length] ?? ""), text: value };
+        probes.set(length, result);
+      }
+      return result;
+    };
+    const available = count - from;
+    const length = largestFitting(1, available, end - from, probe, (guess, width) =>
+      predictCount(
+        guess,
+        width,
+        limit,
+        1,
+        Math.min(available, guess * 2 + PREDICT_MARGIN),
+        (n) => (sums[from + n] as number) - (sums[from] as number),
+      ),
+    );
+    end = from + length;
     if (end === count && start > 0) return { lines, rest: text(start, count) };
-    lines.push({ text: text(start, end), next: graphemes[end] ?? "" });
+    const line = probe(length);
+    lines.push({ text: line.text, next: graphemes[end] ?? "", width: line.width });
     start = end;
   }
   return { lines, rest: "" };
@@ -158,6 +187,7 @@ function breakLongUnit(
  * 1 段落を折り返す。各行は入る限りの単位を持つ (貪欲法)。
  * 単位ごとの幅の和で見積もってから、行全体の実際の幅 (カーニングを含む) で確かめる。
  * 同じ単位の幅は計測が覚えているので、長い文でも計測の呼び出しは行の数に比例する程度で済む。
+ * 見積もりが外れたときに行全体を測り直す回数は、行の単位の数の対数で抑える (`largestFitting`)。
  *
  * 収まるかどうかは、編集欄 (HTML) が組む幅と描画の幅の広いほうで判定する。編集欄の幅は、WebKit は単位ごとに
  * 組むので単位ごとの幅の和、Chromium は行全体の幅。描画の幅のほうが広いこともある (WebKit の字間は描画では
@@ -196,46 +226,59 @@ function wrapParagraph(paragraph: string, context: WrapContext, rows: Row[]): vo
     const visible = trim(text);
     rows.push({ text, width: measure(visible) - (width < limit ? 0 : squeezeOf(text, next)) });
   };
-  const fitsText = (text: string, next: string) => fits([text], editorWidth([text]), next);
+  const probeText = (text: string, next: string): FitProbe => {
+    const width = editorWidth([text]);
+    return { fits: fits([text], width, next), width };
+  };
   let next = 0;
   while (next < units.length) {
-    const line: string[] = [];
+    const start = next;
+    // 行頭からの単位ごとの幅の和 (見積もりと、2. の予測に使う。予測は必要なところまで伸ばす)
+    const sums = [0];
     let estimate = 0;
     // 1. 単位ごとの幅の和で、入るところまで取る (空白だけの単位は行末にぶら下げる)
     while (next < units.length) {
       const unit = units[next] as string;
       const visible = trim(unit);
-      if (line.length > 0 && visible !== "" && estimate + measure(visible) >= limit) break;
-      line.push(unit);
+      if (next > start && visible !== "" && estimate + measure(visible) >= limit) break;
       estimate += measure(unit);
+      sums.push(estimate);
       next++;
     }
-    // 2. 行全体の実際の幅で確かめる。はみ出すなら後ろから戻し、まだ入るなら次の単位も取る
-    let current = editorWidth(line);
-    while (line.length > 1 && !fits(line, current)) {
-      line.pop();
-      next--;
-      current = editorWidth(line);
-    }
-    while (next < units.length && fits(line, current)) {
-      const candidate = [...line, units[next] as string];
-      const width = editorWidth(candidate);
-      if (!fits(candidate, width)) break;
-      line.push(units[next] as string);
-      next++;
-      current = width;
-    }
+    // 2. 行全体の実際の幅で確かめ、入る単位の数を求める (見積もりが外れても、測る回数は数の対数で済む)
+    const probes = new Map<number, FitProbe & { line: string[] }>();
+    const probe = (count: number) => {
+      let result = probes.get(count);
+      if (!result) {
+        const line = units.slice(start, start + count);
+        const width = editorWidth(line);
+        result = { fits: fits(line, width), width, line };
+        probes.set(count, result);
+      }
+      return result;
+    };
+    const sumAt = (count: number) => {
+      for (let i = sums.length; i <= count; i++)
+        sums.push((sums[i - 1] as number) + measure(units[start + i - 1] as string));
+      return sums[count] as number;
+    };
+    const available = units.length - start;
+    const count = largestFitting(1, available, next - start, probe, (guess, width) =>
+      predictCount(guess, width, limit, 1, Math.min(available, guess * 2 + PREDICT_MARGIN), sumAt),
+    );
+    next = start + count;
+    const { line, fits: fitted, width } = probe(count);
     // 3. 1 単位だけでも入らなければ、書記素クラスタで割る。収まる残りは次の行の先頭の単位にする
-    if (line.length === 1 && !fits(line, current)) {
-      const { lines, rest } = breakLongUnit(line[0] as string, context, fitsText);
-      for (const { text, next } of lines) pushRow(text, editorWidth([text]), next);
+    if (count === 1 && !fitted) {
+      const { lines, rest } = breakLongUnit(line[0] as string, context, probeText);
+      for (const row of lines) pushRow(row.text, row.width, row.next);
       if (rest !== "") {
         next--;
         units[next] = rest;
       }
       continue;
     }
-    pushRow(line.join(""), current);
+    pushRow(line.join(""), width);
   }
 }
 
