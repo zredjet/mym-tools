@@ -34,13 +34,16 @@ export function isTopLevelFrame(doc: CanvasDocument, id: NodeId): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * 図形の当たり。`d` は輪郭からの符号付き距離 (内側が負)。
- * 塗りがあれば内側と線の外側の半分、なければ線の上だけ (線の太さ + 余裕の帯)。
- * 線のない図形は太さ 0 の線として扱う (輪郭の近くを押せば当たる)。
+ * 図形の当たり。`d` は輪郭からの符号付き距離 (内側が負)。`strokeWidth` は線がなければ null。
+ * - 塗りがあれば、内側と線の外側の半分
+ * - 線があれば、線の太さ + 余裕の帯 (塗りの外側にも余裕が付く)
+ * - 塗りも線もない図形は、太さ 0 の線として輪郭の近くだけ
+ * 線のない塗りの図形には余裕を付けない (小さな図形が隣の図形の分まで当たらないように)
  */
-function shapeHit(d: number, hasFill: boolean, strokeWidth: number, slop: number): boolean {
-  if (hasFill && d <= strokeWidth / 2) return true;
-  return Math.abs(d) <= (strokeWidth + slop) / 2;
+function shapeHit(d: number, hasFill: boolean, strokeWidth: number | null, slop: number): boolean {
+  if (hasFill && d <= (strokeWidth ?? 0) / 2) return true;
+  if (strokeWidth !== null) return Math.abs(d) <= (strokeWidth + slop) / 2;
+  return !hasFill && Math.abs(d) <= slop / 2;
 }
 
 function boxOf(node: { x: number; y: number; width: number; height: number }, origin: Point): Rect {
@@ -57,11 +60,11 @@ function leafHit(node: CanvasNode, origin: Point, p: Point, slop: number): boole
     }
     case "rect": {
       const d = roundedRectDistance(p, boxOf(node, origin), node.radius);
-      return shapeHit(d, node.fill !== null, node.stroke?.width ?? 0, slop);
+      return shapeHit(d, node.fill !== null, node.stroke?.width ?? null, slop);
     }
     case "ellipse": {
       const d = ellipseDistance(p, boxOf(node, origin));
-      return shapeHit(d, node.fill !== null, node.stroke?.width ?? 0, slop);
+      return shapeHit(d, node.fill !== null, node.stroke?.width ?? null, slop);
     }
     case "image":
       return roundedRectDistance(p, boxOf(node, origin), node.radius) <= 0;
@@ -204,8 +207,12 @@ function effectiveScope(
   if (scopeId === null) return null;
   if (path?.includes(scopeId)) return scopeId;
   const chain = [scopeId, ...getAncestors(doc, scopeId).map((ancestor) => ancestor.id)];
-  // 押した所にスコープの外のノードがなければ、group の外接矩形の中はスコープの中
-  const empty = !path || path.every((id) => chain.includes(id));
+  // 押した所にスコープの外のノードがなければ、group の外接矩形の中はスコープの中。
+  // ページ直下の frame の何もない場所 (道が frame だけ) も何もない場所として扱う
+  const empty =
+    !path ||
+    path.every((id) => chain.includes(id)) ||
+    (path.length === 1 && isTopLevelFrame(doc, path[0] as NodeId));
   for (const id of chain) {
     if (path?.includes(id)) return isTopLevelFrame(doc, id) ? null : id;
     if (empty && point && getNode(doc, id)?.type === "group") {

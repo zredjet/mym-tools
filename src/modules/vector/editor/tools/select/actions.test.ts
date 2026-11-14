@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createText } from "../../model/create";
+import { createFrame, createRect, createText } from "../../model/create";
 import { insertNode } from "../../model/structure";
 import { sampleDocument } from "../../model/testing";
 import { updateNode } from "../../model/transform";
+import type { CanvasDocument, CanvasNode } from "../../model/types";
 import { EditorClipboard } from "../../state/clipboard";
 import { createEditorStore } from "../../state/store";
 import {
@@ -31,6 +32,39 @@ describe("addToSelection", () => {
     expect(addToSelection(doc, ["r2", "r3", "r0"], ["grp"])).toEqual(["r3", "r0", "grp"]);
     expect(addToSelection(doc, ["r0", "r1"], ["r1"])).toEqual(["r0", "r1"]);
     expect(addToSelection(doc, ["r0"], [])).toEqual(["r0"]);
+  });
+});
+
+describe("addToSelection の量", () => {
+  it("選択済み 2,000 個に 2,000 個を足しても固まらない", () => {
+    // 40 個の frame にそれぞれ 100 個の子。前半の子を選び、後半の子を足す
+    const nodes: CanvasNode[] = [];
+    const frames: string[] = [];
+    const selected: string[] = [];
+    const adding: string[] = [];
+    for (let f = 0; f < 40; f++) {
+      const children: string[] = [];
+      for (let i = 0; i < 100; i++) {
+        const id = `c${f}_${i}`;
+        nodes.push(createRect({ id, x: i, y: 0, width: 1, height: 1 }));
+        children.push(id);
+        (i < 50 ? selected : adding).push(id);
+      }
+      nodes.push(createFrame({ id: `f${f}`, children }));
+      frames.push(`f${f}`);
+    }
+    const doc: CanvasDocument = {
+      pages: [{ id: "p1", name: "", children: frames, guides: [] }],
+      nodes: Object.fromEntries(nodes.map((n) => [n.id, n])),
+      assets: {},
+    };
+    const started = performance.now();
+    const result = addToSelection(doc, selected, adding);
+    const elapsed = performance.now() - started;
+    expect(result).toHaveLength(4_000);
+    // 祖先 (frame) を足すと子はすべて外れる
+    expect(addToSelection(doc, result, ["f0"])).toHaveLength(4_000 - 100 + 1);
+    expect(elapsed).toBeLessThan(100); // 以前の実装は 1 回 400 ms 以上かかった
   });
 });
 

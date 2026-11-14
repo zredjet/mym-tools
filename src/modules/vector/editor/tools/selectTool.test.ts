@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createImage, createLine, createRect, createText } from "../model/create";
+import { createFrame, createImage, createLine, createRect, createText } from "../model/create";
 import { getPageBounds } from "../model/geometry";
-import { insertNode } from "../model/structure";
+import { groupNodes, insertNode } from "../model/structure";
 import { sampleDocument } from "../model/testing";
 import { addGuide, updateNode } from "../model/transform";
 import { getParent } from "../model/tree";
@@ -546,11 +546,48 @@ describe("Shift のクリック (§4.5)", () => {
     expect(s().selection).toEqual(["r1"]);
   });
 
-  it("選択中の group の子を Shift+クリックすると、子を足して group を外す", () => {
+  it("選択済みの group / 入れ子の frame を Shift+クリックすると、中の子に入れ替えずに外す", () => {
     const { store, click, s } = setup();
+    store.getState().setSelection(["grp"]);
+    click(155, 115, { shift: true });
+    expect(s().selection).toEqual([]);
     store.getState().setSelection(["r0", "grp"]);
     click(155, 115, { shift: true });
-    expect(s().selection).toEqual(["r0", "r2"]);
+    expect(s().selection).toEqual(["r0"]);
+    store.getState().setSelection(["f2"]);
+    click(310, 160, { shift: true });
+    expect(s().selection).toEqual([]);
+  });
+
+  it("選択済みの group を Shift を押したままドラッグすると、group ごと動く", () => {
+    const { store, drag, s } = setup();
+    store.getState().setSelection(["grp"]);
+    drag([155, 115], [165, 115], { shift: true }); // Cmd/Ctrl はいちばん深いノードを選ぶので付けない
+    expect(s().selection).toEqual(["grp"]);
+    expect(s().doc.nodes.r2).toMatchObject({ x: 60 });
+    expect(s().doc.nodes.l1).toMatchObject({ x1: 50, x2: 90 });
+    expect(getParent(s().doc, "r2")).toEqual({ kind: "node", id: "grp" });
+  });
+
+  it("選択済みのラベルを Shift+クリックすると外す", () => {
+    const { store, click, s } = setup();
+    store.getState().setSelection(["f", "r0"]);
+    click(105, 40, { shift: true });
+    expect(s().selection).toEqual(["r0"]);
+  });
+
+  it("Shift の範囲選択でも、祖先と子孫を入れ替える", () => {
+    const { store, down, move, up, s } = setup();
+    store.getState().setSelection(["f"]);
+    down(200, 140, { shift: true }); // f の中の何もない場所 (ハンドルから離れた所)
+    move(125, 75, { shift: true });
+    up(125, 75, { shift: true });
+    expect(s().selection).toEqual(["r1", "grp"]);
+    store.getState().setSelection(["r2"]);
+    down(135, 85, { shift: true });
+    move(185, 125, { shift: true });
+    up(185, 125, { shift: true });
+    expect(s().selection).toEqual(["grp"]);
   });
 
   it("選ばれていないノードを足すとき、その子孫が選ばれていれば入れ替える", () => {
@@ -752,5 +789,154 @@ describe("スコープの frame の範囲選択", () => {
     b.drag([398, 240], [470, 150]);
     expect(b.s().selection).toEqual([]);
     expect(b.s().scopeId).toBe("f2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2 回目のレビューで足した規則
+// ---------------------------------------------------------------------------
+
+describe("ドロップ先の基準 (§4.6)", () => {
+  it("親の違う複数選択は、つかんだノードの親が変わらない間は付け替えない", () => {
+    const { store, drag, s } = setup();
+    store.getState().setSelection(["r1", "r0"]);
+    drag([120, 70], [125, 70], { mod: true }); // r1 を f の中で 5 px
+    expect(getParent(s().doc, "r0")).toEqual({ kind: "page", id: "p1" });
+    expect(getParent(s().doc, "r1")).toEqual({ kind: "node", id: "f" });
+    expect(s().doc.nodes.r0).toMatchObject({ x: 5, y: 0 });
+  });
+
+  it("つかんだノードの親が変わるときは、選択のすべてを同じドロップ先へ移す", () => {
+    const { store, drag, s } = setup();
+    store.getState().setSelection(["r1", "r0"]);
+    drag([120, 70], [330, 180], { mod: true });
+    expect(getParent(s().doc, "r1")).toEqual({ kind: "node", id: "f2" });
+    expect(getParent(s().doc, "r0")).toEqual({ kind: "node", id: "f2" });
+  });
+
+  it("押した位置へ戻して離したら、親も変えず履歴も積まない", () => {
+    const doc = withNodes(createRect({ id: "p", x: 90, y: 100, width: 30, height: 30 }));
+    const { click, down, move, up, s } = setup(doc);
+    click(115, 115);
+    down(115, 115);
+    move(150, 150); // f の上で付け替わる
+    expect(getParent(s().doc, "p")).toEqual({ kind: "node", id: "f" });
+    move(115, 115);
+    up(115, 115);
+    expect(getParent(s().doc, "p")).toEqual({ kind: "page", id: "p1" });
+    expect(s().revision).toBe(0);
+    expect(s().canUndo).toBe(false);
+  });
+
+  it("Alt の複製では、複製元とその子孫をドロップ先にしない", () => {
+    const { click, drag, s } = setup();
+    click(350, 230); // 入れ子の frame f2 (300..400, 150..250)
+    expect(s().selection).toEqual(["f2"]);
+    drag([350, 230], [360, 240], { alt: true, mod: true }); // ポインターは元の f2 の上
+    const [copy] = s().selection;
+    expect(copy).not.toBe("f2");
+    expect(getParent(s().doc, copy!)).toEqual({ kind: "node", id: "f" });
+    expect(getPageBounds(s().doc, copy!)).toMatchObject({ x: 310, y: 160 });
+  });
+
+  it("frame のラベルをつかんだら、押した点の下と違う frame に入ったときだけ付け替える", () => {
+    // ラベル (105, 40) は frame g (90..290, 20..60) の上。h は離れた所の frame
+    const doc = withNodes(
+      createFrame({ id: "g", x: 90, y: 20, width: 200, height: 40 }),
+      createFrame({ id: "h", x: 700, y: 400, width: 600, height: 500 }),
+    );
+    const { drag, s } = setup(doc);
+    // g の上で動かしても (ノードをつかんだときの規則なら g に入る) ページ直下のまま
+    drag([105, 40], [110, 45], { mod: true });
+    expect(s().selection).toEqual(["f"]);
+    expect(getParent(s().doc, "f")).toEqual({ kind: "page", id: "p1" });
+    s().undo();
+    // h に入ったら h の子になる
+    drag([105, 40], [750, 450], { mod: true });
+    expect(getParent(s().doc, "f")).toEqual({ kind: "node", id: "h" });
+  });
+});
+
+describe("group のスコープとページ直下の frame", () => {
+  it("ページ直下の group が別のページ直下の frame に重なるとき、frame の何もない場所はスコープの中", () => {
+    const doc = withNodes(
+      createRect({ id: "ga", x: 120, y: 200, width: 10, height: 10 }),
+      createRect({ id: "gb", x: 180, y: 260, width: 10, height: 10 }),
+    );
+    // ページ直下の ga と gb をまとめた group (f の上に重なる)
+    const grouped = groupNodes(doc, ["ga", "gb"], "pg");
+    const { store, click, s } = setup(grouped);
+    store.getState().setScope("pg");
+    click(150, 230); // pg の外接矩形の中、f の何もない場所
+    expect(s().scopeId).toBe("pg");
+    click(450, 300); // pg の外 (f の何もない場所)
+    expect(s().scopeId).toBeNull();
+  });
+});
+
+describe("押してからの取消 (§4.5)", () => {
+  it("ノード数が上限で Alt+ドラッグが何もしなかった後でも、押す前の選択に戻す", () => {
+    const nodes: CanvasNode[] = [];
+    for (let i = 0; i < 20_000; i++)
+      nodes.push(
+        createRect({ id: `n${i}`, x: i % 100, y: Math.floor(i / 100), width: 1, height: 1 }),
+      );
+    const doc: CanvasDocument = {
+      pages: [{ id: "p1", name: "", children: nodes.map((n) => n.id), guides: [] }],
+      nodes: Object.fromEntries(nodes.map((n) => [n.id, n])),
+      assets: {},
+    };
+    const { store, ctx, down, move, s } = setup(doc);
+    store.getState().setSelection(["n5000"]); // (0, 50)。押す点のハンドルにかからない所
+    down(0.5, 0.5, { alt: true }); // n0 を選び直す
+    move(50.5, 300.5, { alt: true });
+    expect(s().selection).toEqual(["n0"]);
+    selectTool.onCancel?.(ctx);
+    expect(s().selection).toEqual(["n5000"]);
+  });
+
+  it("移動の途中で Undo した後でも、押す前の選択に戻す", () => {
+    const { store, ctx, down, move, s } = setup();
+    store.getState().setSelection(["r0"]);
+    down(120, 70);
+    move(150, 90);
+    s().undo();
+    move(160, 90);
+    selectTool.onCancel?.(ctx);
+    expect(s().selection).toEqual(["r0"]);
+  });
+
+  it("入れ子の frame をダブルクリックして中に入った直後でも、押す前に戻す", () => {
+    const { click, down, ctx, s } = setup();
+    click(350, 230);
+    expect(s().selection).toEqual(["f2"]);
+    down(350, 230, { clickCount: 2 }); // f2 の何もない場所 → 中に入って選択なし
+    expect(s()).toMatchObject({ scopeId: "f2", selection: [] });
+    selectTool.onCancel?.(ctx);
+    expect(s()).toMatchObject({ scopeId: null, selection: ["f2"] });
+  });
+
+  it("範囲選択の途中の onCancel は、ほかが開いたジェスチャーを取り消さない", () => {
+    const { ctx, down, move, s } = setup();
+    s().beginGesture();
+    s().updateGesture((doc) => updateNode(doc, "r0", { opacity: 0.5 }));
+    down(600, 600);
+    move(650, 650);
+    selectTool.onCancel?.(ctx);
+    expect(s().gestureActive).toBe(true);
+    expect(s().doc.nodes.r0).toMatchObject({ opacity: 0.5 });
+  });
+});
+
+describe("小さい選択の境界", () => {
+  it("画面上の幅 31 は辺の内側を押すと移動、32 はリサイズ", () => {
+    const thin = setup(withNodes(createRect({ id: "q", x: 0, y: 500, width: 31, height: 40 })));
+    thin.click(10, 520);
+    thin.drag([29, 520], [39, 520], { mod: true }); // 右辺の 2 px 内側
+    expect(thin.s().doc.nodes.q).toMatchObject({ x: 10, width: 31 });
+    const wide = setup(withNodes(createRect({ id: "q", x: 0, y: 500, width: 32, height: 40 })));
+    wide.click(10, 520);
+    wide.drag([30, 520], [40, 520], { mod: true });
+    expect(wide.s().doc.nodes.q).toMatchObject({ x: 0, width: 42 });
   });
 });

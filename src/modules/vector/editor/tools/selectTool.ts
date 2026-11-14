@@ -12,7 +12,7 @@
  *
  * 状態はモジュールの変数に持つ (ツールは 1 つだけで、同時に追うポインターも 1 本だけ)。
  */
-import { canEnter, hitFrameLabel, hitTestPath, isInteractive, pickTarget } from "../hit/hitTest";
+import { canEnter, hitFrameLabel, hitTestPath, pickTarget } from "../hit/hitTest";
 import {
   guideAt,
   guideCursor,
@@ -85,11 +85,13 @@ interface Press {
 }
 
 /**
- * 移動でつかんだもの。
- * - `node`: ノードの上。ポインターの下の frame が今の親と違えば付け替える
+ * 移動でつかんだもの (§4.6)。
+ * - `node`: ノード (`id`) の上。ポインターの下の frame が、つかんだノードの今の親と違えば付け替える
  * - `space`: frame のラベルや選択の中の何もない場所。押した点の下と違う frame に入ったときだけ付け替える
  */
-type Grab = "node" | "space";
+type Grab = { kind: "node"; id: NodeId } | { kind: "space" };
+const SPACE: Grab = { kind: "space" };
+const onNode = (id: NodeId): Grab => ({ kind: "node", id });
 
 /** しきい値を越えたときに始めるドラッグ。 */
 type DragIntent =
@@ -104,13 +106,17 @@ interface MoveDrag {
   /** 動かす前の文書 (Alt で複製したときは複製した後) */
   doc: CanvasDocument;
   ids: readonly NodeId[];
+  /** 押す前から選んでいたノード (Alt で複製したときは複製元)。移動量が 0 のときの選択 */
+  sourceIds: readonly NodeId[];
   /** Alt で複製したノード。最初の更新で選択し直す */
   duplicated: boolean;
   start: Rect;
   frames: DropFrame[];
-  grab: Grab;
-  /** 押した点の下の frame (null はページ直下)。`grab` が `space` のときの基準 */
-  startTarget: NodeId | null;
+  /**
+   * 付け替えの基準 (null はページ直下)。ノードをつかんだときは、つかんだノードの今の座標系の frame。
+   * ラベルや何もない場所をつかんだときは、押した点の下の frame
+   */
+  baseTarget: NodeId | null;
   /** 動かすノードの座標系の frame がすべて同じならその ID (ページ直下は null)、ばらばらなら undefined */
   ownFrame: NodeId | null | undefined;
   snapCache: Map<string, SnapTargets>;
@@ -158,8 +164,11 @@ type Phase =
   | { kind: "idle" }
   | { kind: "pending"; press: Press; intent: DragIntent; onClick: (() => void) | null }
   | { kind: "drag"; press: Press; drag: Drag }
-  /** 押したが何もしない (ドラッグしても何も起こさない) */
-  | { kind: "inert" };
+  /**
+   * 押したが何もしない (ドラッグしても何も起こさない)。`press` があれば、取り消したときに
+   * 選択とスコープを押す前に戻す
+   */
+  | { kind: "inert"; press: Press | null };
 
 let phase: Phase = { kind: "idle" };
 let lastCursor: string | null = null;
@@ -298,7 +307,7 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
   resetSelectOverlay();
   ownsGesture = false;
   if (event.button !== 0) {
-    phase = { kind: "inert" };
+    phase = { kind: "inert", press: null };
     return;
   }
   const store = ctx.store;
@@ -347,16 +356,16 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
     state.setScope(null);
     if (event.shift) {
       if (selected.has(label))
-        pending({ kind: "move", grab: "space" }, () => toggleInSelection(store, label));
+        pending({ kind: "move", grab: SPACE }, () => toggleInSelection(store, label));
       else {
         toggleInSelection(store, label);
-        pending({ kind: "move", grab: "space" });
+        pending({ kind: "move", grab: SPACE });
       }
     } else if (selected.has(label))
-      pending({ kind: "move", grab: "space" }, () => store.getState().setSelection([label]));
+      pending({ kind: "move", grab: SPACE }, () => store.getState().setSelection([label]));
     else {
       state.setSelection([label]);
-      pending({ kind: "move", grab: "space" });
+      pending({ kind: "move", grab: SPACE });
     }
     return;
   }
@@ -379,33 +388,34 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
     if (double && !event.shift) {
       const node = getNode(state.doc, id);
       if (node?.type === "text") {
+        // 本文の編集を始めたら、この押下は終わり (取り消しても選択を戻さない)
         store.getState().startTextEdit(id);
-        phase = { kind: "inert" };
+        phase = { kind: "inert", press: null };
         return;
       }
       if (canEnter(state.doc, id)) {
         store.getState().setScope(id);
         const inner = pickTarget(state.doc, path, id, { point }).id;
         store.getState().setSelection(inner === null ? [] : [inner]);
-        if (inner === null) phase = { kind: "inert" };
-        else pending({ kind: "move", grab: "node" });
+        if (inner === null) phase = { kind: "inert", press };
+        else pending({ kind: "move", grab: onNode(inner) });
         return;
       }
     }
 
     if (event.shift) {
-      shiftPress(store, path, id, plainPick(), pending);
+      shiftPress(store, id, plainPick(), pending);
       return;
     }
     if (selected.has(id)) {
       // 選んだままドラッグできる。動かさずに離したら、押した位置で選び直す
-      pending({ kind: "move", grab: "node" }, () => {
+      pending({ kind: "move", grab: onNode(id) }, () => {
         const plain = plainPick();
         store.getState().setSelection(plain === null ? [] : [plain]);
       });
     } else {
       state.setSelection([id]);
-      pending({ kind: "move", grab: "node" });
+      pending({ kind: "move", grab: onNode(id) });
     }
     return;
   }
@@ -415,7 +425,7 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
   const movable = transformableIds(state.doc, selection);
   const bounds = movable.length > 0 ? getSelectionBounds(state.doc, movable) : null;
   if (!event.shift && bounds && rectContainsPoint(bounds, point)) {
-    pending({ kind: "move", grab: "space" }, () => store.getState().setSelection([]));
+    pending({ kind: "move", grab: SPACE }, () => store.getState().setSelection([]));
     return;
   }
   if (pick.scopeId !== state.scopeId) state.setScope(pick.scopeId);
@@ -426,15 +436,14 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
 
 /**
  * Shift を押してノードを押したとき (§4.5)。足すのは、ふつうのクリックで当たるノード。
- * - 押した所の選択済みのノードが、ふつうのクリックで当たるノードの祖先なら、それを足して祖先と入れ替える
- *   (frame を選んだまま、その子を Shift+クリック)
- * - 選択済みの group / frame そのものに当たるときは、その中の押した所の子を足して入れ替える
- * - 選択済みの葉は、動かさずに離したときに外す (ドラッグなら選択ごと動かす)
  * - 選ばれていなければ足す (祖先・子孫は入れ替える)
+ * - 押した所の選択済みのノードが、ふつうのクリックで当たるノードの祖先なら、それを足して祖先と入れ替える
+ *   (ページ直下の frame を選んだまま、その子を Shift+クリック)
+ * - それ以外の選択済みのノード (group や入れ子の frame そのものを含む) は、動かさずに離したら外す。
+ *   中の子には入れ替えない。ドラッグなら選択ごと動かす
  */
 function shiftPress(
   store: Store,
-  path: readonly NodeId[] | null,
   picked: NodeId,
   plain: NodeId | null,
   pending: (intent: DragIntent, onClick?: (() => void) | null) => void,
@@ -442,7 +451,7 @@ function shiftPress(
   const state = store.getState();
   const add = (id: NodeId) => {
     state.setSelection(addToSelection(state.doc, state.selection, [id]));
-    pending({ kind: "move", grab: "node" });
+    pending({ kind: "move", grab: onNode(id) });
   };
   if (!state.selection.includes(picked)) {
     add(picked);
@@ -452,13 +461,7 @@ function shiftPress(
     add(plain);
     return;
   }
-  const index = path ? path.indexOf(picked) : -1;
-  const inner = index >= 0 ? path?.[index + 1] : undefined;
-  if (plain === picked && inner !== undefined && isInteractive(state.doc, inner)) {
-    add(inner);
-    return;
-  }
-  pending({ kind: "move", grab: "node" }, () => toggleInSelection(store, picked));
+  pending({ kind: "move", grab: onNode(picked) }, () => toggleInSelection(store, picked));
 }
 
 /**
@@ -565,8 +568,9 @@ function ownSnapTargets(state: EditorStore, ids: readonly NodeId[], doc = state.
 }
 
 function startMove(state: EditorStore, alt: boolean, pressed: Point, grab: Grab): MoveDrag | null {
-  let ids = transformableIds(state.doc, state.selection);
-  if (ids.length === 0) return null;
+  const sourceIds = transformableIds(state.doc, state.selection);
+  if (sourceIds.length === 0) return null;
+  let ids = sourceIds;
   let doc = state.doc;
   let duplicated = false;
   // Alt: 開始時に 1 回だけ複製し、ドラッグの間は同じ複製を動かす (§4.10)。
@@ -582,7 +586,8 @@ function startMove(state: EditorStore, alt: boolean, pressed: Point, grab: Grab)
   if (!start) return null;
   state.beginGesture();
   ownsGesture = true;
-  const frames = dropFrames(doc, state.pageId, new Set(ids));
+  // 動かすノードの中はドロップ先にしない。Alt の複製では複製元とその子孫も除く
+  const frames = dropFrames(doc, state.pageId, new Set(duplicated ? [...ids, ...sourceIds] : ids));
   const ownFrames = ids.map((id) => coordinateFrameId(doc, id));
   const snapCache = new Map<string, SnapTargets>();
   snapCache.set("own", ownSnapTargets(state, ids, doc));
@@ -590,11 +595,13 @@ function startMove(state: EditorStore, alt: boolean, pressed: Point, grab: Grab)
     kind: "move",
     doc,
     ids,
+    sourceIds,
     duplicated,
     start,
     frames,
-    grab,
-    startTarget: dropTargetAt(frames, pressed),
+    // つかんだノードの今の親 (複製も複製元と同じ親にある)。ラベルや何もない場所は押した点の下
+    baseTarget:
+      grab.kind === "node" ? coordinateFrameId(state.doc, grab.id) : dropTargetAt(frames, pressed),
     ownFrame: ownFrames.every((frame) => frame === ownFrames[0])
       ? (ownFrames[0] ?? null)
       : undefined,
@@ -604,13 +611,13 @@ function startMove(state: EditorStore, alt: boolean, pressed: Point, grab: Grab)
 
 /**
  * 移動の付け替え先 (§4.6)。undefined は親を変えない。
- * ノードをつかんだときは、ポインターの下の最も前面の frame (なければページ直下)。
- * ラベルや選択の中の何もない場所をつかんだときは、押した点の下と違う frame に入ったときだけ。
+ * ポインターの下の最も前面の frame (なければページ直下) が基準と違うときだけ付け替え、
+ * そのときは選択のすべてを同じドロップ先へ移す。基準は、ノードをつかんだときはつかんだノードの今の親、
+ * ラベルや選択の中の何もない場所をつかんだときは押した点の下の frame。
  */
 function moveDropTarget(drag: MoveDrag, pointer: Point): NodeId | null | undefined {
   const under = dropTargetAt(drag.frames, pointer);
-  if (drag.grab === "space" && under === drag.startTarget) return undefined;
-  return under;
+  return under === drag.baseTarget ? undefined : under;
 }
 
 /**
@@ -650,6 +657,14 @@ function updateDrag(drag: Drag, start: Press, event: CanvasPointerEvent, ctx: To
     case "move": {
       let raw = { x: event.page.x - start.page.x, y: event.page.y - start.page.y };
       if (event.shift) raw = constrainAxis(raw);
+      if (raw.x === 0 && raw.y === 0) {
+        // 押した位置へ戻したら、親も変えず文書を変えない (Alt の複製もしない)
+        state.updateGesture((base) => base);
+        if (!sameIds(store.getState().selection, drag.sourceIds))
+          store.getState().setSelection(drag.sourceIds);
+        setSelectOverlay({ guides: [] });
+        return;
+      }
       const axes = event.shift ? { x: raw.x !== 0, y: raw.y !== 0 } : { x: true, y: true };
       const target = moveDropTarget(drag, event.page);
       // 押した位置へ戻したら吸着もしない (文書を変えない)
@@ -801,7 +816,7 @@ function onPointerMove(event: CanvasPointerEvent, ctx: ToolContext): void {
     if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
     const drag = startDrag(phase.intent, phase.press, event, ctx);
     if (!drag) {
-      phase = { kind: "inert" };
+      phase = { kind: "inert", press: phase.press };
       return;
     }
     phase = { kind: "drag", press: phase.press, drag };
@@ -810,7 +825,7 @@ function onPointerMove(event: CanvasPointerEvent, ctx: ToolContext): void {
   // Undo などで外からジェスチャーが閉じられたら、それ以上動かさない
   if (phase.drag.kind !== "marquee" && !ownGestureOpen(ctx.store)) {
     ownsGesture = false;
-    phase = { kind: "inert" };
+    phase = { kind: "inert", press: phase.press };
     resetSelectOverlay();
     return;
   }
@@ -855,9 +870,10 @@ function onCancel(ctx: ToolContext): void {
   if (current.kind === "drag" && current.drag.kind !== "marquee" && ownGestureOpen(store))
     store.getState().cancelGesture();
   ownsGesture = false;
-  // 押してから取り消したら、選択とスコープは押す前に戻す
-  if (current.kind === "pending" || current.kind === "drag") {
-    const { selection, scopeId } = current.press;
+  // 押してから取り消したら、選択とスコープは押す前に戻す (何もしなかった押下でも)
+  const press = current.kind === "idle" ? null : current.press;
+  if (press) {
+    const { selection, scopeId } = press;
     store.getState().setScope(scopeId);
     store.getState().setSelection(selection);
   }

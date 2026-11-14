@@ -143,6 +143,11 @@ describe("編集のショートカット", () => {
     for (const k of ["d", "a", "c", "v", "x"])
       expect(run({ key: k, metaKey: true, repeat: true })).toBe("edit.ignoreRepeat");
     expect(run({ key: "]", repeat: true })).toBe("edit.ignoreRepeat");
+    expect(run({ key: "]", metaKey: true, repeat: true })).toBe("edit.ignoreRepeat");
+    expect(run({ key: "[", metaKey: true, repeat: true })).toBe("edit.ignoreRepeat");
+    expect(run({ key: "G", metaKey: true, shiftKey: true, repeat: true })).toBe(
+      "edit.ignoreRepeat",
+    );
     expect(run({ key: "Backspace", repeat: true })).toBe("edit.ignoreRepeat");
     expect(s().revision).toBe(1);
     expect(run({ key: "Enter", repeat: true })).toBeNull();

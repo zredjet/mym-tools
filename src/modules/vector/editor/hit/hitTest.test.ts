@@ -124,6 +124,18 @@ describe("hitTestPath", () => {
     expect(hitTestPath(bare, "p1", { x: 50, y: 50 }, 1)).toBeNull();
   });
 
+  it("線のない塗りの図形には余裕を付けない (隣の小さな図形の分まで当たらない)", () => {
+    const a = createRect({ id: "a", x: 0, y: 0, width: 1, height: 1 });
+    const b = createRect({ id: "b", x: 1, y: 2, width: 1, height: 1 });
+    const d: CanvasDocument = {
+      pages: [{ id: "p1", name: "", children: ["a", "b"], guides: [] }],
+      nodes: { a, b },
+      assets: {},
+    };
+    expect(hitTestPath(d, "p1", { x: 0.5, y: 0.5 }, 1)).toEqual(["a"]);
+    expect(hitTestPath(d, "p1", { x: 0.5, y: -0.5 }, 1)).toBeNull();
+  });
+
   it("塗りのある図形は中と線の外側の半分が当たる。楕円は楕円の形", () => {
     const ellipse = createEllipse({ id: "e", x: 0, y: 0, width: 100, height: 50 });
     const d = single(ellipse);
@@ -211,6 +223,12 @@ describe("pickTarget", () => {
     expect(
       pickTarget(overlapped, path(170, 105, overlapped), "grp", { point: { x: 170, y: 105 } }),
     ).toEqual({ id: "r1", scopeId: null });
+    // ページ直下の frame の何もない場所は何もない場所 (スコープの group と重なる別の frame でも)
+    const outer = updateNode(doc, "f", { x: 100 }); // f はそのまま。道が [f] のときを確かめる
+    expect(pickTarget(outer, ["f"], "grp", { point: { x: 170, y: 105 } })).toEqual({
+      id: null,
+      scopeId: "grp",
+    });
     // point を渡さなければ、従来どおり道だけで決める
     expect(pickTarget(doc, path(170, 105), "grp")).toEqual({ id: null, scopeId: null });
   });

@@ -8,7 +8,7 @@
 import type { StoreApi } from "zustand";
 import { insertFragment } from "../../model/fragment";
 import { duplicateNodes } from "../../model/structure";
-import { getNode, getParentNode, isAncestorOf, topLevelIds } from "../../model/tree";
+import { getAncestors, getNode, getParentNode, topLevelIds } from "../../model/tree";
 import type { CanvasDocument, NodeId } from "../../model/types";
 import { geometryWithinLimits } from "../../panels/limits";
 import { editorClipboard, PASTE_OFFSET, type EditorClipboard } from "../../state/clipboard";
@@ -45,6 +45,8 @@ export function transformableIds(
 /**
  * 選択にノードを足す。祖先と子孫は同時に選ばないので、足すノードの祖先や子孫が選択にあれば
  * 外して入れ替える (§4.5)。足すノード同士は互いに祖先・子孫でないこと。
+ * 足すノードの祖先の集合を先に作るので、選択と足すノードが数千個でも
+ * (選択の数 + 足す数) × 深さ で済む。
  */
 export function addToSelection(
   doc: CanvasDocument,
@@ -53,9 +55,18 @@ export function addToSelection(
 ): NodeId[] {
   if (ids.length === 0) return [...selection];
   const adding = new Set(ids);
+  // 足すノードの祖先 (選択にあれば外す)
+  const ancestorsOfAdding = new Set<NodeId>();
+  for (const id of adding)
+    for (const ancestor of getAncestors(doc, id)) {
+      if (ancestorsOfAdding.has(ancestor.id)) break; // ここから上は登録済み
+      ancestorsOfAdding.add(ancestor.id);
+    }
   const related = (id: NodeId) =>
     adding.has(id) ||
-    ids.some((other) => isAncestorOf(doc, id, other) || isAncestorOf(doc, other, id));
+    ancestorsOfAdding.has(id) ||
+    // 足すノードの子孫 (選択にあれば外す)
+    getAncestors(doc, id).some((ancestor) => adding.has(ancestor.id));
   return [...selection.filter((id) => !related(id)), ...adding];
 }
 
