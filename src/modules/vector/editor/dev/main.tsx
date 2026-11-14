@@ -10,10 +10,15 @@ import { EditorHarness } from "./EditorHarness";
 import { editorStore } from "../state/store";
 import { setExportWriter } from "../export/writer";
 import { downloadWriter } from "./downloadWriter";
+import { setImportFileReader } from "../assets/reader";
+import { exposeImportHarness, harnessFileReader } from "./fileReader";
 
 exposeHarness();
 // 書き出しはブラウザのダウンロードで保存する (アプリでは切替 PR が保存ダイアログと `vector_write_file` につなぐ)
 setExportWriter(downloadWriter);
+// 画像と SVG の取込は <input type="file"> で読む (アプリでは切替 PR が plugin-dialog と vector_read_* につなぐ)
+setImportFileReader(harnessFileReader);
+exposeImportHarness();
 // 最初の描画より前に読み込む (キャンバスは開いたときに内容が収まるよう表示する)
 editorStore.getState().load(harnessDocument(initialDocument()));
 

@@ -1,6 +1,7 @@
 import { updateNodes } from "../../model/transform";
 import type { FrameNode } from "../../model/types";
 import { editorStore } from "../../state/store";
+import { rememberFrameSize } from "../../tools/create/frameSize";
 import { CheckboxField, Section } from "../fields/Section";
 import { commonValue, MIXED } from "../fields/values";
 import {
@@ -34,6 +35,8 @@ export function FrameSection({ frames }: { frames: readonly FrameNode[] }) {
         onChange={(event) => {
           const preset = getFramePreset(event.target.value);
           if (!preset) return;
+          // フレームツールのクリックで作る大きさとして覚える (§5.6)
+          rememberFrameSize(preset);
           editorStore
             .getState()
             .apply((doc) => updateNodes(doc, ids, { width: preset.width, height: preset.height }));
