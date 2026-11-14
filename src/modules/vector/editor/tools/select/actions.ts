@@ -19,9 +19,27 @@ import { moveDocument } from "./move";
 
 type Store = StoreApi<EditorStore>;
 
-/** 動かせる選択 (祖先も選ばれているものを除き、本人と祖先が表示中でロックされていないもの)。 */
-export function transformableIds(doc: CanvasDocument, selection: readonly NodeId[]): NodeId[] {
-  return topLevelIds(doc, selection).filter((id) => isInteractive(doc, id));
+const NONE: readonly NodeId[] = [];
+let lastTransformable: {
+  doc: CanvasDocument;
+  selection: readonly NodeId[];
+  ids: readonly NodeId[];
+} | null = null;
+
+/**
+ * 動かせる選択 (祖先も選ばれているものを除き、本人と祖先が表示中でロックされていないもの)。
+ * ホバーのたびに呼ぶので、文書と選択が同じなら前の結果を返す (返した配列は書き換えない)。
+ */
+export function transformableIds(
+  doc: CanvasDocument,
+  selection: readonly NodeId[],
+): readonly NodeId[] {
+  if (selection.length === 0) return NONE;
+  const last = lastTransformable;
+  if (last && last.doc === doc && last.selection === selection) return last.ids;
+  const ids = topLevelIds(doc, selection).filter((id) => isInteractive(doc, id));
+  lastTransformable = { doc, selection, ids };
+  return ids;
 }
 
 /** 矢印キー: 選択を動かす (1 px、Shift で 10 px)。動かせるものがなければ false。 */

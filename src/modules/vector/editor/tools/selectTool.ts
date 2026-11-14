@@ -92,7 +92,7 @@ interface MoveDrag {
   kind: "move";
   /** 動かす前の文書 (Alt で複製したときは複製した後) */
   doc: CanvasDocument;
-  ids: NodeId[];
+  ids: readonly NodeId[];
   /** Alt で複製したノード。最初の更新で選択し直す */
   duplicated: boolean;
   start: Rect;
@@ -108,7 +108,7 @@ interface MoveDrag {
 interface ResizeDrag {
   kind: "resize";
   handle: ResizeHandle;
-  ids: NodeId[];
+  ids: readonly NodeId[];
   start: Rect;
   offset: Point;
   /** 画像 (と埋め込み SVG) だけなら、既定で縦横比を固定する */
@@ -191,7 +191,7 @@ function isSingleLine(doc: CanvasDocument, ids: readonly NodeId[]): boolean {
 }
 
 /** ハンドルを出す選択か (選択ツールのとき、本文の編集中でないとき)。 */
-function handleTargets(state: EditorStore): NodeId[] {
+function handleTargets(state: EditorStore): readonly NodeId[] {
   const ids = transformableIds(state.doc, state.selection);
   if (state.editingTextId !== null && ids.includes(state.editingTextId)) return [];
   return ids;
