@@ -19,8 +19,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 5. `docs/module-contract.md` — モジュールがコアと結ぶ契約 (= モジュール/コア境界)
 6. `docs/ui-design.md` — UI の正典: トークン、画面スケルトン (§6 に C 系と各モジュール画面)、キーボードショートカット、空状態
 7. `docs/developer-tools-plan.md` — 開発ツールモジュールの範囲、段階、品質条件
-8. `docs/release-process.md` / `docs/vector-editor-verification.md` / `docs/diagram-editor-verification.md` — リリース手順、ベクター描画・ダイアグラムの検証・実機受入
-9. `docs/MyMyTools Prototype.bundle.html` — 見た目の参考 (Claude Design 出力)。**技術判断のソースにはしない**
+8. `docs/canvas-editor-design.md` — キャンバス (`vector` の自作エディタ) の保存形式、内部の境界、画面、実装の分担 (ADR-0026)。切替 PR までは SVG-Edit が動く
+9. `docs/release-process.md` / `docs/vector-editor-verification.md` / `docs/diagram-editor-verification.md` — リリース手順、ベクター描画・ダイアグラムの検証・実機受入
+10. `docs/MyMyTools Prototype.bundle.html` — 見た目の参考 (Claude Design 出力)。**技術判断のソースにはしない**
 
 プロトタイプ HTML はブラウザで開けば想定の見た目が確認できるが、技術的な決定の根拠は ADR を見ること。
 
@@ -53,6 +54,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 0023 | PNG最適化 (`pngopt`) は shotq のライブラリ部分を `src-tauri/crates/shotq/` に複製してプロセス内で実行する (shotq は private のため git 依存にしない)。rayon は複製した shotq の内部に限り ADR-0009 R-2 の例外とし、処理は同時に 1 つ。取消しは読込中・最適化の後・置換の直前・ファイルの間。出力は CLI と同じ規則で、契約テストで CLI とのバイト一致を確かめる |
 | 0024 | テキストファイルの文字コード判定・変換 (`encoding`、`csvview` の読込) は Rust の `encoding_rs` で行い、共通処理は `modules/text_encoding.rs`。path だけを渡す。`_without_replacement` 系だけを使い、読めないバイト・表せない文字があれば保存せず位置を返す (¥ / ‾ / − と外字は警告)。同じ文字コード同士はバイトのまま改行・BOM だけ変える。別名保存のみ、64 MiB 上限 |
 | 0025 | フォルダ容量 (`dirsize`) は読み取り専用・ローカル限定。Rust の単一スレッドで再帰的に走査し、リンク・ジャンクションと別のボリュームに入らない。UNC は `modules/network_path.rs` で触る前に拒否し、パス中のリンクは `read_link` で行き先を確かめながら解決する。Windows は `GetDriveTypeW`、macOS は `statfs` の `MNT_LOCAL` でネットワーク上のボリュームを拒否する。「サイズ」と「ディスク上」を集計し、読めないフォルダは昇格せず報告する。結果は基準ごとの上位 10,000 件の和集合と「ほか」にまとめ、フォルダ 1,000,000 件で止める |
+| 0026 | ベクター描画を自作のキャンバスエディタに置き換える (SVG-Edit 同梱を廃止、表示名「キャンバス」)。モジュール ID は `vector` のまま payload v2 `{ pages, nodes, assets, text }` にし、v1 の SVG は編集できない埋め込み SVG として包む。描画は SVG 要素で、モデルと描画層を分ける。実行時の依存を増やさない。**切替 PR までは ADR-0021 の実装が動き**、新しいコードは画面にもストレージにもつながない |
 
 ## 絶対に破ってはいけない不変条件
 
@@ -107,6 +109,7 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - `docs/decisions/` の ADR は**追記専用**。受理済 ADR は書き換えず、覆すなら新 ADR で supersede する。軽微な誤字訂正は可、ただし決定そのものは原文を残す。新 ADR を足したらこのファイルの ADR 一覧にも 1 行追加する
 - `docs/ui-design.md` には末尾に改訂履歴テーブルがある。非自明な変更を入れたら 1 行追加し、冒頭の「v1.X の主な変更」プレリュードとヘッダのバージョン・最終更新日を同期させる
 - `docs/MyMyTools Prototype.bundle.html` は 1.7MB の自己完結 HTML (Claude Design 出力)。オフライン参照のためにそのまま置いてある — 再生成・編集はしない
+- ベクター描画は移行中 (ADR-0026)。切替 PR までは `src/modules/vector/editor/` と Rust の新しいコードを `src/modules/registry.ts` / `VectorWorkspacePage.tsx` / `current_payload_version` につながない。`editor/` の契約のファイル (`model/types.ts`、`model/limits.*`、`model/fixtures/`、`state/types.ts`、`render/types.ts`、`tools/types.ts`、`tools/registry.ts`、`EditorRoot.tsx`) は担当の分かれた作業の前提なので、変えるときは `docs/canvas-editor-design.md` §4.1 も同じ変更で更新する
 - 同梱エンジン (Mermaid / draw.io / SVG-Edit / NRBF sidecar) のバージョンは完全固定。更新時は対応 ADR が列挙するもの (submodule commit、定数、資産契約テスト、ライセンス表記、About 表示、実測サイズ) を同じ変更で更新する
 - `src-tauri/src/storage/schema.rs::MIGRATIONS` を変更する PR は、PR 説明に以下を必ず書く (ADR-0011 §2.1 チェックリスト):
   - additive (新カラム+定数 DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) のみで構成されているか

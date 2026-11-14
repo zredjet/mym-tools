@@ -1,0 +1,392 @@
+# キャンバス (自作エディタ) の設計
+
+最終更新: 2026-11-14 / ステータス: Draft v0.1
+
+ADR-0026 の決定を実装するための設計。保存形式、エディタ内部の境界、画面、実装の分担を定める。
+
+## 1. 位置づけ
+
+- 対象はモジュール `vector`。表示名は「キャンバス」に変える (ID は変えない)
+- SVG-Edit 同梱 (ADR-0021) を、自作の Figma 風エディタに置き換える
+- **切替 PR がマージされるまで、`main` で動くのは SVG-Edit**。それまで `requirements.md` / `ui-design.md` / `data-model.md` / `module-contract.md` のベクター描画の記述は ADR-0021 のままにし、切替 PR で本書の内容へ書き換える (§7)
+- 切替までの新しいコードは `src/modules/vector/editor/` と `src-tauri/src/modules/vector/` の新規ファイルに置き、画面にもストレージにもつながない
+
+## 2. 範囲
+
+### 2.1 用途
+
+UI モックアップ・画面設計、アイコン・ロゴ、バナー・サムネイル。図解は `diagram` (draw.io) の役割で、ここでは扱わない。
+
+### 2.2 段階
+
+| 段階 | 内容 |
+|---|---|
+| 1 | モックアップとバナー。この段階で SVG-Edit から切り替える (§2.3) |
+| 2 | アイコン・ロゴ。ペンツール、パス編集、ブーリアン演算、編集できる形での SVG 取込 |
+| 3 | コンポーネントとインスタンス、色・文字のスタイル、ページ切替の画面 |
+| 4 | オートレイアウト、制約 |
+
+### 2.3 第 1 段階の機能
+
+- 無限キャンバス、ズーム、パン、ルーラー、ガイド線、グリッド
+- ノード: フレーム、グループ、矩形、楕円、線、テキスト、画像、埋め込み SVG (編集不可)
+- 表現: 単色とグラデーション (線形・円形) の塗り、単色の線、角丸、不透明度、ドロップシャドウ
+- 操作: 選択、範囲選択、移動、リサイズ、複製、削除、グループ化、重なり順、整列、等間隔、フレーム間の移動
+- 補助: 整数ピクセルへの丸め、スマートガイド (辺と中心)、ガイド線とグリッドへのスナップ、フレームのプリセット
+- パネル: レイヤー (名前変更、表示、ロック、並べ替え)、プロパティ
+- Undo / Redo、エディタ内のコピー・切り取り・貼り付け
+- 取込: PNG / JPEG / WebP、SVG ファイル (埋め込み SVG として置く)
+- 書き出し: SVG、PNG (1 倍・2 倍・3 倍)。対象はフレーム、選択範囲、ページ全体
+- 保存は明示操作 (保存ボタンと Cmd/Ctrl+S)。作品は一覧を挟まず直近のものを開く
+
+### 2.4 第 1 段階に入れないもの
+
+回転、画像のフィットと切り抜き、文中の一部だけの書式、複数の塗り、線の内側・外側揃えと破線、矢印、OS のクリップボードとの画像のやり取り、等間隔のスマートガイド、ページ切替の画面、表示設定の永続化。
+
+### 2.5 対象外
+
+Figma ファイルの読み書き、共同編集、プロトタイピング、プラグイン、任意の外部 SVG の完全な取込、PDF、Illustrator 形式、テキストのアウトライン化。
+
+## 3. 保存形式 (payload v2)
+
+型は `src/modules/vector/editor/model/types.ts`、上限は `model/limits.json`、検証の合否と変換結果の例は `model/fixtures/payload-v2.json` にある。Rust と TypeScript は同じ 2 つの JSON を読む。
+
+### 3.1 全体
+
+```jsonc
+{
+  "pages":  [ { "id": "...", "name": "...", "children": ["..."], "guides": [] } ],
+  "nodes":  { "<id>": { "id": "<id>", "type": "rect", ... } },
+  "assets": { "<id>": { "kind": "image", ... } },
+  "text":   "検索用テキスト"
+}
+```
+
+- `nodes` は ID から引く平たい表。木の形は `pages[].children` と frame / group の `children` が決める
+- 重なり順は `children` の配列の順で、先頭が最背面
+- すべてのフィールドは必須。未知のフィールドは拒否する。形式を変えるときは payload のバージョンを上げる (ADR-0006)
+- エディタのメモリ上のモデルも同じ形を使い、変換層を持たない
+
+### 3.2 座標
+
+- 単位は px。小数を持てるが、エディタの操作は位置と大きさを整数に丸める
+- ページ直下のノードはページ座標。frame の子は frame の左上を原点とする
+- group は座標系を作らない。group の子は group の親の座標系で持ち、group の外接矩形は子から求める
+- 回転は持たない
+
+### 3.3 木の規則
+
+- どのノードも、ちょうど 1 つの親 (ページ、frame、group) の `children` に 1 回だけ現れる
+- `children` が指す ID は `nodes` に存在する。`nodes` のキーとノードの `id` は一致する
+- group の `children` は 1 個以上。frame は 0 個でもよい
+- 深さは `maxDepth` 以下 (ページ直下を 1 とする)
+- ノード、ページ、アセットの ID は別々の名前空間で、書式はどれも `idPattern`
+
+### 3.4 アセット
+
+- `image`: PNG / JPEG / WebP の base64。`mime` と中身の先頭バイトが一致すること。PNG は 1 辺と総画素数の上限を確かめる
+- `svg`: 既存の SVG ポリシー (`scripts/svgedit/policy.json`、`validate_svg`) を通った SVG と、そこから抽出した `text`
+- アセットはノードから参照されているものだけを持つ。エディタは保存の前に参照されていないアセットを落とす
+- 同じ画像を 2 回置いたら、アセットは 1 つを共有する (挿入時に中身を比べる)
+- 全アセットの合計 (image の `data` の長さ + svg の UTF-8 の長さ) は `payloadBytes` 以下
+
+### 3.5 ノードの規則
+
+`types.ts` の型に加えて次を確かめる。数値は有限の JSON number に限る。
+
+| 対象 | 規則 |
+|---|---|
+| `name` | `maxNameLength` 文字以下。空でもよい |
+| `opacity` (ノード、塗り、線、影、停止点) | 0 以上 1 以下 |
+| `x` `y` `x1` `y1` `x2` `y2`、ガイド線の `position` | 絶対値が `maxCoordinate` 以下 |
+| `width` `height` | 0 以上 `maxSize` 以下 |
+| `radius` | 0 以上 `maxRadius` 以下 |
+| 色 | `colorPattern` |
+| 線の `width` | 0 より大きく `maxStrokeWidth` 以下。線なしは `stroke: null` |
+| 影 | `x` `y` は絶対値が `maxShadowOffset` 以下、`blur` は 0 以上 `maxShadowBlur` 以下 |
+| グラデーション | 停止点は `minGradientStops`〜`maxGradientStops` 個、`offset` は 0〜1 で昇順 (同値可)。`from` `to` `center` の各成分は絶対値 100 以下、`radius` は 0 より大きく 100 以下 |
+| テキスト | `text` は `maxTextLength` 文字以下。`fontFamily` は 1〜`maxFontFamilyLength` 文字で制御文字を含まない。`fontSize` は `minFontSize`〜`maxFontSize`。`fontWeight` は 100〜900 の 100 刻み。`lineHeight` は null か、0 より大きく `maxLineHeight` 以下。`letterSpacing` は絶対値が `maxLetterSpacing` 以下 |
+| image / svg ノード | `assetId` が同じ種類のアセットを指す |
+| ページ | 1〜`maxPages` 個、ID は重複しない。ガイド線は `maxGuidesPerPage` 本以下 |
+| 全体 | ノードは `maxNodes` 個以下 |
+
+文字数は Unicode のコードポイント数で数える。
+
+### 3.6 検索用テキスト
+
+文書から次の規則で求め、`text` に入れる。Rust は保存と JSON 取込のたびに求め直し、一致しなければ拒否する (v1 と同じ考え方)。
+
+1. ページを配列の順にたどり、各ページの `children` を配列の順に深さ優先でたどる
+2. frame は `name`、text は `text`、svg はアセットの `text` を拾う。group は拾わずに子へ進む。ほかのノードは拾わない。`visible` が false でも拾う
+3. 拾った文字列ごとに、空白で区切って空の要素を捨て、半角スペース 1 個でつなぐ。空になったものは捨てる
+4. 残ったものを半角スペース 1 個でつなぐ
+
+空白は Unicode の White_Space (Rust の `char::is_whitespace` と同じ集合: U+0009〜U+000D、U+0020、U+0085、U+00A0、U+1680、U+2000〜U+200A、U+2028、U+2029、U+202F、U+205F、U+3000)。JavaScript の `\s` は U+FEFF を含み集合が違うので使わない。
+
+`text` は UTF-8 で `textBytes` 以下。超える文書は保存しない。
+
+### 3.7 v1 から v2 へ
+
+`upgrade_payload(1, { svg, text })` は、v1 の SVG を埋め込み SVG 1 個の文書にする。結果は入力だけで決まる。
+
+- ページは 1 つ (`id: "page1"`、`name: "ページ 1"`、ガイド線なし)
+- ノードは 1 つ (`id: "legacy"`、`type: "svg"`、`name: "SVG"`、位置 0,0、表示・ロックなし・不透明度 1)
+- アセットは 1 つ (`id: "legacy"`、`svg` と `text` は v1 のまま)
+- 大きさは、ルートの `width` / `height` 属性 (数値、`px` 付きも可) が両方とも正ならその値。なければ `viewBox` の幅と高さ。それもなければ 640 × 480。1 以上 `maxSize` 以下に収める
+- `text` は v1 の `text`
+
+この書き換えは戻せない (ADR-0006 の通常の挙動)。`data_revision` は増やさない。
+
+## 4. エディタの構造
+
+### 4.1 ディレクトリと担当
+
+`src/modules/vector/editor/` の下。契約の PR で型と仮置きのファイルを置いてあり、各セッションは自分の担当のファイルだけを作り、置き換える。
+
+| 場所 | 中身 | 担当 |
+|---|---|---|
+| `model/types.ts` `model/limits.*` `model/fixtures/` | 保存形式の型、上限、契約データ | 契約 (変更しない) |
+| `state/types.ts` `render/types.ts` `tools/types.ts` `tools/registry.ts` `EditorRoot.tsx` | 状態・描画・ツールの契約、配置 | 契約 (変更しない) |
+| `model/` のそのほか | 文書の操作、幾何、整列、検索用テキスト、検証 | モデル基盤 |
+| `state/` のそのほか | store、履歴、エディタ内クリップボード | モデル基盤 |
+| `render/` のそのほか | ノードから `SvgEl` への変換、React と文字列への出力 | 描画とビューポート |
+| `canvas/` `toolbar/` `tools/handTool.ts` `dev/` | キャンバス、ルーラー、グリッド、ツールバー、開発用の画面 | 描画とビューポート |
+| `panels/LayersPanel.tsx` `panels/PropertiesPanel.tsx` `panels/sections/` (下の 2 つを除く) | パネル | パネル |
+| `tools/selectTool.ts` `tools/select/` `hit/` `snap/` | 選択、変形、ヒットテスト、スナップ、ガイド線 | 選択と変形 |
+| `tools/{frame,rect,ellipse,line,image}Tool.ts` `assets/` | 作成ツール、画像と SVG の取込、プリセット | 作成ツールと画像 |
+| `text/` `tools/textTool.ts` `panels/sections/TextSection.tsx` | 行分割、計測、フォント、本文の編集 | テキスト |
+| `export/` `panels/sections/ExportSection.tsx` | SVG / PNG の書き出し | 書き出し |
+
+契約のファイルを変えたいときは変えずに報告する。足りないフィールドを足すのは、ほかのセッションの前提を壊さない追加に限る。
+
+### 4.2 状態
+
+- `state/store.ts` が Zustand の vanilla store を 1 つ作り、`editorStore` と `useEditorStore(selector)` を公開する。契約は `state/types.ts` の `EditorStore`
+- これはエディタの中だけの状態で、アプリ全体の状態 (`useAppStore`) には入れない。React の Context も使わない
+- 文書の変更は「文書を受け取り、変更後の文書を返す純関数」(`DocRecipe`) で行い、`apply` か `beginGesture` / `updateGesture` / `commitGesture` を通す。変わらないノードは同じオブジェクトを使い回す
+- 履歴は文書と選択の組のスナップショットで、上限 100 件。大きな画像の文字列はアセットのオブジェクトごと共有されるので複製されない
+- `revision` は文書が変わるたびに増える。呼び出し側は保存した時点の `revision` と比べて未保存かどうかを判定する
+- コンポーネントは必要な部分だけを selector で購読し、ノード 1 個の変更で全体を描き直さない
+
+### 4.3 描画
+
+- ノードはまず `SvgEl` (SVG 要素の素朴な木) にする (`render/types.ts` の `BuildNodeSvg`)。画面はそれを React 要素にし、SVG 書き出しは同じ木を文字列にする。描画の規則を 2 か所に書かない
+- グラデーション、影 (`feDropShadow`)、切り抜き (`clipPath`) の定義は、使うノードのすぐ隣の `<defs>` に置き、ID は `idPrefix` + ノード ID から作る
+- image は `<image>` に data URL で、`preserveAspectRatio="none"`。svg アセットも `<image>` に `data:image/svg+xml;base64,` で置く (文書から隔離され、スクリプトは動かず、ID も衝突しない)
+- data URL の組み立ては重いので、アセットのオブジェクトをキーにして結果を使い回す
+- テキストは `text/layout.ts` の `layoutText` が返す行を `<tspan>` に置く。`foreignObject` は使わない
+- 選択枠、ハンドル、ガイド、作成中の枠は、文書の SVG とは別の重ね描き用の SVG に描き、太さは倍率に関係なく一定にする
+- 画面外のページ直下のノードは描かない
+- 性能の目安は数千ノード。超えて重くなったら Canvas のレンダラを足す。そのために、モデル・状態・ツール・ヒットテストは DOM に依存させない
+
+### 4.4 ツール
+
+- `canvas/CanvasView.tsx` が DOM のイベントを `CanvasPointerEvent` / `CanvasKeyEvent` に直し、`tools/registry.ts` の現在のツールへ渡す。ポインターは `setPointerCapture` で追う (HTML5 のドラッグ&ドロップは使わない)
+- ツールは store だけを通して文書を変える。ドラッグは `beginGesture` で始め、Esc とフォーカス喪失で `cancelGesture` する
+- 作成ツールは 1 回作ったら選択ツールへ戻る
+- Space を押している間と中ボタンのドラッグは、どのツールでも手のひらになる
+
+### 4.5 ヒットテストと選択
+
+ヒットテストは文書の幾何から求める純関数にする (`hit/`)。DOM の `elementFromPoint` には頼らない。
+
+- 前面から順に調べる。`visible` が false か `locked` が true のノードと、その子孫は当たらない
+- 塗りのない図形は線の上だけが当たる。線は太さに 4 画面 px の余裕を足す
+- ページ直下の frame は、名前のラベルを押したときだけ frame 自身が選ばれる。中の何もない場所を押すと選択を解除し、ドラッグは範囲選択になる
+- ページ直下の frame の子は直接選べる。group と入れ子の frame は、まず全体が選ばれ、ダブルクリックで中に入る (`scopeId`)。Esc で 1 段外へ出る
+- Cmd/Ctrl を押しながらのクリックは、いちばん深いノードを選ぶ
+- Shift を押しながらのクリックは選択に足し、選択済みなら外す
+- 範囲選択は、スコープの中で外接矩形が重なるノードを選ぶ。ページ直下の frame は全体が囲まれたときだけ選ぶ
+
+### 4.6 変形とスナップ
+
+- 移動とリサイズの結果は整数に丸める
+- 移動: Shift で水平・垂直に固定、Alt で複製。矢印キーは 1 px、Shift と一緒なら 10 px
+- リサイズ: 8 個のハンドル。Shift で縦横比を固定、Alt で中心から。画像は既定で縦横比を固定し、Shift で解除する
+- 複数選択と group のリサイズは、子孫の位置と大きさを比例させる。テキストはフォントサイズを変えずに枠だけ変える。角丸と線の太さは変えない
+- frame のリサイズは子を動かさない
+- テキストは、横に引くと `auto-height`、縦にも引くと `fixed` になる
+- ドロップした位置が別の frame の上なら、その frame の子にする。見た目の位置は変えない
+- スナップの候補は、同じ親の兄弟と親 frame の辺・中心、ガイド線、グリッド (`snapToGrid` のとき)。6 画面 px 以内でいちばん近いものに吸着し、そろった線を重ね描きする。Cmd/Ctrl を押している間は吸着しない
+- ガイド線はルーラーから引き出して作り、ルーラーへ戻すと消える
+
+### 4.7 テキスト
+
+- 行分割は `text/layout.ts` の `layoutText` が行う。`\n` で改行し、`auto-height` と `fixed` は幅で折り返す。和文は文字の間で、欧文は単語の間で折り返し、行頭に来てはいけない句読点と閉じ括弧は前の行に残す
+- 幅は `TextMeasurer` で測る。ブラウザでは canvas の `measureText`、テストでは固定幅の代用品を渡す
+- 本文の編集は、テキストの位置に `<textarea>` を重ねて行う (`text/TextEditOverlay.tsx`)。日本語入力の変換中の Enter と Esc は変換の操作として扱い、編集を終えない
+- 編集の開始はダブルクリックか Enter、終了は Esc か外側のクリック。空のまま終えたらノードを消す
+- テキストツールは、クリックで `auto-width`、ドラッグで幅を決めた `auto-height` を作る
+- フォントは同梱しない。候補 (§5.9) のうち、その PC にあるものを一覧に出し、ほかは名前を直接入力する。あるかどうかは、そのフォントを先頭に置いたときと総称フォントだけのときの幅を比べて判定する (`document.fonts.check` はシステムフォントの有無を返さないので使わない)
+- 文書のフォントがその PC になければ、プロパティに注意を出し、総称フォントで描く
+- `auto-width` / `auto-height` の大きさは開いたときに求め直す。求め直しただけでは `revision` を増やさない
+
+### 4.8 画像と SVG の取込
+
+- ファイル選択 (`plugin-dialog`) と OS からのドロップで受け取り、path を既存の `vector_read_image` / `vector_read_file` に渡す。検証は Rust が行う
+- 置く位置は、表示範囲の中央か、ドロップした位置。大きすぎる画像は表示範囲に収まる大きさに縮める (アセットは元のまま)
+- SVG ファイルは埋め込み SVG として置く。draw.io の SVG の変換と `notices` の表示は今のまま使う
+
+### 4.9 書き出し
+
+- 対象は、選択中の frame やノード、選択がなければページ全体。frame が複数なら 1 つずつファイルにする
+- SVG は `SvgEl` を文字列にしたもの。PNG は、その SVG を画像として読み込んで canvas に描く (`src/modules/mermaid/mermaidExporter.ts` と同じ経路)
+- PNG の上限は今と同じ (20 MiB、1 辺 16,384 px、16,777,216 画素)。倍率は 1・2・3
+- ファイルへの書き込みは注入された関数を通す。切替 PR で `vector_write_file` につなぐ
+- 書き出す SVG は自分で作った出力なので、取込用の SVG ポリシーでは検証しない (埋め込み SVG を `data:image/svg+xml` で持つため)。UTF-8 と大きさだけを確かめる。この変更は切替 PR で入れる
+- 埋め込み SVG を含む文書の PNG 書き出しが WKWebView と WebView2 で正しく出るかは、実アプリで確かめる
+
+## 5. 画面
+
+### 5.1 配置
+
+```
+┌ 作品バー: [作品 ▼] [新規] [取込] タイトル タグ ……… 未保存 [書き出し] [保存 ⌘S] ┐
+├──────────┬──────────────────────────────────┬──────────────┤
+│ レイヤー │ ルーラー                          │ プロパティ   │
+│          │ キャンバス                        │              │
+│          │        ( ツールバー: 下中央 )     │              │
+└──────────┴──────────────────────────────────┴──────────────┘
+```
+
+- 作品バーは今の `VectorWorkspacePage` のものを引き継ぐ (作品の切替、新規、取込、タイトル、タグ、未保存の表示、保存、削除)。ボタンは「アイコン＋短い名称」(`ui-design.md` v1.15)
+- レイヤーパネルは幅 220 px、プロパティパネルは幅 240 px。レイヤーパネルは Alt/Option+1 で開閉する
+- ツールバーはキャンバスの下中央に浮かせる。並びは 選択、フレーム、矩形、楕円、線、テキスト、画像、手のひら、倍率
+- 色とトークンは `ui-design.md` §2 に従う。キャンバスの地は `--bg` より一段暗い面にする
+
+### 5.2 レイヤーパネル
+
+- 前面のノードを上に並べる。frame と group は開閉できる
+- 行: 種別のアイコン、名前、表示の切替、ロックの切替。ダブルクリックで名前を変える
+- 並べ替えと親の付け替えは `@dnd-kit` のポインター操作で行う
+- 行のクリックは選択 (Shift / Cmd で複数)。キャンバスの選択と同期する
+
+### 5.3 プロパティパネル
+
+選択に応じて節を出す。複数選択で値が違う欄は「混在」と表示する。
+
+| 節 | 対象 | 欄 |
+|---|---|---|
+| 整列 | 2 個以上、または frame の中の 1 個 | 左・中央・右・上・中央・下、横と縦の等間隔 |
+| 位置と大きさ | すべて | X、Y、W、H (線は始点と終点) |
+| 見た目 | すべて | 不透明度、角丸 (frame・矩形・画像) |
+| 塗り | frame、矩形、楕円、テキスト | なし / 単色 / 線形 / 円形、色、不透明度、停止点、向き |
+| 線 | frame、矩形、楕円、線 | 色、不透明度、太さ |
+| 影 | frame、矩形、楕円、テキスト、画像 | X、Y、ぼかし、色、不透明度 |
+| 文字 | テキスト | フォント、サイズ、太さ、斜体、行の高さ、字間、揃え、大きさの決め方 |
+| フレーム | frame | プリセット、はみ出しを切り抜く |
+| 書き出し | すべて (選択なしはページ) | 形式、倍率、書き出し |
+
+何も選んでいないときは、ページの設定 (ルーラー、グリッド、グリッドの間隔、グリッドへのスナップ) を出す。
+
+### 5.4 ショートカット
+
+グローバルの割当 (`ui-design.md` §8.1) と重ならないようにする。Cmd/Ctrl+1〜6 はモジュール切替、Cmd/Ctrl+\ と Cmd/Ctrl+B はサイドバーなので使わない。入力欄にフォーカスがある間は、文字キーのショートカットを効かせない。
+
+| キー | 動作 |
+|---|---|
+| `V` `F` `R` `O` `L` `T` `H` | 選択、フレーム、矩形、楕円、線、テキスト、手のひら |
+| `Space` を押している間 | 手のひら |
+| ホイール / `Shift` + ホイール | 縦 / 横にスクロール |
+| `Cmd/Ctrl` + ホイール、ピンチ | ポインターの位置を中心にズーム |
+| `Cmd/Ctrl` + `+` / `-` | ズームイン / ズームアウト |
+| `Shift+0` / `Shift+1` / `Shift+2` | 100% / 全体を表示 / 選択範囲を表示 |
+| `Cmd/Ctrl+Z` / `Shift+Cmd/Ctrl+Z` | Undo / Redo |
+| `Cmd/Ctrl+C` / `X` / `V` / `D` | コピー / 切り取り / 貼り付け / 複製 |
+| `Cmd/Ctrl+A` | スコープの中をすべて選択 |
+| `Delete` / `Backspace` | 削除 |
+| 矢印 / `Shift` + 矢印 | 1 px / 10 px 移動 |
+| `Cmd/Ctrl+G` / `Shift+Cmd/Ctrl+G` | グループ化 / 解除 |
+| `Cmd/Ctrl+]` / `Cmd/Ctrl+[` | 1 つ前面へ / 1 つ背面へ |
+| `]` / `[` | 最前面へ / 最背面へ |
+| `Enter` | テキストなら本文の編集、frame / group なら中に入る |
+| `Esc` | 操作の取消 → 本文の編集の終了 → スコープを 1 段外へ → 選択の解除 |
+| `Shift+R` | ルーラーの表示を切り替える |
+| `Cmd/Ctrl+'` | グリッドの表示を切り替える |
+| `Alt/Option+1` | レイヤーパネルを開閉する |
+| `Cmd/Ctrl+S` / `Cmd/Ctrl+N` | 保存 / 新規 (今と同じ) |
+
+### 5.5 グリッド
+
+- 表示を入にすると、`gridSize` の間隔の線を描く。線の間隔が 4 画面 px を下回る倍率では描かない
+- 倍率 800% 以上では、表示の入切に関係なく 1 px のグリッドを描く
+- ルーラー、グリッド、スナップ、レイヤーパネルの開閉は文書にも設定にも保存せず、画面を開くたびに既定 (`DEFAULT_VIEW_OPTIONS`) へ戻る
+
+### 5.6 フレームのプリセット
+
+| 分類 | 名前 | 大きさ |
+|---|---|---|
+| 端末 | iPhone | 393 × 852 |
+| 端末 | Android | 412 × 917 |
+| 端末 | タブレット | 820 × 1180 |
+| 端末 | デスクトップ | 1440 × 1024 |
+| バナー | OGP 画像 | 1200 × 630 |
+| バナー | YouTube サムネイル | 1280 × 720 |
+| バナー | X ヘッダー | 1500 × 500 |
+| バナー | 正方形 | 1080 × 1080 |
+| アイコン | 24 | 24 × 24 |
+| アイコン | 512 | 512 × 512 |
+| アイコン | 1024 | 1024 × 1024 |
+
+フレームツールでクリックだけしたときは、直前に使った大きさ (初回は iPhone) で作る。
+
+### 5.7 フォントの候補
+
+- 和文: Hiragino Sans、Hiragino Kaku Gothic ProN、Hiragino Mincho ProN、Hiragino Maru Gothic ProN、Yu Gothic、Yu Gothic UI、Yu Mincho、Meiryo、BIZ UDPGothic、BIZ UDGothic、BIZ UDMincho、MS Gothic、MS PGothic、MS Mincho
+- 欧文: Helvetica Neue、Arial、Segoe UI、Verdana、Georgia、Times New Roman、Menlo、Consolas、Courier New
+- 総称: sans-serif、serif、monospace、system-ui
+
+新しいテキストの既定は、macOS では Hiragino Sans、Windows では Yu Gothic UI、どちらもなければ sans-serif。サイズ 16、太さ 400。
+
+## 6. 実装の分担
+
+1 セッション = 1 worktree = `main` 宛ての PR 1 本。PR のマージは利用者が行う。
+
+| # | セッション | 作るもの | 前提 |
+|---|---|---|---|
+| 1 | Rust 側 | `src-tauri/src/modules/vector/` に v2 の検証と検索用テキスト (§3.3〜3.6)、v1 → v2 (§3.7)。`limits.json` と `payload-v2.json` を `include_str!` で読むテスト。`current_payload_version` と `validate_payload` は変えない | 契約 |
+| 2 | モデル基盤 | 文書の操作 (作成、削除、複製、並べ替え、親の付け替え、グループ化、整列、等間隔)、幾何、ID の生成 (`nanoid`)、検索用テキスト、TypeScript 側の検証、store、履歴、エディタ内クリップボード。契約データを使ったテスト | 契約 |
+| 3 | 描画とビューポート | `SvgEl` への変換と出力、キャンバス、ズーム・パン、ルーラー、グリッド、ツールバー、手のひら、ツールへのイベントの受け渡し、開発用の画面 (§6.2) | 2 |
+| 4 | パネル | レイヤーパネル、プロパティパネル (文字と書き出しの節を除く) | 2 |
+| 5 | 選択と変形 | ヒットテスト、選択、範囲選択、移動、リサイズ、スナップ、スマートガイド、ガイド線、選択に関するショートカット | 3 |
+| 6 | 作成ツールと画像 | フレーム・矩形・楕円・線・画像のツール、プリセット、画像と SVG の取込 | 5 |
+| 7 | テキスト | 行分割、計測、フォントの判定、本文の編集、テキストツール、文字の節 | 3 |
+| 8 | 書き出し | SVG / PNG の生成、書き出しの節 | 3 |
+| 9 | 切替 | §7 | 1〜8 |
+
+並行できる組は 1 と 2、3 と 4、5・7・8。
+
+### 6.1 どのセッションにも共通の規則
+
+- `main` から切った worktree で作業し、§4.1 の自分の担当だけを触る
+- 新しい実行時の依存 (npm、crate) を足さない。必要だと考えたら足さずに報告する
+- 新しいコードを画面 (`src/modules/registry.ts`、`VectorWorkspacePage.tsx`) とストレージ (`current_payload_version`) につながない
+- 切替までは、Rust の新しいコードがテストからしか呼ばれない。未使用の警告は、切替 PR で外すことをコメントに書いた `allow` で抑える
+- テストは純関数を中心に書く。DOM を使うものは既存の vitest (jsdom) で書く
+- PR の前に `npm run typecheck`、`npm run lint`、`npx vitest run --dir src`、Rust を触ったら `cargo fmt --check`、`cargo clippy`、`cargo test` を通す
+- 報告には、作ったもの、確かめた方法、確かめられなかったこと、契約に対する要望を書く
+
+### 6.2 開発用の画面
+
+切替までは、アプリの画面からエディタを開けない。「描画とビューポート」のセッションが次を作り、以後のセッションと検証はこれを使う。
+
+- リポジトリ直下の `canvas-harness.html` と `src/modules/vector/editor/dev/` (入口と `EditorHarness.tsx`)
+- `npm run dev` のあと `http://localhost:1420/canvas-harness.html` で開く。Tauri の IPC は使わず、契約データの `full` を読み込んだエディタを表示する
+- `vite build` の入力には入れない (配布物に含めない)。切替 PR で消すかどうかを決める
+
+## 7. 切替 PR でやること
+
+- `VectorWorkspacePage.tsx` を `EditorRoot` と `editorStore` につなぐ (読み込み、保存、未保存の確認、作品の切替、新規、取込、書き出し、削除)
+- Rust の `current_payload_version` を 2 にし、`upgrade_payload` と `validate_payload` を v2 へつなぐ。未使用の `allow` を外す
+- `vector_write_file` の SVG の検証を §4.9 のとおりに変える
+- `src/modules/vector/index.ts` の表示名を「キャンバス」にし、検索結果の表示を確かめる
+- SVG-Edit 一式を消す: npm の `svgedit`、`prepare:vector`、`test:vector:*`、`predev` / `prebuild` の該当部分、`scripts/svgedit/` の adapter 群、`protocol.rs` と `vector_editor_url` (`registry.rs`、`build.rs`、`permissions/default.toml`)、`bridge.ts`、`third_party/svgedit-NOTICES.txt`、About と `THIRD_PARTY_NOTICES.md` の表記
+- SVG ポリシー (`policy.json`、`svg-policy.js`、`svg-policy.d.ts`、`validation-fixtures.json`) を `scripts/svgedit/` から移す
+- ドキュメント: ADR-0021 の Status を「Superseded by ADR-0026」にする。`requirements.md`、`ui-design.md` (§5.2、§6.23、§8、改訂履歴)、`data-model.md`、`module-contract.md`、`architecture.md`、`README.md`、`CLAUDE.md`、`docs/vector-editor-verification.md`、スクリーンショットを本書の内容へ書き換える
+- 受入: v1 の作品が開けて見た目が残り書き出せる、v1 の `vector` を含む古いエクスポートファイルを取り込める、アプリ / プロジェクト JSON とバックアップが v2 で往復する、portable ZIP が 80,000,000 bytes 以下
+
+## 8. 改訂履歴
+
+| 日付 | 版 | 内容 |
+|---|---|---|
+| 2026-11-14 | 0.1 | 初版。ADR-0026 の決定を受けて、保存形式、構造、画面、分担を定める |
