@@ -1,4 +1,4 @@
-import type { Tool } from "./types";
+import { createDragTool } from "./create/dragCreateTool";
 
-/** 線の作成。中身は「作成ツールと画像」のセッションで実装する。 */
-export const lineTool: Tool = { id: "line", cursor: "crosshair" };
+/** 線の作成 (§4.4)。動きは `create/dragCreateTool.ts` を参照。 */
+export const lineTool = createDragTool("line");

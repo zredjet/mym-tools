@@ -209,6 +209,9 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
         if (store.getState().gestureActive) store.getState().cancelGesture();
         return;
       }
+      // ポインターのドラッグの途中は、Esc のほかのキーをツールにもショートカットにも渡さない
+      // (作成のドラッグ中の Delete や矢印が、途中の文書を確定したり履歴を増やしたりしないように)
+      if (active.current) return;
       const tool = TOOLS[state.toolId];
       if (tool.onKeyDown?.(toCanvasKeyEvent(event), ctx)) {
         event.preventDefault();

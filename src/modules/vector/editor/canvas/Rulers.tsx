@@ -80,11 +80,12 @@ function useGuidePull(rulerAxis: "x" | "y") {
       const guide = beginNewGuide(editorStore, guideAxis);
       if (!guide) return;
       event.preventDefault();
-      // Esc はキャンバスより先に受けて取り消す (キャンバスが選択の解除などに使わないように)
+      // Esc はキャンバスより先に受けて取り消す (キャンバスが選択の解除などに使わないように)。
+      // 引き出しの間は、Esc のほかのキーもキャンバスのツールとショートカットへ渡さない (§4.4。
+      // キャンバスは defaultPrevented のキーを無視する)
       const onKeyDown = (keyEvent: KeyboardEvent) => {
-        if (keyEvent.key !== "Escape") return;
         keyEvent.preventDefault();
-        finish(true);
+        if (keyEvent.key === "Escape") finish(true);
       };
       const onBlur = () => finish(true);
       const onVisibility = () => {
