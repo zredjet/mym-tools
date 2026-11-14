@@ -7,6 +7,7 @@ import { sampleDocument } from "../model/testing";
 import { updateNode } from "../model/transform";
 import { getParent } from "../model/tree";
 import type { CanvasDocument } from "../model/types";
+import { overflowGroupDocument } from "../tools/create/testing";
 import { fitSize, placeAsset, visibleArea, visibleCenter, type PlaceAssetInput } from "./place";
 import { imageAsset, svgAsset } from "./testing";
 
@@ -125,6 +126,31 @@ describe("placeAsset", () => {
         asset: imageAsset(10, 10),
       }).parent,
     ).toEqual({ kind: "node", id: "grp" });
+  });
+
+  it("切り抜かない frame の外へはみ出した group のスコープにも置ける", () => {
+    const doc = overflowGroupDocument();
+    for (const parentRule of ["point", "contain"] as const) {
+      const result = placed(doc, {
+        pageId: "page1",
+        scopeId: "g",
+        parentRule,
+        center: { x: 175, y: 20 },
+        asset: imageAsset(10, 10),
+      });
+      expect(result.parent, parentRule).toEqual({ kind: "node", id: "g" });
+      // group は座標系を作らないので、F の座標系で中心が (175, 20)
+      expect(result.node).toMatchObject({ x: 170, y: 15, width: 10, height: 10 });
+    }
+    // 切り抜く frame なら、見えない所には入れない
+    const clipped = placed(overflowGroupDocument(true), {
+      pageId: "page1",
+      scopeId: "g",
+      parentRule: "point",
+      center: { x: 175, y: 20 },
+      asset: imageAsset(10, 10),
+    });
+    expect(clipped.parent).toEqual({ kind: "page", id: "page1" });
   });
 
   it("同じ中身のアセットは使い回す", () => {

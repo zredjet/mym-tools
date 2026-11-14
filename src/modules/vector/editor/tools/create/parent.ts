@@ -10,9 +10,10 @@
  * frame の中かどうかは、祖先の frame が切り抜く分を除いた見えている範囲で決める。
  */
 import { isInteractive, isTopLevelFrame } from "../../hit/hitTest";
-import { dropFrames, dropTargetAt, type DropFrame } from "../../hit/marquee";
+import { dropFrames, dropTargetAt, intersectRects, type DropFrame } from "../../hit/marquee";
 import { getPageBounds, rectContains, rectContainsPoint, type Rect } from "../../model/geometry";
 import {
+  getAncestors,
   getCoordinateFrame,
   getNode,
   getPageOf,
@@ -49,11 +50,27 @@ function scopeContains(
   if (scope.type !== "group") return false;
   const bounds = getPageBounds(doc, scopeId);
   if (!bounds || !inside(bounds)) return false;
-  // group の座標系の frame が切り抜いて見えない所は、スコープの外とする
-  const frame = getCoordinateFrame(doc, scopeId);
-  if (!frame) return true;
-  const visible = frames.find((item) => item.id === frame.id);
-  return visible !== undefined && inside(visible.rect);
+  // 祖先の切り抜く frame (`clip: true`) が切り抜いて見えない所は、スコープの外とする。
+  // 切り抜かない frame の矩形では弾かない (group がその外へはみ出していても、はみ出した所はスコープの中)
+  const clip = clipRegion(doc, scopeId);
+  return clip === undefined || (clip !== null && inside(clip));
+}
+
+/**
+ * ノードを切り抜く範囲 (ページ座標)。祖先の切り抜く frame の矩形をすべて掛け合わせたもの。
+ * 切り抜く祖先がなければ undefined、掛け合わせて空なら null。
+ */
+function clipRegion(doc: CanvasDocument, id: NodeId): Rect | null | undefined {
+  let region: Rect | undefined;
+  for (const ancestor of getAncestors(doc, id)) {
+    if (ancestor.type !== "frame" || !ancestor.clip) continue;
+    const rect = getPageBounds(doc, ancestor.id);
+    if (!rect) return null;
+    const next = region ? intersectRects(region, rect) : rect;
+    if (!next) return null;
+    region = next;
+  }
+  return region;
 }
 
 /** 押した点 (ページ座標) に作るノードの親。 */

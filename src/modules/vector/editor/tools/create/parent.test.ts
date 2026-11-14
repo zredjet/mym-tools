@@ -3,6 +3,7 @@ import { createFrame } from "../../model/create";
 import { insertNode } from "../../model/structure";
 import { sampleDocument } from "../../model/testing";
 import { updateNode } from "../../model/transform";
+import { overflowGroupDocument } from "./testing";
 import { containingParent, creationParent, parentCoordinateFrame, scopeForParent } from "./parent";
 
 // sampleDocument: ページ直下の frame `f` (100,50 400×300) の中に r1、group `grp` (r2, l1)、
@@ -80,5 +81,41 @@ describe("scopeForParent / parentCoordinateFrame", () => {
     expect(parentCoordinateFrame(doc, page)).toBeNull();
     expect(parentCoordinateFrame(doc, node("f2"))).toBe("f2");
     expect(parentCoordinateFrame(doc, node("grp"))).toBe("f");
+  });
+});
+
+describe("切り抜かない frame の外へはみ出した group のスコープ", () => {
+  it("はみ出した所もスコープの中 (切り抜かない frame の矩形では弾かない)", () => {
+    const doc = overflowGroupDocument();
+    expect(creationParent(doc, "page1", "g", { x: 175, y: 20 })).toEqual(node("g"));
+    expect(containingParent(doc, "page1", "g", { x: 170, y: 15, width: 10, height: 10 })).toEqual(
+      node("g"),
+    );
+  });
+
+  it("切り抜く frame なら、見えない所はスコープの外", () => {
+    const doc = overflowGroupDocument(true);
+    expect(creationParent(doc, "page1", "g", { x: 175, y: 20 })).toEqual({
+      kind: "page",
+      id: "page1",
+    });
+    expect(containingParent(doc, "page1", "g", { x: 170, y: 15, width: 10, height: 10 })).toEqual({
+      kind: "page",
+      id: "page1",
+    });
+  });
+
+  it("入れ子なら、切り抜く祖先をすべて見る", () => {
+    // 外側の切り抜く frame A が 300 まで: 見えている
+    expect(
+      creationParent(overflowGroupDocument(false, 300), "page1", "g", { x: 175, y: 20 }),
+    ).toEqual(node("g"));
+    // A が 160 まで: x = 175 は A に切り抜かれて見えない
+    const narrow = overflowGroupDocument(false, 160);
+    expect(creationParent(narrow, "page1", "g", { x: 175, y: 20 })).toEqual({
+      kind: "page",
+      id: "page1",
+    });
+    expect(creationParent(narrow, "page1", "g", { x: 155, y: 20 })).toEqual(node("g"));
   });
 });
