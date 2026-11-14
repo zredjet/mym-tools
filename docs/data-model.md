@@ -1,6 +1,6 @@
 # データモデル (Data Model)
 
-最終更新: 2026-11-10 / ステータス: Draft (Phase 1)
+最終更新: 2026-11-15 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**データをどう持つか**」を定義する。
 要件 (`requirements.md`) と構造 (`architecture.md`) で確定した方針を、
@@ -772,6 +772,29 @@ project 削除実行時、StorageService は**削除トランザクションの�
 
 **search_text 生成**: `title + " " + tags + " " + text`
 
+### 10.9 M-Canvas (`id = vector`、ADR-0026)
+
+```jsonc
+// items.payload (version 2)
+{
+  "pages":  [ { "id": "page1", "name": "ページ 1", "children": ["frame1"], "guides": [] } ],
+  "nodes":  { "frame1": { "id": "frame1", "type": "frame", "name": "ホーム画面", ... } },
+  "assets": { "img1": { "kind": "image", "mime": "image/png", "data": "<base64>", "width": 320, "height": 200 } },
+  "text":   "ホーム画面 見出し"
+}
+```
+
+- 形式の正典は [キャンバスの設計](canvas-editor-design.md) §3 (型は `src/modules/vector/editor/model/types.ts`、上限は `model/limits.json`、検証の合否と変換の例は `model/fixtures/payload-v2.json`)。Rust と TypeScript が同じ JSON を読む
+- `nodes` は ID から引く平たい表で、木の形は `pages[].children` と frame / group の `children` が決める。すべてのフィールドは必須で、未知のフィールドは拒否する
+- 画像 (PNG / JPEG / WebP の base64) と埋め込み SVG は `assets` に持ち、同じ画像は 1 つのアセットを共有する。別添付テーブルは作らない。全アセットの合計は 20 MiB 以下
+- `text`: frame の名前、テキストの本文、埋め込み SVG の文字を決まった規則 (§3.6) で求めた検索用文字列。UTF-8 で 1 MiB 以下。Rust は保存と JSON 取込のたびに求め直し、一致しなければ拒否する
+- 表示位置、ルーラー・グリッドなどの表示設定、選択、Undo/Redo 履歴は保存しない
+- DB schema と JSON export schema は変えない
+
+**v1 からの変換 (Eager-on-Read)**: payload v1 `{ svg, text }` (ADR-0021 のベクター描画) は、読んだときに `upgrade_payload(1)` で「編集できない埋め込み SVG 1 個」の v2 文書にして書き戻す (§7.2。`data_revision` と `updated_at` は変えない)。SVG は v1 のまま埋め込むので見た目は残り、書き出せる。変換は戻せず、新しい版で開いた作品は古い版のアプリでは読めない。変換結果が v2 の検証を通らない作品 (今の SVG ポリシーを通らなくなった古い作品など) は変換を失敗にして v1 のまま残し (§7.6)、開こうとすると理由を表示する。そうした作品も JSON エクスポートでは元の payload と `payload_schema_version: 1` のまま書き出す
+
+**search_text 生成**: `title + " " + tags + " " + text`
+
 ---
 
 ## 11. 設定 JSON (`settings.json`, Q-13)
@@ -934,7 +957,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
 - インポート時のプロジェクト名衝突は許容 (別プロジェクトとしてそのまま投入)
 - `projects.id` が既存 DB と衝突した場合は、その project と配下 items をまとめてスキップする (§3.3)
 - モジュールの UI 有効状態はデータ移送のフィルタに使わない。無効モジュールの items も export / import 対象に含める (ADR-0012)
-- **エクスポートは StorageService の高レベル読み込み API を通すため、古い payload を含む items は Eager-on-Read により自動的に最新版へ更新された上で出力される**。結果として、エクスポート JSON 内の `payload_schema_version` は該当モジュールの現行版に揃う
+- **エクスポートは StorageService の高レベル読み込み API を通すため、古い payload を含む items は Eager-on-Read により自動的に最新版へ更新された上で出力される**。結果として、エクスポート JSON 内の `payload_schema_version` は該当モジュールの現行版に揃う。ただしアップグレードに失敗した item は、エクスポートを止めず、古い payload と版のまま書き出す (§7.6)
 - 実行中は UI を二重送信不可にして処理中状態を表示する。件数ベースの詳細進捗は、実測で同期 export が体感停止する規模に達した場合に Tauri Event / Channel を追加する
 - エクスポート前の pre-op backup は取らない (個別 UPDATE が独立トランザクション + idempotent なので、export 中の中断は data の一貫性を損なわない)。ADR-0006 §2.5 参照
 
@@ -1295,7 +1318,7 @@ ADR-0011 §2.1 のチェックリストを満たすものに限る:
 | T-27 | 同一行を 2 つのコマンドが v1 として並行に読み込んだ後、両方が v2 へアップグレードを試みる | 楽観的並行制御により、後発の UPDATE は `WHERE payload_schema_version = ?` で空振りし、再読み込み後に最新版と認識して再衝突せず収束する (§7.2) |
 | T-28 | `core_rebuild_search_index` 実行 | 実行前に `pre-rebuild-search-index-<module_id>` (or `-all`) のバックアップが取得されている (§13.4) |
 | T-29 | `core_rebuild_search_index` 実行後 | 全行が最新の `payload_schema_version` と最新の `search_text` に揃う |
-| T-30 | エクスポート実行 | 出力 JSON 内の各 item の `payload_schema_version` がすべて該当モジュールの現行版に揃う (Eager-on-Read による自動最新化、§12.2) |
+| T-30 | エクスポート実行 | 出力 JSON 内の各 item の `payload_schema_version` がすべて該当モジュールの現行版に揃う (Eager-on-Read による自動最新化、§12.2)。アップグレードに失敗した item だけは古い payload と版のまま出力され、エクスポート全体は失敗しない (§7.6) |
 | T-31 | モジュールの `current_payload_version` 上昇後の起動 | `settings.json` の `modules.<id>.last_seen_payload_version` と比較、不一致なら再構築推奨通知が出る (§11.2 例外) |
 | T-32 | リストア対象に破損ファイルを選択 | `PRAGMA integrity_check` が失敗を返し、リストアが中止される。別ファイル選択を促すダイアログが出る (ADR-0007 §2.4.1) |
 | T-33 | pre-op バックアップ取得後に対象操作が失敗 | pre-op バックアップは削除されず `<userdata>/backups/pre-op/` に残る (§13.4) |
@@ -1373,11 +1396,12 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-09-25 | 1.7 | §5 にプロジェクトの並び替えで `updated_at` を変えないことを明記 |
 | 2026-10-02 | 1.8 | §10.2 に Link のネットワーク上の場所を開く時の確認を、§11 に `modules.linkmemo.trusted_network_hosts` を追加 |
 | 2026-11-10 | 1.9 | §6.6 プロジェクト間の移動 (`core_move_item`) を追加。書き換える列、`position` と `updated_at` の扱い、`data_revision +1`、§13.2 の増分対象、§15 の T-51〜T-53 |
+| 2026-11-15 | 1.10 | ADR-0026 を反映。§10.9 キャンバスの payload v2 と v1 からの変換を追加し、末尾の参照APIの節を v2 に合わせる。§7.6 のエクスポート経路 (失敗した item を古い payload のまま書き出す) を実装に合わせた |
 
-## ベクター作品と軽量な参照API（ADR-0021）
+## 大きな作品と軽量な参照API（ADR-0021、ADR-0026）
 
-`vector`のpayload schema v1は`{ svg: string, text: string }`。UTF-8でsvg ≤20MiB、text ≤1MiBとする。textはSVG内のtext/title/desc配下の文字列を空白で区切り、連続空白を正規化した検索用データで、Rust側の抽出結果との一致を保存・JSON取込時に確認する。画像はPNG/JPEG/WebPのdata URLとしてSVG内へ埋め込み、別添付テーブルは作らない。DB schema v2とJSON export schema v1を維持する。
+`vector` の payload は §10.9 (v2)。v1 (`{ svg, text }`、ADR-0021) は読み込み時に v2 へ変換する。
 
 `ItemSummary`はid/project_id/module_id/title/tags/position/created_at/updated_atだけを持つ。`core_list_item_summaries`はproject_id/module_idで絞り、updated_at DESC・id DESC、最大100件ずつ返す。SQLはpayloadを選択しない。
 
-`SearchPreview`はItemSummaryとpayload_schema_version、表示専用payloadを返す。`core_search_previews`はFTS/LIKEの既存検索規約を維持し、vectorではSQL内で`text`の先頭120文字だけを投影する。完全なSVG本文を行デコードやIPCへ渡さない。他モジュールの投影未指定時は既存の検索表示用payloadを保持する。プレビューから保存しない。編集画面はIDから`core_get_item`で完全な文書を取得する。旧一覧／検索APIの返却形は変更しない。
+`SearchPreview`はItemSummaryとpayload_schema_version、表示専用payloadを返す。`core_search_previews`はFTS/LIKEの既存検索規約を維持し、vectorではSQL内で`text`の先頭120文字だけを投影する。文書の本文や画像を行デコードやIPCへ渡さない。他モジュールの投影未指定時は既存の検索表示用payloadを保持する。プレビューから保存しない。編集画面はIDから`core_get_item`で完全な文書を取得する。旧一覧／検索APIの返却形は変更しない。

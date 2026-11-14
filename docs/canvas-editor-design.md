@@ -1,15 +1,14 @@
 # キャンバス (自作エディタ) の設計
 
-最終更新: 2026-11-15 / ステータス: Draft v0.6
+最終更新: 2026-11-15 / ステータス: Draft v0.7
 
 ADR-0026 の決定を実装するための設計。保存形式、エディタ内部の境界、画面、実装の分担を定める。
 
 ## 1. 位置づけ
 
 - 対象はモジュール `vector`。表示名は「キャンバス」に変える (ID は変えない)
-- SVG-Edit 同梱 (ADR-0021) を、自作の Figma 風エディタに置き換える
-- **切替 PR がマージされるまで、`main` で動くのは SVG-Edit**。それまで `requirements.md` / `ui-design.md` / `data-model.md` / `module-contract.md` のベクター描画の記述は ADR-0021 のままにし、切替 PR で本書の内容へ書き換える (§7)
-- 切替までの新しいコードは `src/modules/vector/editor/` と `src-tauri/src/modules/vector/` の新規ファイルに置き、画面にもストレージにもつながない
+- SVG-Edit 同梱 (ADR-0021) を、自作の Figma 風エディタに置き換えた。第 1 段階の切替 (§7) で SVG-Edit 一式を消し、payload v2 を有効にした
+- エディタは `src/modules/vector/editor/`、画面と IPC の接続は `src/modules/vector/VectorWorkspacePage.tsx` と `canvasIo.ts`、Rust は `src-tauri/src/modules/vector/` にある。`requirements.md` / `ui-design.md` / `data-model.md` / `module-contract.md` / `architecture.md` のキャンバスの記述は本書に合わせてある
 
 ## 2. 範囲
 
@@ -88,7 +87,7 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 - `image`: PNG / JPEG / WebP の base64。標準の字母 (`+` `/`) で、パディングは必須、空は不可
 - `image` の `mime` と中身の先頭バイトが一致すること (既存の `validate_image` と同じ判定)。PNG は 24 バイト以上でシグネチャが合う、JPEG は 4 バイト以上で `FF D8 FF` から始まる、WebP は 12 バイト以上で `RIFF` から始まり 8〜11 バイト目が `WEBP`
 - PNG は IHDR の幅と高さが 1 以上 `maxImageSide` 以下、積が `maxImagePixels` 以下
-- `svg`: 既存の SVG ポリシー (`scripts/svgedit/policy.json`、`validate_svg`) を通った SVG と、そこから抽出した `text` (v1 と同じ抽出結果と完全に一致すること)
+- `svg`: 既存の SVG ポリシー (`src/modules/vector/policy/policy.json`、`validate_svg`) を通った SVG と、そこから抽出した `text` (v1 と同じ抽出結果と完全に一致すること)
 - アセットの `width` / `height` は image も svg も、0 より大きく `maxSize` 以下。画像の実際の大きさと一致するかは確かめない
 - アセットはノードから参照されているものだけを持つ。エディタは保存の前に参照されていないアセットを落とす
 - 同じ画像を 2 回置いたら、アセットは 1 つを共有する (挿入時に中身を比べる)
@@ -310,8 +309,8 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 - 対象は、選択中の frame やノード、選択がなければページ全体。frame が複数なら 1 つずつファイルにする
 - SVG は `SvgEl` を文字列にしたもの。PNG は、その SVG を画像として読み込んで canvas に描く (`src/modules/mermaid/mermaidExporter.ts` と同じ経路)
 - PNG の上限は今と同じ (20 MiB、1 辺 16,384 px、16,777,216 画素)。倍率は 1・2・3
-- ファイルへの書き込みは注入された関数を通す。切替 PR で `vector_write_file` につなぐ。関数は `export/` の中の登録口 (モジュールの変数と設定用の関数) に渡す。登録がない間は、書き出しのボタンを無効にする。開発用の画面は、ブラウザのダウンロードで保存する関数を登録する
-- 書き出す SVG は自分で作った出力なので、取込用の SVG ポリシーでは検証しない (埋め込み SVG を `data:image/svg+xml` で持つため)。UTF-8 と大きさだけを確かめる。この変更は切替 PR で入れる
+- ファイルへの書き込みは注入された関数を通す。関数は `export/` の中の登録口 (モジュールの変数と設定用の関数) に渡す。登録がない間は、書き出しのボタンを無効にする。アプリの画面は、ファイルごとに保存ダイアログを出して `vector_write_file` で書く関数 (`canvasIo.ts` の `writeExportFiles`) を登録する。2 つ目からは直前に選んだフォルダを既定にし、取り消したらそこで止める。開発用の画面は、ブラウザのダウンロードで保存する関数を登録する
+- 書き出す SVG は自分で作った出力なので、取込用の SVG ポリシーでは検証しない (埋め込み SVG を `data:image/svg+xml` で持つため)。UTF-8 と大きさだけを確かめる (Rust の `vector_write_file` は、SVG が空でなく 28 MiB 以下であることだけを確かめる)
 - 埋め込み SVG を含む文書の PNG 書き出しが WKWebView と WebView2 で正しく出るかは、実アプリで確かめる
 - 選択が frame だけなら frame ごとに 1 ファイル。frame でないノードを含む選択は全体を 1 ファイル。frame とその中の frame を両方選んだら、外側の 1 ファイルだけにする。非表示のノード (祖先が非表示のものを含む) は書き出さず、書き出し方の判定にも数えない
 - frame の範囲は frame の矩形ちょうど (書き出す画像の大きさを frame の大きさと一致させる。線の外側半分は入らない)。それ以外は、影や線の太さを含めた描画の範囲を外側へ整数に丸める
@@ -334,7 +333,7 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 ### 5.1 配置
 
 ```
-┌ 作品バー: [作品 ▼] [新規] [取込] タイトル タグ ……… 未保存 [書き出し] [保存 ⌘S] ┐
+┌ 作品バー: [作品 ▼] [新規] [取込] タイトル タグ [削除] ……… 未保存 [保存 ⌘S] ┐
 ├──────────┬──────────────────────────────────┬──────────────┤
 │ レイヤー │ ルーラー                          │ プロパティ   │
 │          │ キャンバス                        │              │
@@ -342,7 +341,8 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 └──────────┴──────────────────────────────────┴──────────────┘
 ```
 
-- 作品バーは今の `VectorWorkspacePage` のものを引き継ぐ (作品の切替、新規、取込、タイトル、タグ、未保存の表示、保存、削除)。ボタンは「アイコン＋短い名称」(`ui-design.md` v1.15)
+- 作品バーは SVG-Edit の時の `VectorWorkspacePage` のものを引き継ぐ (作品の切替、新規、取込、タイトル、タグ、未保存の表示、保存、削除)。ボタンは「アイコン＋短い名称」(`ui-design.md` v1.15)
+- 作品バーの「取込」は、今の作品に画像や SVG を置く (ツールバーの「画像」と同じ)。書き出しはプロパティパネルの「書き出し」の節で行い、作品バーには書き出しのボタンを置かない (対象・形式・倍率を節が持つので、作品バーのボタンと結果が分かれないように)
 - レイヤーパネルは幅 220 px、プロパティパネルは幅 240 px。レイヤーパネルは Alt/Option+1 で開閉する
 - ツールバーはキャンバスの下中央に浮かせる。並びは 選択、フレーム、矩形、楕円、線、テキスト、画像、手のひら、倍率
 - 色とトークンは `ui-design.md` §2 に従う。キャンバスの地は `--bg-muted` にする (ダークでは `--bg` より暗い面がないため、ライトとダークで同じトークンを使う)
@@ -444,6 +444,8 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 
 ## 6. 実装の分担
 
+第 1 段階の分担。#9 の切替 (§7) で完了した。§6.1 のうち「画面とストレージにつながない」「未使用の `allow`」は切替までの規則で、今は当てはまらない。
+
 1 セッション = 1 worktree = `main` 宛ての PR 1 本。PR のマージは利用者が行う。
 
 | # | セッション | 作るもの | 前提 |
@@ -474,32 +476,43 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 
 ### 6.2 開発用の画面
 
-切替までは、アプリの画面からエディタを開けない。「描画とビューポート」のセッションが次を作り、以後のセッションと検証はこれを使う。
+エディタの部品だけを、アプリの IPC なしで開く画面。「描画とビューポート」のセッションが作り、切替の後も第 2 段階以降の実装と検証に使う。
 
 - リポジトリ直下の `canvas-harness.html` と `src/modules/vector/editor/dev/` (入口と `EditorHarness.tsx`)
 - `npm run dev` のあと `http://localhost:1420/canvas-harness.html` で開く。Tauri の IPC は使わず、契約データの `full` を読み込んだエディタを表示する
 - `vite build` の入力には入れない (配布物に含めない)。切替の後も残す (第 2 段階以降の実装と検証に使う)
 - 文書は、`fitTextNodes` でテキストの大きさを求め直してから `load` に渡す (切替後の画面と同じ手順)
 
-## 7. 切替 PR でやること
+## 7. 切替 (済み)
 
-- `VectorWorkspacePage.tsx` を `EditorRoot` と `editorStore` につなぐ (読み込み、保存、未保存の確認、作品の切替、新規、取込、書き出し、削除)
-- Rust の `current_payload_version` を 2 にし、`upgrade_payload` と `validate_payload` を v2 へつなぐ。未使用の `allow` を外す
-- 保存の処理は、進行中のジェスチャーを確定してから文書を取り出す。読み込みでは、テキストの大きさを求め直してから `load` に渡す
-- 作品を開いたときと切り替えたときは、`load` のあとに全体表示 (`zoomToFit`) を呼ぶ (`load` は表示位置を残すため)
-- 未保存や削除の確認などのモーダルが開いている間、キャンバスがキーを取らないことを実アプリで確かめる
-- `vector_write_file` の SVG の検証を §4.9 のとおりに変える。SVG の上限を 28 MiB に合わせる
-- 書き出しの保存先の関数 (`setExportWriter`) を登録する。複数のファイルは、1 つずつ保存ダイアログを出す (権限と Rust を変えずに済み、上書きの確認を OS のダイアログに任せられる)
-- 保存、作品の切替、画面を離れる前の未保存の確認は、本文の編集を終えてから行う (§4.7)。`text/editSession.ts` の `commitTextEdit()` を先に呼ぶ
-- 画像と SVG の取込: `assets/` の `setImportFileReader` に、ファイル選択 (`plugin-dialog`) と `vector_read_image` / `vector_read_file` の結果を渡す関数を登録する。OS からのドロップは `importFile(store, file, { at })` につなぐ。作品バーの「取込」は、今の作品に画像や SVG を置く動きにする (ツールバーの「画像」と同じ)
-- 取込の途中は作品を切り替えない (未変更の作品では、操作の途中の `load` を取込が見分けられない場合がある)
-- エディタを開くたびに `tools/create/frameSize.ts` の `resetLastFrameSize()` を呼ぶ
-- `src/modules/vector/index.ts` の表示名を「キャンバス」にし、検索結果の表示を確かめる
-- SVG-Edit 一式を消す: npm の `svgedit`、`prepare:vector`、`test:vector:*`、`predev` / `prebuild` の該当部分、`scripts/svgedit/` の adapter 群、`protocol.rs` と `vector_editor_url` (`registry.rs`、`build.rs`、`permissions/default.toml`)、`bridge.ts`、`third_party/svgedit-NOTICES.txt`、About と `THIRD_PARTY_NOTICES.md` の表記
-- SVG ポリシー (`policy.json`、`svg-policy.js`、`svg-policy.d.ts`、`validation-fixtures.json`) を `scripts/svgedit/` から移す
-- ドキュメント: ADR-0021 の Status を「Superseded by ADR-0026」にする。`requirements.md`、`ui-design.md` (§5.2、§6.23、§8、改訂履歴)、`data-model.md`、`module-contract.md`、`architecture.md`、`README.md`、`CLAUDE.md`、`docs/vector-editor-verification.md`、スクリーンショットを本書の内容へ書き換える
-- 実アプリで確かめる (開発用の画面では確かめられないもの): WKWebView での文字の計測と折り返し・日本語入力・本文の編集中のウィンドウのフォーカス喪失・色の選択・ピンチ、埋め込み SVG と画像を含む文書の PNG、ファイル選択と OS からのドロップ、macOS 12、Windows (WebView2) での同じ項目とフォントの判定
-- 受入: v1 の作品が開けて見た目が残り書き出せる、v1 の `vector` を含む古いエクスポートファイルを取り込める、アプリ / プロジェクト JSON とバックアップが v2 で往復する、portable ZIP が 80,000,000 bytes 以下
+第 1 段階の最後に、画面とストレージを新しいエディタへ切り替え、SVG-Edit 一式を消した。
+
+### 7.1 つないだもの
+
+- `VectorWorkspacePage.tsx` を `EditorRoot` と `editorStore` につないだ (読み込み、保存、未保存の確認、作品の切替、新規、取込、書き出し、削除)。表示名は「キャンバス」
+- 読み込み: payload を `parsePayload` で文書にし、`fitTextNodes(doc, null, canvasTextMeasurer)` でテキストの大きさを求め直してから `load` に渡す。表示位置を既定に戻してから全体を表示する (`load` は表示位置を残すため。キャンバスがまだなければ、開いたときに `CanvasView` が全体を表示する)。読めない payload と、v1 から変換できなかった作品は、理由を出してエディタを出さない (作品の切替、新規、削除、再試行はできる)
+- 保存: `commitTextEdit()` と進行中のジェスチャーの確定 → `checkSavable` → `toPayload` → `core_create_item` / `core_update_item`。未保存かどうかは、保存した時点の `revision` とタイトル・タグで判定する
+- 作品の切替、新規、削除、画面を離れる、ウィンドウを閉じる前に、`commitTextEdit()` と進行中のジェスチャーの確定をしてから未保存を確かめる。取込の途中は作品を切り替えない。確認のモーダル (`aria-modal="true"`) が開いている間、キャンバスはキーを取らない (§4.4)
+- 取込: `setImportFileReader` に、ファイル選択 (`plugin-dialog`、PNG / JPEG / WebP / SVG) と `vector_read_image` / `vector_read_file` の結果を渡す関数を登録した。作品バーの「取込」は `importFromPicker`。OS からのドロップは Tauri の webview のイベントで受け、画面がファイルを読んでから `importFile(store, file, { at })` に渡す (読む間は作品を切り替えない。複数のファイルは先頭の 1 つだけ)
+- 書き出し: §4.9
+- 画面を開くたびに `resetLastFrameSize()` を呼び、表示の設定を `DEFAULT_VIEW_OPTIONS` に戻す。画面を離れたら、store から作品と履歴を外す
+- Rust: `current_payload_version` を 2 に、`upgrade_payload(1)` を `upgrade::upgrade_v1`、`validate_payload` を `scene::validate` につないだ。`vector_write_file` の SVG の検証を §4.9 に変えた。`protocol.rs` と `vector_editor_url` を消した
+- エクスポート: アップグレードに失敗した item は、古い payload と版のまま書き出す (`data-model.md` §7.6)。変換できない v1 の作品があっても、エクスポート全体は止まらない
+- SVG ポリシー (`policy.json`、`svg-policy.js`、`svg-policy.d.ts`、`validation-fixtures.json`) を `src/modules/vector/policy/` へ移した。npm の `svgedit`、`prepare:vector`、`test:vector:*`、`scripts/svgedit/` の adapter 群、`bridge.ts`、`third_party/svgedit-NOTICES.txt`、About と `THIRD_PARTY_NOTICES.md` の表記を消した
+
+### 7.2 実アプリで確かめること
+
+開発用の画面と自動テストでは確かめられないもの。結果は `vector-editor-verification.md` に記録する。
+
+- WKWebView での文字の計測と折り返し・日本語入力・本文の編集中のウィンドウのフォーカス喪失・色の選択・ピンチ
+- 埋め込み SVG と画像を含む文書の PNG
+- ファイル選択と OS からのドロップ (ドロップした位置、Retina と UI スケール)
+- 未保存や削除の確認のモーダルが開いている間、キャンバスがキーを取らないこと
+- macOS 12、Windows (WebView2) での同じ項目とフォントの判定
+
+### 7.3 受入
+
+v1 の作品が開けて見た目が残り書き出せる、v1 の `vector` を含む古いエクスポートファイルを取り込める、アプリ / プロジェクト JSON とバックアップが v2 で往復する、portable ZIP が 80,000,000 bytes 以下。自動テストでの確認と実測は `vector-editor-verification.md` にある。
 
 ## 8. 改訂履歴
 
@@ -511,3 +524,4 @@ Figma ファイルの読み書き、共同編集、プロトタイピング、�
 | 2026-11-14 | 0.4 | 選択と変形・テキスト・書き出しを並行で進めるための取り決めを足す。§4.1 `layoutText` と `fitTextNodes` の扱い、担当の外で変えてよいファイルの割り当て、§4.6 リサイズのあとのテキストの求め直し、§4.7 `fitTextNodes` の規則と呼ぶ場面・本文の編集の開始と終了・編集中の表示、§4.9 書き込みの関数の登録口、§6.1 PR を下書きで作る、§6.2 開発用の画面での求め直し |
 | 2026-11-14 | 0.5 | 選択と変形・テキスト・書き出しの実装とレビューを受けて補う。§4.2 §4.4 ジェスチャーを閉じるのは開いた側 (キャンバスが取り消すのはドラッグの途中だけ)、ドラッグした押下をダブルクリックに数えない、§4.5 group のスコープ・祖先と子孫の選択・選択中のドラッグ・優先順・クリックとドラッグの区別、§4.6 丸めの向き・Alt 複製・線のハンドル・frame のリサイズと子・ドロップ先の決め方、§5.4 繰り返しを受けるショートカット、§4.7 禁則の向き・行分割の時間・計測と描画の一致・中央揃えの `x`・ウィンドウのフォーカス喪失・編集を同期で終える関数、§4.9 書き出しの対象と範囲・SVG の上限 28 MiB・ファイル名、§7 書き込みの上限と保存先の関数・本文の編集を終えてからの保存 |
 | 2026-11-15 | 0.6 | 選択と変形・テキスト・作成ツールと画像の PR (#174、#175、#177) が足した規則を版に反映する: §4.4 ドラッグの途中のキー、§4.5 Shift のクリック、§4.6 ドロップ先の決め方、§4.7 計測と折り返しの規則・既知の制限、§4.8 取込の待ち、§5.6 フレームのクリックの大きさ。あわせて §6.2 開発用の画面を残す、§7 切替でつなぐ登録口 (取込、本文の編集の終了、フレームの大きさ) と実アプリで確かめる項目を足す |
+| 2026-11-15 | 0.7 | 切替 (#9) を反映する。§1 と §7 を切替が済んだ形に直し、§7 につないだもの (読めない作品の扱い、ドロップ、エクスポートの失敗した item)・実アプリで確かめること・受入を分ける。§3.4 の SVG ポリシーの場所、§4.9 の保存先の関数と Rust の SVG の検証、§5.1 作品バー (書き出しはプロパティパネルの節に任せる)、§6 と §6.2 の切替までの記述 |

@@ -36,7 +36,7 @@
     <td width="50%"><img src="docs/images/screenshots/diagram.png" alt="draw.io の図"><br><b>ダイアグラム</b>: draw.io を同梱し、ネットワークに出ずに図を描きます。.drawio / SVG / PNG で入出力</td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/screenshots/vector.png" alt="ベクター描画"><br><b>ベクター描画</b>: SVG-Edit を同梱し、SVG を描いて SVG / PNG で書き出します</td>
+    <td width="50%"><img src="docs/images/screenshots/vector.png" alt="キャンバス"><br><b>キャンバス</b>: フレーム・図形・テキスト・画像で UI モックやバナーを作り、SVG / PNG で書き出します</td>
     <td width="50%"><img src="docs/images/screenshots/regex.png" alt="正規表現の評価"><br><b>正規表現</b>: マッチ・名前付きグループ・置換の結果をその場で確かめます</td>
   </tr>
   <tr>
@@ -134,4 +134,4 @@ PR 経由マージのみ受付け、6 ジョブ全 green が必須。
 - [Tauri 2 公式](https://v2.tauri.app/)
 - リリース告知・配布: GitHub Releases (portable ZIP / 手動更新)
 
-ベクター描画はSVG-Edit 7.4.2を同梱し、作品のプロジェクト保存とSVG/PNG入出力に対応します。[設計境界](docs/decisions/0021-offline-vector-editor.md)と[検証・実機受入](docs/vector-editor-verification.md)を参照してください。
+キャンバスは自作のエディタで、作品のプロジェクト保存、画像と SVG の取込、SVG/PNG の書き出しに対応します。ベクター描画 (SVG-Edit) で作った作品は、開いたときに編集できない埋め込み SVG として引き継ぎます。[設計](docs/canvas-editor-design.md)、[ADR-0026](docs/decisions/0026-self-built-canvas-editor.md)、[検証・実機受入](docs/vector-editor-verification.md)を参照してください。
