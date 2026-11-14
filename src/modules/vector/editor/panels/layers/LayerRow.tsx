@@ -140,13 +140,7 @@ export const LayerRow = memo(function LayerRow({
         className={cn("shrink-0", selected ? "text-[var(--accent)]" : "text-[var(--fg-muted)]")}
       />
       {editing ? (
-        <NameInput
-          initial={node.name}
-          onDone={(value) => {
-            setEditing(false);
-            if (value !== null) commitLayerName(id, value);
-          }}
-        />
+        <NameInput id={id} initial={node.name} onClose={() => setEditing(false)} />
       ) : (
         <span
           className={cn(
@@ -209,26 +203,31 @@ export const LayerRow = memo(function LayerRow({
  * 日本語入力の変換中の Enter と Esc は変換の操作として扱う。
  * 何も打っていなければ確定しない (編集中の Undo で変わった名前を書き戻さない)。
  * 祖先が閉じられるなどで欄が外れたときは、打ってあった名前を確定する。
+ *
+ * 欄が外れるときの後片付けは、打った名前の確定だけを行い、欄を閉じる (`onClose`) ことも
+ * 終わった印を付けることもしない。StrictMode は表示の直後に後片付けを 1 回余分に実行するが、
+ * その時点では何も打っていないので何も起きず、編集は続く。
  */
-function NameInput({ initial, onDone }: { initial: string; onDone(value: string | null): void }) {
+function NameInput({ id, initial, onClose }: { id: NodeId; initial: string; onClose(): void }) {
   const [value, setValue] = useState(initial);
-  const state = useRef({ done: false, value: initial, initial, onDone });
+  const state = useRef({ done: false, value: initial, initial });
 
   useEffect(
     () => () => {
       const current = state.current;
-      if (current.done) return;
+      if (current.done || current.value === current.initial) return;
       current.done = true;
-      current.onDone(current.value === current.initial ? null : current.value);
+      commitLayerName(id, current.value);
     },
-    [],
+    [id],
   );
 
   const finish = (commit: boolean) => {
     const current = state.current;
     if (current.done) return;
     current.done = true;
-    onDone(commit && current.value !== current.initial ? current.value : null);
+    if (commit && current.value !== current.initial) commitLayerName(id, current.value);
+    onClose();
   };
 
   return (

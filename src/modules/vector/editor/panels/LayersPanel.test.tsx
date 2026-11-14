@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CANVAS_LIMITS } from "../model/limits";
@@ -230,9 +231,12 @@ describe("LayersPanel のドラッグ", () => {
         }),
     });
   });
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
     Reflect.deleteProperty(document, "elementsFromPoint");
+    // dnd-kit はドラッグの後 50 ms、次のクリックを止める (ドラッグの直後のクリックを拾わないため)。
+    // 次のテストの最初のクリックが止められないよう、それが外れるまで待つ
+    await new Promise((resolve) => setTimeout(resolve, 60));
   });
 
   const pointer = (
@@ -286,5 +290,48 @@ describe("LayersPanel のドラッグ", () => {
     expect(row("r3").querySelector("span.absolute")).toBeNull();
     pointer("pointerUp", document, 100, 100);
     expect(state().revision).toBe(0);
+  });
+});
+
+describe("LayersPanel を StrictMode で描く (アプリと同じ)", () => {
+  const strict = () =>
+    render(
+      <StrictMode>
+        <LayersPanel />
+      </StrictMode>,
+    );
+
+  it("名前の編集欄が開いたままで、確定・取消できる", () => {
+    strict();
+    fireEvent.doubleClick(row("r0"));
+    let input = screen.getByRole("textbox", { name: "レイヤーの名前" });
+    fireEvent.change(input, { target: { value: "背景" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(getNode(state().doc, "r0")?.name).toBe("背景");
+    expect(state().revision).toBe(1);
+    expect(screen.queryByRole("textbox")).toBeNull();
+
+    fireEvent.doubleClick(row("r0"));
+    input = screen.getByRole("textbox", { name: "レイヤーの名前" });
+    fireEvent.change(input, { target: { value: "前景" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(getNode(state().doc, "r0")?.name).toBe("背景");
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("打ったまま祖先が閉じられたら確定し、打っていなければ何もしない", () => {
+    strict();
+    fireEvent.doubleClick(row("r3"));
+    fireEvent.click(within(row("f")).getByRole("button", { name: "閉じる" }));
+    expect(state().revision).toBe(0);
+    fireEvent.click(within(row("f")).getByRole("button", { name: "開く" }));
+
+    fireEvent.doubleClick(row("r3"));
+    fireEvent.change(screen.getByRole("textbox", { name: "レイヤーの名前" }), {
+      target: { value: "アイコン" },
+    });
+    fireEvent.click(within(row("f")).getByRole("button", { name: "閉じる" }));
+    expect(getNode(state().doc, "r3")?.name).toBe("アイコン");
+    expect(state().revision).toBe(1);
   });
 });

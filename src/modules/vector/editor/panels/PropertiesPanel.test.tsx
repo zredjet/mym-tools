@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createText } from "../model/create";
@@ -505,5 +506,50 @@ describe("整列の範囲", () => {
     fireEvent.click(within(section("整列")).getByRole("button", { name: "左揃え" }));
     expect(state().revision).toBe(before);
     expect(node("r1").x).toBe(10);
+  });
+});
+
+describe("PropertiesPanel を StrictMode で描く (アプリと同じ)", () => {
+  const strict = () =>
+    render(
+      <StrictMode>
+        <PropertiesPanel />
+      </StrictMode>,
+    );
+
+  it("数値と色の文字欄で、確定・取消・確定の対象の規則が変わらない", () => {
+    strict();
+    select("r1");
+    type(field("X 座標"), "33");
+    expect(node("r1").x).toBe(33);
+    type(field("Y 座標"), "40", "Escape");
+    expect(node("r1").y).toBe(10);
+    const color = field("塗りの色");
+    fireEvent.focus(color);
+    fireEvent.change(color, { target: { value: "#00ff00" } });
+    select("r3");
+    fireEvent.blur(color);
+    expect(node("r1").fill).toMatchObject({ color: "#00FF00" });
+    expect(node("r3").fill).toMatchObject({ color: "#D9D9D9" });
+    expect(state().revision).toBe(2);
+  });
+
+  it("色の選択がジェスチャーとして動き、時間がたったら履歴 1 件", () => {
+    vi.useFakeTimers();
+    try {
+      strict();
+      select("r0");
+      const picker = screen.getByLabelText("塗りの色を選ぶ") as HTMLInputElement;
+      act(() => {
+        picker.value = "#ff0000";
+        picker.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      expect(state().gestureActive).toBe(true);
+      act(() => vi.advanceTimersByTime(COLOR_PICK_SETTLE_MS));
+      expect(state().revision).toBe(1);
+      expect(node("r0").fill).toMatchObject({ color: "#FF0000" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
