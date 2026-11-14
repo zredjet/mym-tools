@@ -298,7 +298,7 @@ function canonicalModuleLabel(moduleId: string): string {
     hash: "M-Hash",
     mermaid: "M-Mermaid",
     diagram: "M-Diagram",
-    vector: "ベクター描画",
+    vector: "キャンバス",
   };
   return canonical[moduleId] ?? `M-${moduleId.charAt(0).toUpperCase()}${moduleId.slice(1)}`;
 }
