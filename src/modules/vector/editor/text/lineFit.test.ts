@@ -58,7 +58,8 @@ describe("largestFitting", () => {
     // 1 つの幅は 1 なので、幅 = 個数。境目を測った幅から予測できる
     const predict = (count: number, width: number) => (count * 85_690) / width;
     expect(largestFitting(1, 100_000, 79_428, probe, predict)).toBe(85_690);
-    expect(probed.length).toBeLessThanOrEqual(3);
+    // 見積もり、その隣、予測、その隣
+    expect(probed).toEqual([79_428, 79_429, 85_690, 85_691]);
   });
 
   it("どの見積もりと予測でも、収まる最大の個数を、回数の上限の内で返す (前の探し方と同じ結果)", () => {

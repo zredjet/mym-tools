@@ -5,13 +5,14 @@
  * ずれる。1 つずつ伸ばしては測り直すと、空白のない長い本文を広い枠に置いたとき、行のほぼ全体を何千回も
  * 測り直して固まる (入力のたびに同期で走る)。そこで次の順に探す:
  *
- * 1. 見積もった個数 (`guess`) を確かめる
+ * 1. 見積もった個数 (`guess`) と、その隣 (収まれば 1 つ多く、収まらなければ 1 つ少なく) を確かめる。
+ *    見積もりがほぼ当たるふつうの文はここで決まり、前の 1 つずつ確かめる方法と同じ 2 回で済む
  * 2. 境目がまだ決まらなければ、最後に測った幅と見積もりの比で境目を予測して確かめる。これを
  *    `MAX_PREDICTIONS` 回まで繰り返す (カーニングは行の中でほぼ一様に効くので、比で直した見積もりは境目の
  *    近くに来て、境目に近い位置で測るほど当たる)
  * 3. 最後に確かめた位置から、境目のある側へ間隔を倍にしながら広げ、二分探索で絞る
  *
- * 見積もりが当たれば (ふつうの文) 隣と合わせて 2 回で済み、外れても 2 log2(個数) + 7 回以内で済む。
+ * 見積もりが外れても、確かめる回数は 2 log2(個数) + 7 回以内で済む。
  * 個数を増やすほど行は広がる (一度収まらなくなれば、それより多くても収まらない) とみなす。そのとき結果は、
  * 見積もりから 1 つずつ確かめる方法と同じ。
  */
@@ -72,9 +73,9 @@ export function largestFitting(
     const result = probe(at);
     if (result.fits) good = at;
     else bad = at;
-    if (bad - good <= 1 || round === MAX_PREDICTIONS) break;
-    // 分かっている範囲の内側へ寄せる (外れた予測でも、範囲は 1 つ以上狭まる)
-    const predicted = predict(at, result.width);
+    if (bad - good <= 1 || round > MAX_PREDICTIONS) break;
+    // 1 回目は隣。その後は予測した位置を、分かっている範囲の内側へ寄せる (外れても範囲は 1 つ以上狭まる)
+    const predicted = round === 0 ? at : predict(at, result.width);
     const target = Number.isFinite(predicted) ? Math.round(predicted) : at;
     at = Math.min(bad - 1, Math.max(good + 1, target));
   }
