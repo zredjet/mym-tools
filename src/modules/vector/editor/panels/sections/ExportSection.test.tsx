@@ -64,6 +64,25 @@ describe("ExportSection", () => {
     expect(state().doc).toBe(before.doc);
   });
 
+  it("文書の言語 (<html lang>) を書き出す SVG のルートに付ける", async () => {
+    const writer = vi.fn<ExportWriter>(async (files) => ({ written: files.length }));
+    setExportWriter(writer);
+    const before = document.documentElement.lang;
+    document.documentElement.lang = "ja";
+    try {
+      render(<ExportSection />);
+      fireEvent.click(exportButton());
+      await screen.findByRole("status");
+      expect(writer.mock.calls[0]?.[0][0]?.data).toMatch(/^<svg [^>]*\blang="ja" xml:lang="ja"/);
+      document.documentElement.lang = "";
+      fireEvent.click(exportButton());
+      await waitFor(() => expect(writer).toHaveBeenCalledTimes(2));
+      expect(writer.mock.calls[1]?.[0][0]?.data).not.toMatch(/^<svg [^>]*\blang=/);
+    } finally {
+      document.documentElement.lang = before;
+    }
+  });
+
   it("PNG の倍率が上限を超えれば理由を出し、書き出さない", () => {
     setExportWriter(async (files) => ({ written: files.length }));
     act(() => {
