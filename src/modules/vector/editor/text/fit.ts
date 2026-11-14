@@ -1,15 +1,15 @@
 /**
  * テキストの大きさを本文に合わせて求め直す (`docs/canvas-editor-design.md` §4.7)。
  *
- * 名前と引数は契約で、選択と変形・パネル・読み込みの前の処理が呼ぶ。
- * 中身は仮の実装で、「テキスト」のセッションが `layoutText` と合わせて置き換える。
+ * 名前と引数は契約で、選択と変形 (リサイズの後)、パネル、本文の編集、読み込みの前の処理が呼ぶ。
+ * 行分割は `layoutText` に任せ、ここでは結果をノードの大きさへ反映するだけにする。
  */
 import { CANVAS_LIMITS } from "../model/limits";
 import { mapNodes, type NodePatch } from "../model/transform";
 import { getDescendantIds } from "../model/tree";
 import type { CanvasDocument, CanvasNode, NodeId } from "../model/types";
 import type { TextMeasurer } from "../render/types";
-import { layoutText } from "./layout";
+import { ceilSize, layoutText } from "./layout";
 
 /**
  * `ids` のノードとその子孫のうち、テキストの大きさを本文・フォント・幅から求め直す。
@@ -42,8 +42,12 @@ function withDescendants(doc: CanvasDocument, ids: readonly NodeId[]): NodeId[] 
   return [...result];
 }
 
-function fitSize(value: number): number {
-  return Math.min(CANVAS_LIMITS.maxSize, Math.max(0, Math.ceil(value)));
+/**
+ * 中央揃えで幅が変わったときの左端のずれ。整数の位置を保つため半分を丸める。0 から遠い方へ丸めるので、
+ * 広げてから同じだけ狭めると元の位置へ戻る (片側へ少しずつずれていかない)。
+ */
+function halfAwayFromZero(value: number): number {
+  return Math.sign(value) * Math.round(Math.abs(value) / 2);
 }
 
 function clampCoordinate(value: number): number {
@@ -55,11 +59,11 @@ function fitPatch(node: CanvasNode, measurer: TextMeasurer): NodePatch | null {
   const layout = layoutText(node, measurer);
   // 計測が数値を返さなかったときは、今の大きさを残す (保存できない文書にしない)
   if (!Number.isFinite(layout.width) || !Number.isFinite(layout.height)) return null;
-  const height = fitSize(layout.height);
+  const height = ceilSize(layout.height);
   if (node.sizing === "auto-height") return { height };
-  const width = fitSize(layout.width);
+  const width = ceilSize(layout.width);
   const grown = width - node.width;
   const shift =
-    node.align === "center" ? Math.round(grown / 2) : node.align === "right" ? grown : 0;
+    node.align === "center" ? halfAwayFromZero(grown) : node.align === "right" ? grown : 0;
   return { x: clampCoordinate(node.x - shift), width, height };
 }

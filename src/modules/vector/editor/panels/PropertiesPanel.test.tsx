@@ -85,10 +85,10 @@ describe("節の出し分け", () => {
     expect(field("幅")).toHaveValue("40");
   });
 
-  it("テキストは塗りと影を出す (文字の節は仮置き)", () => {
+  it("テキストは塗りと影と文字を出す", () => {
     render(<PropertiesPanel />);
     select("t1");
-    expect(sectionNames()).toEqual(["位置と大きさ", "見た目", "塗り", "影"]);
+    expect(sectionNames()).toEqual(["位置と大きさ", "見た目", "塗り", "影", "文字"]);
   });
 });
 
