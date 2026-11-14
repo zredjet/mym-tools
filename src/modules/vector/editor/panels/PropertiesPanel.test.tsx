@@ -16,8 +16,12 @@ import { PropertiesPanel } from "./PropertiesPanel";
 const state = () => editorStore.getState();
 const node = (id: string) => getNode(state().doc, id) as CanvasNode & Record<string, unknown>;
 const section = (name: string) => screen.getByRole("region", { name });
+// 書き出しの節は選択に関係なく常に末尾に出る (中身は `sections/ExportSection.test.tsx` で確かめる)
 const sectionNames = () =>
-  screen.queryAllByRole("region").map((el) => el.getAttribute("aria-label"));
+  screen
+    .queryAllByRole("region")
+    .map((el) => el.getAttribute("aria-label"))
+    .filter((name) => name !== "書き出し");
 const select = (...ids: string[]) => act(() => state().setSelection(ids));
 const field = (name: string) => screen.getByRole("textbox", { name });
 const type = (input: HTMLElement, value: string, key = "Enter") => {
