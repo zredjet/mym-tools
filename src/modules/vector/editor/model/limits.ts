@@ -1,7 +1,7 @@
 import limits from "./limits.json";
 
 /**
- * payload v2 の上限と書式 (`docs/canvas-editor-design.md` §3.7)。
+ * payload v2 の上限と書式 (`docs/canvas-editor-design.md` §3.5)。
  * 値は `limits.json` が正典で、Rust 側 (`src-tauri/src/modules/vector/`) も同じファイルを読む。
  */
 export const CANVAS_LIMITS = limits;
