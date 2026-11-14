@@ -181,10 +181,13 @@ function wrapParagraph(paragraph: string, context: WrapContext, rows: Row[]): vo
   /** 収まるかの判定に使う幅 (編集欄の幅と描画の幅の広いほう) */
   const editorWidth = (parts: readonly string[]) =>
     Math.max(editorOf(parts), measure(trim(parts.join(""))));
-  /** 行末で詰められる幅。続く文字 `next` は、行の末尾に空白がないときだけ効く */
+  /**
+   * 行末で詰められる幅。行の末尾に空白がぶら下がるときは詰めない (約物が行の終わりにないので、
+   * Chromium の編集欄も詰めずに空白の後で折り返す)
+   */
   const squeezeOf = (text: string, next: string) => {
     const visible = trim(text);
-    return squeeze(visible, visible.length === text.length ? next : "");
+    return visible.length === text.length ? squeeze(visible, next) : 0;
   };
   /** 幅 `width` (`editorWidth`) の行が収まるか */
   const fits = (parts: readonly string[], width: number, next = "") =>

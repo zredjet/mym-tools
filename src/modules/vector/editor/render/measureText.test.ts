@@ -69,6 +69,24 @@ afterEach(() => {
   for (const element of document.querySelectorAll("[data-canvas-text-measure]")) element.remove();
 });
 
+/**
+ * Range の getClientRects を差し替える (WKWebView の代わり)。jsdom が持っていれば戻せるように元を覚える。
+ * `rectsOf` が null を返したら、getBoundingClientRect の矩形 1 つを返す。
+ */
+function stubClientRects(rectsOf: (range: Range) => DOMRect[] | null) {
+  const original = Object.getOwnPropertyDescriptor(Range.prototype, "getClientRects");
+  Object.defineProperty(Range.prototype, "getClientRects", {
+    configurable: true,
+    value(this: Range) {
+      return rectsOf(this) ?? [this.getBoundingClientRect()];
+    },
+  });
+  return () => {
+    if (original) Object.defineProperty(Range.prototype, "getClientRects", original);
+    else delete (Range.prototype as { getClientRects?: unknown }).getClientRects;
+  };
+}
+
 describe("letterSpacingWidth", () => {
   it("書記素クラスタごとに字間を足す (最後の文字の後にも付く)", () => {
     expect(letterSpacingWidth("abc", 2)).toBe(6);
@@ -538,6 +556,35 @@ describe("createLineBreakProbe (DOM のコード)", () => {
     expect(document.documentElement.querySelector("div[lang]")).toBeNull();
   });
 
+  it("次の行へ送られた文字に前の行の幅 0 の矩形も返されても (WKWebView)、送られたとみなす", () => {
+    // WebKit の折り返し。送られた文字の範囲は、1 行目の末尾の幅 0 の矩形と、2 行目の矩形を返す
+    const ends = {
+      breakAfterSolidus: 8,
+      breakHyphenBeforeDigit: 3,
+      breakBeforeAsciiPrefix: 5,
+      ideographicSpaceHangs: 3,
+    };
+    stubRangeTops(firstLineEnds(ends));
+    const restore = stubClientRects((range) => {
+      const rect = range.getBoundingClientRect();
+      return rect.top > 0
+        ? [{ top: 0, width: 0 } as DOMRect, { top: rect.top, width: 8 } as DOMRect]
+        : null;
+    });
+    try {
+      stubSpanWidths(384, 379.2);
+      expect(createLineBreakProbe(() => document)()).toEqual({
+        breakAfterSolidus: true,
+        breakHyphenBeforeDigit: false,
+        breakBeforeAsciiPrefix: true,
+        keepIdeographicSpace: true,
+        shapePerUnit: true,
+      });
+    } finally {
+      restore();
+    }
+  });
+
   it("行が分かれていなければ (レイアウトがない) 決めない。結果は 1 回だけ求める", () => {
     const calls = stubRangeTops(() => 0);
     const probe = createLineBreakProbe(() => document);
@@ -627,6 +674,63 @@ describe("createLineEndTrimProbe (DOM のコード)", () => {
     ).toBe("");
     fail = false;
     expect(probe("あ", "\u300d", font)).toBe(0.5);
+  });
+
+  /**
+   * WKWebView の代わり: 詰めない。1 文字 16。狭めると約物は前の文字ごと 2 行目へ送られるが、送られた約物の
+   * 範囲は 1 行目の末尾の幅 0 の矩形も返し、それを含めて囲む矩形の上端は 1 行目になる。
+   */
+  function stubWkWebView() {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => ({ width: 100 }) as DOMRect,
+    );
+    const moved = (range: Range) =>
+      Number.parseFloat((range.startContainer.parentElement as HTMLElement).style.width) < 64;
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value(this: Range) {
+        const { startOffset: from, endOffset: to } = this;
+        if (from === 0 && to === 1) return { top: 0, width: 16 } as DOMRect;
+        if (from === 3) return { top: 0, width: 16 } as DOMRect;
+        // 送られた後の 1〜4 文字目を囲む矩形は、2 行にまたがって 1 行目の幅に縮んで見える
+        return { top: 0, width: moved(this) ? 48.3 : 64 } as DOMRect;
+      },
+    });
+    return stubClientRects((range) =>
+      range.startOffset === 3 && moved(range)
+        ? [{ top: 0, width: 0 } as DOMRect, { top: 20, width: 16 } as DOMRect]
+        : null,
+    );
+  }
+
+  it("送られた約物に前の行の幅 0 の矩形も返されても (WKWebView)、残ったと数えない", () => {
+    const restore = stubWkWebView();
+    try {
+      const probe = createLineEndTrimProbe(() => document);
+      expect(probe(" ", "\u300d", font)).toBe(0);
+      expect(probe("\t", "\u3002", font)).toBe(0);
+    } finally {
+      restore();
+    }
+  });
+
+  it("縮んだ幅が字の送りの半分を大きく超えるもの (測り違い) は採らない", () => {
+    stubChromium();
+    // 1 行目に残ったまま、行が 15 縮んだように見える
+    const original = Range.prototype.getBoundingClientRect;
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value(this: Range) {
+        const rect = original.call(this);
+        const narrowed =
+          Number.parseFloat((this.startContainer.parentElement as HTMLElement).style.width) < 64;
+        if (narrowed && this.startOffset === 0 && this.endOffset === 4)
+          return { top: 0, width: 49 * 1.25 } as DOMRect;
+        if (narrowed && this.startOffset === 3) return { top: 0, width: 16 * 1.25 } as DOMRect;
+        return rect;
+      },
+    });
+    expect(createLineEndTrimProbe(() => document)("あ", "\u300d", font)).toBe(0);
   });
 
   it("測れなければ (レイアウトのない環境) 詰めない", () => {

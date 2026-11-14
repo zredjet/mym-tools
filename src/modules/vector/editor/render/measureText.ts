@@ -366,6 +366,16 @@ function shapesPerUnit(doc: Document): boolean {
 }
 
 /**
+ * 範囲の、幅のある矩形。WKWebView は、次の行へ送られた文字の範囲にも、前の行の末尾の幅 0 の矩形を
+ * 返すので、それを数えない。幅のある矩形がなければ (幅 0 の文字、矩形を返さない環境) 範囲を囲む矩形。
+ */
+function visibleRects(range: Range): DOMRect[] {
+  const list = typeof range.getClientRects === "function" ? Array.from(range.getClientRects()) : [];
+  const rects = list.filter((rect) => rect.width > 0);
+  return rects.length > 0 ? rects : [range.getBoundingClientRect()];
+}
+
+/**
  * 折り返しの規則を確かめる文字列。`text` を幅 `width` (フォント `font`) に置き、`index` の文字が 1 行目に
  * 残るかを見る。`index` は行頭に来ない文字にする (WebKit は、折り返した直後の文字の範囲を前の行の末尾として返す)。
  * - `/` の後: `aaaa/` が 1 行目に残れば `/` の後で折り返す (WebKit)。残らなければ単語ごと次の行へ (Chromium)
@@ -427,7 +437,8 @@ export function createLineBreakProbe(
         const topOf = (index: number) => {
           range.setStart(text, index);
           range.setEnd(text, index + 1);
-          return range.getBoundingClientRect().top;
+          const rects = visibleRects(range);
+          return (rects[rects.length - 1] as DOMRect).top;
         };
         const first = topOf(0);
         // 行が分かれたかは最後の文字で見る
@@ -466,7 +477,8 @@ const LETTER_OR_DIGIT = /^[\p{L}\p{N}]/u;
  * 行末の約物を詰める割合 (`MetricsTextMeasurer.lineEndTrim`) を、編集欄と同じ CSS の要素で、フォント・字間・
  * 末尾の 2 文字の組ごとに確かめる (Chromium の `text-spacing-trim`。詰めるかは字と、その前の文字で変わる。
  * たとえば `〛` は詰めず、`」` の後の `、` は詰める)。`ああ` + 前の文字 + 約物 + `い` を、行の幅より少しだけ
- * 狭い幅に置き、約物が 1 行目に残れば、行の縮んだ幅を約物の幅で割った値を返す。測れない環境では 0。
+ * 狭い幅に置き、約物が 1 行目に残れば、行の縮んだ幅を約物の幅で割った値を返す。残ったかは幅のある矩形で
+ * 見る (`visibleRects`)。縮んだ幅が字の送りの半分を超えるものは採らない。測れない環境では 0。
  * 確かめた要素の本文は終わったら空にする。例外が出たら結果を覚えず、次に確かめ直す。
  */
 export function createLineEndTrimProbe(
@@ -522,21 +534,26 @@ export function createLineEndTrimProbe(
         box.textContent = `ああ${before}${last}い`;
         const text = box.firstChild as Text;
         const range = doc.createRange();
-        const rectOf = (from: number, to: number) => {
+        const select = (from: number, to: number) => {
           range.setStart(text, from);
           range.setEnd(text, to);
-          return range.getBoundingClientRect();
+          return range;
         };
         const start = 2 + before.length;
         const end = start + last.length;
-        const full = rectOf(0, end).width;
-        const charWidth = rectOf(start, end).width;
+        const full = select(0, end).getBoundingClientRect().width;
+        const charWidth = select(start, end).getBoundingClientRect().width;
         if (charWidth > 0) {
           // 詰めずには収まらない、少しだけ狭い幅
           box.style.width = `${(full - Math.min(1, charWidth / 4)) / scale}px`;
-          if (rectOf(start, end).top === rectOf(0, 1).top) {
-            const ratio = (full - rectOf(0, end).width) / charWidth;
-            if (ratio > 0.01 && ratio < 1) result = ratio;
+          const firstTop = (visibleRects(select(0, 1))[0] as DOMRect).top;
+          const stays = visibleRects(select(start, end)).every((rect) => rect.top === firstTop);
+          if (stays) {
+            const shrink = (full - select(0, end).getBoundingClientRect().width) / scale;
+            // 詰めるのは字の送り (字間を除く) の半分まで。それより縮んだように見えたら測り違いとして採らない
+            const advance = charWidth / scale - font.letterSpacing;
+            if (shrink > 0.01 * (charWidth / scale) && shrink <= advance * 0.55 + 0.05)
+              result = shrink / (charWidth / scale);
           }
         }
       }
