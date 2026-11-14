@@ -139,4 +139,35 @@ describe("validatePayload の個別の規則", () => {
     payload["assets"].img1.data = "iVBORw0KGgo!";
     expect(validatePayload(payload)).toMatch(/base64/);
   });
+
+  // Rust の base64 0.22 `STANDARD` で確かめた合否 (PR #165 の検証が使う)
+  it.each([
+    ["/9j/4A==", true], // FF D8 FF E0
+    ["/9j/4B==", false], // 最後の文字の使わないビットが 0 でない
+    ["/9j/4EE=", true], // FF D8 FF E0 41
+    ["/9j/4EF=", false],
+    ["/9j/4A", false], // パディングなし
+    ["/9j/4A=", false],
+    ["/9j/4A===", false],
+    ["/9j/ 4A==", false], // 空白
+    ["_9j-4A==", false], // URL 用の字母
+    ["", false],
+  ])("base64 %j の合否は Rust と同じ (%s)", (data, ok) => {
+    const payload = full();
+    payload["assets"].img1.mime = "image/jpeg";
+    payload["assets"].img1.data = data;
+    if (ok) expect(validatePayload(payload)).toBeNull();
+    else expect(validatePayload(payload)).toMatch(/^assets\.img1\.data: /);
+  });
+
+  it("アセットの width / height は 0 以上 maxSize 以下 (Rust と同じ)", () => {
+    const payload = full();
+    payload["assets"].img1.width = 0;
+    payload["assets"].svgA.height = 0;
+    expect(validatePayload(payload)).toBeNull();
+    payload["assets"].img1.width = -1;
+    expect(validatePayload(payload)).toMatch(/img1\.width/);
+    payload["assets"].img1.width = 100001;
+    expect(validatePayload(payload)).toMatch(/img1\.width/);
+  });
 });

@@ -297,6 +297,21 @@ function checkNode(key: string, value: unknown): NodeInfo {
 // ---------------------------------------------------------------------------
 
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/**
+ * Rust の `base64::engine::general_purpose::STANDARD` (0.22) と同じ合否にする。
+ * 標準の字母で、パディングは必須かつ正規の形、最後の文字の使わないビットは 0
+ * (`QR==` や `QUJ=` は `atob` では読めるが Rust は拒否する)。
+ */
+function isCanonicalBase64(data: string): boolean {
+  if (!BASE64.test(data)) return false;
+  if (data.endsWith("=="))
+    return (BASE64_ALPHABET.indexOf(data.charAt(data.length - 3)) & 0x0f) === 0;
+  if (data.endsWith("="))
+    return (BASE64_ALPHABET.indexOf(data.charAt(data.length - 2)) & 0x03) === 0;
+  return true;
+}
 
 /** base64 の先頭 `bytes` バイトだけを復号する。 */
 function decodeHead(data: string, bytes: number): Uint8Array {
@@ -313,7 +328,7 @@ const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const ascii = (s: string) => [...s].map((c) => c.charCodeAt(0));
 
 function checkImageData(mime: string, data: string, path: string): void {
-  if (data.length === 0 || !BASE64.test(data)) fail(path, "base64 が不正です");
+  if (!isCanonicalBase64(data)) fail(path, "base64 が不正です");
   const head = decodeHead(data, 24);
   if (mime === "image/png") {
     if (head.length < 24 || !startsWith(head, PNG_SIGNATURE))
@@ -360,8 +375,9 @@ function checkAsset(key: string, value: unknown): "image" | "svg" {
     }
     if (extracted !== text) fail(`${path}.text`, "SVG から抽出した文字と一致しません");
   }
-  range(asset["width"], `${path}.width`, 0, L.maxSize, true);
-  range(asset["height"], `${path}.height`, 0, L.maxSize, true);
+  // §3.5 に規則がないので、Rust の検証 (PR #165) と同じ 0 以上 maxSize 以下にそろえる
+  range(asset["width"], `${path}.width`, 0, L.maxSize);
+  range(asset["height"], `${path}.height`, 0, L.maxSize);
   return kind;
 }
 
