@@ -1,8 +1,8 @@
 import { CANVAS_LIMITS } from "../../model/limits";
-import { useEditorStore } from "../../state/store";
+import { editorStore, useEditorStore } from "../../state/store";
 import { NumberField } from "../fields/NumberField";
 import { FieldGrid, Section } from "../fields/Section";
-import { applyToSelection, memoBySelection } from "../selection";
+import { memoBySelection } from "../selection";
 import {
   readPosition,
   setBoundsField,
@@ -39,6 +39,8 @@ const positionKey = memoBySelection((doc, selection) =>
  */
 export function PositionSection() {
   const key = useEditorStore((s) => positionKey(s.doc, s.selection));
+  const selection = useEditorStore((s) => s.selection);
+  const apply = editorStore.getState().apply;
   const position = JSON.parse(key) as ReturnType<typeof readPosition>;
   if (!position) return null;
   return (
@@ -52,8 +54,9 @@ export function PositionSection() {
                 ariaLabel={aria}
                 value={position.values[field]}
                 {...COORD}
-                onCommit={(value) =>
-                  applyToSelection((doc, selection) => setLineField(doc, selection, field, value))
+                targets={selection}
+                onCommit={(value, targets) =>
+                  apply((doc) => setLineField(doc, targets, field, value))
                 }
               />
             ))
@@ -64,8 +67,9 @@ export function PositionSection() {
                 ariaLabel={aria}
                 value={position.values[field]}
                 {...(field === "x" || field === "y" ? COORD : SIZE)}
-                onCommit={(value) =>
-                  applyToSelection((doc, selection) => setBoundsField(doc, selection, field, value))
+                targets={selection}
+                onCommit={(value, targets) =>
+                  apply((doc) => setBoundsField(doc, targets, field, value))
                 }
               />
             ))}

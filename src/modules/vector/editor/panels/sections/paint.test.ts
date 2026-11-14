@@ -64,6 +64,17 @@ describe("停止点", () => {
     expect(added?.map((s) => s.offset)).toEqual([0, 0.2, 0.6, 1]);
     expect(added?.[2]?.color).toBe("#FF0000");
   });
+  it("丸めても昇順を保つ", () => {
+    const close = [
+      { offset: 0.33333, color: "#000000", opacity: 1 },
+      { offset: 0.33334, color: "#FFFFFF", opacity: 1 },
+    ];
+    const added = addGradientStop(close)!;
+    const offsets = added.map((s) => s.offset);
+    expect(offsets).toEqual([...offsets].sort((a, b) => a - b));
+    expect(offsets[1]).toBeGreaterThanOrEqual(0.33333);
+    expect(offsets[1]).toBeLessThanOrEqual(0.33334);
+  });
   it("上限では足せず、下限では消せない", () => {
     const full = Array.from({ length: CANVAS_LIMITS.maxGradientStops }, (_, i) => ({
       offset: i / 20,

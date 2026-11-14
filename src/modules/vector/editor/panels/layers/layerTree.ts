@@ -135,6 +135,8 @@ export interface LayerDrop {
  * - `before` (行の上): その行のノードのすぐ前面 → 親の `children` の `index + 1`
  * - `after` (行の下): すぐ背面 → `index`。ただし開いていて子のある frame / group の下は、
  *   すぐ下の行がその最前面の子なので、中の最前面に入れる
+ * - `after` で `climb` が 1 以上: その行から `climb` 段上の祖先のすぐ背面。開いている frame / group の
+ *   最後の行の下から、その frame / group の背面 (兄弟の最背面を含む) へ動かすときに使う (§5.2)
  * - `inside`: frame / group の中の最前面
  */
 export function resolveLayerDrop(
@@ -143,6 +145,7 @@ export function resolveLayerDrop(
   overId: NodeId,
   zone: DropZone,
   overExpanded: boolean,
+  climb = 0,
 ): LayerDrop | null {
   const over = getNode(doc, overId);
   if (!over) return null;
@@ -150,15 +153,80 @@ export function resolveLayerDrop(
   if (draggedIds.some((id) => isAncestorOf(doc, id, overId))) return null;
   const intoContainer =
     zone === "inside" ||
-    (zone === "after" && overExpanded && isContainer(over) && over.children.length > 0);
+    (zone === "after" &&
+      climb === 0 &&
+      overExpanded &&
+      isContainer(over) &&
+      over.children.length > 0);
   if (intoContainer) {
     if (!isContainer(over)) return null;
     return { target: { kind: "node", id: overId }, index: undefined, zone: "inside" };
   }
-  const parent = getParent(doc, overId);
+  let anchor = overId;
+  if (zone === "after")
+    for (let i = 0; i < climb; i++) {
+      const parent = getParent(doc, anchor);
+      if (parent?.kind !== "node") return null;
+      anchor = parent.id;
+    }
+  const parent = getParent(doc, anchor);
   if (!parent) return null;
-  const index = getIndexInParent(doc, overId);
+  const index = getIndexInParent(doc, anchor);
   return { target: parent, index: zone === "before" ? index + 1 : index, zone };
+}
+
+/** 字下げ 1 段の幅と、行の左の余白 (px)。`LayerRow` の描き方と合わせる。 */
+export const LAYER_INDENT = 12;
+export const LAYER_ROW_PADDING = 4;
+
+/**
+ * 行 `index` の下 (`after`) に落とすとき選べる深さの範囲。下の行が浅い (閉じる段がある) ほど、
+ * 祖先の背面へも落とせる。最後の行の下はページ直下 (深さ 0) まで選べる。
+ * 開いていて子のある frame / group の下は中に入れるので null。
+ */
+export function afterDepthRange(
+  rows: readonly LayerRow[],
+  index: number,
+): { min: number; max: number } | null {
+  const row = rows[index];
+  if (!row || row.expanded) return null;
+  const next = rows[index + 1];
+  return { min: next ? Math.min(next.depth, row.depth) : 0, max: row.depth };
+}
+
+/** 行の中の横の位置から深さを選ぶ (範囲に収める)。 */
+export function depthAtOffset(offsetX: number, range: { min: number; max: number }): number {
+  const depth = Math.floor((offsetX - LAYER_ROW_PADDING) / LAYER_INDENT);
+  return Math.min(range.max, Math.max(range.min, depth));
+}
+
+/** ポインターの位置から求めた落とす候補。 */
+export interface DropCandidate {
+  overId: NodeId;
+  zone: DropZone;
+  /** `after` で何段上の祖先の背面に入れるか */
+  climb: number;
+}
+
+/**
+ * 行 `index` の今の矩形 (画面座標) とポインターの位置から、落とす候補を求める。
+ * 矩形はその時点で測ったものを渡す (一覧がスクロールしても判定がずれないように)。
+ * 行より下 (ratio > 1) は、その行の `after` として扱う。
+ */
+export function locateDrop(
+  rows: readonly LayerRow[],
+  index: number,
+  rect: { left: number; top: number; height: number },
+  point: { x: number; y: number },
+): DropCandidate | null {
+  const row = rows[index];
+  if (!row) return null;
+  const ratio = rect.height > 0 ? (point.y - rect.top) / rect.height : 0.5;
+  const zone = dropZoneAt(ratio, row.container);
+  if (zone !== "after") return { overId: row.id, zone, climb: 0 };
+  const range = afterDepthRange(rows, index);
+  const climb = range ? row.depth - depthAtOffset(point.x - rect.left, range) : 0;
+  return { overId: row.id, zone, climb };
 }
 
 /**

@@ -2,7 +2,7 @@ import { Minus, Plus } from "lucide-react";
 
 import { CANVAS_LIMITS } from "../../model/limits";
 import { mapNodes, updateNodes } from "../../model/transform";
-import type { CanvasDocument, Stroke } from "../../model/types";
+import type { CanvasDocument, NodeId, Stroke } from "../../model/types";
 import { editorStore } from "../../state/store";
 import { ColorField } from "../fields/ColorField";
 import { NumberField } from "../fields/NumberField";
@@ -27,10 +27,11 @@ export function StrokeSection({ nodes }: { nodes: readonly StrokeNode[] }) {
     .filter((node) => node.type !== "line" && node.stroke !== null)
     .map((node) => node.id);
 
-  const patchStroke = (patch: Partial<Stroke>) => (doc: CanvasDocument) =>
-    mapNodes(doc, withStroke, (node) =>
-      "stroke" in node && node.stroke ? { stroke: { ...node.stroke, ...patch } } : null,
-    );
+  const patchStroke =
+    (patch: Partial<Stroke>, targets: readonly NodeId[]) => (doc: CanvasDocument) =>
+      mapNodes(doc, targets, (node) =>
+        "stroke" in node && node.stroke ? { stroke: { ...node.stroke, ...patch } } : null,
+      );
 
   const actions = (
     <>
@@ -63,7 +64,8 @@ export function StrokeSection({ nodes }: { nodes: readonly StrokeNode[] }) {
             <ColorField
               ariaLabel="線の色"
               value={commonValue(strokes.map((s) => s.color.toUpperCase()))}
-              toRecipe={(color) => patchStroke({ color })}
+              targets={withStroke}
+              toRecipe={(color, targets) => patchStroke({ color }, targets)}
             />
             <NumberField
               label=""
@@ -71,7 +73,10 @@ export function StrokeSection({ nodes }: { nodes: readonly StrokeNode[] }) {
               suffix="%"
               value={toPercent(commonValue(strokes.map((s) => s.opacity)))}
               {...PERCENT}
-              onCommit={(value) => apply(patchStroke({ opacity: fromPercent(value) }))}
+              targets={withStroke}
+              onCommit={(value, targets) =>
+                apply(patchStroke({ opacity: fromPercent(value) }, targets))
+              }
             />
           </FieldGrid>
           <FieldGrid>
@@ -83,7 +88,8 @@ export function StrokeSection({ nodes }: { nodes: readonly StrokeNode[] }) {
               min={0}
               minExclusive
               max={CANVAS_LIMITS.maxStrokeWidth}
-              onCommit={(value) => apply(patchStroke({ width: value }))}
+              targets={withStroke}
+              onCommit={(value, targets) => apply(patchStroke({ width: value }, targets))}
             />
           </FieldGrid>
         </>
