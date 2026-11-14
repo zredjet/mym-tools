@@ -90,4 +90,46 @@ describe("fitTextNodes", () => {
     const doc = docWith(createText({ id: "t1", text: "abc", width: 7, height: 3 }));
     expect(fitTextNodes(doc, null, { measure: () => Number.NaN })).toBe(doc);
   });
+
+  it("auto-height は幅で折り返した行の数に合わせて高さを決める", () => {
+    // 1 文字 8、幅 24 なら 1 行に 3 文字
+    const doc = docWith(
+      createText({ id: "t1", text: "あいうえお", width: 24, height: 0, sizing: "auto-height" }),
+    );
+    expect(textOf(fitTextNodes(doc, ["t1"], measurer), "t1")).toMatchObject({
+      width: 24,
+      height: 45,
+    });
+  });
+
+  it("中央揃えの x は丸めず、同じ向きの変更を重ねても中心が変わらない", () => {
+    // 1 文字の幅は フォントサイズ × 0.5。"abcde" はサイズ 16 で幅 40、中心は 100 + 20 = 120
+    let doc = docWith(
+      createText({ id: "t1", text: "abcde", x: 100, width: 40, height: 23, align: "center" }),
+    );
+    const center = (d: CanvasDocument) => textOf(d, "t1").x + textOf(d, "t1").width / 2;
+    expect(center(doc)).toBe(120);
+    for (let size = 17; size <= 36; size++) {
+      const node = { ...textOf(doc, "t1"), fontSize: size };
+      doc = fitTextNodes({ ...doc, nodes: { ...doc.nodes, t1: node } }, ["t1"], measurer);
+      expect(center(doc)).toBe(120);
+    }
+    // サイズ 17 では幅 42.5 を切り上げて 43、x は 0.5 刻み
+    const once = docWith(
+      createText({ id: "t1", text: "abcde", x: 100, width: 40, height: 23, align: "center" }),
+    );
+    const odd = fitTextNodes(
+      { ...once, nodes: { ...once.nodes, t1: { ...textOf(once, "t1"), fontSize: 17 } } },
+      ["t1"],
+      measurer,
+    );
+    expect(textOf(odd, "t1")).toMatchObject({ x: 98.5, width: 43 });
+    expect(textOf(doc, "t1")).toMatchObject({ x: 75, width: 90 });
+  });
+
+  it("行の高さの浮動小数の誤差では切り上げない", () => {
+    // 22.4 × 5 = 112.00000000000001
+    const doc = docWith(createText({ id: "t1", text: "a\nb\nc\nd\ne" }));
+    expect(textOf(fitTextNodes(doc, null, measurer), "t1").height).toBe(112);
+  });
 });

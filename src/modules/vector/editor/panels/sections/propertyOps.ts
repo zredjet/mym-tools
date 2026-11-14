@@ -6,6 +6,9 @@ import { CANVAS_LIMITS } from "../../model/limits";
 import { resizeNodes, translateNodes, updateNodes, type NodePatch } from "../../model/transform";
 import { getNode, topLevelIds } from "../../model/tree";
 import type { CanvasDocument, CanvasNode, NodeId, Shadow, Stroke } from "../../model/types";
+import { canvasTextMeasurer } from "../../render/measureText";
+import type { TextMeasurer } from "../../render/types";
+import { fitTextNodes } from "../../text/fit";
 import { commonValue, type Mixed } from "../fields/values";
 import { geometryWithinLimits } from "../limits";
 
@@ -65,6 +68,7 @@ export function readPosition(
 /**
  * X / Y / W / H を当てる。X と Y は外接矩形の左上がその値になるように動かし (`translateNodes`)、
  * W と H は左上を保って大きさを変える (`resizeNodes`、整数に丸める)。複数選択はそれぞれに当てる。
+ * テキストの大きさは同じ変更の中で求め直す (`auto-height` の幅を変えたら、高さが折り返しの結果になる。§4.7)。
  * 結果が範囲の外へ出るなら変えない。
  */
 export function setBoundsField(
@@ -72,6 +76,7 @@ export function setBoundsField(
   selection: readonly NodeId[],
   field: BoundsField,
   value: number,
+  measurer: TextMeasurer = canvasTextMeasurer,
 ): CanvasDocument {
   const ids = topLevelIds(doc, selection);
   let next = doc;
@@ -93,6 +98,7 @@ export function setBoundsField(
       next = resizeNodes(next, [id], from, { ...from, [field]: value }, { round: true });
     }
   }
+  if (field === "width" || field === "height") next = fitTextNodes(next, ids, measurer);
   return next !== doc && geometryWithinLimits(next, ids) ? next : doc;
 }
 

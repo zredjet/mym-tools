@@ -428,6 +428,9 @@ export function buildNodeShell(node: CanvasNode, ctx: ShellContext): SvgEl | nul
           ...paintAttrs(node.fill, box, id("fill"), defs),
           filter,
           "xml:space": "preserve",
+          // 字の送りを表示の倍率 (Retina、キャンバスのズーム、UI スケール) に関係なく、指定のフォントサイズで
+          // 組ませる。付けないと、大きさで送りの比が変わるフォント (Apple Color Emoji、SF) の幅が計測と合わない
+          "text-rendering": "geometricPrecision",
         },
         tspans,
       );

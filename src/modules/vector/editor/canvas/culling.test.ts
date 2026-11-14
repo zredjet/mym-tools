@@ -95,8 +95,9 @@ describe("描く範囲", () => {
       lineHeight: 20,
     });
     const bounds = renderBounds(docOf([text], ["t"]), "t", measurer);
-    expect(bounds?.width).toBeGreaterThanOrEqual(50);
-    expect(bounds?.height).toBeGreaterThanOrEqual(60);
+    // 幅 10 に 2 文字ずつ折り返して 7 行 (高さ 140) になり、ノードの高さ 10 を超える
+    expect(bounds?.width).toBeGreaterThanOrEqual(10);
+    expect(bounds?.height).toBeGreaterThanOrEqual(140);
   });
 
   it("水平な線も幅 0 にならない", () => {

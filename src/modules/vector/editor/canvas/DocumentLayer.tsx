@@ -31,6 +31,8 @@ export const NodeView = memo(function NodeView({ id, depth }: NodeViewProps) {
     const current = getNode(state.doc, id);
     return current ? assetOf(state.doc, current) : undefined;
   });
+  // 本文の編集中のテキストは描かない (入力欄と二重に見えるため。§4.7)
+  const editing = useEditorStore((state) => state.editingTextId === id);
   const shell = useMemo(
     () =>
       node
@@ -38,7 +40,7 @@ export const NodeView = memo(function NodeView({ id, depth }: NodeViewProps) {
         : null,
     [node, asset],
   );
-  if (!node || !shell) return null;
+  if (!node || !shell || editing) return null;
   // 壊れた文書の循環で止まらなくならないよう、深さの上限を超えたら子を描かない
   const slot =
     isContainer(node) && depth <= CANVAS_LIMITS.maxDepth

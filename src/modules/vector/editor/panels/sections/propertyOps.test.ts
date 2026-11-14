@@ -89,7 +89,8 @@ describe("setBoundsField", () => {
       id: "p1",
     });
     const wide = setBoundsField(withText, ["t1"], "width", 120);
-    expect(wide.nodes.t1).toMatchObject({ width: 120, height: 0, sizing: "auto-height" });
+    // auto-height になり、高さは折り返した結果 (空の本文は 1 行 = 16 × 1.4 を切り上げて 23) に求め直す
+    expect(wide.nodes.t1).toMatchObject({ width: 120, height: 23, sizing: "auto-height" });
     const tall = setBoundsField(withText, ["t1"], "height", 40);
     expect(tall.nodes.t1).toMatchObject({ width: 0, height: 40, sizing: "fixed" });
   });
