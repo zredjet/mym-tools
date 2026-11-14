@@ -1,4 +1,4 @@
-import type { Tool } from "./types";
+import { createDragTool } from "./create/dragCreateTool";
 
-/** 矩形の作成。中身は「作成ツールと画像」のセッションで実装する。 */
-export const rectTool: Tool = { id: "rect", cursor: "crosshair" };
+/** 矩形の作成 (§4.4)。動きは `create/dragCreateTool.ts` を参照。 */
+export const rectTool = createDragTool("rect");

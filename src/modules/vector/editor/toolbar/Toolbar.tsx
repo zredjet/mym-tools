@@ -10,6 +10,10 @@ import { useEffect, useId, useRef, useState, type MouseEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
 import { getCanvasViewSize, runViewCommand, type ViewCommand } from "../canvas/viewCommands";
+import { importFromPicker } from "../assets/importFile";
+import { ImportNotice } from "../assets/ImportNotice";
+import { useImportFileReader } from "../assets/reader";
+import { useImportStatus } from "../assets/status";
 import { canvasTextMeasurer } from "../render/measureText";
 import { editorStore, useEditorStore } from "../state/store";
 import { formatZoom, TOOLBAR_TOOLS, ZOOM_ITEMS } from "./toolbarItems";
@@ -101,40 +105,58 @@ function ZoomMenu() {
   );
 }
 
+/**
+ * 「画像」のボタン: このツールに切り替えず、すぐファイル選択を開いて表示範囲の中央に置く (§4.8)。
+ * 取り消したら何もしない (選択ツールのまま)。
+ */
+function startImageImport() {
+  const state = editorStore.getState();
+  if (state.toolId !== "select") state.setTool("select");
+  void importFromPicker(editorStore);
+}
+
 export function Toolbar() {
   const toolId = useEditorStore((state) => state.toolId);
+  const reader = useImportFileReader();
+  const { busy } = useImportStatus();
   return (
-    <div
-      role="toolbar"
-      aria-label="ツール"
-      className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg)] p-1 shadow-[0_8px_24px_rgba(0,0,0,0.10)]"
-    >
-      {TOOLBAR_TOOLS.map((tool) => {
-        const Icon = tool.icon;
-        const active = tool.id === toolId;
-        const title = tool.shortcut ? `${tool.label} (${tool.shortcut})` : tool.label;
-        return (
-          <Button
-            key={tool.id}
-            variant="ghost"
-            size="sm"
-            aria-label={tool.label}
-            aria-pressed={active}
-            title={title}
-            className={cn(
-              "w-7 px-0",
-              active &&
-                "bg-[var(--bg-accent-soft)] !text-[var(--accent)] hover:bg-[var(--bg-accent-soft)]",
-            )}
-            onMouseDown={keepFocus}
-            onClick={() => editorStore.getState().setTool(tool.id)}
-          >
-            <Icon size={16} aria-hidden="true" />
-          </Button>
-        );
-      })}
-      <div className="mx-1 h-5 w-px bg-[var(--border)]" aria-hidden="true" />
-      <ZoomMenu />
-    </div>
+    <>
+      <ImportNotice />
+      <div
+        role="toolbar"
+        aria-label="ツール"
+        className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg)] p-1 shadow-[0_8px_24px_rgba(0,0,0,0.10)]"
+      >
+        {TOOLBAR_TOOLS.map((tool) => {
+          const Icon = tool.icon;
+          const active = tool.id === toolId;
+          const title = tool.shortcut ? `${tool.label} (${tool.shortcut})` : tool.label;
+          return (
+            <Button
+              key={tool.id}
+              variant="ghost"
+              size="sm"
+              aria-label={tool.label}
+              aria-pressed={active}
+              title={title}
+              className={cn(
+                "w-7 px-0",
+                active &&
+                  "bg-[var(--bg-accent-soft)] !text-[var(--accent)] hover:bg-[var(--bg-accent-soft)]",
+              )}
+              disabled={tool.id === "image" && (!reader || busy)}
+              onMouseDown={keepFocus}
+              onClick={() =>
+                tool.id === "image" ? startImageImport() : editorStore.getState().setTool(tool.id)
+              }
+            >
+              <Icon size={16} aria-hidden="true" />
+            </Button>
+          );
+        })}
+        <div className="mx-1 h-5 w-px bg-[var(--border)]" aria-hidden="true" />
+        <ZoomMenu />
+      </div>
+    </>
   );
 }

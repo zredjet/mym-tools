@@ -1,4 +1,4 @@
-import type { Tool } from "./types";
+import { createDragTool } from "./create/dragCreateTool";
 
-/** 楕円の作成。中身は「作成ツールと画像」のセッションで実装する。 */
-export const ellipseTool: Tool = { id: "ellipse", cursor: "crosshair" };
+/** 楕円の作成 (§4.4)。動きは `create/dragCreateTool.ts` を参照。 */
+export const ellipseTool = createDragTool("ellipse");

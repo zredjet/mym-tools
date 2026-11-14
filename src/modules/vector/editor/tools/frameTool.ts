@@ -1,4 +1,4 @@
-import type { Tool } from "./types";
+import { createDragTool } from "./create/dragCreateTool";
 
-/** フレームの作成。中身は「作成ツールと画像」のセッションで実装する。 */
-export const frameTool: Tool = { id: "frame", cursor: "crosshair" };
+/** フレームの作成 (§4.4)。動きは `create/dragCreateTool.ts` を参照。 */
+export const frameTool = createDragTool("frame");
