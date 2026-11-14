@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CANVAS_LIMITS } from "../model/limits";
 import { sampleDocument } from "../model/testing";
-import { getNode } from "../model/tree";
+import { deleteNodes } from "../model/structure";
+import { getNode, getParent } from "../model/tree";
 import { editorStore } from "../state/store";
 import { DEFAULT_VIEW_OPTIONS } from "../state/types";
 import { LayersPanel } from "./LayersPanel";
@@ -160,5 +161,130 @@ describe("LayersPanel の表示とロック", () => {
     act(() => state().undo());
     expect(getNode(state().doc, "r1")?.locked).toBe(false);
     expect(getNode(state().doc, "r1")?.visible).toBe(false);
+  });
+});
+
+describe("LayersPanel の名前の変更と確定の規則", () => {
+  const rename = (id: string) => {
+    fireEvent.doubleClick(row(id));
+    return screen.getByRole("textbox", { name: "レイヤーの名前" });
+  };
+
+  it("編集中の Undo で名前が変わっても、打っていなければ書き戻さない (Redo が残る)", () => {
+    render(<LayersPanel />);
+    let input = rename("r0");
+    fireEvent.change(input, { target: { value: "背景" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    input = rename("r0");
+    act(() => state().undo());
+    fireEvent.blur(input);
+    expect(getNode(state().doc, "r0")?.name).toBe("矩形");
+    expect(state().canRedo).toBe(true);
+  });
+
+  it("編集中にノードが消えたら何もしない", () => {
+    render(<LayersPanel />);
+    const input = rename("r0");
+    fireEvent.change(input, { target: { value: "背景" } });
+    act(() => state().apply((doc) => deleteNodes(doc, ["r0"])));
+    expect(state().revision).toBe(1);
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("編集中に祖先が閉じられたら、打った名前を確定してから外す", () => {
+    render(<LayersPanel />);
+    const input = rename("r3");
+    fireEvent.change(input, { target: { value: "アイコン" } });
+    fireEvent.click(within(row("f")).getByRole("button", { name: "閉じる" }));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(getNode(state().doc, "r3")?.name).toBe("アイコン");
+  });
+});
+
+describe("LayersPanel のドラッグ", () => {
+  const ROW_H = 32;
+  let scrollTop = 0;
+
+  /** 行を上から ROW_H ずつ並べた画面を作る (jsdom はレイアウトしないため)。 */
+  beforeEach(() => {
+    scrollTop = 0;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const rows = screen.queryAllByRole("treeitem");
+      const index = rows.indexOf(this);
+      if (index >= 0) {
+        const top = index * ROW_H - scrollTop;
+        return DOMRect.fromRect({ x: 0, y: top, width: 220, height: ROW_H });
+      }
+      if (this.getAttribute("role") === "tree")
+        return DOMRect.fromRect({ x: 0, y: 0, width: 220, height: 1000 });
+      return DOMRect.fromRect({ x: 0, y: 0, width: 0, height: 0 });
+    });
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      value: (_x: number, y: number) =>
+        screen.queryAllByRole("treeitem").filter((el) => {
+          const rect = el.getBoundingClientRect();
+          return y >= rect.top && y < rect.bottom;
+        }),
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(document, "elementsFromPoint");
+  });
+
+  const pointer = (
+    type: "pointerDown" | "pointerMove" | "pointerUp",
+    target: Element | Document,
+    x: number,
+    y: number,
+  ) =>
+    act(() => {
+      fireEvent[type](target, {
+        clientX: x,
+        clientY: y,
+        button: 0,
+        buttons: 1,
+        isPrimary: true,
+        pointerId: 1,
+      });
+    });
+
+  it("ドラッグの途中で一覧がスクロールしても、今ポインターの下にある行で判定する", () => {
+    render(<LayersPanel />);
+    // 行: r0, f, f2, r3, grp, l1, r2, r1
+    pointer("pointerDown", row("r0"), 100, 16);
+    pointer("pointerMove", document, 100, 40);
+    pointer("pointerMove", document, 100, 100); // r3 の上端 → r3 の前面 (f2 の中)
+    expect(row("r3").querySelector("span.absolute")).not.toBeNull();
+    scrollTop = ROW_H; // 一覧が 1 行分スクロールした
+    act(() => {
+      fireEvent.scroll(screen.getByRole("tree"));
+    });
+    // 同じ画面の位置の下は grp の上端 → grp の前面 (f の中)
+    pointer("pointerUp", document, 100, 100);
+    expect(getParent(state().doc, "r0")).toEqual({ kind: "node", id: "f" });
+  });
+
+  it("開いている最背面の frame の背面へ、最後の行の下の左端から落とせる", () => {
+    render(<LayersPanel />);
+    pointer("pointerDown", row("r0"), 100, 16);
+    pointer("pointerMove", document, 100, 40);
+    pointer("pointerMove", document, 2, 8 * ROW_H + 20); // 最後の行 (r1) の下の余白、左端
+    pointer("pointerUp", document, 2, 8 * ROW_H + 20);
+    expect(state().doc.pages[0]!.children).toEqual(["r0", "f"]);
+    expect(state().revision).toBe(1);
+  });
+
+  it("落とせない位置 (自分の子孫) には挿入線を出さない", () => {
+    render(<LayersPanel />);
+    pointer("pointerDown", row("f"), 100, 48);
+    pointer("pointerMove", document, 100, 70);
+    pointer("pointerMove", document, 100, 100); // r3 は f の子孫
+    expect(row("r3").querySelector("span.absolute")).toBeNull();
+    pointer("pointerUp", document, 100, 100);
+    expect(state().revision).toBe(0);
   });
 });

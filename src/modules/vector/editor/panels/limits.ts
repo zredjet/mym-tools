@@ -3,7 +3,7 @@
  * `translateNodes` / `resizeNodes` / `moveNodes` は上限を見ないので、パネルが確定の前に確かめる。
  */
 import { CANVAS_LIMITS } from "../model/limits";
-import { getDescendantIds, getNode } from "../model/tree";
+import { getDescendantIds, getNode, topLevelIds } from "../model/tree";
 import type { CanvasDocument, NodeId } from "../model/types";
 
 /**
@@ -24,4 +24,16 @@ export function geometryWithinLimits(doc: CanvasDocument, ids: readonly NodeId[]
         return false;
     }
   return true;
+}
+
+/**
+ * 選択への変更の結果が §3.5 の範囲を超えるなら、元の文書を返す。親の座標系が違うノードを
+ * 整列すると、frame の中での座標が上限を超えることがある (§5.3)。
+ */
+export function withinLimitsOrSame(
+  doc: CanvasDocument,
+  selection: readonly NodeId[],
+  next: CanvasDocument,
+): CanvasDocument {
+  return next !== doc && !geometryWithinLimits(next, topLevelIds(doc, selection)) ? doc : next;
 }

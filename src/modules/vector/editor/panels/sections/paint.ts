@@ -4,8 +4,11 @@
  * 絶対値 100 以下、`radius` は 0 より大きく 100 以下)。
  */
 import { CANVAS_LIMITS } from "../../model/limits";
+import { mapNodes } from "../../model/transform";
 import type {
+  CanvasDocument,
   GradientStop,
+  NodeId,
   LinearGradientPaint,
   Paint,
   Point,
@@ -102,8 +105,13 @@ export function addGradientStop(stops: readonly GradientStop[]): GradientStop[] 
   const left = sorted[at];
   const right = sorted[at + 1] ?? left;
   if (!left || !right) return null;
+  // 丸めで隣の停止点を越えないように、両隣の間に収める (同値は可)
+  const offset = Math.min(
+    right.offset,
+    Math.max(left.offset, roundTo((left.offset + right.offset) / 2, 4)),
+  );
   const stop: GradientStop = {
-    offset: roundTo((left.offset + right.offset) / 2, 4),
+    offset,
     color: left.color,
     opacity: roundTo((left.opacity + right.opacity) / 2, 4),
   };
@@ -165,3 +173,28 @@ export function withRadial(
 ): RadialGradientPaint {
   return { ...paint, ...patch };
 }
+
+export type Gradient = LinearGradientPaint | RadialGradientPaint;
+
+/**
+ * 対象のノードのうちグラデーションの塗りを持つものに、塗りごとの変更を当てる。
+ * 確定の時点の塗りから求めるので、入力の途中で文書が変わっても古い塗りを書き戻さない。
+ * `change` が null を返したノードは変えない。
+ */
+export function patchGradient(
+  targets: readonly NodeId[],
+  change: (paint: Gradient) => Gradient | null,
+): (doc: CanvasDocument) => CanvasDocument {
+  return (doc) =>
+    mapNodes(doc, targets, (node) => {
+      if (!("fill" in node) || node.fill === null || node.fill.type === "solid") return null;
+      const next = change(node.fill);
+      return next ? { fill: next } : null;
+    });
+}
+
+/** `index` 番目の停止点を変える (その停止点がなければ変えない)。 */
+export const patchStop =
+  (index: number, patch: Partial<GradientStop>) =>
+  (paint: Gradient): Gradient | null =>
+    paint.stops[index] ? { ...paint, stops: updateGradientStop(paint.stops, index, patch) } : null;

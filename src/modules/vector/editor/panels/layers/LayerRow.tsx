@@ -1,4 +1,3 @@
-import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { ChevronDown, ChevronRight, Eye, EyeOff, Lock, LockOpen } from "lucide-react";
 import { memo, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 
@@ -10,16 +9,24 @@ import { getNode } from "../../model/tree";
 import type { NodeId } from "../../model/types";
 import { editorStore, useEditorStore } from "../../state/store";
 import { isComposing } from "../fields/keys";
+import { selectionSet } from "../selection";
 import { commitLayerName, NODE_TYPE_ICONS } from "./layerActions";
-import type { DropZone, LayerRow as LayerRowData } from "./layerTree";
+import { LAYER_INDENT as INDENT, LAYER_ROW_PADDING as PADDING, type DropZone } from "./layerTree";
 
-/** 1 段の字下げ (px)。 */
-const INDENT = 12;
-
+/**
+ * 行の props は値だけにする (行の並びが変わって行のオブジェクトが作り直されても、
+ * 変わらない行は `memo` で描き直さない。§5.2)。
+ */
 export interface LayerRowProps {
-  row: LayerRowData;
+  id: NodeId;
+  /** ページ直下を 0 とする字下げの段 */
+  depth: number;
+  hasChildren: boolean;
+  expanded: boolean;
   /** この行の上に落とそうとしている位置 */
   dropZone: DropZone | null;
+  /** 挿入線の深さ (`before` / `after` のとき)。祖先の背面に落とすときは行より浅い */
+  dropDepth: number;
   /** ドラッグ中の行 (薄く出す) */
   dragging: boolean;
   onSelect(id: NodeId, modifiers: { shift: boolean; toggle: boolean }): void;
@@ -28,24 +35,25 @@ export interface LayerRowProps {
 
 /**
  * レイヤーパネルの 1 行。自分のノードだけを購読し、ほかのノードの変更では描き直さない。
- * 行全体がドラッグの取っ手 (4 px 動かすまではクリック)。
+ * 行全体がドラッグの取っ手 (4 px 動かすまではクリック)。ドラッグは一覧全体で 1 つの `useDraggable` が受け、
+ * 行は dnd-kit の context を購読しない (購読すると、行の並びが変わるたびに全行が描き直される)。
  */
 export const LayerRow = memo(function LayerRow({
-  row,
+  id,
+  depth,
+  hasChildren,
+  expanded,
   dropZone,
+  dropDepth,
   dragging,
   onSelect,
   onToggleExpanded,
 }: LayerRowProps) {
-  const { id, depth } = row;
   const node = useEditorStore((s) => getNode(s.doc, id));
-  const selected = useEditorStore((s) => s.selection.includes(id));
+  const selected = useEditorStore((s) => selectionSet(s.selection).has(id));
   const hovered = useEditorStore((s) => s.hoveredId === id);
   const [editing, setEditing] = useState(false);
   const element = useRef<HTMLDivElement | null>(null);
-
-  const drag = useDraggable({ id, disabled: editing });
-  const drop = useDroppable({ id });
 
   useEffect(() => {
     if (selected) element.current?.scrollIntoView?.({ block: "nearest" });
@@ -57,8 +65,6 @@ export const LayerRow = memo(function LayerRow({
 
   const setRef = (el: HTMLDivElement | null) => {
     element.current = el;
-    drag.setNodeRef(el);
-    drop.setNodeRef(el);
   };
 
   const toggle = (patch: { visible: boolean } | { locked: boolean }) => (event: MouseEvent) => {
@@ -71,12 +77,11 @@ export const LayerRow = memo(function LayerRow({
   return (
     <div
       ref={setRef}
-      {...drag.attributes}
-      {...drag.listeners}
+      tabIndex={0}
       role="treeitem"
       aria-level={depth + 1}
       aria-selected={selected}
-      aria-expanded={row.hasChildren ? row.expanded : undefined}
+      aria-expanded={hasChildren ? expanded : undefined}
       aria-label={displayName}
       data-layer-id={id}
       className={cn(
@@ -90,7 +95,7 @@ export const LayerRow = memo(function LayerRow({
         dragging && "opacity-50",
         dropZone === "inside" && "ring-2 ring-[var(--accent)] ring-inset",
       )}
-      style={{ paddingLeft: 4 + depth * INDENT }}
+      style={{ paddingLeft: PADDING + depth * INDENT }}
       onClick={(event) =>
         onSelect(id, { shift: event.shiftKey, toggle: event.metaKey || event.ctrlKey })
       }
@@ -110,11 +115,11 @@ export const LayerRow = memo(function LayerRow({
         }
       }}
     >
-      {row.hasChildren ? (
+      {hasChildren ? (
         <button
           type="button"
           tabIndex={-1}
-          aria-label={row.expanded ? "閉じる" : "開く"}
+          aria-label={expanded ? "閉じる" : "開く"}
           className="flex h-5 w-4 shrink-0 items-center justify-center text-[var(--fg-muted)] hover:text-[var(--fg)]"
           onPointerDown={stop}
           onDoubleClick={stop}
@@ -123,7 +128,7 @@ export const LayerRow = memo(function LayerRow({
             onToggleExpanded(id);
           }}
         >
-          {row.expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </button>
       ) : (
         <span className="w-4 shrink-0" />
@@ -131,6 +136,7 @@ export const LayerRow = memo(function LayerRow({
       <Icon
         size={14}
         aria-hidden="true"
+        data-row-id={id}
         className={cn("shrink-0", selected ? "text-[var(--accent)]" : "text-[var(--fg-muted)]")}
       />
       {editing ? (
@@ -191,7 +197,7 @@ export const LayerRow = memo(function LayerRow({
             "pointer-events-none absolute right-1 h-0.5 rounded-full bg-[var(--accent)]",
             dropZone === "before" ? "-top-px" : "-bottom-px",
           )}
-          style={{ left: 4 + depth * INDENT + 16 }}
+          style={{ left: PADDING + dropDepth * INDENT + 16 }}
         />
       )}
     </div>
@@ -201,15 +207,30 @@ export const LayerRow = memo(function LayerRow({
 /**
  * 名前の編集欄。Enter で確定、Esc で取消、フォーカスが外れたら確定。
  * 日本語入力の変換中の Enter と Esc は変換の操作として扱う。
+ * 何も打っていなければ確定しない (編集中の Undo で変わった名前を書き戻さない)。
+ * 祖先が閉じられるなどで欄が外れたときは、打ってあった名前を確定する。
  */
 function NameInput({ initial, onDone }: { initial: string; onDone(value: string | null): void }) {
   const [value, setValue] = useState(initial);
-  const done = useRef(false);
-  const finish = (result: string | null) => {
-    if (done.current) return;
-    done.current = true;
-    onDone(result);
+  const state = useRef({ done: false, value: initial, initial, onDone });
+
+  useEffect(
+    () => () => {
+      const current = state.current;
+      if (current.done) return;
+      current.done = true;
+      current.onDone(current.value === current.initial ? null : current.value);
+    },
+    [],
+  );
+
+  const finish = (commit: boolean) => {
+    const current = state.current;
+    if (current.done) return;
+    current.done = true;
+    onDone(commit && current.value !== current.initial ? current.value : null);
   };
+
   return (
     <input
       type="text"
@@ -220,7 +241,10 @@ function NameInput({ initial, onDone }: { initial: string; onDone(value: string 
       value={value}
       spellCheck={false}
       onFocus={(event) => event.currentTarget.select()}
-      onChange={(event) => setValue(event.target.value)}
+      onChange={(event) => {
+        state.current.value = event.target.value;
+        setValue(event.target.value);
+      }}
       onClick={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
@@ -229,13 +253,13 @@ function NameInput({ initial, onDone }: { initial: string; onDone(value: string 
         if (isComposing(event)) return;
         if (event.key === "Enter") {
           event.preventDefault();
-          finish(value);
+          finish(true);
         } else if (event.key === "Escape") {
           event.preventDefault();
-          finish(null);
+          finish(false);
         }
       }}
-      onBlur={() => finish(value)}
+      onBlur={() => finish(true)}
     />
   );
 }

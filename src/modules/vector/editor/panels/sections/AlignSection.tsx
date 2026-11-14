@@ -11,11 +11,18 @@ import {
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 
-import { canAlign, canDistribute, type AlignKind, type DistributeAxis } from "../../model/align";
-import { alignSelection, distributeSelection } from "../../state/commands";
-import { editorStore, useEditorStore } from "../../state/store";
+import {
+  alignNodes,
+  canAlign,
+  canDistribute,
+  distributeNodes,
+  type AlignKind,
+  type DistributeAxis,
+} from "../../model/align";
+import { useEditorStore } from "../../state/store";
 import { IconButton, Section } from "../fields/Section";
-import { memoBySelection } from "../selection";
+import { withinLimitsOrSame } from "../limits";
+import { applyToSelection, memoBySelection } from "../selection";
 
 const ALIGN_BUTTONS: readonly { kind: AlignKind; label: string; icon: LucideIcon }[] = [
   { kind: "left", label: "左揃え", icon: AlignStartVertical },
@@ -54,7 +61,11 @@ export function AlignSection() {
               key={kind}
               label={label}
               disabled={!align}
-              onClick={() => alignSelection(editorStore, kind)}
+              onClick={() =>
+                applyToSelection((doc, selection) =>
+                  withinLimitsOrSame(doc, selection, alignNodes(doc, selection, kind)),
+                )
+              }
             >
               <Icon size={15} />
             </IconButton>
@@ -67,7 +78,11 @@ export function AlignSection() {
             key={axis}
             label={label}
             disabled={!distribute}
-            onClick={() => distributeSelection(editorStore, axis)}
+            onClick={() =>
+              applyToSelection((doc, selection) =>
+                withinLimitsOrSame(doc, selection, distributeNodes(doc, selection, axis)),
+              )
+            }
           >
             <Icon size={15} />
           </IconButton>

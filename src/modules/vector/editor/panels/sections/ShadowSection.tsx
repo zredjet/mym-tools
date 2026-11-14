@@ -1,6 +1,6 @@
 import { CANVAS_LIMITS } from "../../model/limits";
 import { mapNodes, updateNodes } from "../../model/transform";
-import type { CanvasDocument, Shadow } from "../../model/types";
+import type { CanvasDocument, NodeId, Shadow } from "../../model/types";
 import { editorStore } from "../../state/store";
 import { ColorField } from "../fields/ColorField";
 import { NumberField } from "../fields/NumberField";
@@ -24,10 +24,11 @@ export function ShadowSection({ nodes }: { nodes: readonly ShadowNode[] }) {
   const withShadow = nodes.filter((node) => node.shadow !== null).map((node) => node.id);
   const withoutShadow = nodes.filter((node) => node.shadow === null).map((node) => node.id);
 
-  const patchShadow = (patch: Partial<Shadow>) => (doc: CanvasDocument) =>
-    mapNodes(doc, withShadow, (node) =>
-      "shadow" in node && node.shadow ? { shadow: { ...node.shadow, ...patch } } : null,
-    );
+  const patchShadow =
+    (patch: Partial<Shadow>, targets: readonly NodeId[]) => (doc: CanvasDocument) =>
+      mapNodes(doc, targets, (node) =>
+        "shadow" in node && node.shadow ? { shadow: { ...node.shadow, ...patch } } : null,
+      );
 
   const toggle = (checked: boolean) =>
     apply((doc) =>
@@ -48,7 +49,8 @@ export function ShadowSection({ nodes }: { nodes: readonly ShadowNode[] }) {
               precision={2}
               value={commonValue(shadows.map((s) => s.x))}
               {...OFFSET}
-              onCommit={(value) => apply(patchShadow({ x: value }))}
+              targets={withShadow}
+              onCommit={(value, targets) => apply(patchShadow({ x: value }, targets))}
             />
             <NumberField
               label="Y"
@@ -56,7 +58,8 @@ export function ShadowSection({ nodes }: { nodes: readonly ShadowNode[] }) {
               precision={2}
               value={commonValue(shadows.map((s) => s.y))}
               {...OFFSET}
-              onCommit={(value) => apply(patchShadow({ y: value }))}
+              targets={withShadow}
+              onCommit={(value, targets) => apply(patchShadow({ y: value }, targets))}
             />
             <NumberField
               label="ぼかし"
@@ -65,14 +68,16 @@ export function ShadowSection({ nodes }: { nodes: readonly ShadowNode[] }) {
               value={commonValue(shadows.map((s) => s.blur))}
               min={0}
               max={CANVAS_LIMITS.maxShadowBlur}
-              onCommit={(value) => apply(patchShadow({ blur: value }))}
+              targets={withShadow}
+              onCommit={(value, targets) => apply(patchShadow({ blur: value }, targets))}
             />
           </FieldGrid>
           <FieldGrid>
             <ColorField
               ariaLabel="影の色"
               value={commonValue(shadows.map((s) => s.color.toUpperCase()))}
-              toRecipe={(color) => patchShadow({ color })}
+              targets={withShadow}
+              toRecipe={(color, targets) => patchShadow({ color }, targets)}
             />
             <NumberField
               label=""
@@ -80,7 +85,10 @@ export function ShadowSection({ nodes }: { nodes: readonly ShadowNode[] }) {
               suffix="%"
               value={toPercent(commonValue(shadows.map((s) => s.opacity)))}
               {...PERCENT}
-              onCommit={(value) => apply(patchShadow({ opacity: fromPercent(value) }))}
+              targets={withShadow}
+              onCommit={(value, targets) =>
+                apply(patchShadow({ opacity: fromPercent(value) }, targets))
+              }
             />
           </FieldGrid>
         </>

@@ -5,12 +5,14 @@ import { getNode, getParent } from "../../model/tree";
 import { deepFreeze, fixtureDocument, sampleDocument } from "../../model/testing";
 import type { FrameNode, RectNode } from "../../model/types";
 import {
+  afterDepthRange,
   applyLayerDrop,
   buildLayerRows,
   cachedLayerRowsKey,
   dropZoneAt,
   expandForSelection,
   layerRowsKey,
+  locateDrop,
   parseLayerRowsKey,
   rangeBetween,
   resolveLayerDrop,
@@ -165,6 +167,50 @@ describe("applyLayerDrop の範囲の確認", () => {
     expect(applyLayerDrop(far, ["r0"], drop)).toBe(far);
     // 範囲に収まる移動は落とせる
     expect(applyLayerDrop(doc, ["r0"], drop)).not.toBe(doc);
+  });
+});
+
+describe("祖先の背面へ落とす (climb)", () => {
+  const rows = buildLayerRows(doc, "p1", none);
+  const last = rows.length - 1; // r1 (f の最背面の子、深さ 1)
+
+  it("下の行が浅いほど選べる深さが広い。最後の行の下はページ直下まで", () => {
+    expect(afterDepthRange(rows, last)).toEqual({ min: 0, max: 1 });
+    // r3 (深さ 2) の下は grp (深さ 1) なので 1〜2
+    expect(
+      afterDepthRange(
+        rows,
+        rows.findIndex((r) => r.id === "r3"),
+      ),
+    ).toEqual({
+      min: 1,
+      max: 2,
+    });
+    // 開いていて子のある f の下は中に入れる
+    expect(afterDepthRange(rows, 1)).toBeNull();
+  });
+
+  it("横の位置で深さを選ぶ", () => {
+    const rect = { left: 0, top: 0, height: 32 };
+    expect(locateDrop(rows, last, rect, { x: 2, y: 30 })).toEqual({
+      overId: "r1",
+      zone: "after",
+      climb: 1,
+    });
+    expect(locateDrop(rows, last, rect, { x: 100, y: 30 })?.climb).toBe(0);
+    // 行より下の余白も最後の行の下として扱う
+    expect(locateDrop(rows, last, rect, { x: 2, y: 80 })?.zone).toBe("after");
+  });
+
+  it("開いている最背面の frame の背面 (兄弟の最背面) へ動かせる", () => {
+    // ページ直下は [f, r0]。r0 を f の背面へ
+    const drop = resolveLayerDrop(doc, ["r0"], "r1", "after", false, 1)!;
+    expect(drop).toEqual({ target: { kind: "page", id: "p1" }, index: 0, zone: "after" });
+    expect(applyLayerDrop(doc, ["r0"], drop).pages[0]!.children).toEqual(["r0", "f"]);
+  });
+
+  it("ページより上へは上れない", () => {
+    expect(resolveLayerDrop(doc, ["r1"], "r0", "after", false, 1)).toBeNull();
   });
 });
 
