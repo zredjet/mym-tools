@@ -23,6 +23,7 @@ use std::sync::LazyLock;
 pub(crate) struct Limits {
     pub payload_bytes: usize,
     pub text_bytes: usize,
+    pub max_total_text_bytes: usize,
     pub max_nodes: usize,
     pub max_depth: usize,
     pub max_pages: usize,
@@ -61,9 +62,26 @@ pub(crate) static LIMITS: LazyLock<Limits> = LazyLock::new(|| {
 
 type Result<T> = std::result::Result<T, ModuleError>;
 
+/// 利用者に見せる理由の長さの上限 (文字数)。`validate_svg` 由来の文言は要素名や属性名をそのまま含む。
+const MAX_REASON_CHARS: usize = 300;
+
+/// 理由を `MAX_REASON_CHARS` 文字以下に切る。切ったときは末尾を「…」にする。文字の境界で切る。
+pub(crate) fn clip_reason(reason: String) -> String {
+    match reason.char_indices().nth(MAX_REASON_CHARS) {
+        None => reason,
+        Some(_) => {
+            let end = reason
+                .char_indices()
+                .nth(MAX_REASON_CHARS - 1)
+                .map_or(reason.len(), |(index, _)| index);
+            format!("{}…", &reason[..end])
+        }
+    }
+}
+
 fn invalid(reason: impl Into<String>) -> ModuleError {
     ModuleError::ValidationFailed {
-        reason: reason.into(),
+        reason: clip_reason(reason.into()),
     }
 }
 
@@ -74,8 +92,16 @@ fn app_reason(error: AppError) -> String {
     }
 }
 
-/// `idPattern` (`^[A-Za-z0-9_-]{1,32}$`) と同じ判定。
+/// ID の書式の説明 (拒否の理由に使う)。
+const ID_RULE: &str = "英数字・_・- の 1〜32 文字 (__proto__ 以外)";
+
+/// `idPattern` (`^[A-Za-z0-9_-]{1,32}$`) と同じ判定に加えて、`__proto__` を拒否する (§3.3)。
 pub(crate) fn is_id(value: &str) -> bool {
+    matches_id_pattern(value) && value != "__proto__"
+}
+
+/// `idPattern` だけの判定。
+fn matches_id_pattern(value: &str) -> bool {
     (1..=32).contains(&value.len())
         && value
             .bytes()
@@ -300,6 +326,8 @@ struct NodeInfo<'a> {
     /// frame / group だけが持つ
     children: Option<Vec<&'a str>>,
     asset: Option<(&'a str, AssetKind)>,
+    /// text ノードの本文の UTF-8 のバイト数 (ほかは 0)
+    text_bytes: usize,
 }
 
 const COMMON: [&str; 6] = ["id", "name", "visible", "locked", "opacity", "type"];
@@ -479,6 +507,7 @@ fn validate_node<'a>(id: &str, value: &'a Value, l: &Limits) -> Result<NodeInfo<
     let mut info = NodeInfo {
         children: None,
         asset: None,
+        text_bytes: 0,
     };
     match kind {
         "frame" | "group" => {
@@ -501,7 +530,7 @@ fn validate_node<'a>(id: &str, value: &'a Value, l: &Limits) -> Result<NodeInfo<
             validate_stroke(f.get("stroke"), f.sub("stroke"), l)?;
         }
         "text" => {
-            f.chars("text", l.max_text_length)?;
+            info.text_bytes = f.chars("text", l.max_text_length)?.len();
             let family = f.chars("fontFamily", l.max_font_family_length)?;
             if family.is_empty() || family.chars().any(char::is_control) {
                 return Err(f.fail(
@@ -528,7 +557,7 @@ fn validate_node<'a>(id: &str, value: &'a Value, l: &Limits) -> Result<NodeInfo<
         "image" | "svg" => {
             let asset = f.string("assetId")?;
             if !is_id(asset) {
-                return Err(f.fail("assetId", " ID の書式"));
+                return Err(f.fail("assetId", format!(" {ID_RULE}")));
             }
             let asset_kind = if kind == "image" {
                 AssetKind::Image
@@ -559,8 +588,8 @@ fn validate_asset_shape(id: &str, value: &Value, l: &Limits) -> Result<(AssetKin
         AssetKind::Svg => &["kind", "svg", "text", "width", "height"],
     };
     let f = Fields::new(value, at, keys)?;
-    f.range("width", 0.0, l.max_size)?;
-    f.range("height", 0.0, l.max_size)?;
+    f.positive("width", l.max_size)?;
+    f.positive("height", l.max_size)?;
     let bytes = match kind {
         AssetKind::Image => {
             f.one_of("mime", &["image/png", "image/jpeg", "image/webp"])?;
@@ -622,7 +651,7 @@ pub fn validate(payload: &Value) -> Result<()> {
         )?;
         let id = f.string("id")?;
         if !is_id(id) {
-            return Err(f.fail("id", " ID の書式 (英数字・_・- の 1〜32 文字)"));
+            return Err(f.fail("id", format!(" {ID_RULE}")));
         }
         if !page_ids.insert(id) {
             return Err(invalid(format!("{}の id が重複しています。", f.at)));
@@ -659,11 +688,18 @@ pub fn validate(payload: &Value) -> Result<()> {
     for (id, node) in nodes {
         if !is_id(id) {
             return Err(invalid(format!(
-                "ノードの ID「{}」は英数字・_・- の 1〜32 文字にしてください。",
+                "ノードの ID「{}」は{ID_RULE}にしてください。",
                 clip(id)
             )));
         }
         infos.insert(id.as_str(), validate_node(id, node, l)?);
+    }
+    let total_text: usize = infos.values().map(|info| info.text_bytes).sum();
+    if total_text > l.max_total_text_bytes {
+        return Err(invalid(format!(
+            "テキストの本文の合計は UTF-8 で {} バイト以下にしてください。",
+            l.max_total_text_bytes
+        )));
     }
 
     // アセットの形
@@ -676,7 +712,7 @@ pub fn validate(payload: &Value) -> Result<()> {
     for (id, asset) in assets {
         if !is_id(id) {
             return Err(invalid(format!(
-                "アセットの ID「{}」は英数字・_・- の 1〜32 文字にしてください。",
+                "アセットの ID「{}」は{ID_RULE}にしてください。",
                 clip(id)
             )));
         }
@@ -895,6 +931,8 @@ mod tests {
             ("text-sizing-invalid", "sizing"),
             ("asset-missing", "存在しないアセット"),
             ("asset-unreferenced", "参照されていません"),
+            ("image-asset-size-zero", "width は 0 より大きく"),
+            ("svg-asset-size-zero", "height は 0 より大きく"),
             ("asset-kind-mismatch", "別の種類"),
             ("image-data-mime-mismatch", "画像の形式と内容"),
             ("svg-asset-policy-violation", "未対応のSVG要素"),
@@ -920,6 +958,11 @@ mod tests {
     fn patterns_match_the_hand_written_checks() {
         assert_eq!(LIMITS.id_pattern, "^[A-Za-z0-9_-]{1,32}$");
         assert_eq!(LIMITS.color_pattern, "^#[0-9A-Fa-f]{6}$");
+        // idPattern は __proto__ を許すが、§3.3 で ID に使えない
+        assert!(matches_id_pattern("__proto__"));
+        assert!(!is_id("__proto__"));
+        assert!(is_id("__proto"));
+        assert!(is_id("proto__"));
         for id in ["a", "Z9", "_-", &"a".repeat(32), "page1", "legacy"] {
             assert!(is_id(id), "{id}");
         }
@@ -1145,6 +1188,84 @@ mod tests {
     }
 
     #[test]
+    fn proto_is_rejected_as_any_id() {
+        let mut page = valid_case("full");
+        page["pages"][1]["id"] = json!("__proto__");
+        assert!(reason(&page).contains("__proto__ 以外"));
+
+        let mut nodes = Map::new();
+        nodes.insert("__proto__".into(), rect("__proto__"));
+        let node = document(vec!["__proto__".into()], nodes);
+        assert!(reason(&node).contains("ノードの ID「__proto__」"));
+
+        let mut asset = with_assets(1000);
+        let png = asset["assets"]
+            .as_object_mut()
+            .unwrap()
+            .remove("png")
+            .unwrap();
+        asset["assets"]["__proto__"] = png.clone();
+        asset["nodes"]["i"]["assetId"] = json!("__proto__");
+        assert!(reason(&asset).contains("assetId"));
+        // ノードが正しい ID のアセットを指していても、余分な __proto__ はアセットの ID の書式で落ちる
+        asset["nodes"]["i"]["assetId"] = json!("png");
+        asset["assets"]["png"] = png;
+        assert!(reason(&asset).contains("アセットの ID「__proto__」"));
+        asset["assets"].as_object_mut().unwrap().remove("__proto__");
+        validate(&asset).unwrap();
+    }
+
+    /// 本文の合計が UTF-8 で `total` バイトになる text ノードを並べた文書。本文は空白だけなので検索用テキストは空。
+    fn texts_totalling(total: usize) -> Value {
+        let max_chars = LIMITS.max_text_length;
+        let mut bodies = Vec::new();
+        let mut remaining = total;
+        while remaining > 0 {
+            let wide = (remaining / 3).min(max_chars);
+            let mut body = "\u{3000}".repeat(wide);
+            remaining -= wide * 3;
+            if wide < max_chars {
+                body.push_str(&" ".repeat(remaining));
+                remaining = 0;
+            }
+            bodies.push(body);
+        }
+        let refs: Vec<&str> = bodies.iter().map(String::as_str).collect();
+        let payload = texts(&refs);
+        let sum: usize = refs.iter().map(|body| body.len()).sum();
+        assert_eq!(sum, total);
+        payload
+    }
+
+    #[test]
+    fn total_text_limit_is_inclusive() {
+        let max = LIMITS.max_total_text_bytes;
+        validate(&texts_totalling(max)).unwrap();
+        assert!(reason(&texts_totalling(max + 1)).contains("本文の合計"));
+    }
+
+    #[test]
+    fn reasons_are_clipped_at_a_char_boundary() {
+        let mut payload = valid_case("full");
+        let name = "要素".repeat(500);
+        payload["assets"]["svgA"]["svg"] = json!(format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><{name}/></svg>"
+        ));
+        payload["assets"]["svgA"]["text"] = json!("");
+        let reason = reason(&payload);
+        assert_eq!(reason.chars().count(), 300, "{reason}");
+        assert!(reason.starts_with("アセット「svgA」: 未対応のSVG要素です: 要素"));
+        assert!(reason.ends_with('…'));
+        // 短い理由はそのまま
+        assert_eq!(clip_reason("短い".into()), "短い");
+        assert_eq!(clip_reason("あ".repeat(300)), "あ".repeat(300));
+        assert_eq!(
+            clip_reason("あ".repeat(301)),
+            format!("{}…", "あ".repeat(299))
+        );
+    }
+
+    #[test]
     fn field_rules_from_the_design() {
         let base = valid_case("full");
         let rejects = |path: &[&str], value: Value| {
@@ -1173,6 +1294,8 @@ mod tests {
         rejects(&["pages", "0", "name"], json!("あ".repeat(201)));
         rejects(&["nodes", "rect1", "visible"], json!("true"));
         rejects(&["text"], json!(null));
+        rejects(&["assets", "img1", "height"], json!(100_001));
+        rejects(&["nodes", "text1", "fontFamily"], json!("A\u{9f}"));
         // 境界ちょうどは通る
         let mut payload = base.clone();
         payload["nodes"]["rect1"]["name"] = json!("あ".repeat(200));

@@ -5,7 +5,7 @@
 // 切替 PR で外す (ADR-0026)。
 #![cfg_attr(not(test), allow(dead_code))]
 
-use super::scene::{search_text, LIMITS};
+use super::scene::{clip_reason, search_text, validate, LIMITS};
 use crate::module::ModuleError;
 use quick_xml::{events::Event, Reader, XmlVersion};
 use serde_json::{json, Value};
@@ -15,7 +15,7 @@ const FALLBACK_SIZE: (f64, f64) = (640.0, 480.0);
 
 fn failed(reason: impl Into<String>) -> ModuleError {
     ModuleError::UpgradeFailed {
-        reason: reason.into(),
+        reason: clip_reason(reason.into()),
     }
 }
 
@@ -25,6 +25,8 @@ fn failed(reason: impl Into<String>) -> ModuleError {
 /// 正規化されているので通常は v1 の `text` と同じになる。違いが出るのは v1 の空白の集合
 /// (`js_whitespace`) に無く `char::is_whitespace` にある U+0085 を含むときだけで、
 /// v1 の `text` をそのまま入れると変換結果が v2 の検証を通らなくなるため、求め直した値を使う。
+///
+/// 作った v2 は `scene::validate` で確かめ、通らなければ `UpgradeFailed` を返す (壊れた v2 を返さない)。
 pub fn upgrade_v1(payload: &Value) -> Result<Value, ModuleError> {
     let svg = payload
         .get("svg")
@@ -69,6 +71,14 @@ pub fn upgrade_v1(payload: &Value) -> Result<Value, ModuleError> {
         "text": ""
     });
     document["text"] = Value::String(search_text(&document));
+    // 壊れた v2 を返さない (§3.7)。今の SVG ポリシーを通らない古い作品などは変換を失敗にし、v1 のまま残す。
+    validate(&document).map_err(|error| {
+        let reason = match error {
+            ModuleError::ValidationFailed { reason } => reason,
+            other => other.to_string(),
+        };
+        failed(format!("変換した文書が検証を通りません: {reason}"))
+    })?;
     Ok(document)
 }
 
@@ -177,7 +187,6 @@ fn parse_number(token: &str) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::scene::validate;
     use super::*;
 
     fn contract() -> Value {
@@ -337,6 +346,41 @@ mod tests {
         let v2 = upgrade_svg(svg);
         assert_eq!(v2["assets"]["legacy"]["text"], json!("a\u{85}b"));
         assert_eq!(v2["text"], json!("a b"));
+    }
+
+    #[test]
+    fn v1_that_fails_the_current_policy_is_an_upgrade_error() {
+        // v1 の text が SVG と一致していても、今の SVG ポリシーを通らなければ壊れた v2 を返さない。
+        for svg in [
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect onclick=\"x()\"/></svg>",
+            "not xml",
+        ] {
+            let result = upgrade_v1(&json!({ "svg": svg, "text": "" }));
+            let Err(ModuleError::UpgradeFailed { reason }) = result else {
+                panic!("{svg}: {result:?}");
+            };
+            assert!(reason.contains("検証を通りません"), "{reason}");
+        }
+        // v1 の text が SVG と一致しない場合も同じ
+        let result = upgrade_v1(&json!({
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a</text></svg>",
+            "text": "b"
+        }));
+        assert!(matches!(result, Err(ModuleError::UpgradeFailed { .. })));
+    }
+
+    #[test]
+    fn upgrade_failure_reason_is_clipped() {
+        let name = "要素".repeat(500);
+        let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\"><{name}/></svg>");
+        let Err(ModuleError::UpgradeFailed { reason }) =
+            upgrade_v1(&json!({ "svg": svg, "text": "" }))
+        else {
+            panic!("expected UpgradeFailed");
+        };
+        assert_eq!(reason.chars().count(), 300, "{reason}");
+        assert!(reason.ends_with('…'));
     }
 
     #[test]
