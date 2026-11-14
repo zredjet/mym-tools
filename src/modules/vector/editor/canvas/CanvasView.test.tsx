@@ -95,6 +95,16 @@ describe("ポインターをツールへ渡す", () => {
     expect(spy.onPointerDown.mock.calls.map((call) => call[0].clickCount)).toEqual([1, 2]);
   });
 
+  it("押したまま動かしたら、次の押下をダブルクリックに数えない", () => {
+    const { canvas } = setup();
+    fireEvent.pointerDown(canvas, pointer(0, 10, 20));
+    fireEvent.pointerMove(canvas, pointer(0, 40, 20));
+    fireEvent.pointerMove(canvas, pointer(0, 10, 20));
+    fireEvent.pointerUp(canvas, pointer(0, 10, 20));
+    fireEvent.pointerDown(canvas, pointer(0, 10, 20));
+    expect(spy.onPointerDown.mock.calls[1]![0]).toMatchObject({ clickCount: 1 });
+  });
+
   it("ルーラーなど data-canvas-ignore の上は渡さない", () => {
     const { canvas } = setup();
     const ruler = canvas.querySelector("[data-canvas-ruler='x']");
@@ -196,16 +206,36 @@ describe("キー", () => {
     expect(spy.onPointerUp).not.toHaveBeenCalled();
   });
 
-  it("ジェスチャーの途中の Esc は、ツールが取り消さなくても文書を戻す", () => {
-    setup();
+  it("ドラッグの途中の Esc は、ツールが取り消さなくても文書を戻す", () => {
+    const { canvas } = setup();
     const before = editorStore.getState().doc;
+    spy.onPointerDown.mockImplementation((_, ctx) => {
+      ctx.store.getState().beginGesture();
+      ctx.store.getState().updateGesture((doc: typeof before) => ({ ...doc }));
+    });
+    fireEvent.pointerDown(canvas, pointer());
+    expect(editorStore.getState().gestureActive).toBe(true);
+    fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" });
+    expect(spy.onCancel).toHaveBeenCalledTimes(1);
+    expect(editorStore.getState().gestureActive).toBe(false);
+    expect(editorStore.getState().doc).toBe(before);
+  });
+
+  it("ドラッグしていないときは、Esc でもフォーカス喪失でも、開いているジェスチャーを取り消さない", () => {
+    // パネルの色の選択や本文の編集が開いているジェスチャー。閉じるのは開いた側 (§4.4)
+    setup();
     act(() => {
       editorStore.getState().beginGesture();
       editorStore.getState().updateGesture((doc) => ({ ...doc }));
     });
+    const during = editorStore.getState().doc;
     fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" });
-    expect(editorStore.getState().gestureActive).toBe(false);
-    expect(editorStore.getState().doc).toBe(before);
+    expect(spy.onKeyDown).toHaveBeenCalledTimes(1);
+    fireEvent.blur(window);
+    expect(spy.onCancel).toHaveBeenCalledTimes(1);
+    expect(editorStore.getState().gestureActive).toBe(true);
+    expect(editorStore.getState().doc).toBe(during);
+    act(() => editorStore.getState().cancelGesture());
   });
 
   it("ウィンドウのフォーカス喪失で onCancel", () => {
