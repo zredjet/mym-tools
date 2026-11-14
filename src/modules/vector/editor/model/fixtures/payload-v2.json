@@ -1,0 +1,850 @@
+{
+  "description": "vector payload v2 の契約 (docs/canvas-editor-design.md §3)。Rust と TypeScript の両方のテストが読む。valid は検証を通り、payload.text が文書から求めた検索用テキストと一致する。invalid は base (valid の名前) の payload に patch を順に当てたもので、どちらの実装でも拒否する。patch の op は set (path の位置へ value を置く) / remove (path の位置を消す) / append (path の配列の末尾へ value を足す)。upgrade は v1 を v2 へ変換した結果が v2 と完全に一致し、その v2 は検証を通る。",
+  "valid": [
+    {
+      "name": "empty",
+      "payload": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": [],
+            "guides": []
+          }
+        ],
+        "nodes": {},
+        "assets": {},
+        "text": ""
+      }
+    },
+    {
+      "name": "full",
+      "payload": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["frame1", "svg1"],
+            "guides": [
+              {
+                "axis": "x",
+                "position": 120
+              },
+              {
+                "axis": "y",
+                "position": -40.5
+              }
+            ]
+          },
+          {
+            "id": "page2",
+            "name": "ページ 2",
+            "children": ["frame2"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "frame1": {
+            "id": "frame1",
+            "name": "ホーム画面",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 393,
+            "height": 852,
+            "type": "frame",
+            "children": ["rect1", "ellipse1", "group1", "image1"],
+            "clip": true,
+            "fill": {
+              "type": "solid",
+              "color": "#FFFFFF",
+              "opacity": 1
+            },
+            "stroke": null,
+            "radius": 0,
+            "shadow": null
+          },
+          "rect1": {
+            "id": "rect1",
+            "name": "カード",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 16,
+            "y": 96,
+            "width": 361,
+            "height": 120,
+            "type": "rect",
+            "fill": {
+              "type": "linear",
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#2563EB",
+                  "opacity": 1
+                },
+                {
+                  "offset": 1,
+                  "color": "#7C3AED",
+                  "opacity": 0.8
+                }
+              ],
+              "from": {
+                "x": 0,
+                "y": 0
+              },
+              "to": {
+                "x": 1,
+                "y": 1
+              }
+            },
+            "stroke": {
+              "color": "#111827",
+              "opacity": 0.2,
+              "width": 1
+            },
+            "radius": 12,
+            "shadow": {
+              "x": 0,
+              "y": 4,
+              "blur": 12,
+              "color": "#000000",
+              "opacity": 0.25
+            }
+          },
+          "ellipse1": {
+            "id": "ellipse1",
+            "name": "アバター",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 24,
+            "y": 24,
+            "width": 48,
+            "height": 48,
+            "type": "ellipse",
+            "fill": {
+              "type": "radial",
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff",
+                  "opacity": 1
+                },
+                {
+                  "offset": 0.5,
+                  "color": "#93c5fd",
+                  "opacity": 1
+                },
+                {
+                  "offset": 1,
+                  "color": "#1d4ed8",
+                  "opacity": 1
+                }
+              ],
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "radius": 0.5
+            },
+            "stroke": null,
+            "shadow": null
+          },
+          "group1": {
+            "id": "group1",
+            "name": "見出しのまとまり",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "group",
+            "children": ["line1", "text1"]
+          },
+          "line1": {
+            "id": "line1",
+            "name": "下線",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "line",
+            "x1": 16,
+            "y1": 80,
+            "x2": 377,
+            "y2": 80,
+            "stroke": {
+              "color": "#D1D5DB",
+              "opacity": 1,
+              "width": 2
+            }
+          },
+          "text1": {
+            "id": "text1",
+            "name": "見出し",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 88,
+            "y": 28,
+            "width": 200,
+            "height": 44.8,
+            "type": "text",
+            "text": "見出し　テキスト\n2 行目",
+            "fontFamily": "Hiragino Sans",
+            "fontSize": 16,
+            "fontWeight": 600,
+            "italic": false,
+            "lineHeight": null,
+            "letterSpacing": 0,
+            "align": "left",
+            "sizing": "auto-width",
+            "fill": {
+              "type": "solid",
+              "color": "#111827",
+              "opacity": 1
+            },
+            "shadow": null
+          },
+          "image1": {
+            "id": "image1",
+            "name": "写真",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 16,
+            "y": 232,
+            "width": 361,
+            "height": 200,
+            "type": "image",
+            "assetId": "img1",
+            "radius": 8,
+            "shadow": null
+          },
+          "svg1": {
+            "id": "svg1",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 420,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "type": "svg",
+            "assetId": "svgA"
+          },
+          "frame2": {
+            "id": "frame2",
+            "name": "バナー",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 1200,
+            "height": 630,
+            "type": "frame",
+            "children": [],
+            "clip": false,
+            "fill": null,
+            "stroke": null,
+            "radius": 0,
+            "shadow": null
+          }
+        },
+        "assets": {
+          "img1": {
+            "kind": "image",
+            "mime": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+            "width": 1,
+            "height": 1
+          },
+          "svgA": {
+            "kind": "svg",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><text x=\"0\" y=\"8\">旧作品</text></svg>",
+            "text": "旧作品",
+            "width": 10,
+            "height": 10
+          }
+        },
+        "text": "ホーム画面 見出し テキスト 2 行目 旧作品 バナー"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "pages-empty",
+      "reason": "ページが 0 個",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["pages"],
+          "value": []
+        },
+        {
+          "op": "set",
+          "path": ["nodes"],
+          "value": {}
+        },
+        {
+          "op": "set",
+          "path": ["assets"],
+          "value": {}
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": ""
+        }
+      ]
+    },
+    {
+      "name": "page-id-duplicate",
+      "reason": "ページ ID の重複",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["pages", 1, "id"],
+          "value": "page1"
+        }
+      ]
+    },
+    {
+      "name": "child-referenced-twice",
+      "reason": "同じノードが 2 つの親に現れる",
+      "base": "full",
+      "patch": [
+        {
+          "op": "append",
+          "path": ["pages", 1, "children"],
+          "value": "rect1"
+        }
+      ]
+    },
+    {
+      "name": "orphan-node",
+      "reason": "どの親からも参照されないノード",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "stray"],
+          "value": {
+            "id": "stray",
+            "name": "迷子",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "type": "rect",
+            "fill": null,
+            "stroke": null,
+            "radius": 0,
+            "shadow": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "child-missing",
+      "reason": "children が存在しないノードを指す",
+      "base": "full",
+      "patch": [
+        {
+          "op": "append",
+          "path": ["nodes", "frame1", "children"],
+          "value": "nope"
+        }
+      ]
+    },
+    {
+      "name": "node-key-mismatch",
+      "reason": "nodes のキーと id が一致しない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "id"],
+          "value": "rectX"
+        }
+      ]
+    },
+    {
+      "name": "unknown-node-type",
+      "reason": "未知のノード種別",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "type"],
+          "value": "star"
+        }
+      ]
+    },
+    {
+      "name": "unknown-field",
+      "reason": "未知のフィールド",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "rotation"],
+          "value": 45
+        }
+      ]
+    },
+    {
+      "name": "missing-field",
+      "reason": "必須フィールドの欠落",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "rect1", "radius"]
+        }
+      ]
+    },
+    {
+      "name": "bad-id",
+      "reason": "ID の書式違反",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "svg1"]
+        },
+        {
+          "op": "set",
+          "path": ["nodes", "bad id"],
+          "value": {
+            "id": "bad id",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 420,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "type": "svg",
+            "assetId": "svgA"
+          }
+        },
+        {
+          "op": "set",
+          "path": ["pages", 0, "children"],
+          "value": ["frame1", "bad id"]
+        }
+      ]
+    },
+    {
+      "name": "bad-color",
+      "reason": "色の書式違反",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "frame1", "fill", "color"],
+          "value": "#12345"
+        }
+      ]
+    },
+    {
+      "name": "opacity-out-of-range",
+      "reason": "不透明度が 0〜1 の外",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "opacity"],
+          "value": 1.5
+        }
+      ]
+    },
+    {
+      "name": "negative-size",
+      "reason": "大きさが負",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "width"],
+          "value": -1
+        }
+      ]
+    },
+    {
+      "name": "coordinate-out-of-range",
+      "reason": "座標が上限の外",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "x"],
+          "value": 1000001
+        }
+      ]
+    },
+    {
+      "name": "number-as-string",
+      "reason": "数値のフィールドに文字列",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "x"],
+          "value": "16"
+        }
+      ]
+    },
+    {
+      "name": "group-empty",
+      "reason": "子のない group",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "group1", "children"],
+          "value": []
+        },
+        {
+          "op": "set",
+          "path": ["nodes", "frame1", "children"],
+          "value": ["rect1", "ellipse1", "group1", "image1", "line1", "text1"]
+        }
+      ]
+    },
+    {
+      "name": "gradient-one-stop",
+      "reason": "グラデーションの停止点が 1 個",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "fill", "stops"],
+          "value": [
+            {
+              "offset": 0,
+              "color": "#2563EB",
+              "opacity": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "gradient-stops-unsorted",
+      "reason": "停止点が offset の昇順でない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "fill", "stops"],
+          "value": [
+            {
+              "offset": 1,
+              "color": "#7C3AED",
+              "opacity": 0.8
+            },
+            {
+              "offset": 0,
+              "color": "#2563EB",
+              "opacity": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "font-weight-invalid",
+      "reason": "fontWeight が 100 刻みでない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "text1", "fontWeight"],
+          "value": 650
+        }
+      ]
+    },
+    {
+      "name": "text-sizing-invalid",
+      "reason": "sizing が未知の値",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "text1", "sizing"],
+          "value": "shrink"
+        }
+      ]
+    },
+    {
+      "name": "asset-missing",
+      "reason": "参照先のアセットがない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["assets", "img1"]
+        }
+      ]
+    },
+    {
+      "name": "asset-unreferenced",
+      "reason": "参照されないアセット",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "extra"],
+          "value": {
+            "kind": "image",
+            "mime": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "asset-kind-mismatch",
+      "reason": "image ノードが svg アセットを指す",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "image1", "assetId"],
+          "value": "svgA"
+        },
+        {
+          "op": "remove",
+          "path": ["assets", "img1"]
+        }
+      ]
+    },
+    {
+      "name": "image-data-mime-mismatch",
+      "reason": "mime と画像の中身が一致しない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "img1", "mime"],
+          "value": "image/jpeg"
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-policy-violation",
+      "reason": "SVG ポリシー違反 (script)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "svg"],
+          "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><script>alert(1)</script></svg>"
+        },
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "text"],
+          "value": ""
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面 見出し テキスト 2 行目 バナー"
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-text-mismatch",
+      "reason": "SVG アセットの text が抽出結果と違う",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "text"],
+          "value": "別の文字"
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面 見出し テキスト 2 行目 別の文字 バナー"
+        }
+      ]
+    },
+    {
+      "name": "text-mismatch",
+      "reason": "検索用テキストが文書と一致しない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面"
+        }
+      ]
+    },
+    {
+      "name": "guide-axis-invalid",
+      "reason": "ガイド線の向きが未知の値",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["pages", 0, "guides", 0, "axis"],
+          "value": "z"
+        }
+      ]
+    },
+    {
+      "name": "top-level-unknown-field",
+      "reason": "トップレベルの未知のフィールド",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["version"],
+          "value": 2
+        }
+      ]
+    }
+  ],
+  "upgrade": [
+    {
+      "name": "svgedit-document",
+      "v1": {
+        "svg": "<svg width=\"640\" height=\"480\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:svg=\"http://www.w3.org/2000/svg\"><g class=\"layer\"><title>レイヤー 1</title><text fill=\"#000000\" font-size=\"24\" id=\"svg_1\" x=\"40\" y=\"60\">こんにちは</text></g></svg>",
+        "text": "レイヤー 1 こんにちは"
+      },
+      "v2": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["legacy"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "legacy": {
+            "id": "legacy",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 640,
+            "height": 480,
+            "type": "svg",
+            "assetId": "legacy"
+          }
+        },
+        "assets": {
+          "legacy": {
+            "kind": "svg",
+            "svg": "<svg width=\"640\" height=\"480\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:svg=\"http://www.w3.org/2000/svg\"><g class=\"layer\"><title>レイヤー 1</title><text fill=\"#000000\" font-size=\"24\" id=\"svg_1\" x=\"40\" y=\"60\">こんにちは</text></g></svg>",
+            "text": "レイヤー 1 こんにちは",
+            "width": 640,
+            "height": 480
+          }
+        },
+        "text": "レイヤー 1 こんにちは"
+      }
+    },
+    {
+      "name": "size-from-viewbox",
+      "v1": {
+        "svg": "<svg viewBox=\"0 0 300 150\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"300\" height=\"150\" fill=\"#ff0000\"/></svg>",
+        "text": ""
+      },
+      "v2": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["legacy"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "legacy": {
+            "id": "legacy",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 300,
+            "height": 150,
+            "type": "svg",
+            "assetId": "legacy"
+          }
+        },
+        "assets": {
+          "legacy": {
+            "kind": "svg",
+            "svg": "<svg viewBox=\"0 0 300 150\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"300\" height=\"150\" fill=\"#ff0000\"/></svg>",
+            "text": "",
+            "width": 300,
+            "height": 150
+          }
+        },
+        "text": ""
+      }
+    },
+    {
+      "name": "size-fallback",
+      "v1": {
+        "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"5\" height=\"5\"/></svg>",
+        "text": ""
+      },
+      "v2": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["legacy"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "legacy": {
+            "id": "legacy",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 640,
+            "height": 480,
+            "type": "svg",
+            "assetId": "legacy"
+          }
+        },
+        "assets": {
+          "legacy": {
+            "kind": "svg",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"5\" height=\"5\"/></svg>",
+            "text": "",
+            "width": 640,
+            "height": 480
+          }
+        },
+        "text": ""
+      }
+    }
+  ]
+}
