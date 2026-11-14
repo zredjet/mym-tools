@@ -17,7 +17,7 @@ export interface CanvasPointerEvent {
   screen: Point;
   /** 0 = 主ボタン、1 = 中ボタン、2 = 副ボタン */
   button: number;
-  /** 1 = クリック、2 = ダブルクリック */
+  /** 1 = クリック、2 = ダブルクリック。ボタンを押していない移動では 0 */
   clickCount: number;
   shift: boolean;
   alt: boolean;
@@ -38,6 +38,11 @@ export interface CanvasKeyEvent {
 export interface ToolContext {
   store: StoreApi<EditorStore>;
   measurer: TextMeasurer;
+  /**
+   * キャンバスのカーソルを上書きする (リサイズハンドルの上など)。null でツールの `cursor` に戻す。
+   * ツールの切替と `onCancel` のときは、キャンバスが null に戻す。
+   */
+  setCursor(cursor: string | null): void;
 }
 
 export interface Tool {
@@ -50,7 +55,11 @@ export interface Tool {
   onPointerUp?(event: CanvasPointerEvent, ctx: ToolContext): void;
   /** 処理したら true を返す。false ならキャンバス共通のショートカットへ回る */
   onKeyDown?(event: CanvasKeyEvent, ctx: ToolContext): boolean;
-  /** Esc、ツールの切替、ウィンドウからのフォーカス喪失で呼ばれる。途中の操作を捨てる */
+  /**
+   * ドラッグの途中の Esc、ツールの切替、ポインターの取消、ウィンドウからのフォーカス喪失、
+   * キャンバスが画面から外れるときに呼ばれる。途中の操作を捨てる。
+   * 何もしていないときの Esc は `onKeyDown` に渡るだけで、ここは呼ばれない。
+   */
   onCancel?(ctx: ToolContext): void;
   /**
    * 操作中の補助表示 (作成中の枠、範囲選択の矩形など)。
