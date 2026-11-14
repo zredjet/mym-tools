@@ -8,7 +8,7 @@ import type { CanvasDocument, TextNode } from "../model/types";
 import { canvasTextMeasurer } from "../render/measureText";
 import { editorStore } from "../state/store";
 import { finishTextEditSession, getTextEditSession, startTextCreation } from "./editSession";
-import { editorStyle, editorTextColor } from "./editorStyle";
+import { documentZoom, editorStyle, editorTextColor } from "./editorStyle";
 import { TextEditOverlay } from "./TextEditOverlay";
 
 const page = { kind: "page", id: FIRST_PAGE_ID } as const;
@@ -114,14 +114,14 @@ describe("TextEditOverlay: 表示", () => {
   });
 
   it("auto-width で編集欄 (HTML) の行が描画より広く組まれるときは、入力欄を広げ、揃えの基準をノードに合わせる", () => {
-    // 単位ごとに組むエンジンの代わり: 単位ごとの和が描画の幅 (ノードの幅) より 6 広い
+    // 単位ごとに組むエンジンの代わり: 編集欄の幅が描画の幅 (ノードの幅) より 6 広い
     vi.spyOn(canvasTextMeasurer, "measure").mockImplementation((value: string) =>
       value === "あいう" ? 30 : Array.from(value).length * 12,
     );
     vi.spyOn(
       canvasTextMeasurer as Required<typeof canvasTextMeasurer>,
-      "lineBreakOptions",
-    ).mockReturnValue({ shapePerUnit: true });
+      "editorWidth",
+    ).mockImplementation((value: string) => Array.from(value).length * 12);
     const at = (align: TextNode["align"]) =>
       editorStyle(
         createText({ text: "あいう", width: 30, height: 23, sizing: "auto-width", align }),
@@ -139,6 +139,34 @@ describe("TextEditOverlay: 表示", () => {
       { x: 0, y: 0, zoom: 1 },
     );
     expect(wrapped).toMatchObject({ width: 30 });
+  });
+
+  it("UI スケール (body の zoom) を入力欄の zoom で打ち消し、位置と倍率に掛け直す", () => {
+    const node = createText({ text: "あ", x: 10, y: 20, width: 30, height: 23, sizing: "fixed" });
+    const plain = editorStyle(node, { x: 0, y: 0 }, { x: 0, y: 0, zoom: 2 });
+    expect(plain).toMatchObject({ left: 18, top: 38, transform: "scale(2)" });
+    expect(plain).not.toHaveProperty("zoom");
+    // 打ち消した中の長さなので、位置は 1.25 倍。文書の大きさのまま組み、2 × 1.25 倍に見せる
+    expect(editorStyle(node, { x: 0, y: 0 }, { x: 0, y: 0, zoom: 2 }, 1.25)).toMatchObject({
+      left: 22.5,
+      top: 47.5,
+      width: 30,
+      transform: "scale(2.5)",
+      zoom: 0.8,
+    });
+  });
+
+  it("文書に掛かっている zoom は html と body の積。分からなければ 1", () => {
+    expect(documentZoom()).toBe(1);
+    const spy = vi
+      .spyOn(window, "getComputedStyle")
+      .mockImplementation(
+        (element: Element) =>
+          ({ zoom: element === document.body ? "1.25" : "1.2" }) as unknown as CSSStyleDeclaration,
+      );
+    expect(documentZoom()).toBeCloseTo(1.5);
+    spy.mockImplementation(() => ({ zoom: "normal" }) as unknown as CSSStyleDeclaration);
+    expect(documentZoom()).toBe(1);
   });
 
   it("文字の色は塗りの色。塗りがなければ薄い前景色、グラデーションは先頭の色", () => {

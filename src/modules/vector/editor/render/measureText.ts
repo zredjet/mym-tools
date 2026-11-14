@@ -12,9 +12,9 @@
  *   HTML の行の箱から求めるので、編集欄の文字と描画の文字の上下の位置がそろう。契約 (`TextMeasurer`) に
  *   ない追加の口 (`text/metrics.ts`) で、持たない計測では既定の比率を使う
  */
-import { graphemeCount } from "../text/graphemes";
-import type { LineBreakOptions } from "../text/lineBreak";
-import type { FontMetrics, MetricsTextMeasurer } from "../text/metrics";
+import { forEachGrapheme, graphemeCount } from "../text/graphemes";
+import { shapingUnits, type LineBreakOptions } from "../text/lineBreak";
+import type { FontMetrics, LineEndTrim, MetricsTextMeasurer } from "../text/metrics";
 import { cssFont, cssFontFamily } from "./buildNodeSvg";
 import type { FontSpec } from "./types";
 
@@ -55,24 +55,38 @@ export function defaultMeasureDocument(): Document | null {
 
 /**
  * canvas の 2D コンテキストを 1 つだけ作る。jsdom など canvas が使えない環境では null。
- * `textRendering` があれば `geometricPrecision` にする (Chromium の canvas は既定で字幅を丸め、
- * SVG の描画より広く測る。Safari 15 は持たない)。
+ * - canvas は html の直下につなぎ、`<html lang>` を引き継がせる。つながない canvas は言語を持たないので、
+ *   `sans-serif` などの総称フォントと和文の代わりのフォントが、描画 (`lang="ja"` の文書の SVG) と違うものになる
+ * - `textRendering` があれば `geometricPrecision` にする (Chromium の canvas は既定で字幅を丸め、
+ *   SVG の描画より広く測る。Safari 15 は持たない)
  */
 export function createMeasureContext(
   getDocument: () => Document | null = defaultMeasureDocument,
 ): () => CanvasRenderingContext2D | null {
   let context: CanvasRenderingContext2D | null | undefined;
+  let doc: Document | null = null;
   return () => {
     if (context === undefined) {
       try {
-        const doc = getDocument();
-        context = doc ? doc.createElement("canvas").getContext("2d") : null;
-        const styles = context as (CanvasRenderingContext2D & { textRendering?: string }) | null;
-        if (styles && "textRendering" in styles) styles.textRendering = "geometricPrecision";
+        doc = getDocument();
+        if (!doc) context = null;
+        else {
+          const canvas = doc.createElement("canvas");
+          canvas.width = 1;
+          canvas.height = 1;
+          canvas.setAttribute("aria-hidden", "true");
+          canvas.setAttribute("data-canvas-text-measure", "");
+          canvas.setAttribute("style", HIDDEN_STYLE);
+          attach(doc, canvas);
+          context = canvas.getContext("2d");
+          const styles = context as (CanvasRenderingContext2D & { textRendering?: string }) | null;
+          if (styles && "textRendering" in styles) styles.textRendering = "geometricPrecision";
+        }
       } catch {
         context = null;
       }
     }
+    if (doc && context && !context.canvas.isConnected) attach(doc, context.canvas);
     return context;
   };
 }
@@ -137,6 +151,47 @@ export function mayContainEmoji(text: string): boolean {
   return (scriptClasses(text) & EMOJI) !== 0;
 }
 
+/**
+ * WebKit が複雑な組版の経路で組む文字を含むか: 字形を組み合わせる文字 (ヘブライ・アラビア・インドの文字、
+ * ハングルの字母など)、結合文字 (U+1DC0〜、記号用、かなの濁点)、ZWJ・ZWNJ、異体字セレクタ、
+ * 絵文字の肌の色、旗 (地域指示記号)、タグ文字。WebKit の SVG は字間があると、この経路では文字列全体を
+ * カーニングして組み、ほかの経路では 1 文字ずつ並べる。
+ */
+export function usesComplexTextPath(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x0591) continue;
+    if (code <= 0x1cff) return true;
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        const cp = (code - 0xd800) * 0x400 + (next - 0xdc00) + 0x10000;
+        if (
+          (cp >= 0x1f1e6 && cp <= 0x1f1ff) ||
+          (cp >= 0x1f3fb && cp <= 0x1f3ff) ||
+          (cp >= 0xe0000 && cp <= 0xe01ef)
+        )
+          return true;
+        i++;
+      }
+      continue;
+    }
+    if (
+      (code >= 0x1dc0 && code <= 0x1dff) ||
+      code === 0x200c ||
+      code === 0x200d ||
+      (code >= 0x20d0 && code <= 0x20ff) ||
+      (code >= 0x302a && code <= 0x302f) ||
+      code === 0x3099 ||
+      code === 0x309a ||
+      (code >= 0xfe00 && code <= 0xfe0f) ||
+      (code >= 0xfe20 && code <= 0xfe2f)
+    )
+      return true;
+  }
+  return false;
+}
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 const XML_NS = "http://www.w3.org/XML/1998/namespace";
 
@@ -152,9 +207,10 @@ function attach(doc: Document, element: Element): void {
 }
 
 /**
- * 見えない SVG の `<text>` で幅を測る (`getComputedTextLength`)。測れない環境では null を返す。
+ * 見えない SVG の `<text>` で幅を測る (`getComputedTextLength`)。字間を含む。測れない環境では null を返す。
  * Chromium では描画と同じ幅 (カーニングを含む) を返すが、WebKit はカーニングを含まない値を返すので、
- * 使うかどうかは `createCanvasTextMeasurer` が実測で決める。
+ * 使うかどうかは `createCanvasTextMeasurer` が実測で決める。描画 (`buildNodeShell`) と同じく
+ * `text-rendering="geometricPrecision"` を付け、表示の倍率に関係なく指定のフォントサイズで組ませる。
  * 空白は描画 (`xml:space="preserve"`) と同じく保つ。属性は XML の名前空間に置かないと効かないので
  * `setAttributeNS` を使い、CSS の `white-space: pre` も付ける。測り終えたら本文を空にする。
  */
@@ -175,6 +231,7 @@ export function createSvgTextMeasure(
           svg.setAttribute("style", `${HIDDEN_STYLE};width:0;height:0;overflow:hidden`);
           const text = doc.createElementNS(SVG_NS, "text") as SVGTextElement;
           text.setAttributeNS(XML_NS, "xml:space", "preserve");
+          text.setAttribute("text-rendering", "geometricPrecision");
           text.setAttribute("style", "white-space:pre");
           svg.appendChild(text);
           element = typeof text.getComputedTextLength === "function" ? text : null;
@@ -194,6 +251,7 @@ export function createSvgTextMeasure(
     target.setAttribute("font-size", String(font.size));
     target.setAttribute("font-weight", String(font.weight));
     target.setAttribute("font-style", font.italic ? "italic" : "normal");
+    target.setAttribute("letter-spacing", String(font.letterSpacing));
     target.textContent = text;
     const width = target.getComputedTextLength();
     target.textContent = "";
@@ -262,14 +320,6 @@ export function createDomFontMetrics(
   };
 }
 
-/**
- * エンジンによって違う折り返しの規則を、編集欄と同じ CSS の要素で 1 回だけ確かめる。測れない環境では既定 (空)。
- * - `/` の後: 等幅フォントで `xx aaaa/bbbb` を 8.5 文字の幅に置き、`aaaa/` が 1 行目に残れば `/` の後で折り返す
- *   (WebKit)。折り返さなければ単語ごと次の行へ送られる (Chromium)
- * - 単位ごとの組み: かなの並びを、ふつうと `word-break: keep-all` (和文の間で折り返さない = 単位に分けない)
- *   で組んだ幅を比べ、違えば HTML は折り返せる単位ごとに組んでいる (WebKit)。かなをカーニングするフォント
- *   (ヒラギノなど) が見つからなければ、違いが出ないので決めない (行全体で判定する)
- */
 /** かなの並び (ヒラギノなどはかなの組をカーニングする)。単位ごとに組むと、単位をまたぐ分だけ広くなる。 */
 export const UNIT_SHAPING_PROBE = "テキストテキストテキストテキスト";
 export const UNIT_SHAPING_PROBE_FAMILIES = [
@@ -280,7 +330,11 @@ export const UNIT_SHAPING_PROBE_FAMILIES = [
   "sans-serif",
 ] as const;
 
-/** HTML が折り返せる単位ごとに組むか (`createLineBreakProbe` の一部)。 */
+/**
+ * かなの並びを、ふつうと `word-break: keep-all` (和文の間で折り返さない = 単位に分けない) で組んだ幅を比べ、
+ * 違えば HTML は折り返せる単位ごとに組んでいる (WebKit)。かなをカーニングするフォント (ヒラギノなど) が
+ * 見つからなければ、違いが出ないので決めない (行全体で判定する)。
+ */
 function shapesPerUnit(doc: Document): boolean {
   const box = doc.createElement("div");
   box.setAttribute("aria-hidden", "true");
@@ -309,6 +363,32 @@ function shapesPerUnit(doc: Document): boolean {
   }
 }
 
+/**
+ * 折り返しの規則を確かめる文字列。`text` を幅 `width` (フォント `font`) に置き、`index` の文字が 1 行目に
+ * 残るかを見る。`index` は行頭に来ない文字にする (WebKit は、折り返した直後の文字の範囲を前の行の末尾として返す)。
+ * - `/` の後: `aaaa/` が 1 行目に残れば `/` の後で折り返す (WebKit)。残らなければ単語ごと次の行へ (Chromium)
+ * - `-` の後の数字: `11-` が 1 行目に残れば折り返す (Chromium)
+ * - 前置の記号: `a:` が 1 行目に残れば `:` の後、`\` の前で折り返す (WebKit)
+ * - 全角空白: ぶら下がれば `ああああ` と全角空白が 1 行目に残る (Chromium)。ぶら下がらなければ、4 つめの `あ` と
+ *   全角空白が次の行へ送られる (WebKit)
+ */
+export const LINE_BREAK_PROBES = {
+  breakAfterSolidus: { text: "xx aaaa/bbbb", width: "8.5ch", font: "16px monospace", index: 7 },
+  breakHyphenBeforeDigit: { text: "xx 11-22", width: "6.5ch", font: "16px monospace", index: 4 },
+  breakBeforeAsciiPrefix: { text: "xx a:\\bbb", width: "7.5ch", font: "16px monospace", index: 4 },
+  ideographicSpaceHangs: {
+    text: "ああああ\u3000い",
+    width: "4.5em",
+    font: "16px sans-serif",
+    index: 4,
+  },
+} as const;
+
+/**
+ * エンジンによって違う折り返しの規則を、編集欄と同じ CSS の要素で 1 回だけ確かめる。測れない環境では既定 (空)。
+ * どれも、狭い幅に置いた文字列のある文字が 1 行目に残るかで見る (`LINE_BREAK_PROBES`)。
+ * 単位ごとの組み (`shapePerUnit`) は `shapesPerUnit` で見る。
+ */
 export function createLineBreakProbe(
   getDocument: () => Document | null = defaultMeasureDocument,
 ): () => LineBreakOptions {
@@ -324,29 +404,134 @@ export function createLineBreakProbe(
       box.setAttribute("lang", "ja");
       box.setAttribute(
         "style",
-        `${HIDDEN_STYLE};font:16px monospace;line-height:20px;width:8.5ch;white-space:pre-wrap;` +
+        `${HIDDEN_STYLE};line-height:20px;white-space:pre-wrap;` +
           "overflow-wrap:break-word;word-break:normal;line-break:strict",
       );
-      const text = doc.createTextNode("xx aaaa/bbbb");
-      box.appendChild(text);
       attach(doc, box);
       const range = doc.createRange();
-      const topOf = (index: number) => {
-        range.setStart(text, index);
-        range.setEnd(text, index + 1);
-        return range.getBoundingClientRect().top;
+      /** 確かめる文字が 1 行目に残るか。行が分かれない (レイアウトのない環境) なら null */
+      const staysOnFirstLine = (
+        probe: (typeof LINE_BREAK_PROBES)[keyof typeof LINE_BREAK_PROBES],
+      ) => {
+        box.style.font = probe.font;
+        box.style.width = probe.width;
+        box.textContent = probe.text;
+        const text = box.firstChild as Text;
+        const topOf = (index: number) => {
+          range.setStart(text, index);
+          range.setEnd(text, index + 1);
+          return range.getBoundingClientRect().top;
+        };
+        const first = topOf(0);
+        // 行が分かれたかは最後の文字で見る
+        if (!(topOf(probe.text.length - 1) > first)) return null;
+        return topOf(probe.index) === first;
       };
-      const first = topOf(0);
-      const solidus = topOf(7);
-      // 行が分かれたかは最後の文字で見る (WebKit は、折り返した直後の文字の範囲を前の行の末尾として返す)
-      const last = topOf(11);
+      const solidus = staysOnFirstLine(LINE_BREAK_PROBES.breakAfterSolidus);
+      if (solidus !== null) {
+        result = {
+          breakAfterSolidus: solidus,
+          breakHyphenBeforeDigit:
+            staysOnFirstLine(LINE_BREAK_PROBES.breakHyphenBeforeDigit) === true,
+          breakBeforeAsciiPrefix:
+            staysOnFirstLine(LINE_BREAK_PROBES.breakBeforeAsciiPrefix) === true,
+          keepIdeographicSpace: staysOnFirstLine(LINE_BREAK_PROBES.ideographicSpaceHangs) === false,
+          shapePerUnit: shapesPerUnit(doc),
+        };
+      }
       box.remove();
-      // 行が分かれていない (レイアウトのない環境) なら決めない
-      if (last > first)
-        result = { breakAfterSolidus: solidus === first, shapePerUnit: shapesPerUnit(doc) };
     } catch {
       // 確かめられなければ既定の規則
     }
+    return result;
+  };
+}
+
+/** 行末の約物を詰めるかを確かめる文字 (`LineEndTrim` の種類ごと)。 */
+export const LINE_END_TRIM_PROBES: Readonly<Record<keyof LineEndTrim, string>> = {
+  close: "」",
+  dot: "、",
+  quote: "”",
+};
+
+/**
+ * 行末の約物を詰める割合 (`LineEndTrim`) を、編集欄と同じ CSS の要素でフォントと字間ごとに確かめる。
+ * `ああああ」い` を、`ああああ」` が詰めずには収まらない幅 (`」` の幅の 1/4 だけ狭い) に置き、`」` が
+ * 1 行目に残れば、その幅の縮み方から割合を求める。測れない環境では詰めない。
+ */
+export function createLineEndTrimProbe(
+  getDocument: () => Document | null = defaultMeasureDocument,
+): (font: FontSpec) => LineEndTrim {
+  let parts: { doc: Document; box: HTMLElement; ruler: HTMLElement } | null | undefined;
+  const results = new Map<string, LineEndTrim>();
+  const ensure = () => {
+    if (parts === undefined) {
+      try {
+        const doc = getDocument();
+        if (!doc) parts = null;
+        else {
+          const box = doc.createElement("div");
+          box.setAttribute("aria-hidden", "true");
+          box.setAttribute("data-canvas-text-measure", "");
+          box.setAttribute("lang", "ja");
+          box.setAttribute(
+            "style",
+            `${HIDDEN_STYLE};line-height:normal;white-space:pre-wrap;` +
+              "overflow-wrap:break-word;word-break:normal;line-break:strict",
+          );
+          const ruler = doc.createElement("div");
+          ruler.setAttribute("style", `${HIDDEN_STYLE};width:100px;height:0`);
+          ruler.setAttribute("aria-hidden", "true");
+          parts = { doc, box, ruler };
+        }
+      } catch {
+        parts = null;
+      }
+    }
+    if (parts) {
+      attach(parts.doc, parts.box);
+      attach(parts.doc, parts.ruler);
+    }
+    return parts;
+  };
+  return (font) => {
+    const key = `${cssFont(font)}\u0001${font.letterSpacing}`;
+    const cached = results.get(key);
+    if (cached) return cached;
+    const result: LineEndTrim = { close: 0, dot: 0, quote: 0 };
+    try {
+      const current = ensure();
+      const scale = current ? current.ruler.getBoundingClientRect().width / 100 : 0;
+      if (current && Number.isFinite(scale) && scale > 0) {
+        const { doc, box } = current;
+        box.style.font = cssFont(font);
+        box.style.letterSpacing = `${font.letterSpacing}px`;
+        const range = doc.createRange();
+        for (const kind of Object.keys(LINE_END_TRIM_PROBES) as (keyof LineEndTrim)[]) {
+          box.style.width = "100000px";
+          box.textContent = `ああああ${LINE_END_TRIM_PROBES[kind]}い`;
+          const text = box.firstChild as Text;
+          const rectOf = (from: number, to: number) => {
+            range.setStart(text, from);
+            range.setEnd(text, to);
+            return range.getBoundingClientRect();
+          };
+          const full = rectOf(0, 5).width;
+          const charWidth = rectOf(4, 5).width;
+          if (!(charWidth > 0)) continue;
+          box.style.width = `${(full - charWidth / 4) / scale}px`;
+          const squeezed = rectOf(4, 5);
+          if (squeezed.top !== rectOf(0, 1).top) continue;
+          const ratio = (charWidth - squeezed.width) / charWidth;
+          if (ratio > 0.01 && ratio < 1) result[kind] = ratio;
+        }
+        box.textContent = "";
+      }
+    } catch {
+      // 確かめられなければ詰めない
+    }
+    if (results.size >= FONT_TABLE_LIMIT) results.clear();
+    results.set(key, result);
     return result;
   };
 }
@@ -428,6 +613,7 @@ export interface CanvasMeasurerOptions {
   measureWithSvg?: (text: string, font: FontSpec) => number | null;
   measureFontMetrics?: (font: FontSpec) => FontMetrics | null;
   detectLineBreaks?: () => LineBreakOptions;
+  detectLineEndTrim?: (font: FontSpec) => LineEndTrim;
 }
 
 /** 計測の経路を選ぶ規則 (テストと検証のために公開する)。 */
@@ -437,21 +623,24 @@ export interface MeasurePathInfo {
 }
 
 /**
- * ブラウザでの計測 (§4.7)。SVG の `<text>` が実際に描かれる幅と同じ値を返す。
+ * ブラウザでの計測 (§4.7)。SVG の `<text>` が実際に描かれる幅 (字間を含む) と同じ値を返す。
  *
- * どのエンジンでも、まず canvas の `measureText` で測る (速い)。WebKit (Safari、WKWebView) の canvas は
- * 描画と同じ幅を返す (カーニング、絵文字、`system-ui`、欧文フォントの中の和文を含めて実測で一致)。
- * Chromium の canvas は絵文字の幅と、代わりのフォントの選び方が描画と違うことがあるので、次の文字列だけは
- * SVG のレイアウトの幅 (`getComputedTextLength`。Chromium では描画と同じ) で測る:
- * - 絵文字とそのほかの文字 (`EMOJI` / `OTHER`) を含む文字列
- * - そのフォントで、canvas と SVG の幅が `AGREEMENT_PROBES` のどれかで合わない種類 (`LATIN` / `CJK`) の
- *   文字を含む文字列 (フォントと種類の組ごとに 1 回だけ比べる)
+ * どのエンジンでも、まず canvas の `measureText` で測る (速い)。canvas は `<html lang>` を引き継ぐよう文書に
+ * つなぎ、描画は `text-rendering="geometricPrecision"` で表示の倍率に関係なく組ませる (どちらも実測で必要)。
  *
- * どちらのエンジンかは名前で決めず、SVG のレイアウトの幅がカーニングを含むかを最初に 1 回だけ確かめて決める
- * (`KERNING_PROBE`)。含まなければ (WebKit) SVG では測らない。
+ * エンジンの違いは名前で決めず、SVG のレイアウトの幅 (`getComputedTextLength`) がカーニングを含むかを最初に
+ * 1 回だけ確かめて決める (`KERNING_PROBE`。カーニングした幅としない幅の、どちらに近いか)。
  *
- * 結果はフォントと文字列の組で覚える。長い文字列は覚えず、覚える量は文字列の合計の長さで抑える。
- * canvas が使えない環境 (jsdom) では、フォントサイズ × 0.6 を 1 文字の幅とみなす。
+ * - 含む (Chromium): canvas は絵文字の幅と、代わりのフォントの選び方が描画と違うことがあるので、絵文字と
+ *   そのほかの文字 (`EMOJI` / `OTHER`) を含む文字列と、そのフォントで canvas と SVG の幅が `AGREEMENT_PROBES`
+ *   のどれかで合わない種類 (`LATIN` / `CJK`) の文字を含む文字列は、SVG のレイアウトの幅 (Chromium では描画と
+ *   同じ) で測る。字間は canvas の `letterSpacing` に任せる (合字を解くのも描画と同じ)
+ * - 含まない (WebKit): SVG では測らない (canvas は描画と一致する)。ただし字間が 0 でないと、WebKit の SVG は
+ *   1 文字ずつ並べて描く (カーニングを入れず、字間は符号位置ごとに付く) ので、書記素ごとの canvas の幅の和に
+ *   符号位置の数 × 字間を足す。編集欄も字間のある間はカーニングを切る (`letterSpacingDropsKerning`)
+ *
+ * 結果はフォントと字間と文字列の組で覚える。長い文字列は覚えず、覚える量は文字列の合計の長さで抑える。
+ * canvas が使えない環境 (jsdom) では、フォントサイズ × 0.6 を 1 文字の幅とみなし、書記素ごとに字間を足す。
  */
 export function createCanvasTextMeasurer(
   options: CanvasMeasurerOptions = {},
@@ -465,6 +654,7 @@ export function createCanvasTextMeasurer(
   const measureWithSvg = options.measureWithSvg ?? createSvgTextMeasure();
   const measureFontMetrics = options.measureFontMetrics ?? createDomFontMetrics();
   const detectLineBreaks = options.detectLineBreaks ?? createLineBreakProbe();
+  const detectLineEndTrim = options.detectLineEndTrim ?? createLineEndTrimProbe();
   const widths = new WidthCache();
   const metrics = new Map<string, FontMetrics | null>();
   /** フォントごとに、確かめた文字の種類と、canvas と描画が合わない種類 (ビットの和) */
@@ -480,18 +670,37 @@ export function createCanvasTextMeasurer(
     }
     return value;
   };
-  // `ctx.font` は読み返すと書き方が変わる (正規化される) ので、最後に設定した文字列を覚えて比べる
+  // `ctx.font` は読み返すと書き方が変わる (正規化される) ので、最後に設定した値を覚えて比べる
   let currentFont = "";
-  const applyFont = (ctx: CanvasRenderingContext2D, fontString: string) => {
-    if (currentFont === fontString) return;
-    ctx.font = fontString;
-    currentFont = fontString;
+  let currentSpacing = 0;
+  const applyFont = (ctx: CanvasRenderingContext2D, fontString: string, spacing: number) => {
+    if (currentFont !== fontString) {
+      ctx.font = fontString;
+      currentFont = fontString;
+    }
+    if (currentSpacing !== spacing) {
+      (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${spacing}px`;
+      currentSpacing = spacing;
+    }
   };
-  const canvasWidth = (text: string, fontString: string): number | null => {
+  /** canvas で測る。`spacing` は canvas の `letterSpacing` を持つときだけ渡す。 */
+  const canvasWidth = (text: string, fontString: string, spacing = 0): number | null => {
     const ctx = getContext();
     if (!ctx) return null;
-    applyFont(ctx, fontString);
+    applyFont(ctx, fontString, spacing);
     return ctx.measureText(text).width;
+  };
+  const canvasHasSpacing = () => {
+    const ctx = getContext();
+    return ctx !== null && "letterSpacing" in ctx;
+  };
+  /** 字間なしの canvas の幅 (覚える)。 */
+  const plainWidth = (text: string, fontString: string): number | null => {
+    const cached = widths.get(fontString, text);
+    if (cached !== undefined) return cached;
+    const width = canvasWidth(text, fontString);
+    if (width !== null) widths.set(fontString, text, width);
+    return width;
   };
 
   /** SVG のレイアウトの幅が描画と同じか (カーニングを含むか)。最初に 1 回だけ確かめる。 */
@@ -507,13 +716,15 @@ export function createCanvasTextMeasurer(
       for (const char of KERNING_PROBE) separate += canvasWidth(char, fontString) ?? 0;
       if (separate - kerned < 1) continue; // このフォントはカーニングしない
       const viaSvg = measureWithSvg(KERNING_PROBE, font);
-      svgMatchesDrawing = viaSvg !== null && Math.abs(viaSvg - kerned) <= AGREEMENT_TOLERANCE;
+      // 許容差ではなく、カーニングした幅としない幅のどちらに近いかで決める (描画の丸めの違いに左右されない)
+      svgMatchesDrawing =
+        viaSvg !== null && Math.abs(viaSvg - kerned) < Math.abs(viaSvg - separate);
       break;
     }
     return svgMatchesDrawing;
   };
 
-  /** そのフォントで、canvas と描画が合わない文字の種類。種類ごとに最初に使うときに比べる。 */
+  /** そのフォントで、canvas と描画が合わない文字の種類。種類ごとに最初に使うときに比べる (字間なし)。 */
   const disagreeingClasses = (font: FontSpec, fontString: string, classes: number): number => {
     let entry = agreement.get(fontString);
     if (!entry) {
@@ -521,11 +732,12 @@ export function createCanvasTextMeasurer(
       entry = { checked: 0, disagreeing: 0 };
       agreement.set(fontString, entry);
     }
+    const plain = font.letterSpacing === 0 ? font : { ...font, letterSpacing: 0 };
     for (const cls of [LATIN, CJK] as const) {
       if ((classes & cls) === 0 || (entry.checked & cls) !== 0) continue;
       entry.checked |= cls;
       for (const probe of AGREEMENT_PROBES[cls]) {
-        const viaSvg = measureWithSvg(probe, font);
+        const viaSvg = measureWithSvg(probe, plain);
         const viaCanvas = canvasWidth(probe, fontString);
         if (viaSvg === null || viaCanvas === null) break;
         if (Math.abs(viaSvg - viaCanvas) > AGREEMENT_TOLERANCE) {
@@ -537,27 +749,80 @@ export function createCanvasTextMeasurer(
     return entry.disagreeing;
   };
 
-  /** 描画と同じ幅を得るために SVG で測るか。 */
+  /** 描画と同じ幅を得るために SVG で測るか (Chromium 型だけ)。 */
   const needsSvg = (text: string, font: FontSpec, fontString: string): boolean => {
-    // WebKit は canvas が描画と同じ幅を返し、SVG のレイアウトの幅はカーニングを含まない
-    if (!svgIsDrawing()) return false;
     const classes = scriptClasses(text);
     if ((classes & (EMOJI | OTHER)) !== 0) return true;
     return (disagreeingClasses(font, fontString, classes) & classes) !== 0;
   };
 
+  /** 描画の幅 (字間を含む)。測れなければ null。 */
+  const drawnWidth = (text: string, font: FontSpec, fontString: string): number | null => {
+    const spacing = font.letterSpacing;
+    if (svgIsDrawing()) {
+      if (needsSvg(text, font, fontString)) {
+        const viaSvg = measureWithSvg(text, font);
+        if (viaSvg !== null) return viaSvg;
+      }
+      if (spacing === 0) return plainWidth(text, fontString);
+      if (canvasHasSpacing()) return canvasWidth(text, fontString, spacing);
+      const plain = plainWidth(text, fontString);
+      return plain === null ? null : plain + graphemeCount(text) * spacing;
+    }
+    if (spacing === 0) return plainWidth(text, fontString);
+    // WebKit 型: 字間は符号位置ごとに付く。複雑な組版の経路の文字を含めば全体をカーニングして組み、
+    // 含まなければ 1 文字ずつ並べる (カーニングなし)
+    const sum = usesComplexTextPath(text)
+      ? plainWidth(text, fontString)
+      : graphemeSum(text, fontString);
+    return sum === null ? null : sum + codePointLength(text) * spacing;
+  };
+
+  /** 書記素クラスタごとの、字間なしの canvas の幅の和 (カーニングを入れない幅)。 */
+  const graphemeSum = (text: string, fontString: string): number | null => {
+    let sum: number | null = 0;
+    forEachGrapheme(text, (grapheme) => {
+      const width = sum === null ? null : plainWidth(grapheme, fontString);
+      sum = width === null || sum === null ? null : sum + width;
+    });
+    return sum;
+  };
+
+  const measure = (text: string, font: FontSpec): number => {
+    if (text === "") return 0;
+    const fontString = fontStringOf(font);
+    const spacing = font.letterSpacing;
+    const key = spacing === 0 ? fontString : `${fontString}\u0001${spacing}`;
+    const cached = widths.get(key, text);
+    if (cached !== undefined) return cached;
+    const width =
+      drawnWidth(text, font, fontString) ??
+      graphemeCount(text) * font.size * 0.6 + letterSpacingWidth(text, spacing);
+    widths.set(key, text, width);
+    return width;
+  };
+
   return {
-    measure(text: string, font: FontSpec): number {
-      const spacing = letterSpacingWidth(text, font.letterSpacing);
-      if (text === "") return 0;
-      const fontString = fontStringOf(font);
-      const cached = widths.get(fontString, text);
-      if (cached !== undefined) return cached + spacing;
-      let width = needsSvg(text, font, fontString) ? measureWithSvg(text, font) : null;
-      width ??= canvasWidth(text, fontString);
-      width ??= graphemeCount(text) * font.size * 0.6;
-      widths.set(fontString, text, width);
-      return width + spacing;
+    measure,
+
+    editorWidth(text: string, font: FontSpec): number {
+      if (text === "" || svgIsDrawing()) return measure(text, font);
+      // WebKit 型。字間があると編集欄はカーニングを切る (`letterSpacingDropsKerning`)。字間は書記素ごと
+      if (font.letterSpacing !== 0) {
+        const sum = graphemeSum(text, fontStringOf(font));
+        if (sum !== null) return sum + graphemeCount(text) * font.letterSpacing;
+        return measure(text, font);
+      }
+      // HTML は組む単位ごとに組み、単位をまたぐカーニングを入れない
+      const lineBreaks = detectLineBreaks();
+      if (!lineBreaks.shapePerUnit) return measure(text, font);
+      let width = 0;
+      for (const unit of shapingUnits(text, lineBreaks)) width += measure(unit, font);
+      return width;
+    },
+
+    lineEndTrim(font: FontSpec): LineEndTrim {
+      return detectLineEndTrim(font);
     },
 
     fontMetrics(font: FontSpec): FontMetrics | null {
@@ -567,7 +832,7 @@ export function createCanvasTextMeasurer(
       let result = measureFontMetrics(font);
       const ctx = result ? null : getContext();
       if (ctx) {
-        applyFont(ctx, fontString);
+        applyFont(ctx, fontString, currentSpacing);
         const measured = ctx.measureText("x");
         const ascent = measured.fontBoundingBoxAscent;
         const descent = measured.fontBoundingBoxDescent;
@@ -582,6 +847,10 @@ export function createCanvasTextMeasurer(
 
     lineBreakOptions(): LineBreakOptions {
       return detectLineBreaks();
+    },
+
+    letterSpacingDropsKerning(): boolean {
+      return !svgIsDrawing();
     },
 
     get cachedLength() {

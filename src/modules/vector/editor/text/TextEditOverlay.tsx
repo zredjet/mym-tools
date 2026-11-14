@@ -38,7 +38,7 @@ import {
   openTextEditSession,
   type TextEditSession,
 } from "./editSession";
-import { editorStyle } from "./editorStyle";
+import { documentZoom, editorStyle } from "./editorStyle";
 
 /** 変換を確定した直後の Esc を変換の操作とみなす時間 (ms)。Safari は compositionend の後に keydown を送る。 */
 const COMPOSITION_GRACE_MS = 50;
@@ -187,7 +187,7 @@ function TextEditor({ id }: { id: NodeId }) {
       autoComplete="off"
       autoCorrect="off"
       autoCapitalize="off"
-      style={editorStyle(node, { x: originX, y: originY }, viewport)}
+      style={editorStyle(node, { x: originX, y: originY }, viewport, documentZoom())}
       onChange={onChange}
       onCompositionStart={onCompositionStart}
       onCompositionEnd={onCompositionEnd}

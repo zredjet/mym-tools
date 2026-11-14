@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { breakUnits, trimTrailingSpaces } from "./lineBreak";
+import { breakUnits, lineEndTrimKind, shapingUnits, trimTrailingSpaces } from "./lineBreak";
 
 describe("breakUnits", () => {
   it("欧文は空白の後で分け、空白は前の単位に含める", () => {
@@ -66,6 +66,68 @@ describe("breakUnits", () => {
     expect(breakUnits("qux/quux", { breakAfterSolidus: false })).toEqual(["qux/quux"]);
   });
 
+  it("空白の後は、続く文字が句読点や閉じ括弧でも分ける (どのエンジンも同じ)", () => {
+    expect(breakUnits("a \u3001b")).toEqual(["a ", "\u3001", "b"]);
+    expect(breakUnits("x = ?")).toEqual(["x ", "= ", "?"]);
+    expect(breakUnits("( a )")).toEqual(["( ", "a ", ")"]);
+  });
+
+  it("三点リーダの後は欧文やダッシュの前でも分ける (前では分けない)", () => {
+    expect(breakUnits("あ\u2026\u2026abc")).toEqual(["あ\u2026\u2026", "abc"]);
+    expect(breakUnits("x\u2026y")).toEqual(["x\u2026", "y"]);
+    expect(breakUnits("\u2026\u2026\u2015\u2015")).toEqual(["\u2026\u2026", "\u2015\u2015"]);
+    expect(breakUnits("\u2026\u300d")).toEqual(["\u2026\u300d"]);
+  });
+
+  it("/ の前では分けず、後ろは和文の前で分ける", () => {
+    expect(breakUnits("円/個")).toEqual(["円/", "個"]);
+    expect(breakUnits("abc/123 x/y")).toEqual(["abc/123 ", "x/y"]);
+  });
+
+  it("ASCII の引用符の前後では分けない。欧文の後ろの閉じの引用符と和文の間でも分けない", () => {
+    expect(breakUnits('は"テスト"です')).toEqual(['は"テ', "ス", 'ト"で', "す"]);
+    expect(breakUnits("It's 'a'は")).toEqual(["It's ", "'a'は"]);
+    expect(breakUnits("\u2018a\u2019は")).toEqual(["\u2018a\u2019は"]);
+    expect(breakUnits("\u201cテ\u201dで")).toEqual(["\u201cテ\u201d", "で"]);
+  });
+
+  it("前置の記号 (通貨記号など) の後では分けない。¥ や € の前は : などの後から分ける", () => {
+    expect(breakUnits("価格\uffe51,000")).toEqual(["価", "格", "\uffe51,000"]);
+    expect(breakUnits("$5 +5 \u00a51,000")).toEqual(["$5 ", "+5 ", "\u00a51,000"]);
+    expect(breakUnits("C:\\Users a.\u20acc")).toEqual(["C:\\Users ", "a.", "\u20acc"]);
+  });
+
+  it("breakBeforeAsciiPrefix (WebKit) なら、: などと前置の記号の間、前置の記号の並びの間でも分ける", () => {
+    const webkit = { breakBeforeAsciiPrefix: true };
+    expect(breakUnits("C:\\Users\\name", webkit)).toEqual(["C:", "\\Users\\name"]);
+    expect(breakUnits("a:\\\\b a,+b", webkit)).toEqual(["a:", "\\", "\\b ", "a,", "+b"]);
+  });
+
+  it("- の後の数字は、breakHyphenBeforeDigit (Chromium) なら単語の途中だけ分ける。ほかのハイフンは数字の前でも分ける", () => {
+    const chromium = { breakHyphenBeforeDigit: true };
+    expect(breakUnits("1-2 a-1 -1")).toEqual(["1-2 ", "a-1 ", "-1"]);
+    expect(breakUnits("1-2 a-1 -1 (-1)", chromium)).toEqual([
+      "1-",
+      "2 ",
+      "a-",
+      "1 ",
+      "-1 ",
+      "(-1)",
+    ]);
+    expect(breakUnits("1\u20132")).toEqual(["1\u2013", "2"]);
+  });
+
+  it("breakAfterSolidus (WebKit) なら、/ の後で数字の前でも分ける (数字にはさまれた / を除く)", () => {
+    const webkit = { breakAfterSolidus: true };
+    expect(breakUnits("abc/123 a/1b 1/2/3", webkit)).toEqual([
+      "abc/",
+      "123 ",
+      "a/",
+      "1b ",
+      "1/2/3",
+    ]);
+  });
+
   it("ノーブレークスペースの前後とゼロ幅スペースの扱い", () => {
     expect(breakUnits("a\u00a0b c")).toEqual(["a\u00a0b ", "c"]);
     expect(breakUnits("ab\u200bcd")).toEqual(["ab\u200b", "cd"]);
@@ -80,6 +142,22 @@ describe("breakUnits", () => {
       "キ",
       "ス",
       "ト",
+    ]);
+  });
+
+  it("keepIdeographicSpace (WebKit) でも、全角の空白は後ろで分け、前では分けない", () => {
+    expect(breakUnits("見出し\u3000テキスト", { keepIdeographicSpace: true })).toEqual([
+      "見",
+      "出",
+      "し\u3000",
+      "テ",
+      "キ",
+      "ス",
+      "ト",
+    ]);
+    expect(breakUnits("ab\u3000\u3001cd", { keepIdeographicSpace: true })).toEqual([
+      "ab\u3000\u3001",
+      "cd",
     ]);
   });
 
@@ -101,5 +179,37 @@ describe("trimTrailingSpaces", () => {
     expect(trimTrailingSpaces("ab")).toBe("ab");
     expect(trimTrailingSpaces("   ")).toBe("");
     expect(trimTrailingSpaces("a\u00a0")).toBe("a\u00a0");
+  });
+
+  it("keepIdeographicSpace (WebKit) なら全角の空白はぶら下げない", () => {
+    expect(trimTrailingSpaces("ab\u3000 \t", { keepIdeographicSpace: true })).toBe("ab\u3000");
+  });
+});
+
+describe("shapingUnits", () => {
+  it("行分割の単位に加えて、小書きのかなと長音記号の前でも分ける (句読点はまとめたまま)", () => {
+    expect(breakUnits("ちょっとコーヒー。")).toEqual(["ちょっ", "と", "コー", "ヒー。"]);
+    expect(shapingUnits("ちょっとコーヒー。")).toEqual([
+      "ち",
+      "ょ",
+      "っ",
+      "と",
+      "コ",
+      "ー",
+      "ヒ",
+      "ー。",
+    ]);
+    expect(shapingUnits("Hello world")).toEqual(["Hello ", "world"]);
+  });
+});
+
+describe("lineEndTrimKind", () => {
+  it("全角の閉じ括弧、全角の読点・句点、閉じの引用符", () => {
+    expect(lineEndTrimKind("\u300d".charCodeAt(0))).toBe("close");
+    expect(lineEndTrimKind("\uff09".charCodeAt(0))).toBe("close");
+    expect(lineEndTrimKind("\u3001".charCodeAt(0))).toBe("dot");
+    expect(lineEndTrimKind("\u201d".charCodeAt(0))).toBe("quote");
+    expect(lineEndTrimKind(")".charCodeAt(0))).toBeNull();
+    expect(lineEndTrimKind("あ".charCodeAt(0))).toBeNull();
   });
 });

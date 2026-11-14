@@ -171,12 +171,82 @@ describe("layoutText: 折り返し", () => {
       expect(lineTexts(node, perUnit)).toEqual(["ちょっと"]);
     });
 
-    it("編集欄の行の幅 (auto-width の入力欄の幅) は単位ごとの和。行全体で組むエンジンでは描画の幅", () => {
+    it("折り返しの判定には、計測が返す編集欄の幅 (editorWidth) を使う", () => {
+      // 編集欄は 1 文字ずつ組む (カーニングなし)
+      const editor: MetricsTextMeasurer = {
+        measure: kerned.measure,
+        fontMetrics: () => null,
+        editorWidth: (value: string, font: FontSpec) => measurer.measure(value, font),
+      };
+      const node = text({ text: "あいうえお", sizing: "auto-height", width: 22 });
+      expect(lineTexts(node, editor)).toEqual(["あいうえ", "お"]);
+    });
+
+    it("編集欄の行の幅 (auto-width の入力欄の幅) は計測の editorWidth。持たなければ描画の幅", () => {
       const node = text({ text: "あいうえお\nab" });
-      expect(editorLineWidth(node, perUnit)).toBe(25);
-      expect(layoutText(node, perUnit).width).toBe(21);
+      const editor: MetricsTextMeasurer = {
+        ...perUnit,
+        editorWidth: (value: string, font: FontSpec) => measurer.measure(value, font),
+      };
+      expect(editorLineWidth(node, editor)).toBe(25);
+      expect(layoutText(node, editor).width).toBe(21);
       expect(editorLineWidth(node, kerned)).toBe(21);
     });
+  });
+
+  describe("行末の約物を詰めるエンジン (Chromium の text-spacing-trim)", () => {
+    const trimming: MetricsTextMeasurer = {
+      measure: measurer.measure,
+      fontMetrics: () => null,
+      lineEndTrim: () => ({ close: 0.5, dot: 0, quote: 0 }),
+    };
+
+    it("収まらない行も、行末の閉じ括弧を詰めて収まるなら収め、詰めた幅で揃える", () => {
+      // "あいう」" は 20。詰めると 17.5 で幅 18 に入る
+      const node = text({ text: "あいう」えお", sizing: "auto-height", width: 18, align: "right" });
+      expect(lineTexts(node)).toEqual(["あい", "う」え", "お"]);
+      const layout = layoutText(node, trimming);
+      expect(layout.lines.map((line) => line.text)).toEqual(["あいう」", "えお"]);
+      expect(layout.lines.map((line) => [line.width, line.x])).toEqual([
+        [17.5, 0.5],
+        [10, 8],
+      ]);
+    });
+
+    it("詰められない文字 (割合が 0 の読点、ほかの文字) では詰めない。収まる行は詰めない", () => {
+      expect(
+        lineTexts(text({ text: "あいう、えお", sizing: "auto-height", width: 18 }), trimming),
+      ).toEqual(["あい", "う、え", "お"]);
+      const fits = layoutText(
+        text({ text: "あいう」", sizing: "auto-height", width: 20 }),
+        trimming,
+      );
+      expect(fits.lines.map((line) => line.width)).toEqual([20]);
+    });
+  });
+
+  it("全角の空白をぶら下げないエンジン (WebKit) では、幅に数えて折り返す", () => {
+    const node = text({ text: "ああああ\u3000い", sizing: "auto-height", width: 20 });
+    expect(lineTexts(node)).toEqual(["ああああ\u3000", "い"]);
+    const webkit: MetricsTextMeasurer = {
+      measure: measurer.measure,
+      fontMetrics: () => null,
+      lineBreakOptions: () => ({ keepIdeographicSpace: true }),
+    };
+    expect(lineTexts(node, webkit)).toEqual(["あああ", "あ\u3000い"]);
+  });
+
+  it("編集欄の幅は、タブを次のタブ位置 (空白 1 つの幅ごと、近すぎればその次) まで進める", () => {
+    // a = 7、空白とタブと b = 5 (描画はタブを空白 1 つとして描く)
+    const widths: Record<string, number> = { a: 7, b: 5, " ": 5, "\t": 5 };
+    const tabbed: TextMeasurer = {
+      measure: (value: string) => Array.from(value).reduce((sum, ch) => sum + (widths[ch] ?? 0), 0),
+    };
+    // 7 → 10 (次のタブ位置) → 15
+    expect(editorLineWidth(text({ text: "a\tb" }), tabbed)).toBe(15);
+    // 7 + 7 = 14 → 15 は 1 しか進まないので 20 → 25
+    expect(editorLineWidth(text({ text: "aa\tb" }), tabbed)).toBe(25);
+    expect(layoutText(text({ text: "aa\tb" }), tabbed).width).toBe(24);
   });
 
   it("段落ごとに折り返し、空行を残す", () => {

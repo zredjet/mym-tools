@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fontMetricsOf, lineBreakOptionsOf } from "../text/metrics";
+import {
+  editorWidthOf,
+  fontMetricsOf,
+  lineBreakOptionsOf,
+  lineEndTrimOf,
+  NO_LINE_END_TRIM,
+} from "../text/metrics";
 import {
   AGREEMENT_PROBES,
   AGREEMENT_TOLERANCE,
@@ -8,17 +14,20 @@ import {
   createCanvasTextMeasurer,
   createDomFontMetrics,
   createLineBreakProbe,
+  createLineEndTrimProbe,
   createMeasureContext,
   createSvgTextMeasure,
   EMOJI,
   KERNING_PROBE,
   LATIN,
+  LINE_BREAK_PROBES,
   letterSpacingWidth,
   MAX_CACHED_TEXT_LENGTH,
   MAX_CACHED_TOTAL_LENGTH,
   mayContainEmoji,
   OTHER,
   scriptClasses,
+  usesComplexTextPath,
 } from "./measureText";
 import type { FontSpec } from "./types";
 
@@ -173,19 +182,43 @@ describe("createCanvasTextMeasurer: 経路の選び方", () => {
     expect(none.measure("a👍🏽", font)).toBeCloseTo(19.2);
   });
 
-  it("描画と同じ font で測り、字間を足し、結果を覚える", () => {
+  it("描画と同じ font で測り、結果を覚える", () => {
     const { ctx, fonts } = fakeContext();
     const measurer = createCanvasTextMeasurer({
       getContext: () => ctx,
       measureWithSvg: webkitSvg(),
     });
     const bold = { ...font, weight: 700, italic: true };
-    expect(measurer.measure("ab", { ...bold, letterSpacing: 1.5 })).toBe(23);
+    expect(measurer.measure("AVab", bold)).toBe(38);
     expect(fonts).toContain('italic 700 16px "Hiragino Sans", sans-serif');
     const calls = vi.mocked(ctx.measureText).mock.calls.length;
-    expect(measurer.measure("ab", bold)).toBe(20);
+    expect(measurer.measure("AVab", bold)).toBe(38);
     expect(vi.mocked(ctx.measureText).mock.calls.length).toBe(calls);
     expect(measurer.measure("", font)).toBe(0);
+  });
+
+  it("WebKit 型で字間があれば、1 文字ずつの幅の和に符号位置の数 × 字間を足す。複雑な組版の経路の文字を含めば全体をカーニングして測る", () => {
+    const { ctx } = fakeContext();
+    const measurer = createCanvasTextMeasurer({
+      getContext: () => ctx,
+      measureWithSvg: webkitSvg(),
+    });
+    const spaced = { ...font, letterSpacing: 1.5 };
+    // AV のカーニング (2) は入らない
+    expect(measurer.measure("AVab", spaced)).toBe(40 + 4 * 1.5);
+    // 異体字セレクタ (U+FE0F) を含む: 全体 (カーニングあり) + 符号位置 5 × 字間
+    expect(measurer.measure("AVa\u2764\ufe0f", spaced)).toBe(
+      kernedWidth("AVa\u2764\ufe0f") + 5 * 1.5,
+    );
+  });
+
+  it("Chromium 型で canvas が letterSpacing を持たなければ、書記素クラスタごとに字間を足す", () => {
+    const { ctx } = fakeContext();
+    const measurer = createCanvasTextMeasurer({
+      getContext: () => ctx,
+      measureWithSvg: chromiumSvg(),
+    });
+    expect(measurer.measure("AVab", { ...font, letterSpacing: 1.5 })).toBe(38 + 4 * 1.5);
   });
 });
 
@@ -234,6 +267,51 @@ describe("createCanvasTextMeasurer: 覚える量とアセント・ディセン�
     expect(fontMetricsOf({ measure: () => 1 }, font)).toBeNull();
   });
 
+  it("編集欄の幅: Chromium 型は描画の幅。WebKit 型は組む単位ごとの和、字間があればカーニングなしで書記素ごとに字間", () => {
+    // キャ の間を 3 詰めるフォント
+    const kana = (text: string) => Array.from(text).length * 10 - (text.includes("キャ") ? 3 : 0);
+    const { ctx: chromiumCtx } = fakeContext(
+      (text) => kernedWidth(text) - (text.includes("キャ") ? 3 : 0),
+    );
+    const chromium = createCanvasTextMeasurer({
+      getContext: () => chromiumCtx,
+      measureWithSvg: chromiumSvg(),
+      detectLineBreaks: () => ({ shapePerUnit: false }),
+    });
+    expect(editorWidthOf(chromium, "キャンプ", font)).toBe(37);
+    const webkit = (shapePerUnit: boolean) =>
+      createCanvasTextMeasurer({
+        getContext: () =>
+          fakeContext(
+            (text) => kernedWidth(text) - (kana(text) < Array.from(text).length * 10 ? 3 : 0),
+          ).ctx,
+        measureWithSvg: webkitSvg(),
+        detectLineBreaks: () => ({ shapePerUnit }),
+      });
+    // 小書きのかなの前でも区切って組む (キ + ャ + ン + プ)
+    expect(editorWidthOf(webkit(true), "キャンプ", font)).toBe(40);
+    expect(webkit(true).measure("キャンプ", font)).toBe(37);
+    expect(editorWidthOf(webkit(false), "キャンプ", font)).toBe(37);
+    // 字間 2: 書記素ごとの幅の和 + 書記素の数 × 字間 (ZWJ の並びも 1 つ)
+    expect(
+      editorWidthOf(webkit(true), "AV\ud83d\udc68\u200d\ud83d\udc69", {
+        ...font,
+        letterSpacing: 2,
+      }),
+    ).toBe(20 + kernedWidth("\ud83d\udc68\u200d\ud83d\udc69") + 3 * 2);
+    expect(editorWidthOf({ measure: () => 7 }, "abc", font)).toBe(7);
+  });
+
+  it("行末の約物を詰める割合はエンジンから求めたものを返す", () => {
+    const trim = { close: 0.5, dot: 0, quote: 0 };
+    const measurer = createCanvasTextMeasurer({
+      getContext: () => null,
+      detectLineEndTrim: () => trim,
+    });
+    expect(lineEndTrimOf(measurer, font)).toBe(trim);
+    expect(lineEndTrimOf({ measure: () => 1 }, font)).toBe(NO_LINE_END_TRIM);
+  });
+
   it("折り返しの規則はエンジンから求めたものを返す", () => {
     const measurer = createCanvasTextMeasurer({
       getContext: () => null,
@@ -249,6 +327,19 @@ describe("createCanvasTextMeasurer: 覚える量とアセント・ディセン�
     expect(fontMetricsOf(canvasTextMeasurer, font)).toBeNull();
     expect(lineBreakOptionsOf(canvasTextMeasurer)).toEqual({});
     expect(document.querySelector("[data-canvas-text-measure]")).toBeNull();
+  });
+});
+
+describe("usesComplexTextPath", () => {
+  it("結合文字・異体字セレクタ・ZWJ・肌の色・旗・字形を組み合わせる文字を見つける", () => {
+    expect(usesComplexTextPath("Hello 世界 Ελληνικά e\u0301")).toBe(false);
+    expect(usesComplexTextPath("\ud83d\ude00")).toBe(false);
+    expect(usesComplexTextPath("\u2764\ufe0f")).toBe(true);
+    expect(usesComplexTextPath("\ud83d\udc4d\ud83c\udffd")).toBe(true);
+    expect(usesComplexTextPath("\ud83c\uddef\ud83c\uddf5")).toBe(true);
+    expect(usesComplexTextPath("a\u200db")).toBe(true);
+    expect(usesComplexTextPath("か\u3099")).toBe(true);
+    expect(usesComplexTextPath("\u0627\u0644")).toBe(true);
   });
 });
 
@@ -325,13 +416,13 @@ describe("createDomFontMetrics (DOM のコード)", () => {
 
 describe("createLineBreakProbe (DOM のコード)", () => {
   /** jsdom の Range は getBoundingClientRect を持たないので、文字の位置ごとの行の上端を返すものを置く。 */
-  function stubRangeTops(topOf: (offset: number) => number) {
+  function stubRangeTops(topOf: (text: string, offset: number) => number) {
     const calls: number[] = [];
     Object.defineProperty(Range.prototype, "getBoundingClientRect", {
       configurable: true,
       value(this: Range) {
         calls.push(this.startOffset);
-        return { top: topOf(this.startOffset) } as DOMRect;
+        return { top: topOf(this.startContainer.textContent ?? "", this.startOffset) } as DOMRect;
       },
     });
     return calls;
@@ -351,28 +442,59 @@ describe("createLineBreakProbe (DOM のコード)", () => {
     });
   }
 
-  it("`aaaa/` が 1 行目に残り、かなの並びを単位ごとに組めば (WebKit)、/ の後で折り返し、単位ごとの幅で判定する", () => {
-    // WebKit は、折り返した直後の文字の範囲を前の行の末尾として返す
-    stubRangeTops((offset) => (offset <= 8 ? 0 : 20));
+  /** 確かめの文字列ごとの、1 行目の最後の文字の位置 */
+  function firstLineEnds(ends: Record<keyof typeof LINE_BREAK_PROBES, number>) {
+    const byText = new Map<string, number>(
+      Object.entries(ends).map(([key, end]) => [
+        LINE_BREAK_PROBES[key as keyof typeof LINE_BREAK_PROBES].text,
+        end,
+      ]),
+    );
+    return (text: string, offset: number) => (offset <= (byText.get(text) ?? 0) ? 0 : 20);
+  }
+
+  it("WebKit の折り返し: / の後、: と \\ の間で折り返し、- と数字の間では折り返さず、全角空白をぶら下げず、単位ごとに組む", () => {
+    // WebKit は、折り返した直後の文字の範囲を前の行の末尾として返す (1 つ先まで 1 行目とする)
+    stubRangeTops(
+      firstLineEnds({
+        breakAfterSolidus: 8,
+        breakHyphenBeforeDigit: 3,
+        breakBeforeAsciiPrefix: 5,
+        ideographicSpaceHangs: 3,
+      }),
+    );
     stubSpanWidths(384, 379.2);
     expect(createLineBreakProbe(() => document)()).toEqual({
       breakAfterSolidus: true,
+      breakHyphenBeforeDigit: false,
+      breakBeforeAsciiPrefix: true,
+      keepIdeographicSpace: true,
       shapePerUnit: true,
     });
     expect(document.querySelector("[data-canvas-text-measure]")).toBeNull();
   });
 
-  it("単語ごと次の行へ送られ、かなの並びを行全体で組めば (Chromium)、どちらもしない", () => {
-    stubRangeTops((offset) => (offset <= 2 ? 0 : 20));
+  it("Chromium の折り返し: / と \\ の前では単語ごと送り、- と数字の間で折り返し、全角空白をぶら下げ、行全体で組む", () => {
+    stubRangeTops(
+      firstLineEnds({
+        breakAfterSolidus: 2,
+        breakHyphenBeforeDigit: 5,
+        breakBeforeAsciiPrefix: 2,
+        ideographicSpaceHangs: 4,
+      }),
+    );
     stubSpanWidths(379.2, 379.2);
     expect(createLineBreakProbe(() => document)()).toEqual({
       breakAfterSolidus: false,
+      breakHyphenBeforeDigit: true,
+      breakBeforeAsciiPrefix: false,
+      keepIdeographicSpace: false,
       shapePerUnit: false,
     });
   });
 
   it("単位ごとの組みは、かなをカーニングするフォントが見つかるまで候補を順に試す", () => {
-    stubRangeTops((offset) => (offset <= 2 ? 0 : 20));
+    stubRangeTops((_, offset) => (offset <= 2 ? 0 : 20));
     const fonts: string[] = [];
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
       this: HTMLElement,
@@ -400,15 +522,101 @@ describe("createLineBreakProbe (DOM のコード)", () => {
   });
 });
 
+describe("createLineEndTrimProbe (DOM のコード)", () => {
+  afterEach(() => {
+    delete (Range.prototype as { getBoundingClientRect?: unknown }).getBoundingClientRect;
+  });
+
+  /**
+   * Chromium の代わり: 1 文字 16 (UI スケール 1.25 で 20 に見える)。「 は収まらない行の末尾で半分に詰める。
+   * 読点と引用符は詰めない。
+   */
+  function stubChromium(scale = 1.25) {
+    const calls: string[] = [];
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return { width: 100 * scale } as DOMRect;
+    });
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value(this: Range) {
+        const text = this.startContainer.textContent ?? "";
+        const box = this.startContainer.parentElement as HTMLElement;
+        calls.push(text);
+        const width = Number.parseFloat(box.style.width) * scale;
+        const last = text.charAt(4);
+        const fits = width >= 80 * scale;
+        if (this.startOffset === 0)
+          return { top: 0, width: (this.endOffset === 5 ? 80 : 16) * scale } as DOMRect;
+        if (fits) return { top: 0, width: 16 * scale } as DOMRect;
+        if (last === "」" && width >= 72 * scale) return { top: 0, width: 8 * scale } as DOMRect;
+        return { top: 20, width: 16 * scale } as DOMRect;
+      },
+    });
+    return calls;
+  }
+
+  it("詰めずには収まらない幅に置いて、1 行目に残った約物の幅の縮み方から割合を求める。フォントと字間ごとに 1 回", () => {
+    const calls = stubChromium();
+    const probe = createLineEndTrimProbe(() => document);
+    expect(probe(font)).toEqual({ close: 0.5, dot: 0, quote: 0 });
+    const box = document.querySelector<HTMLElement>("div[data-canvas-text-measure]");
+    expect(box?.parentElement).toBe(document.documentElement);
+    expect(box?.getAttribute("lang")).toBe("ja");
+    expect(box?.style.whiteSpace).toBe("pre-wrap");
+    expect(box?.textContent).toBe("");
+    const count = calls.length;
+    expect(probe(font)).toEqual({ close: 0.5, dot: 0, quote: 0 });
+    expect(calls.length).toBe(count);
+    probe({ ...font, letterSpacing: 1 });
+    expect(calls.length).toBeGreaterThan(count);
+    expect(box?.style.letterSpacing).toBe("1px");
+  });
+
+  it("測れなければ (レイアウトのない環境) 詰めない", () => {
+    expect(createLineEndTrimProbe(() => document)(font)).toEqual({ close: 0, dot: 0, quote: 0 });
+    expect(createLineEndTrimProbe(() => null)(font)).toEqual({ close: 0, dot: 0, quote: 0 });
+  });
+});
+
 describe("createMeasureContext", () => {
-  it("textRendering があれば geometricPrecision にする (なければ足さない)", () => {
-    const withRendering = { textRendering: "auto" };
-    const fakeDocument = (context: object) =>
-      ({ createElement: () => ({ getContext: () => context }) }) as unknown as Document;
-    expect(createMeasureContext(() => fakeDocument(withRendering))()).toBe(withRendering);
+  /** canvas と html だけを持つ文書の代わり。 */
+  function fakeDocument(context: { canvas?: unknown; textRendering?: string }) {
+    const attributes = new Map<string, string>();
+    const canvas = {
+      width: 0,
+      height: 0,
+      isConnected: false,
+      setAttribute: (name: string, value: string) => attributes.set(name, value),
+      getContext: () => context,
+    };
+    context.canvas = canvas;
+    const appendChild = vi.fn((element: { isConnected: boolean }) => {
+      element.isConnected = true;
+    });
+    const doc = {
+      createElement: () => canvas,
+      documentElement: { appendChild },
+    } as unknown as Document;
+    return { doc, canvas, attributes, appendChild };
+  }
+
+  it("canvas を html の直下に見えないように置き (言語を引き継ぐ)、textRendering があれば geometricPrecision にする", () => {
+    const withRendering: { canvas?: unknown; textRendering?: string } = { textRendering: "auto" };
+    const { doc, canvas, attributes, appendChild } = fakeDocument(withRendering);
+    const getContext = createMeasureContext(() => doc);
+    expect(getContext()).toBe(withRendering);
     expect(withRendering.textRendering).toBe("geometricPrecision");
-    const without = {};
-    createMeasureContext(() => fakeDocument(without))();
+    expect(appendChild).toHaveBeenCalledWith(canvas);
+    expect(attributes.get("style")).toContain("visibility:hidden");
+    expect(attributes.get("aria-hidden")).toBe("true");
+    // 外されていたら置き直す
+    canvas.isConnected = false;
+    getContext();
+    expect(appendChild).toHaveBeenCalledTimes(2);
+    const without: { canvas?: unknown; textRendering?: string } = {};
+    createMeasureContext(() => fakeDocument(without).doc)();
     expect("textRendering" in without).toBe(false);
     expect(createMeasureContext(() => null)()).toBeNull();
   });

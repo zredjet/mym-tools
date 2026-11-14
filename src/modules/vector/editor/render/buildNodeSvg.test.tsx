@@ -247,6 +247,7 @@ describe("buildNodeSvg: 種別ごと", () => {
       "letter-spacing": 1,
       fill: "#000000",
       "xml:space": "preserve",
+      "text-rendering": "geometricPrecision",
     });
     // 仮の layoutText: y = index * lineHeight + (lineHeight + fontSize * 0.7) / 2
     expect(out.children).toEqual([

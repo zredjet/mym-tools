@@ -1,6 +1,8 @@
 /**
  * 本文の編集欄 (`TextEditOverlay`) の見た目。描画 (`buildNodeShell`) と同じフォント・行の高さ・字間・揃えにし、
  * 文書の大きさのまま作って倍率は `transform: scale` で掛ける (行分割の計測と同じフォントサイズでブラウザが組む)。
+ * アプリの UI スケール (`body { zoom }`) も打ち消してから `transform` で掛ける。拡大・縮小したフォントサイズで
+ * 組むと、絵文字 (どのエンジンも) やシステムフォント (WebKit) の字幅が変わり、折り返しが描画とずれる。
  */
 import type { CSSProperties } from "react";
 import { pageToScreen } from "../canvas/viewport";
@@ -8,6 +10,7 @@ import type { Paint, TextNode } from "../model/types";
 import { cssFontFamily } from "../render/buildNodeSvg";
 import { canvasTextMeasurer } from "../render/measureText";
 import { ceilSize, editorLineWidth, layoutText, lineHeightOf } from "./layout";
+import { letterSpacingDropsKerningOf } from "./metrics";
 
 /** 入力欄の周りの余白 (画面 px)。行末のカーソルが欄の外に出て中身がスクロールしないようにする。 */
 const CARET_PAD = 2;
@@ -25,13 +28,31 @@ export function editorTextColor(fill: Paint | null, opacity: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-/** 編集欄の見た目 (画面座標の位置、文書の大きさ、倍率)。 */
+/**
+ * 文書に掛かっている CSS の `zoom` (html と body の積。アプリの UI スケール)。分からなければ 1。
+ */
+export function documentZoom(doc: Document = document): number {
+  let zoom = 1;
+  for (const element of [doc.documentElement, doc.body]) {
+    if (!element) continue;
+    const value = Number.parseFloat(doc.defaultView?.getComputedStyle(element).zoom ?? "");
+    if (Number.isFinite(value) && value > 0) zoom *= value;
+  }
+  return zoom;
+}
+
+/**
+ * 編集欄の見た目 (画面座標の位置、文書の大きさ、倍率)。`uiZoom` は入力欄が置かれる場所に掛かっている
+ * CSS の `zoom` (`documentZoom`)。入力欄に `zoom: 1 / uiZoom` を付けて打ち消し、位置と倍率に掛け直す。
+ */
 export function editorStyle(
   node: TextNode,
   origin: { x: number; y: number },
   viewport: { x: number; y: number; zoom: number },
+  uiZoom = 1,
 ): CSSProperties {
   const { zoom } = viewport;
+  const ui = Number.isFinite(uiZoom) && uiZoom > 0 ? uiZoom : 1;
   const screen = pageToScreen(viewport, { x: origin.x + node.x, y: origin.y + node.y });
   const pad = CARET_PAD / zoom;
   const layout = layoutText(node, canvasTextMeasurer);
@@ -45,8 +66,9 @@ export function editorStyle(
   const shift = node.align === "center" ? extra / 2 : node.align === "right" ? extra : 0;
   return {
     position: "absolute",
-    left: screen.x - CARET_PAD - shift * zoom,
-    top: screen.y - CARET_PAD,
+    // 打ち消した zoom の中の長さなので、置かれる場所の長さに UI スケールを掛ける
+    left: (screen.x - CARET_PAD - shift * zoom) * ui,
+    top: (screen.y - CARET_PAD) * ui,
     width: node.width + extra,
     // fixed で本文が高さを超えたときは、描画と同じくはみ出した行も見せる
     height: Math.max(node.height, layout.height),
@@ -54,8 +76,9 @@ export function editorStyle(
     margin: 0,
     border: 0,
     boxSizing: "content-box",
-    transform: `scale(${zoom})`,
+    transform: `scale(${zoom * ui})`,
     transformOrigin: "0 0",
+    ...(ui === 1 ? {} : { zoom: 1 / ui }),
     background: "transparent",
     outline: "none",
     resize: "none",
@@ -69,6 +92,11 @@ export function editorStyle(
     fontStyle: node.italic ? "italic" : "normal",
     lineHeight: `${lineHeightOf(node)}px`,
     letterSpacing: node.letterSpacing,
+    // 描画 (`buildNodeShell`) と同じく、表示の倍率に関係なく指定のフォントサイズで組む
+    textRendering: "geometricPrecision",
+    // 字間があると描画がカーニングを入れないエンジン (WebKit) では、編集欄もカーニングを切ってそろえる
+    fontKerning:
+      node.letterSpacing !== 0 && letterSpacingDropsKerningOf(canvasTextMeasurer) ? "none" : "auto",
     textAlign: node.align,
     textIndent: 0,
     textTransform: "none",
