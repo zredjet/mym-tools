@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { breakUnits, lineEndTrimKind, shapingUnits, trimTrailingSpaces } from "./lineBreak";
+import { breakUnits, mayTrimAtLineEnd, shapingUnits, trimTrailingSpaces } from "./lineBreak";
 
 describe("breakUnits", () => {
   it("欧文は空白の後で分け、空白は前の単位に含める", () => {
@@ -203,13 +203,10 @@ describe("shapingUnits", () => {
   });
 });
 
-describe("lineEndTrimKind", () => {
+describe("mayTrimAtLineEnd", () => {
   it("全角の閉じ括弧、全角の読点・句点、閉じの引用符", () => {
-    expect(lineEndTrimKind("\u300d".charCodeAt(0))).toBe("close");
-    expect(lineEndTrimKind("\uff09".charCodeAt(0))).toBe("close");
-    expect(lineEndTrimKind("\u3001".charCodeAt(0))).toBe("dot");
-    expect(lineEndTrimKind("\u201d".charCodeAt(0))).toBe("quote");
-    expect(lineEndTrimKind(")".charCodeAt(0))).toBeNull();
-    expect(lineEndTrimKind("あ".charCodeAt(0))).toBeNull();
+    for (const ch of ["\u300d", "\uff09", "\u301b", "\u3001", "\u3002", "\u201d"])
+      expect(mayTrimAtLineEnd(ch.charCodeAt(0))).toBe(true);
+    for (const ch of [")", "あ", "\u300c"]) expect(mayTrimAtLineEnd(ch.charCodeAt(0))).toBe(false);
   });
 });

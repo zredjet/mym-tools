@@ -198,7 +198,9 @@ describe("layoutText: 折り返し", () => {
     const trimming: MetricsTextMeasurer = {
       measure: measurer.measure,
       fontMetrics: () => null,
-      lineEndTrim: () => ({ close: 0.5, dot: 0, quote: 0 }),
+      // 」 は半分詰める。」 の後の 、 も半分詰める (前の文字で変わる例)。ほかは詰めない
+      lineEndTrim: (previous: string, last: string) =>
+        last === "」" || (last === "、" && previous === "」") ? 0.5 : 0,
     };
 
     it("収まらない行も、行末の閉じ括弧を詰めて収まるなら収め、詰めた幅で揃える", () => {
@@ -223,6 +225,39 @@ describe("layoutText: 折り返し", () => {
       );
       expect(fits.lines.map((line) => line.width)).toEqual([20]);
     });
+
+    it("単位の途中で割るときは、続く約物との詰め (、。 の 、) を割った後も残す (Chromium の編集欄と同じ)", () => {
+      // 、 の後に 。 が続くと、、 が半分 (2.5) 詰まる (canvas の幅に出る)
+      const adjacent: TextMeasurer = {
+        measure: (value: string, font: FontSpec) =>
+          measurer.measure(value, font) - 2.5 * (value.split("、。").length - 1),
+      };
+      const node = text({ text: "あ、。、。、。", sizing: "auto-height", width: 15 });
+      expect(lineTexts(node, adjacent)).toEqual(["あ、。、", "。、。"]);
+      // 詰めないエンジンでは、割った行は字幅どおり
+      expect(lineTexts(node)).toEqual(["あ、。", "、。、", "。"]);
+    });
+
+    it("詰めるかは、前の文字と合わせて計測に聞く", () => {
+      // "あい」、" は 20。末尾の 、 を詰めると 17.5
+      expect(
+        lineTexts(text({ text: "あい」、えお", sizing: "auto-height", width: 18 }), trimming),
+      ).toEqual(["あい」、", "えお"]);
+    });
+  });
+
+  it("収まるかは、編集欄の幅と描画の幅の広いほうで判定する (描いた行が枠からはみ出さない)", () => {
+    // 編集欄は描画より 1 文字につき 1 狭い (WebKit の字間: 描画は符号位置ごと、編集欄は書記素ごと)
+    const narrowEditor: MetricsTextMeasurer = {
+      measure: measurer.measure,
+      fontMetrics: () => null,
+      editorWidth: (value: string, font: FontSpec) =>
+        measurer.measure(value, font) - Array.from(value).length,
+    };
+    const node = text({ text: "あいうえおか", sizing: "auto-height", width: 22 });
+    const layout = layoutText(node, narrowEditor);
+    expect(layout.lines.map((line) => line.text)).toEqual(["あいうえ", "おか"]);
+    for (const line of layout.lines) expect(line.width).toBeLessThan(22);
   });
 
   it("全角の空白をぶら下げないエンジン (WebKit) では、幅に数えて折り返す", () => {

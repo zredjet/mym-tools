@@ -12,21 +12,6 @@ export interface FontMetrics {
   descent: number;
 }
 
-/**
- * 行に収まらないとき、行末の約物を詰める割合 (その字の幅に対する)。0 は詰めない。
- * Chromium の `text-spacing-trim` (既定の `normal` の `allow-end`) がこうする。
- * - `close`: 全角の閉じ括弧 (`」` `）` など)
- * - `dot`: 全角の読点・句点 (`、` `。` など)
- * - `quote`: 閉じの引用符 (`”` `’`。全角の字形のフォントだけ)
- */
-export interface LineEndTrim {
-  close: number;
-  dot: number;
-  quote: number;
-}
-
-export const NO_LINE_END_TRIM: LineEndTrim = { close: 0, dot: 0, quote: 0 };
-
 /** アセントとディセントも返す計測。エンジンによって違う折り返しの規則も返す。 */
 export interface MetricsTextMeasurer extends TextMeasurer {
   /** 分からなければ null */
@@ -43,8 +28,12 @@ export interface MetricsTextMeasurer extends TextMeasurer {
    * そろえる。描画の幅 (`measure`) と違うエンジンだけが違う値を返す (WebKit は単位ごとに組む)
    */
   editorWidth?(text: string, font: FontSpec): number;
-  /** 行末の約物を詰める割合 (フォントごと)。持たなければ詰めない */
-  lineEndTrim?(font: FontSpec): LineEndTrim;
+  /**
+   * 行に収まらないとき、行末の約物 `last` を詰めて縮める幅の、`last` の幅に対する割合 (`previous` は
+   * その前の文字)。0 は詰めない。Chromium の `text-spacing-trim` (既定の `normal` の `allow-end`) がこうする。
+   * 持たなければ詰めない
+   */
+  lineEndTrim?(previous: string, last: string, font: FontSpec): number;
 }
 
 /** 計測がアセントとディセントを返せるならその値、返せなければ null。 */
@@ -79,10 +68,15 @@ export function editorWidthOf(measurer: TextMeasurer, text: string, font: FontSp
     : measurer.measure(text, font);
 }
 
-/** 行末の約物を詰める割合。計測が返さなければ詰めない。 */
-export function lineEndTrimOf(measurer: TextMeasurer, font: FontSpec): LineEndTrim {
+/** 行末の約物を詰める割合。計測が返さなければ詰めない (0)。 */
+export function lineEndTrimOf(
+  measurer: TextMeasurer,
+  previous: string,
+  last: string,
+  font: FontSpec,
+): number {
   const candidate = measurer as Partial<MetricsTextMeasurer>;
   return typeof candidate.lineEndTrim === "function"
-    ? candidate.lineEndTrim(font)
-    : NO_LINE_END_TRIM;
+    ? candidate.lineEndTrim(previous, last, font)
+    : 0;
 }

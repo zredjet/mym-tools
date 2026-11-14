@@ -21,17 +21,11 @@ import type { FontSpec, LayoutText, TextLayout, TextLine, TextMeasurer } from ".
 import { splitGraphemes } from "./graphemes";
 import {
   breakUnits,
-  lineEndTrimKind,
+  mayTrimAtLineEnd,
   trimTrailingSpaces,
   type LineBreakOptions,
 } from "./lineBreak";
-import {
-  editorWidthOf,
-  fontMetricsOf,
-  lineBreakOptionsOf,
-  lineEndTrimOf,
-  type LineEndTrim,
-} from "./metrics";
+import { editorWidthOf, fontMetricsOf, lineBreakOptionsOf, lineEndTrimOf } from "./metrics";
 
 /** `lineHeight` が null のときの行の高さ (フォントサイズに対する倍率)。 */
 export const AUTO_LINE_HEIGHT = 1.4;
@@ -99,8 +93,11 @@ interface WrapContext {
   measure: (text: string) => number;
   /** 編集欄 (HTML) が組む幅。折り返すかどうかはこの幅で判定する */
   editor: (text: string) => number;
-  /** 行末の約物を詰めて縮められる幅 (末尾の空白を落とした行の文字列から)。詰めなければ 0 */
-  squeeze: (visible: string) => number;
+  /**
+   * 行末の約物を詰めて縮められる幅 (末尾の空白を落とした行の文字列と、行の後に続く文字から)。詰めなければ 0。
+   * 続く文字は、単位の途中で割った行のときだけ渡す
+   */
+  squeeze: (visible: string, next?: string) => number;
 }
 
 /**
@@ -115,8 +112,8 @@ interface WrapContext {
 function breakLongUnit(
   unit: string,
   context: WrapContext,
-  fitsText: (text: string) => boolean,
-): { lines: string[]; rest: string } {
+  fitsText: (text: string, next: string) => boolean,
+): { lines: { text: string; next: string }[]; rest: string } {
   const { limit, measure, options } = context;
   const graphemes = splitGraphemes(unit);
   // 同じ文字は 1 回だけ測る (`"a".repeat(n)` や `━━━` の連続)
@@ -131,8 +128,8 @@ function breakLongUnit(
   });
   const count = graphemes.length;
   const text = (from: number, to: number) => graphemes.slice(from, to).join("");
-  const fits = (from: number, to: number) => fitsText(text(from, to));
-  const lines: string[] = [];
+  const fits = (from: number, to: number) => fitsText(text(from, to), graphemes[to] ?? "");
+  const lines: { text: string; next: string }[] = [];
   let start = 0;
   while (start < count) {
     // 1 文字ずつの幅の和で、入るところまで (空白は行末にぶら下げる)
@@ -151,7 +148,7 @@ function breakLongUnit(
     while (end > start + 1 && !fits(start, end)) end--;
     while (end < count && fits(start, end + 1)) end++;
     if (end === count && start > 0) return { lines, rest: text(start, count) };
-    lines.push(text(start, end));
+    lines.push({ text: text(start, end), next: graphemes[end] ?? "" });
     start = end;
   }
   return { lines, rest: "" };
@@ -162,15 +159,17 @@ function breakLongUnit(
  * 単位ごとの幅の和で見積もってから、行全体の実際の幅 (カーニングを含む) で確かめる。
  * 同じ単位の幅は計測が覚えているので、長い文でも計測の呼び出しは行の数に比例する程度で済む。
  *
- * 収まるかどうかは、編集欄 (HTML) が組む幅で判定する (WebKit は単位ごとに組むので単位ごとの幅の和、
- * Chromium は行全体の幅)。収まらなくても、行末の約物を詰めて収まるなら収める (Chromium の
- * `text-spacing-trim`)。行の幅 (揃え) は描画の幅で、行末を詰めた行は詰めた分を引く (編集欄と同じ位置に揃う)。
+ * 収まるかどうかは、編集欄 (HTML) が組む幅と描画の幅の広いほうで判定する。編集欄の幅は、WebKit は単位ごとに
+ * 組むので単位ごとの幅の和、Chromium は行全体の幅。描画の幅のほうが広いこともある (WebKit の字間は描画では
+ * 符号位置ごと、編集欄では書記素ごと。タブは描画では空白 1 つ) ので、広いほうで判定して、描いた行が枠から
+ * はみ出さないようにする。収まらなくても、行末の約物を詰めて収まるなら収める (Chromium の `text-spacing-trim`)。
+ * 行の幅 (揃え) は描画の幅で、行末を詰めた行は詰めた分を引く (編集欄と同じ位置に揃う)。
  */
 function wrapParagraph(paragraph: string, context: WrapContext, rows: Row[]): void {
   const { limit, options, measure, editor, squeeze } = context;
   const trim = (text: string) => trimTrailingSpaces(text, options);
   const units = breakUnits(paragraph, options);
-  const editorWidth = options.shapePerUnit
+  const editorOf = options.shapePerUnit
     ? (parts: readonly string[]) => {
         if (parts.some((part) => part.includes("\t"))) return editor(trim(parts.join("")));
         let width = 0;
@@ -179,14 +178,22 @@ function wrapParagraph(paragraph: string, context: WrapContext, rows: Row[]): vo
         return last >= 0 ? width + editor(trim(parts[last] as string)) : 0;
       }
     : (parts: readonly string[]) => editor(trim(parts.join("")));
-  /** 編集欄で幅 `width` に組まれる行が収まるか */
-  const fits = (parts: readonly string[], width: number) =>
-    width < limit || width - squeeze(trim(parts.join(""))) < limit;
-  const pushRow = (text: string, width: number) => {
+  /** 収まるかの判定に使う幅 (編集欄の幅と描画の幅の広いほう) */
+  const editorWidth = (parts: readonly string[]) =>
+    Math.max(editorOf(parts), measure(trim(parts.join(""))));
+  /** 行末で詰められる幅。続く文字 `next` は、行の末尾に空白がないときだけ効く */
+  const squeezeOf = (text: string, next: string) => {
     const visible = trim(text);
-    rows.push({ text, width: measure(visible) - (width < limit ? 0 : squeeze(visible)) });
+    return squeeze(visible, visible.length === text.length ? next : "");
   };
-  const fitsText = (text: string) => fits([text], editorWidth([text]));
+  /** 幅 `width` (`editorWidth`) の行が収まるか */
+  const fits = (parts: readonly string[], width: number, next = "") =>
+    width < limit || width - squeezeOf(parts.join(""), next) < limit;
+  const pushRow = (text: string, width: number, next = "") => {
+    const visible = trim(text);
+    rows.push({ text, width: measure(visible) - (width < limit ? 0 : squeezeOf(text, next)) });
+  };
+  const fitsText = (text: string, next: string) => fits([text], editorWidth([text]), next);
   let next = 0;
   while (next < units.length) {
     const line: string[] = [];
@@ -218,7 +225,7 @@ function wrapParagraph(paragraph: string, context: WrapContext, rows: Row[]): vo
     // 3. 1 単位だけでも入らなければ、書記素クラスタで割る。収まる残りは次の行の先頭の単位にする
     if (line.length === 1 && !fits(line, current)) {
       const { lines, rest } = breakLongUnit(line[0] as string, context, fitsText);
-      for (const text of lines) pushRow(text, editorWidth([text]));
+      for (const { text, next } of lines) pushRow(text, editorWidth([text]), next);
       if (rest !== "") {
         next--;
         units[next] = rest;
@@ -265,7 +272,6 @@ function wrapContext(
   font: FontSpec,
   measure: (text: string) => number,
 ): WrapContext {
-  let trim: LineEndTrim | undefined;
   const editor = (text: string) => editorWidthOf(measurer, text, font);
   // 単位ごとの和 (WebKit) は同じ単位を何度も測るので、1 回のレイアウトの間だけ覚える
   const editorWidths = new Map<string, number>();
@@ -282,13 +288,18 @@ function wrapContext(
       }
       return width;
     },
-    squeeze: (visible) => {
-      const last = visible.charCodeAt(visible.length - 1);
-      const kind = lineEndTrimKind(last);
-      if (kind === null) return 0;
-      trim ??= lineEndTrimOf(measurer, font);
-      const ratio = trim[kind];
-      return ratio > 0 ? ratio * measure(visible.slice(-1)) : 0;
+    squeeze: (visible, next = "") => {
+      if (visible === "" || !mayTrimAtLineEnd(visible.charCodeAt(visible.length - 1))) return 0;
+      // 末尾の 2 つの書記素クラスタ (前の文字で詰めるかが変わる)
+      const tail = splitGraphemes(visible.slice(-16));
+      const last = tail[tail.length - 1] as string;
+      const ratio = lineEndTrimOf(measurer, tail[tail.length - 2] ?? "", last, font);
+      const atEnd = ratio > 0 ? ratio * measure(last) : 0;
+      // 単位の途中で割った行: 続く約物との詰め (`、。` の `、`) を、編集欄は割った後も残す (Chromium)。
+      // 詰める幅は描画の幅から求める (詰めないエンジンでは 0)
+      if (next === "" || !(mayTrimAtLineEnd(next.charCodeAt(0)) || next === "\u30fb")) return atEnd;
+      const adjacent = measure(last) + measure(next) - measure(last + next);
+      return Math.max(atEnd, adjacent > SIZE_EPSILON ? adjacent : 0);
     },
   };
 }

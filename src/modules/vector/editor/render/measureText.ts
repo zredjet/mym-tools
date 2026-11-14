@@ -14,7 +14,7 @@
  */
 import { forEachGrapheme, graphemeCount } from "../text/graphemes";
 import { shapingUnits, type LineBreakOptions } from "../text/lineBreak";
-import type { FontMetrics, LineEndTrim, MetricsTextMeasurer } from "../text/metrics";
+import type { FontMetrics, MetricsTextMeasurer } from "../text/metrics";
 import { cssFont, cssFontFamily } from "./buildNodeSvg";
 import type { FontSpec } from "./types";
 
@@ -153,13 +153,15 @@ export function mayContainEmoji(text: string): boolean {
 
 /**
  * WebKit が複雑な組版の経路で組む文字を含むか: 字形を組み合わせる文字 (ヘブライ・アラビア・インドの文字、
- * ハングルの字母など)、結合文字 (U+1DC0〜、記号用、かなの濁点)、ZWJ・ZWNJ、異体字セレクタ、
+ * ハングルの字母など)、結合文字 (U+0300〜、U+1DC0〜、記号用、かなの濁点)、声調の字母、ZWJ・ZWNJ、異体字セレクタ、
  * 絵文字の肌の色、旗 (地域指示記号)、タグ文字。WebKit の SVG は字間があると、この経路では文字列全体を
  * カーニングして組み、ほかの経路では 1 文字ずつ並べる。
  */
 export function usesComplexTextPath(text: string): boolean {
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
+    // 結合のダイアクリティカルマーク (`e` + U+0301 など) と声調の字母
+    if ((code >= 0x0300 && code <= 0x036f) || (code >= 0x02e5 && code <= 0x02e9)) return true;
     if (code < 0x0591) continue;
     if (code <= 0x1cff) return true;
     if (code >= 0xd800 && code <= 0xdbff) {
@@ -387,7 +389,8 @@ export const LINE_BREAK_PROBES = {
 /**
  * エンジンによって違う折り返しの規則を、編集欄と同じ CSS の要素で 1 回だけ確かめる。測れない環境では既定 (空)。
  * どれも、狭い幅に置いた文字列のある文字が 1 行目に残るかで見る (`LINE_BREAK_PROBES`)。
- * 単位ごとの組み (`shapePerUnit`) は `shapesPerUnit` で見る。
+ * 単位ごとの組み (`shapePerUnit`) は `shapesPerUnit` で見る。確かめる要素は終わったら (途中で例外が出ても)
+ * 外す。例外が出たら結果を覚えず、次に呼ばれたときに確かめ直す (それまでは既定の規則)。
  */
 export function createLineBreakProbe(
   getDocument: () => Document | null = defaultMeasureDocument,
@@ -395,28 +398,32 @@ export function createLineBreakProbe(
   let result: LineBreakOptions | undefined;
   return () => {
     if (result !== undefined) return result;
-    result = {};
+    let box: HTMLElement | null = null;
     try {
       const doc = getDocument();
-      if (!doc) return result;
-      const box = doc.createElement("div");
-      box.setAttribute("aria-hidden", "true");
-      box.setAttribute("lang", "ja");
-      box.setAttribute(
+      if (!doc) {
+        result = {};
+        return result;
+      }
+      const current = doc.createElement("div");
+      box = current;
+      current.setAttribute("aria-hidden", "true");
+      current.setAttribute("lang", "ja");
+      current.setAttribute(
         "style",
         `${HIDDEN_STYLE};line-height:20px;white-space:pre-wrap;` +
           "overflow-wrap:break-word;word-break:normal;line-break:strict",
       );
-      attach(doc, box);
+      attach(doc, current);
       const range = doc.createRange();
       /** 確かめる文字が 1 行目に残るか。行が分かれない (レイアウトのない環境) なら null */
       const staysOnFirstLine = (
         probe: (typeof LINE_BREAK_PROBES)[keyof typeof LINE_BREAK_PROBES],
       ) => {
-        box.style.font = probe.font;
-        box.style.width = probe.width;
-        box.textContent = probe.text;
-        const text = box.firstChild as Text;
+        current.style.font = probe.font;
+        current.style.width = probe.width;
+        current.textContent = probe.text;
+        const text = current.firstChild as Text;
         const topOf = (index: number) => {
           range.setStart(text, index);
           range.setEnd(text, index + 1);
@@ -428,42 +435,45 @@ export function createLineBreakProbe(
         return topOf(probe.index) === first;
       };
       const solidus = staysOnFirstLine(LINE_BREAK_PROBES.breakAfterSolidus);
-      if (solidus !== null) {
-        result = {
-          breakAfterSolidus: solidus,
-          breakHyphenBeforeDigit:
-            staysOnFirstLine(LINE_BREAK_PROBES.breakHyphenBeforeDigit) === true,
-          breakBeforeAsciiPrefix:
-            staysOnFirstLine(LINE_BREAK_PROBES.breakBeforeAsciiPrefix) === true,
-          keepIdeographicSpace: staysOnFirstLine(LINE_BREAK_PROBES.ideographicSpaceHangs) === false,
-          shapePerUnit: shapesPerUnit(doc),
-        };
-      }
-      box.remove();
+      // 行が分かれていない (レイアウトのない環境) なら決めない
+      result =
+        solidus === null
+          ? {}
+          : {
+              breakAfterSolidus: solidus,
+              breakHyphenBeforeDigit:
+                staysOnFirstLine(LINE_BREAK_PROBES.breakHyphenBeforeDigit) === true,
+              breakBeforeAsciiPrefix:
+                staysOnFirstLine(LINE_BREAK_PROBES.breakBeforeAsciiPrefix) === true,
+              keepIdeographicSpace:
+                staysOnFirstLine(LINE_BREAK_PROBES.ideographicSpaceHangs) === false,
+              shapePerUnit: shapesPerUnit(doc),
+            };
+      return result;
     } catch {
-      // 確かめられなければ既定の規則
+      // 確かめられなければ、今回は既定の規則で、次に確かめ直す
+      return {};
+    } finally {
+      box?.remove();
     }
-    return result;
   };
 }
 
-/** 行末の約物を詰めるかを確かめる文字 (`LineEndTrim` の種類ごと)。 */
-export const LINE_END_TRIM_PROBES: Readonly<Record<keyof LineEndTrim, string>> = {
-  close: "」",
-  dot: "、",
-  quote: "”",
-};
+/** 前の文字が文字や数字なら、行末で詰めるかに関わらないので 1 つの代表で確かめる。 */
+const LETTER_OR_DIGIT = /^[\p{L}\p{N}]/u;
 
 /**
- * 行末の約物を詰める割合 (`LineEndTrim`) を、編集欄と同じ CSS の要素でフォントと字間ごとに確かめる。
- * `ああああ」い` を、`ああああ」` が詰めずには収まらない幅 (`」` の幅の 1/4 だけ狭い) に置き、`」` が
- * 1 行目に残れば、その幅の縮み方から割合を求める。測れない環境では詰めない。
+ * 行末の約物を詰める割合 (`MetricsTextMeasurer.lineEndTrim`) を、編集欄と同じ CSS の要素で、フォント・字間・
+ * 末尾の 2 文字の組ごとに確かめる (Chromium の `text-spacing-trim`。詰めるかは字と、その前の文字で変わる。
+ * たとえば `〛` は詰めず、`」` の後の `、` は詰める)。`ああ` + 前の文字 + 約物 + `い` を、行の幅より少しだけ
+ * 狭い幅に置き、約物が 1 行目に残れば、行の縮んだ幅を約物の幅で割った値を返す。測れない環境では 0。
+ * 確かめた要素の本文は終わったら空にする。例外が出たら結果を覚えず、次に確かめ直す。
  */
 export function createLineEndTrimProbe(
   getDocument: () => Document | null = defaultMeasureDocument,
-): (font: FontSpec) => LineEndTrim {
+): (previous: string, last: string, font: FontSpec) => number {
   let parts: { doc: Document; box: HTMLElement; ruler: HTMLElement } | null | undefined;
-  const results = new Map<string, LineEndTrim>();
+  const results = new Map<string, number>();
   const ensure = () => {
     if (parts === undefined) {
       try {
@@ -482,6 +492,7 @@ export function createLineEndTrimProbe(
           const ruler = doc.createElement("div");
           ruler.setAttribute("style", `${HIDDEN_STYLE};width:100px;height:0`);
           ruler.setAttribute("aria-hidden", "true");
+          ruler.setAttribute("data-canvas-text-measure", "");
           parts = { doc, box, ruler };
         }
       } catch {
@@ -494,41 +505,45 @@ export function createLineEndTrimProbe(
     }
     return parts;
   };
-  return (font) => {
-    const key = `${cssFont(font)}\u0001${font.letterSpacing}`;
+  return (previous, last, font) => {
+    const before = previous === "" || LETTER_OR_DIGIT.test(previous) ? "あ" : previous;
+    const key = `${cssFont(font)}\u0001${font.letterSpacing}\u0001${before}\u0001${last}`;
     const cached = results.get(key);
-    if (cached) return cached;
-    const result: LineEndTrim = { close: 0, dot: 0, quote: 0 };
+    if (cached !== undefined) return cached;
+    let result = 0;
+    const current = ensure();
     try {
-      const current = ensure();
       const scale = current ? current.ruler.getBoundingClientRect().width / 100 : 0;
       if (current && Number.isFinite(scale) && scale > 0) {
         const { doc, box } = current;
         box.style.font = cssFont(font);
         box.style.letterSpacing = `${font.letterSpacing}px`;
+        box.style.width = "100000px";
+        box.textContent = `ああ${before}${last}い`;
+        const text = box.firstChild as Text;
         const range = doc.createRange();
-        for (const kind of Object.keys(LINE_END_TRIM_PROBES) as (keyof LineEndTrim)[]) {
-          box.style.width = "100000px";
-          box.textContent = `ああああ${LINE_END_TRIM_PROBES[kind]}い`;
-          const text = box.firstChild as Text;
-          const rectOf = (from: number, to: number) => {
-            range.setStart(text, from);
-            range.setEnd(text, to);
-            return range.getBoundingClientRect();
-          };
-          const full = rectOf(0, 5).width;
-          const charWidth = rectOf(4, 5).width;
-          if (!(charWidth > 0)) continue;
-          box.style.width = `${(full - charWidth / 4) / scale}px`;
-          const squeezed = rectOf(4, 5);
-          if (squeezed.top !== rectOf(0, 1).top) continue;
-          const ratio = (charWidth - squeezed.width) / charWidth;
-          if (ratio > 0.01 && ratio < 1) result[kind] = ratio;
+        const rectOf = (from: number, to: number) => {
+          range.setStart(text, from);
+          range.setEnd(text, to);
+          return range.getBoundingClientRect();
+        };
+        const start = 2 + before.length;
+        const end = start + last.length;
+        const full = rectOf(0, end).width;
+        const charWidth = rectOf(start, end).width;
+        if (charWidth > 0) {
+          // 詰めずには収まらない、少しだけ狭い幅
+          box.style.width = `${(full - Math.min(1, charWidth / 4)) / scale}px`;
+          if (rectOf(start, end).top === rectOf(0, 1).top) {
+            const ratio = (full - rectOf(0, end).width) / charWidth;
+            if (ratio > 0.01 && ratio < 1) result = ratio;
+          }
         }
-        box.textContent = "";
       }
     } catch {
-      // 確かめられなければ詰めない
+      return 0;
+    } finally {
+      if (current) current.box.textContent = "";
     }
     if (results.size >= FONT_TABLE_LIMIT) results.clear();
     results.set(key, result);
@@ -613,7 +628,7 @@ export interface CanvasMeasurerOptions {
   measureWithSvg?: (text: string, font: FontSpec) => number | null;
   measureFontMetrics?: (font: FontSpec) => FontMetrics | null;
   detectLineBreaks?: () => LineBreakOptions;
-  detectLineEndTrim?: (font: FontSpec) => LineEndTrim;
+  detectLineEndTrim?: (previous: string, last: string, font: FontSpec) => number;
 }
 
 /** 計測の経路を選ぶ規則 (テストと検証のために公開する)。 */
@@ -703,24 +718,28 @@ export function createCanvasTextMeasurer(
     return width;
   };
 
-  /** SVG のレイアウトの幅が描画と同じか (カーニングを含むか)。最初に 1 回だけ確かめる。 */
+  /**
+   * SVG のレイアウトの幅が描画と同じか (カーニングを含むか)。最初に 1 回だけ確かめる。canvas か SVG で
+   * 測れなかったときは覚えず (今回は含まないとみなす)、次に確かめ直す。
+   */
   const svgIsDrawing = (): boolean => {
     if (svgMatchesDrawing !== null) return svgMatchesDrawing;
-    svgMatchesDrawing = false;
     for (const family of KERNING_PROBE_FAMILIES) {
       const font: FontSpec = { family, size: 32, weight: 400, italic: false, letterSpacing: 0 };
       const fontString = cssFont(font);
       const kerned = canvasWidth(KERNING_PROBE, fontString);
-      if (kerned === null) break;
+      if (kerned === null) return false;
       let separate = 0;
       for (const char of KERNING_PROBE) separate += canvasWidth(char, fontString) ?? 0;
       if (separate - kerned < 1) continue; // このフォントはカーニングしない
       const viaSvg = measureWithSvg(KERNING_PROBE, font);
+      if (viaSvg === null) return false;
       // 許容差ではなく、カーニングした幅としない幅のどちらに近いかで決める (描画の丸めの違いに左右されない)
-      svgMatchesDrawing =
-        viaSvg !== null && Math.abs(viaSvg - kerned) < Math.abs(viaSvg - separate);
-      break;
+      svgMatchesDrawing = Math.abs(viaSvg - kerned) < Math.abs(viaSvg - separate);
+      return svgMatchesDrawing;
     }
+    // カーニングするフォントがない: 決められないので canvas だけで測る
+    svgMatchesDrawing = false;
     return svgMatchesDrawing;
   };
 
@@ -735,16 +754,21 @@ export function createCanvasTextMeasurer(
     const plain = font.letterSpacing === 0 ? font : { ...font, letterSpacing: 0 };
     for (const cls of [LATIN, CJK] as const) {
       if ((classes & cls) === 0 || (entry.checked & cls) !== 0) continue;
-      entry.checked |= cls;
+      // 測れなかったら覚えず (今回は合うとみなす)、次に確かめ直す
+      let measured = true;
       for (const probe of AGREEMENT_PROBES[cls]) {
         const viaSvg = measureWithSvg(probe, plain);
         const viaCanvas = canvasWidth(probe, fontString);
-        if (viaSvg === null || viaCanvas === null) break;
+        if (viaSvg === null || viaCanvas === null) {
+          measured = false;
+          break;
+        }
         if (Math.abs(viaSvg - viaCanvas) > AGREEMENT_TOLERANCE) {
           entry.disagreeing |= cls;
           break;
         }
       }
+      if (measured) entry.checked |= cls;
     }
     return entry.disagreeing;
   };
@@ -821,8 +845,8 @@ export function createCanvasTextMeasurer(
       return width;
     },
 
-    lineEndTrim(font: FontSpec): LineEndTrim {
-      return detectLineEndTrim(font);
+    lineEndTrim(previous: string, last: string, font: FontSpec): number {
+      return detectLineEndTrim(previous, last, font);
     },
 
     fontMetrics(font: FontSpec): FontMetrics | null {

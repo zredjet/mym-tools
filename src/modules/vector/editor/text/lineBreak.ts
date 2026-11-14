@@ -263,14 +263,11 @@ const LINE_END_CLOSE = charSet("」』）】〕〉》］｝〙〗〛〟｠");
 const LINE_END_DOT = charSet("、。，．");
 
 /**
- * 行末で詰められる約物の種類 (`LineEndTrim` のどれを使うか)。詰められない文字は null。
- * 全角の閉じ括弧、全角の読点・句点、閉じの引用符。
+ * 行末で詰めることがある約物か (全角の閉じ括弧、全角の読点・句点、閉じの引用符)。実際に詰めるかと
+ * 詰める幅は、エンジンとフォントと前の文字で決まる (`MetricsTextMeasurer.lineEndTrim`)。
  */
-export function lineEndTrimKind(code: number): "close" | "dot" | "quote" | null {
-  if (LINE_END_CLOSE.has(code)) return "close";
-  if (LINE_END_DOT.has(code)) return "dot";
-  if (CLOSE_QUOTE.has(code)) return "quote";
-  return null;
+export function mayTrimAtLineEnd(code: number): boolean {
+  return LINE_END_CLOSE.has(code) || LINE_END_DOT.has(code) || CLOSE_QUOTE.has(code);
 }
 
 /** 行末にぶら下げる空白 (`breakUnits` の空白と同じ集合) を落とす。 */
