@@ -8,8 +8,12 @@ import "@/index.css";
 import { exposeHarness, harnessDocument, initialDocument } from "./documents";
 import { EditorHarness } from "./EditorHarness";
 import { editorStore } from "../state/store";
+import { setExportWriter } from "../export/writer";
+import { downloadWriter } from "./downloadWriter";
 
 exposeHarness();
+// 書き出しはブラウザのダウンロードで保存する (アプリでは切替 PR が保存ダイアログと `vector_write_file` につなぐ)
+setExportWriter(downloadWriter);
 // 最初の描画より前に読み込む (キャンバスは開いたときに内容が収まるよう表示する)
 editorStore.getState().load(harnessDocument(initialDocument()));
 
