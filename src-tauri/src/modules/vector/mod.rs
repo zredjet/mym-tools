@@ -2,6 +2,8 @@
 pub mod commands;
 mod drawio_import;
 pub mod protocol;
+mod scene;
+mod upgrade;
 mod validation;
 
 use crate::module::{ModuleBackend, ModuleError};
