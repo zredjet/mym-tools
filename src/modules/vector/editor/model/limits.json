@@ -1,6 +1,7 @@
 {
   "payloadBytes": 20971520,
   "textBytes": 1048576,
+  "maxTotalTextBytes": 4194304,
   "maxNodes": 20000,
   "maxDepth": 32,
   "maxPages": 100,

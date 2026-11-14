@@ -1,5 +1,5 @@
 {
-  "description": "vector payload v2 の契約 (docs/canvas-editor-design.md §3)。Rust と TypeScript の両方のテストが読む。valid は検証を通り、payload.text が文書から求めた検索用テキストと一致する。invalid は base (valid の名前) の payload に patch を順に当てたもので、どちらの実装でも拒否する。patch の op は set (path の位置へ value を置く) / remove (path の位置を消す) / append (path の配列の末尾へ value を足す)。upgrade は v1 を v2 へ変換した結果が v2 と完全に一致し、その v2 は検証を通る。",
+  "description": "vector payload v2 の契約 (docs/canvas-editor-design.md §3)。Rust と TypeScript の両方のテストが読む。valid は検証を通り、payload.text が文書から求めた検索用テキストと一致する。invalid は base (valid の名前) の payload に patch を順に当てたもので、どちらの実装でも拒否する。patch の op は set (path の位置へ value を置く) / remove (path の位置を消す) / append (path の配列の末尾へ value を足す)。upgrade は v1 を v2 へ変換した結果が v2 と完全に一致し、その v2 は検証を通る (text-renormalized は、v1 の抽出が空白として扱わない U+0085 を含み、文書の text だけが v1 と違う例)。",
   "valid": [
     {
       "name": "empty",
@@ -616,6 +616,30 @@
       ]
     },
     {
+      "name": "image-asset-size-zero",
+      "reason": "画像アセットの大きさが 0",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "img1", "width"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-size-zero",
+      "reason": "SVG アセットの大きさが 0",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "height"],
+          "value": 0
+        }
+      ]
+    },
+    {
       "name": "asset-kind-mismatch",
       "reason": "image ノードが svg アセットを指す",
       "base": "full",
@@ -844,6 +868,48 @@
           }
         },
         "text": ""
+      }
+    },
+    {
+      "name": "text-renormalized",
+      "v1": {
+        "svg": "<svg width=\"20\" height=\"10\" xmlns=\"http://www.w3.org/2000/svg\"><text>a&#x85;b</text></svg>",
+        "text": "a\u0085b"
+      },
+      "v2": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["legacy"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "legacy": {
+            "id": "legacy",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 20,
+            "height": 10,
+            "type": "svg",
+            "assetId": "legacy"
+          }
+        },
+        "assets": {
+          "legacy": {
+            "kind": "svg",
+            "svg": "<svg width=\"20\" height=\"10\" xmlns=\"http://www.w3.org/2000/svg\"><text>a&#x85;b</text></svg>",
+            "text": "a\u0085b",
+            "width": 20,
+            "height": 10
+          }
+        },
+        "text": "a b"
       }
     }
   ]
