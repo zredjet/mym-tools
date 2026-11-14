@@ -5,7 +5,7 @@
  * 選んだノードだけ)、ポインターが動くたびに全ノードを調べ直さない。
  */
 import { getPageBounds, rectContains, rectsIntersect, type Rect } from "../model/geometry";
-import { getChildren, getNode, getPage, type ParentRef } from "../model/tree";
+import { getAncestors, getChildren, getNode, getPage, type ParentRef } from "../model/tree";
 import type { CanvasDocument, CanvasNode, NodeId, PageId, Point } from "../model/types";
 import { isInteractive } from "./hitTest";
 
@@ -57,6 +57,25 @@ function intersectCandidate(
 }
 
 /**
+ * スコープの中で見えている範囲 (ページ座標)。スコープとその祖先のうち、子を切り抜く frame の矩形を
+ * すべて掛け合わせたもの (group のスコープでも、外側の frame の切り抜きを見る)。
+ * 切り抜く frame がなければ undefined、重なりがなければ null。
+ */
+function scopeClip(doc: CanvasDocument, scopeId: NodeId): Rect | null | undefined {
+  let clip: Rect | undefined;
+  for (const id of [scopeId, ...getAncestors(doc, scopeId).map((ancestor) => ancestor.id)]) {
+    const node = getNode(doc, id);
+    if (node?.type !== "frame" || !node.clip) continue;
+    const rect = getPageBounds(doc, id);
+    if (!rect) continue;
+    const next: Rect | null = clip ? intersectRects(clip, rect) : rect;
+    if (!next) return null;
+    clip = next;
+  }
+  return clip;
+}
+
+/**
  * 範囲選択の候補。スコープがあればスコープの子、なければページ直下のノードと、
  * ページ直下の frame の子 (frame が囲まれていないときに選ぶ)。非表示とロック中は除く。
  */
@@ -67,12 +86,12 @@ export function marqueeCandidates(
 ): MarqueeCandidate[] {
   if (scopeId !== null) {
     if (!isInteractive(doc, scopeId)) return [];
-    const scope = getNode(doc, scopeId);
-    const clip = scope?.type === "frame" && scope.clip ? getPageBounds(doc, scopeId) : null;
+    const clip = scopeClip(doc, scopeId);
+    if (clip === null) return []; // すべて切り抜かれて見えない
     const parent: ParentRef = { kind: "node", id: scopeId };
     const result: MarqueeCandidate[] = [];
     for (const id of getChildren(doc, parent)) {
-      const candidate = intersectCandidate(doc, id, clip);
+      const candidate = intersectCandidate(doc, id, clip ?? null);
       if (candidate) result.push(candidate);
     }
     return result;

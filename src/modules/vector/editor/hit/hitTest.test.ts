@@ -13,7 +13,7 @@ import {
   pickTarget,
   STROKE_HIT_SLOP,
 } from "./hitTest";
-import { distanceToSegment, ellipseDistance, roundedRectDistance } from "./shapes";
+import { distanceToSegment, insideGrownEllipse, roundedRectDistance } from "./shapes";
 
 /*
  * sampleDocument (ページ座標):
@@ -54,13 +54,23 @@ describe("shapes", () => {
     expect(roundedRectDistance({ x: 1, y: 1 }, rect, 0)).toBeLessThan(0);
   });
 
-  it("楕円の符号付き距離は輪郭の近くで正確", () => {
+  it("半径を広げた・縮めた楕円の中か", () => {
     const rect = { x: 0, y: 0, width: 200, height: 100 };
-    expect(ellipseDistance({ x: 200, y: 50 }, rect)).toBeCloseTo(0);
-    expect(ellipseDistance({ x: 203, y: 50 }, rect)).toBeCloseTo(3, 0);
-    expect(ellipseDistance({ x: 100, y: 50 }, rect)).toBeLessThan(0);
+    expect(insideGrownEllipse({ x: 200, y: 50 }, rect, 0)).toBe(true);
+    expect(insideGrownEllipse({ x: 203, y: 50 }, rect, 0)).toBe(false);
+    expect(insideGrownEllipse({ x: 203, y: 50 }, rect, 3)).toBe(true);
+    expect(insideGrownEllipse({ x: 196, y: 50 }, rect, -3)).toBe(true);
+    expect(insideGrownEllipse({ x: 198, y: 50 }, rect, -3)).toBe(false);
     // 外接矩形の角は外
-    expect(ellipseDistance({ x: 5, y: 5 }, rect)).toBeGreaterThan(0);
+    expect(insideGrownEllipse({ x: 5, y: 5 }, rect, 0)).toBe(false);
+    // 縮めた半径が 0 以下なら、どの点も中にない
+    expect(insideGrownEllipse({ x: 100, y: 50 }, { x: 0, y: 0, width: 200, height: 2 }, -2)).toBe(
+      false,
+    );
+    // 幅 0 の楕円 (線分) も広げれば囲める
+    expect(insideGrownEllipse({ x: 1, y: 50 }, { x: 0, y: 0, width: 0, height: 100 }, 2)).toBe(
+      true,
+    );
   });
 });
 
@@ -143,6 +153,45 @@ describe("hitTestPath", () => {
     expect(hitTestPath(d, "p1", { x: 3, y: 3 }, 1)).toBeNull();
     const stroked = single({ ...ellipse, stroke: createStroke("#000000", 10) });
     expect(hitTestPath(stroked, "p1", { x: 104, y: 25 }, 1)).toEqual(["e"]);
+  });
+
+  it("細長い塗りのない楕円も、見えている線の上は当たる (縦横比が大きくても)", () => {
+    // (0, 0) の 200×2 の楕円、線の太さ 2。輪郭は (190, 1.436) を通る
+    const thin = createEllipse({
+      id: "e",
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 2,
+      fill: null,
+      stroke: createStroke("#000000", 2),
+    });
+    const d = single(thin);
+    expect(hitTestPath(d, "p1", { x: 190, y: 1 }, 1)).toEqual(["e"]);
+    expect(hitTestPath(d, "p1", { x: 199, y: 1 }, 1)).toEqual(["e"]);
+    // 線の帯 (太さ 2 + 余裕 4 の半分 = 3) の外は当たらない
+    expect(hitTestPath(d, "p1", { x: 190, y: 6 }, 1)).toBeNull();
+    expect(hitTestPath(d, "p1", { x: 205, y: 1 }, 1)).toBeNull();
+    // 縦長でも同じ
+    const tall = single({ ...thin, width: 2, height: 200 });
+    expect(hitTestPath(tall, "p1", { x: 1, y: 190 }, 1)).toEqual(["e"]);
+  });
+
+  it("太い楕円の塗りのない中は当たらず、線の帯だけが当たる", () => {
+    const ring = single(
+      createEllipse({
+        id: "e",
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 100,
+        fill: null,
+        stroke: createStroke("#000000", 2),
+      }),
+    );
+    expect(hitTestPath(ring, "p1", { x: 100, y: 50 }, 1)).toBeNull();
+    expect(hitTestPath(ring, "p1", { x: 198, y: 50 }, 1)).toEqual(["e"]);
+    expect(hitTestPath(ring, "p1", { x: 196, y: 50 }, 1)).toBeNull();
   });
 
   it("テキストは枠の中が当たる (塗りがなくても)", () => {

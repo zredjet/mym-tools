@@ -32,28 +32,18 @@ export function roundedRectDistance(p: Point, rect: Rect, radius: number): numbe
 }
 
 /**
- * 楕円 (外接矩形 `rect`) の符号付き距離の近似。輪郭の近くで正確で、遠いほど粗い
- * (当たり判定は輪郭の近くしか見ないので十分)。幅か高さが 0 なら線分との距離。
+ * 楕円 (外接矩形 `rect`) の半径に `grow` を足した楕円の中 (輪郭を含む) に点があるか。
+ * 負の `grow` は内側へ縮める。縮めた半径が 0 以下なら、どの点も中にない。
+ *
+ * 線の帯は「外側へ広げた楕円の中で、内側へ縮めた楕円の外」で判定する。
+ * 距離の近似を使わないので、縦横比の大きい細長い楕円でも、見えている線の上の点を外さない。
+ * 幅か高さが 0 の楕円 (線分) も、広げれば線分を囲む細い楕円になる。
  */
-export function ellipseDistance(p: Point, rect: Rect): number {
-  const a = rect.width / 2;
-  const b = rect.height / 2;
-  const cx = rect.x + a;
-  const cy = rect.y + b;
-  if (a === 0 || b === 0) {
-    return distanceToSegment(
-      p,
-      { x: rect.x, y: rect.y },
-      {
-        x: rect.x + rect.width,
-        y: rect.y + rect.height,
-      },
-    );
-  }
-  const x = p.x - cx;
-  const y = p.y - cy;
-  const k0 = Math.hypot(x / a, y / b);
-  const k1 = Math.hypot(x / (a * a), y / (b * b));
-  if (k1 === 0) return -Math.min(a, b); // 中心
-  return (k0 * (k0 - 1)) / k1;
+export function insideGrownEllipse(p: Point, rect: Rect, grow: number): boolean {
+  const rx = rect.width / 2 + grow;
+  const ry = rect.height / 2 + grow;
+  if (rx <= 0 || ry <= 0) return false;
+  const nx = (p.x - (rect.x + rect.width / 2)) / rx;
+  const ny = (p.y - (rect.y + rect.height / 2)) / ry;
+  return nx * nx + ny * ny <= 1;
 }

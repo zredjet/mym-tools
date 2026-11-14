@@ -12,7 +12,7 @@ import { getPageBounds, rectContainsPoint, type Rect } from "../model/geometry";
 import { getAncestors, getNode, getPage, getParent } from "../model/tree";
 import type { CanvasDocument, CanvasNode, NodeId, PageId, Point } from "../model/types";
 import type { TextMeasurer } from "../render/types";
-import { distanceToSegment, ellipseDistance, roundedRectDistance } from "./shapes";
+import { distanceToSegment, insideGrownEllipse, roundedRectDistance } from "./shapes";
 
 /** 線の当たりの太さに足す余裕 (画面 px)。線の太さ + この値の帯が当たる (§4.5)。 */
 export const STROKE_HIT_SLOP = 4;
@@ -46,6 +46,23 @@ function shapeHit(d: number, hasFill: boolean, strokeWidth: number | null, slop:
   return !hasFill && Math.abs(d) <= slop / 2;
 }
 
+/**
+ * 楕円の当たり。規則は `shapeHit` と同じで、線の帯は外側へ広げた楕円と内側へ縮めた楕円で判定する
+ * (内側の半径が 0 以下なら内側はない)。
+ */
+function ellipseHit(
+  p: Point,
+  rect: Rect,
+  hasFill: boolean,
+  strokeWidth: number | null,
+  slop: number,
+): boolean {
+  if (hasFill && insideGrownEllipse(p, rect, (strokeWidth ?? 0) / 2)) return true;
+  const half = strokeWidth !== null ? (strokeWidth + slop) / 2 : hasFill ? null : slop / 2;
+  if (half === null) return false;
+  return insideGrownEllipse(p, rect, half) && !insideGrownEllipse(p, rect, -half);
+}
+
 function boxOf(node: { x: number; y: number; width: number; height: number }, origin: Point): Rect {
   return { x: origin.x + node.x, y: origin.y + node.y, width: node.width, height: node.height };
 }
@@ -62,10 +79,14 @@ function leafHit(node: CanvasNode, origin: Point, p: Point, slop: number): boole
       const d = roundedRectDistance(p, boxOf(node, origin), node.radius);
       return shapeHit(d, node.fill !== null, node.stroke?.width ?? null, slop);
     }
-    case "ellipse": {
-      const d = ellipseDistance(p, boxOf(node, origin));
-      return shapeHit(d, node.fill !== null, node.stroke?.width ?? null, slop);
-    }
+    case "ellipse":
+      return ellipseHit(
+        p,
+        boxOf(node, origin),
+        node.fill !== null,
+        node.stroke?.width ?? null,
+        slop,
+      );
     case "image":
       return roundedRectDistance(p, boxOf(node, origin), node.radius) <= 0;
     // テキストと埋め込み SVG は枠の中が当たる

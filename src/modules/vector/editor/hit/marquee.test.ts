@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { createFrame, createGroup, createRect } from "../model/create";
 import { sampleDocument } from "../model/testing";
 import { updateNode } from "../model/transform";
+import type { CanvasDocument, CanvasNode } from "../model/types";
 import {
   dropFrames,
   dropTargetAt,
@@ -59,6 +61,83 @@ describe("範囲選択", () => {
     expect(select({ x: 40, y: 55, width: 40, height: 40 }, null, outside)).toEqual([]);
     const noClip = updateNode(outside, "f", { clip: false });
     expect(select({ x: 40, y: 55, width: 40, height: 40 }, null, noClip)).toEqual(["r1"]);
+  });
+});
+
+describe("スコープの祖先の切り抜き", () => {
+  function docOf(top: string[], nodes: CanvasNode[]): CanvasDocument {
+    return {
+      pages: [{ id: "p1", name: "", children: top, guides: [] }],
+      nodes: Object.fromEntries(nodes.map((node) => [node.id, node])),
+      assets: {},
+    };
+  }
+
+  it("切り抜く frame の中の group のスコープでは、frame の外の部分で選ばない", () => {
+    // 100×100 の切り抜く frame の中の group に、x = 90〜130 の矩形
+    const doc = docOf(
+      ["f"],
+      [
+        createFrame({ id: "f", x: 0, y: 0, width: 100, height: 100, clip: true, children: ["g"] }),
+        createGroup(["a", "b"], { id: "g" }),
+        createRect({ id: "a", x: 90, y: 10, width: 40, height: 10 }),
+        createRect({ id: "b", x: 10, y: 50, width: 10, height: 10 }),
+      ],
+    );
+    expect(
+      marqueeSelect(marqueeCandidates(doc, "p1", "g"), { x: 110, y: 0, width: 10, height: 40 }),
+    ).toEqual([]);
+    expect(
+      marqueeSelect(marqueeCandidates(doc, "p1", "g"), { x: 95, y: 0, width: 5, height: 40 }),
+    ).toEqual(["a"]);
+    // 切り抜かなければ選ぶ
+    const open = updateNode(doc, "f", { clip: false });
+    expect(
+      marqueeSelect(marqueeCandidates(open, "p1", "g"), { x: 110, y: 0, width: 10, height: 40 }),
+    ).toEqual(["a"]);
+  });
+
+  it("入れ子の frame のスコープも、祖先の切り抜きを見る", () => {
+    // 外側 f (0..100、切り抜く) の中の n (50..250、切り抜かない) に、ページ座標 150..160 の矩形
+    const doc = docOf(
+      ["f"],
+      [
+        createFrame({ id: "f", x: 0, y: 0, width: 100, height: 100, clip: true, children: ["n"] }),
+        createFrame({
+          id: "n",
+          x: 50,
+          y: 0,
+          width: 200,
+          height: 100,
+          clip: false,
+          children: ["c", "d"],
+        }),
+        createRect({ id: "c", x: 100, y: 10, width: 10, height: 10 }),
+        createRect({ id: "d", x: 10, y: 10, width: 10, height: 10 }),
+      ],
+    );
+    const all = { x: 0, y: 0, width: 300, height: 100 };
+    expect(marqueeSelect(marqueeCandidates(doc, "p1", "n"), all)).toEqual(["d"]);
+  });
+
+  it("祖先の切り抜きの重なりがなければ、何も選ばない", () => {
+    const doc = docOf(
+      ["f"],
+      [
+        createFrame({ id: "f", x: 0, y: 0, width: 100, height: 100, clip: true, children: ["n"] }),
+        createFrame({
+          id: "n",
+          x: 150,
+          y: 0,
+          width: 100,
+          height: 100,
+          clip: true,
+          children: ["c"],
+        }),
+        createRect({ id: "c", x: 10, y: 10, width: 10, height: 10 }),
+      ],
+    );
+    expect(marqueeCandidates(doc, "p1", "n")).toEqual([]);
   });
 });
 
