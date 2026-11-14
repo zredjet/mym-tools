@@ -5,6 +5,7 @@ import { fixtureDocument, sampleDocument } from "../model/testing";
 import type { CanvasDocument, CanvasNode } from "../model/types";
 import { canvasTextMeasurer } from "../render/measureText";
 import { editorStore } from "../state/store";
+import { fitTextNodes } from "../text/fit";
 
 const PALETTE = [
   "#2563EB",
@@ -86,8 +87,13 @@ export function applyTheme(theme: Theme) {
   else document.documentElement.removeAttribute("data-theme");
 }
 
+/** 読み込む文書を作る。テキストの大きさは `load` に渡す前に求め直す (§4.7)。 */
+export function harnessDocument(name: HarnessDocumentName): CanvasDocument {
+  return fitTextNodes(HARNESS_DOCUMENTS[name](), null, canvasTextMeasurer);
+}
+
 export function loadDocument(name: HarnessDocumentName) {
-  editorStore.getState().load(HARNESS_DOCUMENTS[name]());
+  editorStore.getState().load(harnessDocument(name));
   const size = getCanvasViewSize();
   if (size.width > 0) zoomToFit({ store: editorStore, size, measurer: canvasTextMeasurer }, 1);
 }

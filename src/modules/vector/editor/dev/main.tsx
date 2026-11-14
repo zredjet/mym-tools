@@ -5,13 +5,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "@/index.css";
-import { exposeHarness, initialDocument, HARNESS_DOCUMENTS } from "./documents";
+import { exposeHarness, harnessDocument, initialDocument } from "./documents";
 import { EditorHarness } from "./EditorHarness";
 import { editorStore } from "../state/store";
 
 exposeHarness();
 // 最初の描画より前に読み込む (キャンバスは開いたときに内容が収まるよう表示する)
-editorStore.getState().load(HARNESS_DOCUMENTS[initialDocument()]());
+editorStore.getState().load(harnessDocument(initialDocument()));
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
