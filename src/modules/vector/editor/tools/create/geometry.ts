@@ -9,10 +9,13 @@ import type { Rect } from "../../model/geometry";
 import type { Point } from "../../model/types";
 import { moveLineEnd } from "../select/resize";
 
-/** `-0` を `0` にする丸め。 */
+/**
+ * 整数への丸め。絶対値を丸めてから符号を戻す (`Math.round` は 5.5 を 6、-5.5 を -5 にするので、
+ * 向きによって長さが変わり、45° の線が崩れる)。`-0` は `0` にする。
+ */
 export function roundInt(value: number): number {
-  const rounded = Math.round(value);
-  return rounded === 0 ? 0 : rounded;
+  const rounded = Math.round(Math.abs(value));
+  return rounded === 0 ? 0 : value < 0 ? -rounded : rounded;
 }
 
 export interface BoxModifiers {
@@ -45,8 +48,9 @@ export function dragBox(start: Point, pointer: Point, origin: Point, mods: BoxMo
   // ポインターの側の辺 (整数) までの差。0 なら引いた向きだけを見る
   const dx = roundInt(px) - s.x;
   const dy = roundInt(py) - s.y;
-  const signX = dx < 0 || (dx === 0 && px < s.x) ? -1 : 1;
-  const signY = dy < 0 || (dy === 0 && py < s.y) ? -1 : 1;
+  // 差が 0 の軸の向きは、丸める前の `pointer - start` で決める (動かしていない軸は右・下)
+  const signX = dx < 0 || (dx === 0 && pointer.x - start.x < 0) ? -1 : 1;
+  const signY = dy < 0 || (dy === 0 && pointer.y - start.y < 0) ? -1 : 1;
   const k = mods.fromCenter ? 2 : 1;
   let width = Math.max(1, k * Math.abs(dx));
   let height = Math.max(1, k * Math.abs(dy));

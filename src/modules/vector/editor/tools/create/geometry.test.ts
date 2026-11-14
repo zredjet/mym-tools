@@ -121,6 +121,37 @@ describe("小数の押下点", () => {
   });
 });
 
+describe("向きと .5 の丸め", () => {
+  it("Shift でまっすぐ下へ引いたら、正方形は右下にできる (小数の押下点でも)", () => {
+    expect(
+      dragBox({ x: 600.5, y: 300 }, { x: 600.5, y: 360 }, O, { square: true, fromCenter: false }),
+    ).toEqual({ x: 601, y: 300, width: 60, height: 60 });
+    expect(
+      dragBox({ x: 300, y: 200.5 }, { x: 340, y: 200.5 }, O, { square: true, fromCenter: false }),
+    ).toEqual({ x: 300, y: 201, width: 40, height: 40 });
+    // 少しでも左へ引いていれば左
+    expect(
+      dragBox({ x: 600.5, y: 300 }, { x: 600.2, y: 360 }, O, { square: true, fromCenter: false }).x,
+    ).toBe(541);
+  });
+
+  it("Shift の線は、差がちょうど .5 の右上・左下でも 45°", () => {
+    for (const pointer of [
+      { x: 15.5, y: 4.5 },
+      { x: 4.5, y: 15.5 },
+      { x: 15.5, y: 15.5 },
+      { x: 4.5, y: 4.5 },
+    ]) {
+      const line = dragLine({ x: 10, y: 10 }, pointer, O, { constrain: true, fromCenter: false });
+      expect(line, JSON.stringify(pointer)).not.toBeNull();
+      if (line) expect(Math.abs(line.x2 - line.x1)).toBe(Math.abs(line.y2 - line.y1));
+    }
+    expect(
+      dragLine({ x: 10, y: 10 }, { x: 15.5, y: 4.5 }, O, { constrain: true, fromCenter: false }),
+    ).toEqual({ x1: 10, y1: 10, x2: 16, y2: 4 });
+  });
+});
+
 const roundLocal = (v: number, origin: number) => Math.round(v - origin);
 
 describe("clickBox", () => {

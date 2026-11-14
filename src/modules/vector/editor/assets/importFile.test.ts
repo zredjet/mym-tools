@@ -210,6 +210,37 @@ describe("ジェスチャー・作品の入れ替え・本文の編集", () => {
     expect(s().doc).toBe(before);
   });
 
+  it("待ちが解けた直後に別の操作が次のジェスチャーを開いたら、それも閉じるのを待つ", async () => {
+    const { store, s } = setup();
+    const gate = deferred<{ width: number; height: number }>();
+    const pending = importFile(store, image(), { ...options, measureImage: () => gate.promise });
+    const moveR0 = (x: number) =>
+      store.getState().updateGesture((doc) => ({
+        ...doc,
+        nodes: { ...doc.nodes, r0: { ...doc.nodes.r0!, x } as (typeof doc.nodes)[string] },
+      }));
+    // ジェスチャー A を開いたまま読み込みが終わる
+    store.getState().beginGesture();
+    moveR0(50);
+    gate.resolve({ width: 200, height: 100 });
+    await tick();
+    await tick();
+    expect(s().revision).toBe(0);
+    // 別の操作の beginGesture が A を確定して B を開き、同じ流れで B を動かす
+    store.getState().beginGesture();
+    moveR0(80);
+    await tick();
+    await tick();
+    // B は途中で確定されない
+    expect(s()).toMatchObject({ gestureActive: true, revision: 1 });
+    expect(s().doc.nodes.r0).toMatchObject({ x: 80 });
+    // B の持ち主が取り消せば A の結果に戻り、その後に置く
+    store.getState().cancelGesture();
+    expect(await pending).toBe(true);
+    expect(s().revision).toBe(2);
+    expect(s().doc.nodes.r0).toMatchObject({ x: 50 });
+  });
+
   it("ジェスチャーが確定されたら、その後に置く (履歴は 2 件)", async () => {
     const { store, s } = setup();
     const gate = deferred<{ width: number; height: number }>();
@@ -260,7 +291,7 @@ describe("ジェスチャー・作品の入れ替え・本文の編集", () => {
     expect(getImportStatus().notice).toBeNull();
   });
 
-  it("取込の途中にドロップされたら、取込中であることを知らせる", async () => {
+  it("取込の途中にドロップされたら、取込中であることを知らせ、先の取込が終わったら消す", async () => {
     const { store } = setup();
     const gate = deferred<{ width: number; height: number }>();
     const pending = importFile(store, image(), { ...options, measureImage: () => gate.promise });
@@ -269,7 +300,8 @@ describe("ジェスチャー・作品の入れ替え・本文の編集", () => {
     );
     expect(getImportStatus().notice?.message).toContain("取り込んでいる途中");
     gate.resolve({ width: 200, height: 100 });
-    await pending;
+    expect(await pending).toBe(true);
+    expect(getImportStatus().notice).toBeNull();
   });
 
   it("本文の編集中なら、編集を終えてから置く", async () => {
@@ -350,6 +382,26 @@ describe("画像ツール", () => {
     await done;
     await vi.waitFor(() => expect(s().toolId).toBe("select"));
     expect(selected()).toMatchObject({ type: "svg", x: 1400, y: 1450 });
+  });
+
+  it("取込の途中にもう一度クリックしても、ファイル選択を二重に開かない", async () => {
+    const { store, s } = setup();
+    const file = deferred<ImportedFile | null>();
+    const reader = vi.fn(() => file.promise);
+    setImportFileReader(reader);
+    store.getState().setTool("image");
+    const ctx: ToolContext = { store, measurer: fixedWidthMeasurer(), setCursor: vi.fn() };
+    imageTool.onPointerDown?.(event(1500, 1500), ctx);
+    imageTool.onPointerUp?.(event(1500, 1500), ctx);
+    expect(s().toolId).toBe("image");
+    imageTool.onPointerDown?.(event(1200, 1200), ctx);
+    imageTool.onPointerUp?.(event(1200, 1200), ctx);
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(getImportStatus().notice?.message).toContain("取り込んでいる途中");
+    file.resolve(svg);
+    await vi.waitFor(() => expect(s().toolId).toBe("select"));
+    expect(s().revision).toBe(1);
+    expect(s().doc.nodes[s().selection[0] ?? ""]).toMatchObject({ x: 1400, y: 1450 });
   });
 
   it("取り消しても選択ツールへ戻る", async () => {

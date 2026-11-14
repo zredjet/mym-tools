@@ -223,6 +223,27 @@ describe("キー", () => {
     expect(editorStore.getState().doc).not.toBe(before);
   });
 
+  it("ルーラーからガイド線を引き出している間も、Esc のほかのキーを渡さない", () => {
+    const { canvas } = setup();
+    editorStore.getState().setSelection(["r0"]);
+    const ruler = canvas.querySelector<HTMLElement>("[data-canvas-ruler='x']")!;
+    fireEvent.pointerDown(ruler, { pointerId: 4, button: 0, clientX: 100, clientY: 10 });
+    fireEvent.pointerMove(ruler, { pointerId: 4, button: 0, clientX: 100, clientY: 80 });
+    expect(editorStore.getState().gestureActive).toBe(true);
+    for (const key of ["Delete", "ArrowRight", "r"])
+      fireEvent.keyDown(document.body, { key, code: key });
+    expect(spy.onKeyDown).not.toHaveBeenCalled();
+    expect(editorStore.getState().doc.nodes.r0).toBeDefined();
+    expect(editorStore.getState()).toMatchObject({ gestureActive: true, toolId: "select" });
+    // Esc での取消は今のまま
+    fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" });
+    expect(editorStore.getState()).toMatchObject({ gestureActive: false, revision: 0 });
+    expect(editorStore.getState().doc.pages[0]!.guides).toEqual([]);
+    // 終わった後は渡す
+    fireEvent.keyDown(document.body, { key: "Delete", code: "Delete" });
+    expect(spy.onKeyDown).toHaveBeenCalledTimes(1);
+  });
+
   it("ドラッグの途中の Esc は、ツールが取り消さなくても文書を戻す", () => {
     const { canvas } = setup();
     const before = editorStore.getState().doc;

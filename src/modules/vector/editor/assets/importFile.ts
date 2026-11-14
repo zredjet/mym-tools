@@ -49,8 +49,9 @@ export interface ImportOptions {
  * - ジェスチャーが閉じたとき、revision が増えずに、ジェスチャーの外で最後に見た文書と違う文書になった
  *   (未変更の作品で色の選択や本文の編集の途中に `load` された場合)
  *
- * 見張り始めた時点でジェスチャーが開いていた場合は、開始時点の文書が分からないので、閉じたときに
- * 履歴が空になった (Undo も Redo もできなくなった) ことで見分ける。未変更の作品ではこれを見逃す。
+ * 見張り始めた時点でジェスチャーが開いていた場合は、開始時点の文書が分からない。revision が 1 以上なら
+ * `load` は「revision が減った」で分かるが、revision 0 (未変更の作品) のままジェスチャーの途中に
+ * `load` された場合は見逃す。
  */
 export function watchDocumentReplaced(
   store: Store,
@@ -71,12 +72,7 @@ export function watchDocumentReplaced(
     if (state.revision === previous.revision) {
       if (!previous.gestureActive) {
         if (state.doc !== previous.doc) return mark();
-      } else if (
-        stable !== null
-          ? state.doc !== stable
-          : !state.canUndo && !state.canRedo && (previous.canUndo || previous.canRedo)
-      )
-        return mark();
+      } else if (stable !== null && state.doc !== stable) return mark();
     }
     stable = state.doc;
   });
@@ -133,11 +129,16 @@ async function place(
   const prepared = await prepareImport(file, options.measureImage ?? measureImageInBrowser);
   if (watch.replaced()) return error(REPLACED);
   if (!prepared.ok) return error(prepared.reason);
-  // 本文の編集中なら終えてから置く (編集中のテキストを残したまま選択を画像へ移さない)
-  if (store.getState().editingTextId !== null) store.getState().endTextEdit();
-  // ほかの操作のジェスチャーは、開いた側が閉じるのを待つ (途中で確定しない。§4.2)
-  await whenGestureClosed(store, watch);
-  if (watch.replaced()) return error(REPLACED);
+  // 本文の編集を終え、ほかの操作のジェスチャーは開いた側が閉じるのを待つ (途中で確定しない。§4.2)。
+  // 待ちが解けた後に続きが走るまでに、別の操作が次のジェスチャーを開いていることがある
+  // (`beginGesture` は前のジェスチャーを確定して新しく開く) ので、開いていれば待ち直す
+  for (;;) {
+    // 編集中のテキストを残したまま選択を画像へ移さない
+    if (store.getState().editingTextId !== null) store.getState().endTextEdit();
+    if (!store.getState().gestureActive) break;
+    await whenGestureClosed(store, watch);
+    if (watch.replaced()) return error(REPLACED);
+  }
 
   const state = store.getState();
   const viewSize = options.viewSize ?? getCanvasViewSize();
@@ -192,6 +193,8 @@ async function run(
   } finally {
     watch.stop();
     setImportBusy(false);
+    // 取込の途中に出した「取込中」の知らせは、この取込が終わったら消す (結果の知らせは残す)
+    if (getImportStatus().notice?.message === BUSY) notifyImport(store, null);
     // 画像ツールは 1 回で終わる (取り消したときも選択ツールへ戻る)
     if (store.getState().toolId === "image") store.getState().setTool("select");
   }
