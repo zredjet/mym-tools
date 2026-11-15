@@ -75,6 +75,8 @@ impl ScopedStorage {
     }
 
     /// item を更新する。`payload` の変更で `search_text` も再生成する (`data-model.md` §7.1)。
+    ///
+    /// 保存されている行が今の版で読めないときは上書きしない (`ensure_overwritable`、ADR-0027)。
     pub fn update_item(
         &self,
         id: &ItemId,
@@ -86,6 +88,7 @@ impl ScopedStorage {
         self.module
             .validate_payload(&payload)
             .map_err(|e| e.into_app_error(self.module.id()))?;
+        self.ensure_overwritable(id)?;
         let module_id = self.module.id().to_string();
         let payload_schema_version = self.module.current_payload_version();
         let search_text = build_search_text(title, tags, &self.module.index_text(&payload));
@@ -141,6 +144,48 @@ impl ScopedStorage {
         self.guard_stateless()?;
         let module_id = self.module.id().to_string();
         self.inner.list_items(&module_id, project_id, limit, offset)
+    }
+
+    /// 保存されている行を利用者の保存で上書きしてよいかを確かめる (ADR-0027)。
+    ///
+    /// - 今の版の行: そのまま許す (payload を読まない)
+    /// - 古い版の行: 保存されている payload の引き上げを試し、失敗するなら拒否する。変換できず
+    ///   開けない作品を、画面を通さない呼び出しで別の内容に置き換えて消さないため。引き上げられる
+    ///   なら許す (Eager-on-Read の書き戻しに失敗して古い版のまま残った行への保存を止めない)
+    /// - 新しい版の行 (新しいアプリで書いた行): 拒否する。読めない内容を上書きしない
+    fn ensure_overwritable(&self, id: &ItemId) -> Result<(), AppError> {
+        let module_id = self.module.id();
+        let current = self.module.current_payload_version();
+        let Some((stored_version, mut payload)) = self
+            .inner
+            .stored_payload_if_not_current(module_id, id, current)?
+        else {
+            return Ok(());
+        };
+        if stored_version > current {
+            return Err(AppError::UnsupportedFuturePayloadVersion {
+                module_id: module_id.to_string(),
+                item_version: stored_version,
+                current_version: current,
+            });
+        }
+        for from_version in stored_version..current {
+            payload = self
+                .module
+                .upgrade_payload(from_version, payload)
+                .map_err(|error| AppError::PayloadUpgradeFailed {
+                    module_id: module_id.to_string(),
+                    reason: format!(
+                        "保存されている内容を今の形式に変換できないため、上書きしません: {}",
+                        match error.into_app_error(module_id) {
+                            AppError::PayloadUpgradeFailed { reason, .. }
+                            | AppError::Validation { reason, .. } => reason,
+                            other => other.to_string(),
+                        }
+                    ),
+                })?;
+        }
+        Ok(())
     }
 
     fn guard_stateless(&self) -> Result<(), AppError> {

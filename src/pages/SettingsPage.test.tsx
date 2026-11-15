@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppShellOutletContext } from "@/components/shell/AppShell";
 import { listBackups } from "@/ipc/backup";
-import { importJson, type ImportSummary } from "@/ipc/transfer";
+import { exportJson, importJson, type ExportSummary, type ImportSummary } from "@/ipc/transfer";
 import { useAppStore } from "@/store/useAppStore";
 
 import { SettingsPage } from "./SettingsPage";
@@ -75,6 +75,64 @@ describe("SettingsPage import", () => {
 
     expect(await screen.findByText("インポート完了")).toBeInTheDocument();
     expect(refreshProjects).not.toHaveBeenCalled();
+  });
+});
+
+function exportSummary(notUpgraded: ExportSummary["not_upgraded"]): ExportSummary {
+  return {
+    schema_version: 1,
+    exported_at: "2026-11-15T10:00:00.000+09:00",
+    app_version: "0.1.0",
+    scope: "app",
+    module_versions: { vector: 2 },
+    projects_count: 1,
+    items_count: 3,
+    bytes_written: 2048,
+    not_upgraded: notUpgraded,
+  };
+}
+
+describe("SettingsPage export", () => {
+  beforeEach(() => {
+    vi.mocked(listBackups).mockResolvedValue([]);
+    dialog.save.mockResolvedValue("/tmp/out.mymtools.json");
+  });
+
+  it("shows the items written in their old format", async () => {
+    vi.mocked(exportJson).mockResolvedValue(
+      exportSummary([
+        {
+          id: "item-1",
+          module_id: "vector",
+          title: "古い作品",
+          payload_schema_version: 1,
+          reason: "SVG が今の検証を通りません: 未対応のSVG要素です: script",
+        },
+      ]),
+    );
+    renderSettings(vi.fn().mockResolvedValue(undefined));
+
+    fireEvent.click(await screen.findByRole("button", { name: /JSON にエクスポート/ }));
+
+    expect(await screen.findByText("エクスポート完了")).toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(
+      "1 件は新しい形式に変換できないため、元の形式のまま書き出しました。",
+    );
+    expect(alert).toHaveTextContent("失敗として数えられます");
+    expect(alert).toHaveTextContent("古い作品");
+    expect(alert).toHaveTextContent("vector / item-1");
+    expect(alert).toHaveTextContent("未対応のSVG要素です: script");
+  });
+
+  it("shows no notice when every item was converted", async () => {
+    vi.mocked(exportJson).mockResolvedValue(exportSummary([]));
+    renderSettings(vi.fn().mockResolvedValue(undefined));
+
+    fireEvent.click(await screen.findByRole("button", { name: /JSON にエクスポート/ }));
+
+    expect(await screen.findByText("エクスポート完了")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
 

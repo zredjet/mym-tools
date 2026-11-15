@@ -76,7 +76,7 @@ pub async fn core_export_json(
 
     // ページングで全件を読む間に item が更新されて取りこぼし / 重複が出ないよう Exclusive
     run_storage(&state, LockMode::Exclusive, move || {
-        let data = match project_id {
+        let build = match project_id {
             None => build_export_data(&storage, &modules, env!("CARGO_PKG_VERSION"))?,
             Some(id) => build_project_export_data(
                 &storage,
@@ -90,7 +90,7 @@ pub async fn core_export_json(
         // ので、途中失敗 (ディスクフル等) でも既存ファイルを壊さない
         write_atomically_with(&path_buf, |file| {
             let mut writer = std::io::BufWriter::new(file);
-            serde_json::to_writer_pretty(&mut writer, &data)
+            serde_json::to_writer_pretty(&mut writer, &build.data)
                 .map_err(|e| AppError::Storage(format!("serialize export: {e}")))?;
             writer.flush()?;
             Ok(())
@@ -100,7 +100,7 @@ pub async fn core_export_json(
             .map(|metadata| metadata.len())
             .unwrap_or(0);
 
-        let mut summary = ExportSummary::summarize(&data);
+        let mut summary = ExportSummary::summarize(&build);
         summary.bytes_written = bytes_written;
         Ok(summary)
     })

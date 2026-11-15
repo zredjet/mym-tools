@@ -172,6 +172,17 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
         module: &dyn ModuleBackend,
     ) -> Result<Item, AppError>;
 
+    /// 保存されている行の `payload_schema_version` が `current_version` と違うときだけ、その版と
+    /// 保存されている payload を返す (同じなら `None`。payload を読まない)。Eager-on-Read は
+    /// **発火させない**。ユーザー編集で上書きする前の確認 (`ScopedStorage::update_item`、ADR-0027) に使う。
+    /// 行が無ければ `AppError::NotFound`。
+    fn stored_payload_if_not_current(
+        &self,
+        module_id: &str,
+        id: &ItemId,
+        current_version: u32,
+    ) -> Result<Option<(u32, JsonValue)>, AppError>;
+
     /// プロジェクト内のモジュール item を一覧取得 (Eager-on-Read を**発火させない**、
     /// `data-model.md` §7.2 注)。`ORDER BY position ASC, updated_at DESC, id DESC` 順。
     ///

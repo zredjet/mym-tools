@@ -1,8 +1,11 @@
-//! DB schema versionを変えない、ADR-0016限定のLink / Memo所属移行。
+//! DB schema version を変えない起動時のデータ処理。
+//!
+//! - ADR-0016 限定の Link / Memo 所属移行
+//! - payload の版を上げたモジュールの、最初の変換の前のバックアップの記録 (ADR-0027)
 
 use std::collections::BTreeSet;
 
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Value as JsonValue};
 
 use crate::error::AppError;
@@ -15,6 +18,57 @@ struct LegacyMemo {
     title: String,
     tags: Vec<String>,
     body: String,
+}
+
+/// `meta` に置く、payload の引き上げ前のバックアップの記録のキー (ADR-0027)。値は、取った
+/// バックアップがどの版への引き上げのためのものか (= そのときの `current_payload_version`)。
+pub(crate) fn payload_upgrade_backup_key(module_id: &str) -> String {
+    format!("payload_upgrade_backup.{module_id}")
+}
+
+/// 引き上げ前のバックアップを取った版。記録が無ければ 0。
+pub(crate) fn payload_upgrade_backup_version(
+    conn: &mut Connection,
+    module_id: &str,
+) -> Result<u32, AppError> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = ?",
+            params![payload_upgrade_backup_key(module_id)],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(AppError::from)?;
+    Ok(value.and_then(|v| v.parse().ok()).unwrap_or(0))
+}
+
+/// 引き上げ前のバックアップを取ったことを記録する。`data_revision` は増やさない (内容の変更ではない)。
+pub(crate) fn set_payload_upgrade_backup_version(
+    conn: &mut Connection,
+    module_id: &str,
+    version: u32,
+) -> Result<(), AppError> {
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![payload_upgrade_backup_key(module_id), version.to_string()],
+    )
+    .map_err(AppError::from)?;
+    Ok(())
+}
+
+/// `version` より古い payload の行が `module_id` にあるか。payload の列は読まない。
+pub(crate) fn has_items_older_than(
+    conn: &mut Connection,
+    module_id: &str,
+    version: u32,
+) -> Result<bool, AppError> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM items WHERE module_id = ? AND payload_schema_version < ?)",
+        params![module_id, version as i64],
+        |row| row.get(0),
+    )
+    .map_err(AppError::from)
 }
 
 pub(crate) fn legacy_linkmemo_memo_count(conn: &mut Connection) -> Result<usize, AppError> {

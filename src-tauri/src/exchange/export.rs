@@ -3,16 +3,17 @@
 //! 高レベル StorageService API を介して全 stateful モジュール × 全プロジェクトの
 //! items を集め、`ExportData` を構築する。Eager-on-Read は読込み時に発火するため、
 //! 出力上の `payload_schema_version` は各モジュールの現行版に揃う (`data-model.md`
-//! §12.2)。アップグレードに失敗した item だけは、古い payload と版のまま書き出す
-//! (`data-model.md` §7.6)。
+//! §12.2)。アップグレードに失敗した item だけは、古い payload と版のまま書き出し、
+//! `ExportBuild::not_upgraded` で知らせる (`data-model.md` §7.6 / ADR-0027)。書き戻しに
+//! 失敗した item は、Eager-on-Read が返した変換後の payload を書き出す。
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::error::AppError;
 use crate::exchange::{
-    ExportData, ExportScope, ItemExport, ProjectExport, ProjectWithItems,
-    CURRENT_EXPORT_SCHEMA_VERSION,
+    ExportBuild, ExportData, ExportScope, ItemExport, NotUpgradedItem, ProjectExport,
+    ProjectWithItems, CURRENT_EXPORT_SCHEMA_VERSION,
 };
 use crate::module::ModuleBackend;
 use crate::storage::{Project, ProjectId, StorageService};
@@ -36,7 +37,7 @@ pub fn build_export_data(
     storage: &Arc<dyn StorageService>,
     modules: &[Arc<dyn ModuleBackend>],
     app_version: &str,
-) -> Result<ExportData, AppError> {
+) -> Result<ExportBuild, AppError> {
     let projects = storage.list_projects()?;
     build_for_projects(storage, modules, app_version, ExportScope::App, projects)
 }
@@ -47,7 +48,7 @@ pub fn build_project_export_data(
     modules: &[Arc<dyn ModuleBackend>],
     app_version: &str,
     project_id: &ProjectId,
-) -> Result<ExportData, AppError> {
+) -> Result<ExportBuild, AppError> {
     let project = storage.get_project(project_id)?;
     build_for_projects(
         storage,
@@ -64,7 +65,7 @@ fn build_for_projects(
     app_version: &str,
     scope: ExportScope,
     projects: Vec<Project>,
-) -> Result<ExportData, AppError> {
+) -> Result<ExportBuild, AppError> {
     // module_versions: stateful なものだけ書き出す (`data-model.md` §12.2)
     let mut module_versions: BTreeMap<String, u32> = BTreeMap::new();
     let stateful: Vec<&Arc<dyn ModuleBackend>> =
@@ -73,6 +74,7 @@ fn build_for_projects(
         module_versions.insert(m.id().to_string(), m.current_payload_version());
     }
 
+    let mut not_upgraded: Vec<NotUpgradedItem> = Vec::new();
     let mut projects_out: Vec<ProjectWithItems> = Vec::with_capacity(projects.len());
     for project in projects {
         let mut items_out: Vec<ItemExport> = Vec::new();
@@ -95,8 +97,19 @@ fn build_for_projects(
                             // アップグレードできない item は、古い payload と版のまま書き出す
                             // (`data-model.md` §7.6)。エクスポート全体を止めたり、アプリで
                             // 開けなかった item をエクスポートから落としたりしない。行は
-                            // Eager-on-Read が書き換えていないので、一覧で読んだ内容のまま
-                            Err(AppError::PayloadUpgradeFailed { .. }) => it,
+                            // Eager-on-Read が書き換えていないので、一覧で読んだ内容のまま。
+                            // 取り込む側では失敗になるので、完了の表示で知らせる (ADR-0027)
+                            Err(AppError::PayloadUpgradeFailed { reason, .. }) => {
+                                not_upgraded.push(NotUpgradedItem {
+                                    id: it.id.clone(),
+                                    module_id: it.module_id.clone(),
+                                    title: it.title.clone(),
+                                    payload_schema_version: it.payload_schema_version,
+                                    reason,
+                                });
+                                it
+                            }
+                            // それ以外 (DB の読み取りの失敗など) はエクスポートを止める
                             Err(error) => return Err(error),
                         }
                     };
@@ -114,13 +127,16 @@ fn build_for_projects(
         });
     }
 
-    Ok(ExportData {
-        schema_version: CURRENT_EXPORT_SCHEMA_VERSION,
-        exported_at: now_jst_iso8601(),
-        app_version: app_version.to_string(),
-        scope,
-        module_versions,
-        projects: projects_out,
+    Ok(ExportBuild {
+        data: ExportData {
+            schema_version: CURRENT_EXPORT_SCHEMA_VERSION,
+            exported_at: now_jst_iso8601(),
+            app_version: app_version.to_string(),
+            scope,
+            module_versions,
+            projects: projects_out,
+        },
+        not_upgraded,
     })
 }
 
@@ -198,7 +214,7 @@ mod tests {
     #[test]
     fn empty_db_exports_zero_projects_and_only_stateful_module_versions() {
         let (storage, modules) = setup();
-        let data = build_export_data(&storage, &modules, "0.1.0").unwrap();
+        let data = build_export_data(&storage, &modules, "0.1.0").unwrap().data;
         assert_eq!(data.schema_version, CURRENT_EXPORT_SCHEMA_VERSION);
         assert_eq!(data.app_version, "0.1.0");
         assert!(matches!(data.scope, ExportScope::App));
@@ -224,7 +240,7 @@ mod tests {
             "Title 1 tagA Hello",
         )?;
 
-        let data = build_export_data(&storage, &modules, "0.1.0")?;
+        let data = build_export_data(&storage, &modules, "0.1.0")?.data;
         assert_eq!(data.projects.len(), 1);
         let pw = &data.projects[0];
         assert_eq!(pw.project.name, "Project A");
@@ -258,7 +274,7 @@ mod tests {
             "Memo body",
         )?;
 
-        let data = build_export_data(&storage, &modules, "0.1.0")?;
+        let data = build_export_data(&storage, &modules, "0.1.0")?.data;
         assert_eq!(data.schema_version, 1);
         let items = &data.projects[0].items;
         assert!(items.iter().any(|item| item.module_id == "linkmemo"));
@@ -290,7 +306,7 @@ mod tests {
             "Second item two",
         )?;
 
-        let data = build_project_export_data(&storage, &modules, "0.1.0", &second.id)?;
+        let data = build_project_export_data(&storage, &modules, "0.1.0", &second.id)?.data;
 
         assert!(matches!(data.scope, ExportScope::Project));
         assert_eq!(data.projects.len(), 1);
@@ -314,7 +330,7 @@ mod tests {
             &json!({"body": "x"}),
             "Prompt 1 x",
         )?;
-        let data = build_export_data(&storage, &modules, "0.1.0")?;
+        let data = build_export_data(&storage, &modules, "0.1.0")?.data;
         assert_eq!(data.projects[0].items.len(), 1);
         assert_eq!(data.projects[0].items[0].module_id, "prompt");
         Ok(())
@@ -368,10 +384,29 @@ mod tests {
         )?;
         let revision = storage.data_revision()?;
 
-        for data in [
+        for build in [
             build_export_data(&storage, &modules, "0.1.0")?,
             build_project_export_data(&storage, &modules, "0.1.0", &p.id)?,
         ] {
+            // 変換できなかった item を知らせる (ADR-0027)
+            assert_eq!(build.not_upgraded.len(), 1);
+            let reported = &build.not_upgraded[0];
+            assert_eq!(reported.title, "Broken");
+            assert_eq!(reported.module_id, "prompt");
+            assert_eq!(reported.payload_schema_version, 1);
+            assert_eq!(reported.reason, "cannot upgrade");
+            let summary = crate::exchange::ExportSummary::summarize(&build);
+            assert_eq!(summary.not_upgraded, build.not_upgraded);
+            let data = build.data;
+            assert_eq!(
+                reported.id,
+                data.projects[0]
+                    .items
+                    .iter()
+                    .find(|i| i.title == "Broken")
+                    .unwrap()
+                    .id
+            );
             assert_eq!(data.module_versions["prompt"], 2);
             let items = &data.projects[0].items;
             assert_eq!(items.len(), 2);
@@ -388,6 +423,70 @@ mod tests {
         assert_eq!(row.payload_schema_version, 1);
         assert_eq!(row.payload, broken);
         assert_eq!(storage.data_revision()?, revision);
+        Ok(())
+    }
+
+    /// 変換の失敗でないエラー (モジュールの内部エラー、DB の読み取りの失敗など) では、
+    /// 元の版のまま書き出さずにエクスポートを止める。
+    #[test]
+    fn other_errors_while_upgrading_stop_the_export() -> Result<(), AppError> {
+        struct BrokenModule;
+        impl ModuleBackend for BrokenModule {
+            fn id(&self) -> &'static str {
+                "prompt"
+            }
+            fn current_payload_version(&self) -> u32 {
+                2
+            }
+            fn upgrade_payload(
+                &self,
+                _from_version: u32,
+                _payload: serde_json::Value,
+            ) -> Result<serde_json::Value, crate::module::ModuleError> {
+                Err(crate::module::ModuleError::Internal("boom".into()))
+            }
+        }
+        let storage: Arc<dyn StorageService> =
+            Arc::new(SqliteStorage::open(":memory:").expect("open"));
+        let modules: Vec<Arc<dyn ModuleBackend>> = vec![Arc::new(BrokenModule)];
+        let p = storage.create_project("P", None)?;
+        storage.create_item("prompt", &p.id, "Item", &[], 1, &json!({}), "Item")?;
+        assert!(matches!(
+            build_export_data(&storage, &modules, "0.1.0"),
+            Err(AppError::Internal(_))
+        ));
+        assert!(matches!(
+            build_project_export_data(&storage, &modules, "0.1.0", &p.id),
+            Err(AppError::Internal(_))
+        ));
+        Ok(())
+    }
+
+    /// 書き戻しに失敗しても、エクスポートは変換した payload を書き出す (`data-model.md` §7.6)。
+    #[test]
+    fn upgraded_payload_is_exported_even_if_the_write_back_fails() -> Result<(), AppError> {
+        let sqlite = Arc::new(SqliteStorage::open(":memory:").expect("open"));
+        let storage: Arc<dyn StorageService> = sqlite.clone();
+        let modules: Vec<Arc<dyn ModuleBackend>> = vec![Arc::new(FailingUpgradeModule)];
+        let p = storage.create_project("P", None)?;
+        let v1 = json!({ "body": "fine", "upgrade_ok": true });
+        storage.create_item("prompt", &p.id, "Fine", &[], 1, &v1, "Fine fine")?;
+        sqlite.with_conn(|conn| {
+            conn.execute_batch(
+                "CREATE TRIGGER fail_write_back BEFORE UPDATE OF payload_schema_version ON items \
+                 BEGIN SELECT RAISE(ABORT, 'disk full'); END;",
+            )
+            .map_err(AppError::from)
+        })?;
+        let build = build_export_data(&storage, &modules, "0.1.0")?;
+        assert!(build.not_upgraded.is_empty());
+        let item = &build.data.projects[0].items[0];
+        assert_eq!(item.payload_schema_version, 2);
+        assert_eq!(item.payload, json!({ "body": "fine", "v": 2 }));
+        // 行は v1 のまま
+        let rows = storage.list_items("prompt", &p.id, 100, 0)?;
+        assert_eq!(rows[0].payload_schema_version, 1);
+        assert_eq!(rows[0].payload, v1);
         Ok(())
     }
 }

@@ -642,19 +642,46 @@ function DataTransferSection({
         </div>
       )}
 
-      {exportSummary != null && (
-        <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-muted)] p-3 text-[12px] text-[var(--fg)]">
-          <p className="font-medium">エクスポート完了</p>
-          <p className="text-[var(--fg-muted)] tabular-nums">
-            プロジェクト {exportSummary.projects_count} 件 / アイテム合計{" "}
-            {exportSummary.items_count} 件 / {formatBytes(exportSummary.bytes_written)} (
-            {exportSummary.exported_at.slice(0, 19).replace("T", " ")} JST)
-          </p>
-        </div>
-      )}
+      {exportSummary != null && <ExportSummaryView summary={exportSummary} />}
 
       {importSummary != null && <ImportSummaryView summary={importSummary} />}
     </section>
+  );
+}
+
+function ExportSummaryView({ summary }: { summary: ExportSummary }) {
+  const notUpgraded = summary.not_upgraded;
+  return (
+    <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-muted)] p-3 text-[12px] text-[var(--fg)]">
+      <p className="font-medium">エクスポート完了</p>
+      <p className="text-[var(--fg-muted)] tabular-nums">
+        プロジェクト {summary.projects_count} 件 / アイテム合計 {summary.items_count} 件 /{" "}
+        {formatBytes(summary.bytes_written)} ({summary.exported_at.slice(0, 19).replace("T", " ")}{" "}
+        JST)
+      </p>
+      {notUpgraded.length > 0 && (
+        <div role="alert" className="mt-2 text-[var(--destructive)]">
+          <p>
+            {notUpgraded.length}{" "}
+            件は新しい形式に変換できないため、元の形式のまま書き出しました。このファイルを取り込むと、これらは失敗として数えられます。
+          </p>
+          <ul className="mt-1 max-h-48 overflow-y-auto rounded border border-[var(--border)] bg-[var(--bg)] p-2 text-[11px] text-[var(--fg)]">
+            {notUpgraded.map((item) => (
+              <li
+                key={item.id}
+                className="border-b border-dashed border-[var(--border)] py-1 last:border-0"
+              >
+                {item.title}{" "}
+                <span className="font-mono text-[var(--fg-muted)]">
+                  ({item.module_id} / {item.id})
+                </span>
+                : {item.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
