@@ -39,9 +39,47 @@ export function validateImageData(value) {
   }
 }
 
+/** XML 1.0 の Char か (コードポイント)。 */
+const isXmlChar = (code) =>
+  code === 0x9 ||
+  code === 0xa ||
+  code === 0xd ||
+  (code >= 0x20 && code <= 0xd7ff) ||
+  (code >= 0xe000 && code <= 0xfffd) ||
+  (code >= 0x10000 && code <= 0x10ffff);
+
+/**
+ * SVG の文字を確かめる (Rust の `validation.rs` の `check_characters` と同じ規則)。XML 1.0 の Char にない
+ * 文字は、そのまま書いたものも文字参照も拒否する。U+0085 をそのまま書いたものは、Rust の XML の読み方が
+ * 改行にして抽出が合わないので拒否する (文字参照 `&#x85;` は許す)。文字参照は文字列のまま探す。
+ */
+export function checkCharacters(svg) {
+  for (const char of svg) {
+    const code = char.codePointAt(0);
+    // 対になっていないサロゲートは 1 つのコード単位で来て、Char にない
+    if (!isXmlChar(code) || (char.length === 1 && code >= 0xd800 && code <= 0xdfff))
+      throw new Error(
+        `SVGに使えない文字 (U+${code.toString(16).toUpperCase().padStart(4, "0")}) が含まれています。`,
+      );
+  }
+  if (svg.includes("\u0085"))
+    throw new Error(
+      "U+0085 (NEL) をそのまま含むSVGは使用できません。文字参照 (&#x85;) で書いてください。",
+    );
+  for (const match of svg.matchAll(/&#(x[0-9a-fA-F]+|[0-9]+);/g)) {
+    const body = match[1];
+    const code = body.startsWith("x")
+      ? Number.parseInt(body.slice(1), 16)
+      : Number.parseInt(body, 10);
+    if (!isXmlChar(code))
+      throw new Error(`SVGに使えない文字の参照 (&#${body};) が含まれています。`);
+  }
+}
+
 export function validateSvg(svg, policy) {
   if (typeof svg !== "string" || !svg.trim() || utf8Size(svg) > MAX_SVG_BYTES)
     throw new Error("SVGは空でなく20MiB以下にしてください。");
+  checkCharacters(svg);
   if (/<!DOCTYPE|<!ENTITY|<\?(?!xml\s)/i.test(svg))
     throw new Error("DTD・実体宣言・処理命令は使用できません。");
   const encoding = svg.match(/<\?xml\s[^?]*encoding\s*=\s*['"]([^'"]+)['"]/i)?.[1];

@@ -87,48 +87,10 @@ pub fn run() {
         let backups_root = data_dir.join("backups");
         let settings_path = data_dir.join("settings.json");
 
-        // DB schema migration を **SqliteStorage::open の外** で実行する
-        // (ADR-0011 §2.4 bootstrap 経路 — `LocalBackupService` は完成済 storage を要求するため、
-        // 鶏卵問題を回避するために独立ヘルパで pre-migration backup を取得 + 適用)。
-        // 新規 DB / 既に最新版 / 未来版 (= unsupported) は no-op。失敗時は起動停止。
-        storage::bootstrap::migrate_if_needed(&db_path, &backups_root)
-            .map_err(|e| format!("DB schema migration failed for {}: {e}", db_path.display()))?;
-
-        // SQLite を開いて schema 整合性チェック (`data-model.md` §4 / §13)
-        // migration が走った後なので、`verify_schema_version` は CURRENT と一致する想定
-        let sqlite_storage = Arc::new(
-            SqliteStorage::open(&db_path)
-                .map_err(|e| format!("failed to open SQLite at {}: {e}", db_path.display()))?,
-        );
-        let storage: Arc<dyn StorageService> = sqlite_storage.clone();
-
-        // バックアップサービス (ADR-0007)
-        let backup: Arc<dyn BackupService> =
-            Arc::new(LocalBackupService::new(backups_root, Arc::clone(&storage)));
-
-        // Link / Memo 分離前の単独 Memo がある場合だけ pre-op backup を取得し、
-        // 成功後に所属移行する。失敗は既存の setup 起動失敗経路へ返す。
-        migrate_linkmemo_split_with_backup(sqlite_storage.as_ref(), || {
-            backup
-                .take(BackupKind::PreOp {
-                    prefix: "pre-split-linkmemo".into(),
-                })
-                .map(|_| ())
-        })
-        .map_err(|e| format!("Link / Memo data migration failed: {e}"))?;
-
-        // payload の版を上げたモジュールに古い版の行があれば、最初の変換 (Eager-on-Read) の前に
-        // pre-op backup を 1 回取る (ADR-0027)。変換は戻せず、旧版のアプリは新しい版の行を読めない
-        // ため。失敗したら pre-migration と同じく起動を止める
+        // ストレージを開き、起動時のデータ処理とそのためのバックアップを済ませる (`prepare_storage`)。
+        // Eager-on-Read が動きうる AppState (画面の command) はこの後に作る
         let backends = modules::registry::module_backends();
-        take_payload_upgrade_backups(sqlite_storage.as_ref(), &backends, |prefix| {
-            backup
-                .take(BackupKind::PreOp {
-                    prefix: prefix.to_string(),
-                })
-                .map(|_| ())
-        })
-        .map_err(|e| format!("backup before payload upgrade failed: {e}"))?;
+        let (storage, backup) = prepare_storage(&db_path, &backups_root, &backends)?;
 
         // 起動時 auto バックアップ判定 (`data-model.md` §13.3): 24h 経過 + revision 変化
         // 取得は短時間 (~数百 ms) のため起動 setup 内で同期実行。失敗してもアプリは
@@ -146,6 +108,63 @@ pub fn run() {
     builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// 起動時に開いたストレージとバックアップサービス (`prepare_storage` の結果)。
+type PreparedStorage = (Arc<dyn StorageService>, Arc<dyn BackupService>);
+
+/// 起動時のストレージの準備。この順に行い、どれかが失敗したら起動を止める (エラーの文を返す)。
+///
+/// 1. DB schema migration を `SqliteStorage::open` の外で行う (ADR-0011 §2.4。pre-migration バックアップ)
+/// 2. SQLite を開いて schema を確かめる (`data-model.md` §4 / §13)
+/// 3. バックアップサービス (ADR-0007)
+/// 4. Link / Memo 分離前の単独 Memo の再所属 (ADR-0016。`pre-split-linkmemo`)
+/// 5. payload の版を上げたモジュールの、最初の変換の前のバックアップ (ADR-0027。`pre-payload-<id>-v<N>`)
+///
+/// 5. は Eager-on-Read が動きうる処理 (`AppState` の command) より前に終える。
+fn prepare_storage(
+    db_path: &std::path::Path,
+    backups_root: &std::path::Path,
+    backends: &[Arc<dyn module::ModuleBackend>],
+) -> Result<PreparedStorage, String> {
+    storage::bootstrap::migrate_if_needed(db_path, backups_root)
+        .map_err(|e| format!("DB schema migration failed for {}: {e}", db_path.display()))?;
+    let sqlite_storage = Arc::new(
+        SqliteStorage::open(db_path)
+            .map_err(|e| format!("failed to open SQLite at {}: {e}", db_path.display()))?,
+    );
+    let storage: Arc<dyn StorageService> = sqlite_storage.clone();
+    let backup: Arc<dyn BackupService> = Arc::new(LocalBackupService::new(
+        backups_root.to_path_buf(),
+        Arc::clone(&storage),
+    ));
+    migrate_linkmemo_split_with_backup(sqlite_storage.as_ref(), || {
+        backup
+            .take(BackupKind::PreOp {
+                prefix: "pre-split-linkmemo".into(),
+            })
+            .map(|_| ())
+    })
+    .map_err(|e| format!("Link / Memo data migration failed: {e}"))?;
+    take_payload_upgrade_backups_with(storage.as_ref(), backup.as_ref(), backends)
+        .map_err(|e| format!("backup before payload upgrade failed: {e}"))?;
+    Ok((storage, backup))
+}
+
+/// `take_payload_upgrade_backups` を、`backup` の pre-op バックアップで行う。起動時と、アプリの中の
+/// リストアの後 (`core_backup_restore`) に呼ぶ (ADR-0027)。
+pub(crate) fn take_payload_upgrade_backups_with(
+    storage: &dyn StorageService,
+    backup: &dyn BackupService,
+    backends: &[Arc<dyn module::ModuleBackend>],
+) -> Result<Vec<String>, AppError> {
+    take_payload_upgrade_backups(storage, backends, |prefix| {
+        backup
+            .take(BackupKind::PreOp {
+                prefix: prefix.to_string(),
+            })
+            .map(|_| ())
+    })
 }
 
 fn migrate_linkmemo_split_with_backup(
@@ -183,7 +202,7 @@ fn payload_upgrade_backup_prefix(module_id: &str, version: u32) -> String {
 ///
 /// 戻り値は取ったバックアップの prefix。失敗は呼び出し側が起動の失敗にする。
 fn take_payload_upgrade_backups(
-    storage: &SqliteStorage,
+    storage: &dyn StorageService,
     modules: &[Arc<dyn module::ModuleBackend>],
     mut take_backup: impl FnMut(&str) -> Result<(), AppError>,
 ) -> Result<Vec<String>, AppError> {
@@ -405,6 +424,74 @@ mod startup_data_migration_tests {
         // バックアップの中の行は v1 のまま (変換の前の控え)
         let copy = SqliteStorage::open(&records[0].path).unwrap();
         assert!(copy.has_items_older_than("vector", 2).unwrap());
+    }
+
+    fn pre_payload_backups(backups_root: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(backups_root.join("pre-op"))
+            .map(|entries| {
+                entries
+                    .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+                    .filter(|name| name.starts_with("pre-payload-vector-v2-"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    /// 起動の手順 (`prepare_storage`、`run()` の setup が AppState::build の前に呼ぶ) が、
+    /// v1 の作品の最初の変換の前にバックアップを取り、行は変えない (ADR-0027)。
+    #[test]
+    fn startup_takes_the_payload_upgrade_backup_before_any_conversion() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("data.sqlite");
+        let backups_root = dir.path().join("backups");
+        let v1 = json!({ "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"/>", "text": "" });
+        {
+            let storage = SqliteStorage::open(&db_path).unwrap();
+            let project = storage.create_project("P", None).unwrap();
+            storage
+                .create_item("vector", &project.id, "古い作品", &[], 1, &v1, "古い作品")
+                .unwrap();
+        }
+        let backends = modules::registry::module_backends();
+        let (storage, _backup) = prepare_storage(&db_path, &backups_root, &backends).unwrap();
+        assert_eq!(pre_payload_backups(&backups_root).len(), 1);
+        let project = &storage.list_projects().unwrap()[0];
+        let row = &storage.list_items("vector", &project.id, 10, 0).unwrap()[0];
+        assert_eq!(row.payload_schema_version, 1);
+        assert_eq!(row.payload, v1);
+        drop(storage);
+        // 2 回目の起動では取らない
+        prepare_storage(&db_path, &backups_root, &backends).unwrap();
+        assert_eq!(pre_payload_backups(&backups_root).len(), 1);
+    }
+
+    /// アプリの中のリストアで記録の無いバックアップを戻したら、次の起動を待たずに取る (ADR-0027)。
+    #[test]
+    fn restoring_a_backup_without_the_record_takes_the_backup_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("data.sqlite");
+        let backups_root = dir.path().join("backups");
+        let backends = modules::registry::module_backends();
+        let (storage, backup) = prepare_storage(&db_path, &backups_root, &backends).unwrap();
+        let project = storage.create_project("P", None).unwrap();
+        let v1 = json!({ "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"/>", "text": "" });
+        storage
+            .create_item("vector", &project.id, "古い作品", &[], 1, &v1, "古い作品")
+            .unwrap();
+        // 記録の無い (切替前の版で取った) バックアップの代わり
+        let old = backup.take(BackupKind::Manual).unwrap();
+        take_payload_upgrade_backups_with(storage.as_ref(), backup.as_ref(), &backends).unwrap();
+        assert_eq!(pre_payload_backups(&backups_root).len(), 1);
+        assert_eq!(storage.payload_upgrade_backup_version("vector").unwrap(), 2);
+        // リストア (core_backup_restore と同じ手順) で記録が消え、もう一度取る
+        backup.restore_from(&old.path).unwrap();
+        assert_eq!(storage.payload_upgrade_backup_version("vector").unwrap(), 0);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        take_payload_upgrade_backups_with(storage.as_ref(), backup.as_ref(), &backends).unwrap();
+        assert_eq!(pre_payload_backups(&backups_root).len(), 2);
+        assert_eq!(storage.payload_upgrade_backup_version("vector").unwrap(), 2);
     }
 
     #[test]

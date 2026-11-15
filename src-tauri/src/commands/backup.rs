@@ -86,13 +86,20 @@ pub async fn core_backup_verify(state: State<'_, AppState>, path: String) -> Res
 /// 1. 整合性検証 (`verify_integrity`)
 /// 2. **pre-restore バックアップ取得** (失敗したら restore 中止)
 /// 3. アクティブ DB に書き戻し (`restore_from`)
+/// 4. 戻した DB に、payload の版が古い行があり、その引き上げの前のバックアップの記録が無ければ、
+///    起動時と同じく `pre-payload-<module_id>-v<N>` を取る (ADR-0027)。画面は再起動を促すだけで
+///    読み込み直して使い続けられるので、次の起動を待たずにここで取る
 ///
 /// 完了後の **アプリ再起動はユーザーに促す** (`data-model.md` §13.6 step 7)。
 /// フロント側は本コマンドが Ok を返したら「再起動してください」モーダルを出す責務。
 #[tauri::command]
 pub async fn core_backup_restore(state: State<'_, AppState>, path: String) -> Result<(), AppError> {
     let backup = Arc::clone(&state.backup);
-    // 検証 → pre-restore 取得 → 書き戻しを 1 つの Exclusive 区間で行い、途中に書込みを挟ませない
+    let storage = Arc::clone(&state.storage);
+    let mut modules: Vec<_> = state.modules.values().cloned().collect();
+    modules.sort_by_key(|module| module.id());
+    // 検証 → pre-restore 取得 → 書き戻し → 引き上げの前のバックアップを 1 つの Exclusive 区間で行い、
+    // 途中に書込み (と Eager-on-Read) を挟ませない
     run_storage(&state, LockMode::Exclusive, move || {
         let src_path = PathBuf::from(path);
         // 1. 整合性チェック (失敗したら restore 中止)
@@ -102,7 +109,15 @@ pub async fn core_backup_restore(state: State<'_, AppState>, path: String) -> Re
             prefix: "pre-restore".into(),
         })?;
         // 3. アクティブ DB に書き戻し
-        backup.restore_from(&src_path)
+        backup.restore_from(&src_path)?;
+        // 4. 引き上げの前のバックアップ (ADR-0027)
+        crate::take_payload_upgrade_backups_with(storage.as_ref(), backup.as_ref(), &modules)
+            .map(|_| ())
+            .map_err(|e| {
+                AppError::Storage(format!(
+                    "リストアは完了しましたが、新しい形式への変換の前のバックアップを取れませんでした: {e}"
+                ))
+            })
     })
     .await
 }

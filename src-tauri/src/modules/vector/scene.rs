@@ -939,6 +939,11 @@ mod tests {
             ("asset-kind-mismatch", "別の種類"),
             ("image-data-mime-mismatch", "画像の形式と内容"),
             ("svg-asset-policy-violation", "未対応のSVG要素"),
+            ("svg-asset-raw-nel", "U+0085"),
+            (
+                "svg-asset-control-character-reference",
+                "使えない文字の参照",
+            ),
             ("svg-asset-text-mismatch", "SVGと一致しません"),
             ("text-mismatch", "文書と一致しません"),
             ("guide-axis-invalid", "axis"),

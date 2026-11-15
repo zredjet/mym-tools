@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 
 pub const MAX_SVG_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_TEXT_BYTES: usize = 1024 * 1024;
-const SVG_NS: &[u8] = b"http://www.w3.org/2000/svg";
+pub const SVG_NS: &[u8] = b"http://www.w3.org/2000/svg";
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Policy {
@@ -34,6 +34,7 @@ pub fn validate_svg(svg: &str) -> Result<String, AppError> {
     if svg.trim().is_empty() || svg.len() > MAX_SVG_BYTES {
         return Err(error("SVGは空でなく20MiB以下にしてください。"));
     }
+    check_characters(svg)?;
     // Mirror the browser pre-scan, which also covers comments and CDATA.
     if has_markup_declaration(svg) {
         return Err(error("DTD・実体宣言・処理命令は使用できません。"));
@@ -148,6 +149,59 @@ pub fn validate_svg(svg: &str) -> Result<String, AppError> {
     }
     Ok(text)
 }
+/// XML 1.0 の Char (`#x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]`) か。
+pub fn is_xml_char(c: char) -> bool {
+    matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..)
+}
+
+/// SVG の文字を確かめる (ブラウザの `svg-policy.js` の `checkCharacters` と同じ規則)。
+///
+/// - XML 1.0 の Char にない文字 (制御文字、U+FFFE / U+FFFF) を、そのまま書いたものも文字参照
+///   (`&#x1;` など) も拒否する。ブラウザの DOMParser は XML として読めないため
+/// - U+0085 (NEL) をそのまま書いたものを拒否する。こちらの XML の読み方 (1.1 の改行の規則) は改行にし、
+///   ブラウザは文字のまま残すので、抽出した文字が合わない。文字参照 (`&#x85;`) は両方とも文字のまま残すので許す
+///
+/// 文字参照は文字列のまま探す (CDATA やコメントの中の `&#…;` も数える。両方が同じ規則で拒否する)。
+pub fn check_characters(svg: &str) -> Result<(), AppError> {
+    if let Some(c) = svg.chars().find(|c| !is_xml_char(*c)) {
+        return Err(error(format!(
+            "SVGに使えない文字 (U+{:04X}) が含まれています。",
+            c as u32
+        )));
+    }
+    if svg.contains('\u{85}') {
+        return Err(error(
+            "U+0085 (NEL) をそのまま含むSVGは使用できません。文字参照 (&#x85;) で書いてください。",
+        ));
+    }
+    let mut rest = svg;
+    while let Some(start) = rest.find("&#") {
+        rest = &rest[start + 2..];
+        let (digits, radix) = match rest.strip_prefix('x') {
+            Some(hex) => (hex, 16),
+            None => (rest, 10),
+        };
+        let len = digits
+            .find(|c: char| !c.is_digit(radix))
+            .unwrap_or(digits.len());
+        if len == 0 || !digits[len..].starts_with(';') {
+            continue;
+        }
+        let valid = u32::from_str_radix(&digits[..len], radix)
+            .ok()
+            .and_then(char::from_u32)
+            .is_some_and(is_xml_char);
+        if !valid {
+            return Err(error(format!(
+                "SVGに使えない文字の参照 (&#{}{};) が含まれています。",
+                if radix == 16 { "x" } else { "" },
+                &digits[..len]
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn has_markup_declaration(svg: &str) -> bool {
     let lower = svg.to_ascii_lowercase();
     if lower.contains("<!doctype") || lower.contains("<!entity") {

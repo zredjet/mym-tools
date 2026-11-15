@@ -1,5 +1,5 @@
 {
-  "description": "vector payload v2 の契約 (docs/canvas-editor-design.md §3)。Rust と TypeScript の両方のテストが読む。valid は検証を通り、payload.text が文書から求めた検索用テキストと一致する。invalid は base (valid の名前) の payload に patch を順に当てたもので、どちらの実装でも拒否する。patch の op は set (path の位置へ value を置く) / remove (path の位置を消す) / append (path の配列の末尾へ value を足す)。upgrade は v1 を v2 へ変換した結果が v2 と完全に一致し、その v2 は検証を通る (text-renormalized は、v1 の抽出が空白として扱わない U+0085 を含み、文書の text だけが v1 と違う例。stale-v1-text は、v1 の text が今の SVG の抽出と違う例で、アセットの text は v1 の text ではなく SVG から求め直した値になる)。",
+  "description": "vector payload v2 の契約 (docs/canvas-editor-design.md §3)。Rust と TypeScript の両方のテストが読む。valid は検証を通り、payload.text が文書から求めた検索用テキストと一致する。invalid は base (valid の名前) の payload に patch を順に当てたもので、どちらの実装でも拒否する。patch の op は set (path の位置へ value を置く) / remove (path の位置を消す) / append (path の配列の末尾へ value を足す)。invalid には、Rust の XML の読み方とブラウザの DOMParser で結果が分かれる文字 (U+0085 をそのまま書いたもの、XML で使えない文字の参照) を含む埋め込み SVG も入れる (どちらも拒否する)。upgrade は v1 を v2 へ変換した結果が v2 と完全に一致し、その v2 は検証を通る (text-renormalized は、v1 の抽出が空白として扱わない U+0085 を含み、文書の text だけが v1 と違う例。stale-v1-text は、v1 の text が今の SVG の抽出と違う例で、アセットの text は v1 の text ではなく SVG から求め直した値になる)。",
   "valid": [
     {
       "name": "empty",
@@ -690,6 +690,30 @@
       ]
     },
     {
+      "name": "svg-asset-raw-nel",
+      "reason": "埋め込み SVG に U+0085 をそのまま含む (Rust と TS で抽出が違う)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "svg"],
+          "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><text x=\"0\" y=\"8\">旧作品</text></svg>"
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-control-character-reference",
+      "reason": "埋め込み SVG に XML で使えない文字の参照 (&#x1;)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "svg"],
+          "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><text x=\"0\" y=\"8\">旧作品&#x1;</text></svg>"
+        }
+      ]
+    },
+    {
       "name": "svg-asset-text-mismatch",
       "reason": "SVG アセットの text が抽出結果と違う",
       "base": "full",
@@ -874,7 +898,7 @@
       "name": "text-renormalized",
       "v1": {
         "svg": "<svg width=\"20\" height=\"10\" xmlns=\"http://www.w3.org/2000/svg\"><text>a&#x85;b</text></svg>",
-        "text": "a\u0085b"
+        "text": "ab"
       },
       "v2": {
         "pages": [
@@ -904,7 +928,7 @@
           "legacy": {
             "kind": "svg",
             "svg": "<svg width=\"20\" height=\"10\" xmlns=\"http://www.w3.org/2000/svg\"><text>a&#x85;b</text></svg>",
-            "text": "a\u0085b",
+            "text": "ab",
             "width": 20,
             "height": 10
           }

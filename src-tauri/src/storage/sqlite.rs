@@ -103,37 +103,6 @@ impl SqliteStorage {
         self.with_conn(crate::storage::data_migrations::migrate_legacy_linkmemo_memos)
     }
 
-    /// payload の引き上げ前のバックアップを取った版 (記録が無ければ 0、ADR-0027)。
-    pub(crate) fn payload_upgrade_backup_version(&self, module_id: &str) -> Result<u32, AppError> {
-        self.with_conn(|conn| {
-            crate::storage::data_migrations::payload_upgrade_backup_version(conn, module_id)
-        })
-    }
-
-    /// payload の引き上げ前のバックアップを取ったことを記録する (ADR-0027)。
-    pub(crate) fn set_payload_upgrade_backup_version(
-        &self,
-        module_id: &str,
-        version: u32,
-    ) -> Result<(), AppError> {
-        self.with_conn(|conn| {
-            crate::storage::data_migrations::set_payload_upgrade_backup_version(
-                conn, module_id, version,
-            )
-        })
-    }
-
-    /// `version` より古い payload の行が `module_id` にあるか (ADR-0027)。
-    pub(crate) fn has_items_older_than(
-        &self,
-        module_id: &str,
-        version: u32,
-    ) -> Result<bool, AppError> {
-        self.with_conn(|conn| {
-            crate::storage::data_migrations::has_items_older_than(conn, module_id, version)
-        })
-    }
-
     /// `data_revision` を `+1` する (書込みコミットの一環として呼ぶ)。
     /// 呼び出し元は同一トランザクション内でこれを呼んでから `commit` する。
     fn bump_data_revision(tx: &rusqlite::Transaction) -> Result<i64, AppError> {
@@ -570,6 +539,30 @@ impl StorageService for SqliteStorage {
         })
     }
 
+    fn payload_upgrade_backup_version(&self, module_id: &str) -> Result<u32, AppError> {
+        self.with_conn(|conn| {
+            crate::storage::data_migrations::payload_upgrade_backup_version(conn, module_id)
+        })
+    }
+
+    fn set_payload_upgrade_backup_version(
+        &self,
+        module_id: &str,
+        version: u32,
+    ) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            crate::storage::data_migrations::set_payload_upgrade_backup_version(
+                conn, module_id, version,
+            )
+        })
+    }
+
+    fn has_items_older_than(&self, module_id: &str, version: u32) -> Result<bool, AppError> {
+        self.with_conn(|conn| {
+            crate::storage::data_migrations::has_items_older_than(conn, module_id, version)
+        })
+    }
+
     fn take_online_backup_to(&self, dst_path: &Path) -> Result<(), AppError> {
         // 親ディレクトリを確保 (UI からの初回呼び出しで <userdata>/backups/<kind>/ が
         // 未作成のことがある)
@@ -802,7 +795,7 @@ impl StorageService for SqliteStorage {
 
     fn update_item(
         &self,
-        module_id: &str,
+        module: &dyn ModuleBackend,
         id: &ItemId,
         title: &str,
         tags: &[String],
@@ -811,7 +804,7 @@ impl StorageService for SqliteStorage {
         search_text: &str,
     ) -> Result<(), AppError> {
         self.update_item_internal(
-            module_id,
+            module,
             id,
             title,
             tags,
@@ -1107,7 +1100,7 @@ impl SqliteStorage {
     #[allow(clippy::too_many_arguments)]
     fn update_item_internal(
         &self,
-        module_id: &str,
+        module: &dyn ModuleBackend,
         id: &ItemId,
         title: &str,
         tags: &[String],
@@ -1115,6 +1108,7 @@ impl SqliteStorage {
         payload: &JsonValue,
         search_text: &str,
     ) -> Result<(), AppError> {
+        let module_id = module.id();
         if title.trim().is_empty() {
             return Err(AppError::Validation {
                 module_id: module_id.to_string(),
@@ -1127,6 +1121,7 @@ impl SqliteStorage {
             serde_json::to_string(payload).map_err(|e| AppError::Storage(e.to_string()))?;
         self.with_conn(|conn| {
             let tx = conn.transaction().map_err(AppError::from)?;
+            ensure_overwritable(&tx, module, id)?;
             let now = now_jst_iso8601();
             let rows_affected = tx
                 .execute(
@@ -1286,7 +1281,7 @@ impl SqliteStorage {
             while from_version < current_version {
                 current_payload = module
                     .upgrade_payload(from_version, current_payload)
-                    .map_err(|e| e.into_app_error(module_id))?;
+                    .map_err(|e| e.into_upgrade_error(module_id))?;
                 from_version += 1;
             }
             // 新版 payload で search_text 再生成
@@ -1712,6 +1707,65 @@ impl ItemRowRaw {
             updated_at: self.updated_at,
         }
     }
+}
+
+/// 保存されている行を利用者の保存で上書きしてよいかを、上書きと同じトランザクションの中で確かめる
+/// (ADR-0027)。
+///
+/// - 今の版の行: そのまま許す (payload を読まない)
+/// - 古い版の行: 保存されている payload の引き上げを試し、失敗するなら拒否する。変換できず開けない
+///   作品を、画面を通さない呼び出しで別の内容に置き換えて消さないため。引き上げられるなら許す
+///   (Eager-on-Read の書き戻しに失敗して古い版のまま残った行への保存を止めない)。引き上げの失敗の
+///   扱いは Eager-on-Read と同じ (`ModuleError::into_upgrade_error`)
+/// - 新しい版の行 (新しいアプリで書いた行): 拒否する。読めない内容を上書きしない
+/// - 行が無い: `NotFound`
+fn ensure_overwritable(
+    tx: &rusqlite::Transaction,
+    module: &dyn ModuleBackend,
+    id: &ItemId,
+) -> Result<(), AppError> {
+    let module_id = module.id();
+    let current = module.current_payload_version();
+    let row: Option<(i64, Option<String>)> = tx
+        .query_row(
+            "SELECT payload_schema_version, \
+             CASE WHEN payload_schema_version <> ?1 THEN payload END \
+             FROM items WHERE id = ?2 AND module_id = ?3",
+            params![current as i64, id.as_str(), module_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(AppError::from)?;
+    let (stored_version, stored_payload) = row.ok_or_else(|| AppError::NotFound {
+        entity: "item".into(),
+        key: id.to_string(),
+    })?;
+    let Some(stored_payload) = stored_payload else {
+        return Ok(());
+    };
+    let stored_version = stored_version as u32;
+    if stored_version > current {
+        return Err(AppError::UnsupportedFuturePayloadVersion {
+            module_id: module_id.to_string(),
+            item_version: stored_version,
+            current_version: current,
+        });
+    }
+    let refused = |reason: String| AppError::PayloadUpgradeFailed {
+        module_id: module_id.to_string(),
+        reason: format!("保存されている内容を今の形式に変換できないため、上書きしません: {reason}"),
+    };
+    let mut payload: JsonValue = serde_json::from_str(&stored_payload)
+        .map_err(|e| refused(format!("payload が JSON として読めません: {e}")))?;
+    for from_version in stored_version..current {
+        payload = module
+            .upgrade_payload(from_version, payload)
+            .map_err(|error| match error.into_upgrade_error(module_id) {
+                AppError::PayloadUpgradeFailed { reason, .. } => refused(reason),
+                other => other,
+            })?;
+    }
+    Ok(())
 }
 
 /// search_text 構築のヘルパ (Eager-on-Read 内部更新でも使う、`module-contract.md` §3.2)。
@@ -3594,6 +3648,99 @@ mod tests {
             assert_eq!(row.title, "Old");
             assert_eq!(storage.data_revision().unwrap(), revision);
         }
+    }
+
+    /// 上書きの拒否はストレージの層 (`StorageService::update_item`) にあり、`ScopedStorage` を通さない
+    /// 呼び出しでも効く (ADR-0027)。
+    #[test]
+    fn storage_service_update_item_refuses_rows_it_cannot_read() {
+        let storage = Arc::new(in_memory_storage());
+        let p = storage.create_project("P", None).unwrap();
+        let module = TestColorModule { version: 2 };
+        let id = storage
+            .create_item(
+                "color",
+                &p.id,
+                "Old",
+                &[],
+                0,
+                &serde_json::json!({"hex": "#f00"}),
+                "Old",
+            )
+            .unwrap();
+        let revision = storage.data_revision().unwrap();
+        let error = StorageService::update_item(
+            storage.as_ref(),
+            &module,
+            &id,
+            "New",
+            &[],
+            2,
+            &serde_json::json!({"hex": "#0f0"}),
+            "New",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, AppError::PayloadUpgradeFailed { .. }),
+            "{error:?}"
+        );
+        assert_eq!(storage.data_revision().unwrap(), revision);
+        let row = &storage.list_items("color", &p.id, 10, 0).unwrap()[0];
+        assert_eq!(row.payload_schema_version, 0);
+        assert_eq!(row.title, "Old");
+    }
+
+    /// `upgrade_payload` が検証の失敗 (`ValidationFailed`) を返したときも、読み込み・エクスポート・
+    /// 上書きの確認のどれもが「変換できない」(`PayloadUpgradeFailed`) として扱う (ADR-0027)。
+    #[test]
+    fn upgrade_validation_failures_are_treated_as_unconvertible_everywhere() {
+        struct RejectsOnUpgrade;
+        impl ModuleBackend for RejectsOnUpgrade {
+            fn id(&self) -> &'static str {
+                "color"
+            }
+            fn current_payload_version(&self) -> u32 {
+                2
+            }
+            fn upgrade_payload(
+                &self,
+                _from_version: u32,
+                _payload: JsonValue,
+            ) -> Result<JsonValue, ModuleError> {
+                Err(ModuleError::ValidationFailed {
+                    reason: "変換した結果が検証を通りません".into(),
+                })
+            }
+        }
+        let sqlite = Arc::new(in_memory_storage());
+        let storage: Arc<dyn StorageService> = sqlite.clone();
+        let p = storage.create_project("P", None).unwrap();
+        let id = storage
+            .create_item(
+                "color",
+                &p.id,
+                "Old",
+                &[],
+                1,
+                &serde_json::json!({"hex": "#f00"}),
+                "Old",
+            )
+            .unwrap();
+        let module: Arc<dyn ModuleBackend> = Arc::new(RejectsOnUpgrade);
+        let scoped = storage.clone().scoped_for(module.clone());
+        assert!(matches!(
+            scoped.get_item(&id),
+            Err(AppError::PayloadUpgradeFailed { .. })
+        ));
+        let build =
+            crate::exchange::build_export_data(&storage, std::slice::from_ref(&module), "t")
+                .unwrap();
+        assert_eq!(build.not_upgraded.len(), 1);
+        assert_eq!(build.data.projects[0].items[0].payload_schema_version, 1);
+        assert!(matches!(
+            scoped.update_item(&id, "New", &[], serde_json::json!({"hex": "#0f0"})),
+            Err(AppError::PayloadUpgradeFailed { .. })
+        ));
     }
 
     #[test]

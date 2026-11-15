@@ -1,14 +1,11 @@
-use super::validation::{error, validate_image, validate_svg, MAX_SVG_BYTES};
+use super::validation::{error, is_xml_char, validate_image, validate_svg, MAX_SVG_BYTES, SVG_NS};
 use super::CURRENT_PAYLOAD_VERSION;
 use crate::commands::{run_storage, LockMode};
 use crate::state::AppState;
 use crate::storage::{ItemId, StorageService};
 use crate::{error::AppError, modules::image_export::write_atomically};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use quick_xml::{
-    events::{BytesStart, Event},
-    Reader, XmlVersion,
-};
+use quick_xml::{events::Event, name::ResolveResult, NsReader, XmlVersion};
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -83,37 +80,53 @@ pub const MAX_EXPORT_SVG_BYTES: usize = 28 * 1024 * 1024;
 fn check_export_svg(svg: &str) -> Result<(), AppError> {
     let malformed =
         |e: &dyn std::fmt::Display| error(format!("書き出す SVG の XML が不正です: {e}"));
-    let mut reader = Reader::from_str(svg);
-    let (mut depth, mut roots) = (0usize, 0usize);
-    let mut open = |element: &BytesStart, depth: usize| -> Result<(), AppError> {
-        if depth == 0 {
-            roots += 1;
-            if roots > 1 || element.local_name().as_ref() != b"svg" {
-                return Err(error(
-                    "書き出す SVG のルートの要素が svg 1 つではありません。",
-                ));
-            }
-        }
-        for attr in element.attributes() {
-            let attr = attr.map_err(|e| malformed(&e))?;
-            attr.normalized_value(XmlVersion::Implicit1_0)
-                .map_err(|e| malformed(&e))?;
-        }
-        Ok(())
+    let invalid_char = |c: char| {
+        error(format!(
+            "書き出す SVG に使えない文字 (U+{:04X}) が含まれています。",
+            c as u32
+        ))
     };
+    let not_svg_root = || error("書き出す SVG のルートの要素が SVG の svg 1 つではありません。");
+    // 先頭の BOM は許す (`Reader` が読み飛ばす)。そのほかの XML 1.0 の Char にない文字は拒否する
+    if let Some(c) = svg.chars().find(|c| !is_xml_char(*c)) {
+        return Err(invalid_char(c));
+    }
+    let mut reader = NsReader::from_str(svg);
+    let (mut depth, mut roots) = (0usize, 0usize);
+    let mut first = true;
     loop {
-        match reader.read_event().map_err(|e| malformed(&e))? {
-            Event::Start(element) => {
-                open(&element, depth)?;
-                depth += 1;
+        let (namespace, event) = reader.read_resolved_event().map_err(|e| malformed(&e))?;
+        let at_start = std::mem::replace(&mut first, false);
+        match event {
+            Event::Start(ref element) | Event::Empty(ref element) => {
+                if depth == 0 {
+                    roots += 1;
+                    // SVG の名前空間の svg (接頭辞なしで既定の名前空間が SVG か、SVG に結び付いた接頭辞)
+                    let svg_namespace =
+                        matches!(namespace, ResolveResult::Bound(ref ns) if ns.as_ref() == SVG_NS);
+                    if roots > 1 || !svg_namespace || element.local_name().as_ref() != b"svg" {
+                        return Err(not_svg_root());
+                    }
+                }
+                for attr in element.attributes() {
+                    let attr = attr.map_err(|e| malformed(&e))?;
+                    let value = attr
+                        .normalized_value(XmlVersion::Implicit1_0)
+                        .map_err(|e| malformed(&e))?;
+                    if let Some(c) = value.chars().find(|c| !is_xml_char(*c)) {
+                        return Err(invalid_char(c));
+                    }
+                }
+                if matches!(event, Event::Start(_)) {
+                    depth += 1;
+                }
             }
-            Event::Empty(element) => open(&element, depth)?,
             Event::End(_) => {
                 depth = depth
                     .checked_sub(1)
                     .ok_or_else(|| error("書き出す SVG の閉じタグが不正です。"))?;
             }
-            Event::Text(text) if depth == 0 => {
+            Event::Text(ref text) if depth == 0 => {
                 if !text.iter().all(u8::is_ascii_whitespace) {
                     return Err(error("書き出す SVG のルートの外に文字があります。"));
                 }
@@ -121,18 +134,24 @@ fn check_export_svg(svg: &str) -> Result<(), AppError> {
             Event::CData(_) | Event::GeneralRef(_) if depth == 0 => {
                 return Err(error("書き出す SVG のルートの外に文字があります。"));
             }
-            Event::GeneralRef(entity) => {
+            Event::GeneralRef(ref entity) => {
                 let entity = entity.decode().map_err(|e| malformed(&e))?;
-                quick_xml::escape::unescape(&format!("&{entity};")).map_err(|e| malformed(&e))?;
+                let reference = format!("&{entity};");
+                let decoded = quick_xml::escape::unescape(&reference).map_err(|e| malformed(&e))?;
+                if let Some(c) = decoded.chars().find(|c| !is_xml_char(*c)) {
+                    return Err(invalid_char(c));
+                }
+            }
+            // XML 宣言は先頭だけ (ルートの後ろや途中のものは拒否する)
+            Event::Decl(_) if !at_start => {
+                return Err(error("書き出す SVG の XML 宣言の位置が不正です。"));
             }
             Event::Eof => break,
             _ => {}
         }
     }
     if roots != 1 || depth != 0 {
-        return Err(error(
-            "書き出す SVG のルートの要素が svg 1 つではありません。",
-        ));
+        return Err(not_svg_root());
     }
     Ok(())
 }
@@ -299,6 +318,11 @@ mod tests {
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" lang=\"ja\" xml:lang=\"ja\" style=\"background:#fff\" width=\"10\" height=\"10\"><style><![CDATA[text{font:12px sans-serif}]]></style><text>a &amp; &#x3042;</text></svg>\n",
             "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
             "<!-- c --><svg:svg xmlns:svg=\"http://www.w3.org/2000/svg\"></svg:svg>",
+            // 先頭の BOM
+            "\u{FEFF}<?xml version=\"1.0\" encoding=\"UTF-8\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+            "\u{FEFF}<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+            // U+0085 などの XML 1.0 の文字は書き出せる (取込用の規則は当てない)
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a\u{85}b &#x85;</text></svg>",
         ] {
             write_file(path_text.clone(), "svg".into(), svg.into())
                 .unwrap_or_else(|e| panic!("{svg}: {e}"));
@@ -315,6 +339,20 @@ mod tests {
             "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>&unknown;</text></svg>",
             "<svg xmlns=\"http://www.w3.org/2000/svg\" a=\"1\" a=\"2\"/>",
             "<svg xmlns=\"http://www.w3.org/2000/svg\" a=\"&bad;\"/>",
+            // SVG の名前空間でない svg
+            "<svg/>",
+            "<svg xmlns=\"http://example.com/\"/>",
+            "<x:svg xmlns:x=\"http://example.com/\"/>",
+            // ルートの後ろの要素と XML 宣言
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"/><g/>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"/><?xml version=\"1.0\"?>",
+            "<!-- c --><?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+            // XML 1.0 の Char にない文字 (そのまま、文字参照、属性)
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a\u{1}b</text></svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a&#x1;b</text></svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a&#xFFFE;b</text></svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" a=\"&#x8;\"/>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>\u{FFFF}</text></svg>",
         ] {
             assert!(
                 write_file(path_text.clone(), "svg".into(), svg.into()).is_err(),

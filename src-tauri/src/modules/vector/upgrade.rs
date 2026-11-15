@@ -386,6 +386,26 @@ mod tests {
         }
     }
 
+    /// 今のブラウザの検証 (TS の `validatePayload`) を通らない v2 を作らない。抽出が分かれる文字を
+    /// 含む v1 は、変換を失敗にして v1 のまま残す (「元の SVG を書き出す」で取り出せる)。
+    #[test]
+    fn v1_with_characters_the_browser_reads_differently_stays_v1() {
+        for svg in [
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a\u{85}b</text></svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a&#x1;b</text></svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a&#xFFFE;b</text></svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a\u{1}b</text></svg>",
+        ] {
+            assert!(
+                matches!(
+                    upgrade_v1(&json!({ "svg": svg, "text": "a b" })),
+                    Err(ModuleError::UpgradeFailed { .. })
+                ),
+                "{svg:?}"
+            );
+        }
+    }
+
     #[test]
     fn upgrade_failure_reason_is_clipped() {
         let name = "要素".repeat(500);
