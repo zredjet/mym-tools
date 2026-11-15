@@ -1,8 +1,8 @@
 /**
  * ファイルを読む関数の登録口 (§4.8)。`export/writer.ts` と同じ形。
  *
- * エディタはファイルの選び方と読み方を知らない。画面 (切替 PR では `VectorWorkspacePage`、
- * 開発用の画面では `dev/main.tsx`) が `setImportFileReader` で関数を渡す。
+ * エディタはファイルの選び方と読み方を知らない。画面 (アプリでは `VectorWorkspacePage` が `canvasIo.ts` の
+ * `pickImportFile` を、開発用の画面では `dev/main.tsx` が `dev/fileReader.ts` を) `setImportFileReader` で渡す。
  * 登録がない間は、ツールバーの「画像」のボタンを無効にする。
  */
 import { useSyncExternalStore } from "react";

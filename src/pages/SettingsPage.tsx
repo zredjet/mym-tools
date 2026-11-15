@@ -48,7 +48,8 @@ export function SettingsPage() {
   const [taking, setTaking] = useState(false);
   const [deletingBackup, setDeletingBackup] = useState<BackupRecord | null>(null);
   const [restoringBackup, setRestoringBackup] = useState<BackupRecord | null>(null);
-  const [restartPrompt, setRestartPrompt] = useState(false);
+  /** リストアの後の再起動のお願い。`warning` は、変換の前のバックアップを取れなかった理由 (ADR-0027) */
+  const [restartPrompt, setRestartPrompt] = useState<{ warning: string | null } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -107,8 +108,8 @@ export function SettingsPage() {
 
   const handleConfirmRestore = useCallback(async () => {
     if (restoringBackup == null) return;
-    await restoreBackup(restoringBackup.path);
-    setRestartPrompt(true);
+    const outcome = await restoreBackup(restoringBackup.path);
+    setRestartPrompt({ warning: outcome.payload_backup_error });
   }, [restoringBackup]);
 
   return (
@@ -220,12 +221,12 @@ export function SettingsPage() {
 
       {/* リストア完了後の再起動プロンプト (data-model.md §13.6 step 7) */}
       <Modal
-        open={restartPrompt}
+        open={restartPrompt !== null}
         onClose={() => {}}
         title="アプリを再起動してください"
         widthClassName="w-full max-w-md"
       >
-        {restartPrompt && (
+        {restartPrompt !== null && (
           <div className="flex flex-col gap-3">
             <p className="text-[13px] text-[var(--fg)]">
               バックアップからのリストアが完了しました。DB 接続をクリーンに作り直すため、 アプリを
@@ -234,6 +235,14 @@ export function SettingsPage() {
             <p className="text-[12px] text-[var(--fg-muted)]">
               再起動するまでの間も古い一覧や編集中の内容を使わないよう、閉じると画面を読み込み直します。
             </p>
+            {restartPrompt.warning !== null && (
+              <p role="alert" className="text-[12px] text-[var(--destructive)]">
+                ただし、新しい形式への変換の前のバックアップ (
+                <code className="font-mono">pre-payload-...</code>) を取れませんでした:{" "}
+                {restartPrompt.warning}
+                。次の起動でもう一度取ります。再起動するまで、古い形式の作品を開かないでください。
+              </p>
+            )}
             <p className="text-[12px] text-[var(--fg-muted)]">
               戻る前の状態は <code className="font-mono">pre-restore-...</code>{" "}
               として保存されており、 必要なら再起動後にそのファイルからもう一度リストアできます。
@@ -642,19 +651,46 @@ function DataTransferSection({
         </div>
       )}
 
-      {exportSummary != null && (
-        <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-muted)] p-3 text-[12px] text-[var(--fg)]">
-          <p className="font-medium">エクスポート完了</p>
-          <p className="text-[var(--fg-muted)] tabular-nums">
-            プロジェクト {exportSummary.projects_count} 件 / アイテム合計{" "}
-            {exportSummary.items_count} 件 / {formatBytes(exportSummary.bytes_written)} (
-            {exportSummary.exported_at.slice(0, 19).replace("T", " ")} JST)
-          </p>
-        </div>
-      )}
+      {exportSummary != null && <ExportSummaryView summary={exportSummary} />}
 
       {importSummary != null && <ImportSummaryView summary={importSummary} />}
     </section>
+  );
+}
+
+function ExportSummaryView({ summary }: { summary: ExportSummary }) {
+  const notUpgraded = summary.not_upgraded;
+  return (
+    <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-muted)] p-3 text-[12px] text-[var(--fg)]">
+      <p className="font-medium">エクスポート完了</p>
+      <p className="text-[var(--fg-muted)] tabular-nums">
+        プロジェクト {summary.projects_count} 件 / アイテム合計 {summary.items_count} 件 /{" "}
+        {formatBytes(summary.bytes_written)} ({summary.exported_at.slice(0, 19).replace("T", " ")}{" "}
+        JST)
+      </p>
+      {notUpgraded.length > 0 && (
+        <div role="alert" className="mt-2 text-[var(--destructive)]">
+          <p>
+            {notUpgraded.length}{" "}
+            件は新しい形式に変換できないため、元の形式のまま書き出しました。このファイルを取り込むと、これらは失敗として数えられます。
+          </p>
+          <ul className="mt-1 max-h-48 overflow-y-auto rounded border border-[var(--border)] bg-[var(--bg)] p-2 text-[11px] text-[var(--fg)]">
+            {notUpgraded.map((item) => (
+              <li
+                key={item.id}
+                className="border-b border-dashed border-[var(--border)] py-1 last:border-0"
+              >
+                {item.title}{" "}
+                <span className="font-mono text-[var(--fg-muted)]">
+                  ({item.module_id} / {item.id})
+                </span>
+                : {item.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 

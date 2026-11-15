@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-11-10 / ステータス: Draft (Phase 1)
+最終更新: 2026-11-15 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -545,6 +545,7 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` (ADR-0002 で確定) |
 | Mermaid図 | Mermaid 11.17.2、strict security、dynamic import |
 | 自由図編集 | draw.io 31.5.3固定submodule、IPC権限なしloopback origin、sandboxed iframe |
+| キャンバス | 自作エディタ (React の SVG 描画、モジュール内の Zustand store 1 つ)。実行時の依存を足さない (ADR-0026) |
 | PDF結合 | `lopdf 0.45`（MSRV 1.88、`aes 0.9.2`固定、展開済みstream 64 MiB上限、終端のないstreamの事前検査） |
 | 文字コード判定・変換 | `encoding_rs 0.8`（WHATWG。`_without_replacement`系だけを使う）、`same-file 1`（出力先と入力の同一判定） |
 | フォルダ容量 | 標準ライブラリの`read_dir`、macOSは`libc 0.2`の`statfs`（ネットワーク上のボリュームの判定）、Windowsは`windows-sys`の`GetDriveTypeW` / `GetCompressedFileSizeW` / `GetDiskFreeSpace(Ex)W` |
@@ -598,13 +599,15 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-10-07 | 1.7 | §10.8 に `csvview` の読込とWorkerでの解析の境界を追加 |
 | 2026-10-17 | 1.8 | ADR-0025を反映。§10.9 フォルダ容量境界、§11 の重い処理の方針、§13 の依存を追加 |
 | 2026-11-10 | 1.9 | ADR-0020 2026-11-10追補を反映。§10.6と§13の`System.Formats.Nrbf`を10.0.14へ更新 |
+| 2026-11-15 | 1.10 | ADR-0026を反映。末尾の「SVG-Edit統合」をキャンバスの構造に書き換え、§13 にキャンバスを追加 |
 
-## SVG-Edit統合（ADR-0021）
+## キャンバス (ADR-0026)
 
-`VectorWorkspacePage`がメタデータ、文書切替、未保存確認、ファイルダイアログを担当する。`VectorBridge`は文書ID・要求ID・セッションを持つ限定postMessageを担当する。専用loopback originの`host.js`がSVG-Edit 7.4.2の標準UIを初期化し、共通SVG検証とMyMyToolsのファイル操作へ接続する。ReactのDOMへ取り込んだSVG本文を挿入しない。
+ベクター描画の SVG-Edit 同梱 (ADR-0021) は、自作のキャンバスエディタに置き換えた。iframe、loopback サーバ、postMessage のブリッジはない。設計の正典は [キャンバスの設計](canvas-editor-design.md)。
 
-アダプターは標準の変更イベントとUndo履歴への追加を監視する。レイヤーの表示・順序、SVG文書内タイトルなど、`elementChanged`を発火しない編集もrevisionを更新する。Undo/Redo後にレイヤーのDOMと標準エディタの一覧キャッシュが異なる場合は再同期する。レイヤーの作成・複製・改名はiframe内のHTML dialogを使い、ネイティブpromptや追加のsandbox権限を必要としない。入力中の保存要求は理由を表示して拒否し、文書読込時には入力を取り消して古い文書への変更を防ぐ。
-
-`modules/vector`のRustバックエンドはpayloadと検索テキストを検証し、ファイルの容量・形式・出力先拡張子を確認して原子的に書き出す。軽量な一覧は共通ストレージからmetadataだけをSELECTし、検索はモジュール宣言から表示用payloadをSQL投影する。既存moduleの検索結果表示と遷移先は変更しない。
-
-`prepare:drawio`と`prepare:vector`は独立して自身の生成資産を更新し、ViteのpublicDirを共有する。SVG-Edit資産はnpm固定配布物からコピーするため、通常ビルドで外部サイトへ接続しない。source mapはライセンス監査にだけ使用し、実行資産には含めない。
+- `VectorWorkspacePage` が作品バー (作品の切替、新規、取込、タイトル、タグ、未保存の表示、保存、削除) と、作品の読み込み・保存、未保存の確認、ファイルのダイアログを受け持つ。その下に `EditorRoot` (レイヤー、キャンバス、プロパティ、ツールバー) を置く
+- エディタの状態は `src/modules/vector/editor/state/store.ts` の Zustand の vanilla store 1 つ (`editorStore`) が持つ。アプリ全体の状態 (`useAppStore`) には入れず、Context も使わない。文書は payload v2 と同じ形で、変換層を持たない
+- モデル、状態、ツール、ヒットテストは DOM に依存しない。描画はノードを `SvgEl` (SVG 要素の素朴な木) にしてから、画面では React 要素、SVG 書き出しでは文字列にする。PNG はその SVG を画像として読み込んで canvas に描く
+- ファイルの読み書きは、画面が `canvasIo.ts` の関数をエディタの登録口 (`setImportFileReader`、`setExportWriter`) に渡す。エディタは Tauri の IPC を直接呼ばない。OS からのドロップは Tauri の webview のイベントで受ける (HTML5 のドラッグ&ドロップは使わない)
+- `modules/vector` の Rust は payload v2 の検証と検索用テキストの照合 (`scene.rs`)、v1 からの変換 (`upgrade.rs`、Eager-on-Read)、取込の検証 (`vector_read_file` / `vector_read_image`、SVG ポリシー `validation.rs`)、書き出し (`vector_write_file`、拡張子と大きさ、XML として整形式でルートが `svg` であることを確かめて原子的に書く)、変換できない v1 の元の SVG の書き出し (`vector_export_original_svg`、行は変えない、ADR-0027) を持つ。SVG ポリシーは `src/modules/vector/policy/` にあり、TypeScript と Rust が同じ `policy.json` と `validation-fixtures.json` を読む
+- 軽量な一覧は共通ストレージから metadata だけを SELECT し、検索はモジュール宣言 (`search_preview_field() = "text"`) から表示用 payload を SQL 投影する。画像を含む payload を一覧や検索の IPC に載せない

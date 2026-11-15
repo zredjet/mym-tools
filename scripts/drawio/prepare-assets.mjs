@@ -82,10 +82,34 @@ function preparedAlready() {
   }
 }
 
+/**
+ * 同梱をやめたエディタの生成物 (`GENERATED_ROOT` からの相対 path)。SVG-Edit (ADR-0021) は
+ * ADR-0026 でキャンバスに置き換えた。`vite.config.ts` は `GENERATED_ROOT` をまるごと配信・同梱する
+ * ので、前の版で作った作業フォルダに残っていると、手元のビルドに入ってしまう。
+ */
+export const RETIRED_GENERATED_PATHS = ["svgedit", "licenses/svgedit", ".svgedit-stamp.json"];
+
+/** `RETIRED_GENERATED_PATHS` のうち残っているものを消し、消したものを返す。 */
+export function removeRetiredAssets(root = GENERATED_ROOT) {
+  const removed = [];
+  for (const path of RETIRED_GENERATED_PATHS) {
+    const target = resolve(root, path);
+    if (!existsSync(target)) continue;
+    rmSync(target, { recursive: true, force: true });
+    removed.push(path);
+  }
+  return removed;
+}
+
 export function prepareDrawioAssets() {
   const commit = currentCommit();
   if (commit !== DRAWIO_COMMIT) {
     throw new Error(`draw.io commit が不一致です。expected=${DRAWIO_COMMIT} actual=${commit}`);
+  }
+
+  // draw.io の資産が揃っていて早く戻るときも、同梱をやめたエディタの生成物は消す
+  for (const path of removeRetiredAssets()) {
+    process.stdout.write(`removed retired generated asset: ${path}\n`);
   }
 
   if (preparedAlready()) {
@@ -93,7 +117,8 @@ export function prepareDrawioAssets() {
     return;
   }
 
-  // Other offline editors share GENERATED_ROOT; only replace our own assets.
+  // GENERATED_ROOT には draw.io 以外の生成物 (ライセンスの写しなど) も置くので、
+  // ここで作り直すのは draw.io の資産だけにする
   rmSync(TARGET_ROOT, { recursive: true, force: true });
   mkdirSync(TARGET_ROOT, { recursive: true });
 

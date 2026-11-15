@@ -46,7 +46,11 @@ export async function handleCloseRequested(
   event: { preventDefault: () => void },
   closeWindow: () => Promise<void> = () => getCurrentWindow().close(),
 ): Promise<void> {
-  if (!closeConfirmed) {
+  // 確認済みの閉じ直しは 1 回だけガードを飛ばす。閉じ直しの後の `destroy()` が失敗してウィンドウが
+  // 残っても、次の閉じる要求はまた確かめる
+  const confirmed = closeConfirmed;
+  closeConfirmed = false;
+  if (!confirmed) {
     for (const guard of guards) {
       if (!guard.shouldBlock()) continue;
       event.preventDefault();

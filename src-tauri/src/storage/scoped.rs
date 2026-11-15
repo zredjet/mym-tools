@@ -75,6 +75,8 @@ impl ScopedStorage {
     }
 
     /// item を更新する。`payload` の変更で `search_text` も再生成する (`data-model.md` §7.1)。
+    ///
+    /// 保存されている行が今の版で読めないときは、`StorageService::update_item` が上書きを拒否する (ADR-0027)。
     pub fn update_item(
         &self,
         id: &ItemId,
@@ -86,11 +88,10 @@ impl ScopedStorage {
         self.module
             .validate_payload(&payload)
             .map_err(|e| e.into_app_error(self.module.id()))?;
-        let module_id = self.module.id().to_string();
         let payload_schema_version = self.module.current_payload_version();
         let search_text = build_search_text(title, tags, &self.module.index_text(&payload));
         self.inner.update_item(
-            &module_id,
+            self.module.as_ref(),
             id,
             title,
             tags,

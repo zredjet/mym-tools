@@ -87,5 +87,5 @@ export async function runExport(
 ): Promise<ExportWriteResult & { total: number }> {
   const files = await buildExportFiles(doc, plan, options);
   const result = await writer(files);
-  return { written: result.written, total: files.length };
+  return { ...result, total: files.length };
 }

@@ -49,6 +49,21 @@ export interface ExportSummary {
   items_count: number;
   /** 書き出した JSON ファイルのバイト数 (ユーザーへサイズ感を表示) */
   bytes_written: number;
+  /**
+   * 新しい形式に変換できず、元の形式のまま書き出した item (`exchange/mod.rs::NotUpgradedItem`、
+   * ADR-0027)。取り込む側では失敗として数えられる
+   */
+  not_upgraded: NotUpgradedItem[];
+}
+
+/** エクスポートで新しい形式に変換できなかった item (ADR-0027)。 */
+export interface NotUpgradedItem {
+  id: string;
+  module_id: string;
+  title: string;
+  /** 書き出した (= 保存されている) payload の版 */
+  payload_schema_version: number;
+  reason: string;
 }
 
 export function exportJson(input: {

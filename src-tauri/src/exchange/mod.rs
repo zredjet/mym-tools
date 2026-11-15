@@ -224,12 +224,37 @@ pub struct ExportSummary {
     pub items_count: usize,
     /// 書き出した JSON ファイルのバイト数
     pub bytes_written: u64,
+    /// 新しい形式に変換できず、元の payload と版のまま書き出した item (ADR-0027)。
+    /// 取り込む側では失敗として数えられる
+    #[serde(default)]
+    pub not_upgraded: Vec<NotUpgradedItem>,
+}
+
+/// エクスポートで Eager-on-Read の変換に失敗し、元の形式のまま書き出した item (ADR-0027)。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotUpgradedItem {
+    pub id: ItemId,
+    pub module_id: String,
+    pub title: String,
+    /// 書き出した (= 保存されている) payload の版
+    pub payload_schema_version: u32,
+    /// 変換できなかった理由
+    pub reason: String,
+}
+
+/// `build_export_data` / `build_project_export_data` の結果。`data` をファイルへ書き、
+/// `not_upgraded` を完了の表示に出す (ADR-0027)。
+#[derive(Debug, Clone)]
+pub struct ExportBuild {
+    pub data: ExportData,
+    pub not_upgraded: Vec<NotUpgradedItem>,
 }
 
 impl ExportSummary {
-    /// `ExportData` (フル) から件数を集計してサマリを作る。`bytes_written` は
+    /// `ExportBuild` (フルの `ExportData` と変換できなかった item) から件数を集計してサマリを作る。`bytes_written` は
     /// ファイル書き込み後に呼び出し側で埋める想定 (本コンストラクタでは 0)。
-    pub fn summarize(data: &ExportData) -> Self {
+    pub fn summarize(build: &ExportBuild) -> Self {
+        let data = &build.data;
         let items_count = data.projects.iter().map(|p| p.items.len()).sum();
         Self {
             schema_version: data.schema_version,
@@ -240,6 +265,7 @@ impl ExportSummary {
             projects_count: data.projects.len(),
             items_count,
             bytes_written: 0,
+            not_upgraded: build.not_upgraded.clone(),
         }
     }
 }

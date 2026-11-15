@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Phase 1 の主要機能を実装済みの Tauri 2 デスクトップアプリ** (macOS Apple Silicon / Windows x64)。WebView 側は React 19 + TypeScript + Tailwind v4 + Zustand、ネイティブ側は Rust (MSRV 1.88) + rusqlite。カテゴリ別の 29 モジュールを一機能一モジュールで統合している (ADR-0014)。実行可能なコマンドは `README.md` と `package.json` / `src-tauri/Cargo.toml` を確認すること。
 
-同梱エンジンの資産は `npm run prepare:drawio` / `prepare:vector` / `prepare:nrbf` で生成する (`dev` / `build` の pre スクリプトで drawio と vector は自動実行)。draw.io は Git submodule で固定している。
+同梱エンジンの資産は `npm run prepare:drawio` / `prepare:nrbf` で生成する (`dev` / `build` の pre スクリプトで drawio は自動実行)。draw.io は Git submodule で固定している。
 
 ## 何を読むか (優先順)
 
@@ -19,8 +19,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 5. `docs/module-contract.md` — モジュールがコアと結ぶ契約 (= モジュール/コア境界)
 6. `docs/ui-design.md` — UI の正典: トークン、画面スケルトン (§6 に C 系と各モジュール画面)、キーボードショートカット、空状態
 7. `docs/developer-tools-plan.md` — 開発ツールモジュールの範囲、段階、品質条件
-8. `docs/canvas-editor-design.md` — キャンバス (`vector` の自作エディタ) の保存形式、内部の境界、画面、実装の分担 (ADR-0026)。切替 PR までは SVG-Edit が動く
-9. `docs/release-process.md` / `docs/vector-editor-verification.md` / `docs/diagram-editor-verification.md` — リリース手順、ベクター描画・ダイアグラムの検証・実機受入
+8. `docs/canvas-editor-design.md` — キャンバス (`vector` の自作エディタ) の保存形式 (payload v2)、内部の境界、画面、段階 (ADR-0026)
+9. `docs/release-process.md` / `docs/vector-editor-verification.md` / `docs/diagram-editor-verification.md` — リリース手順、キャンバス・ダイアグラムの検証・実機受入
 10. `docs/MyMyTools Prototype.bundle.html` — 見た目の参考 (Claude Design 出力)。**技術判断のソースにはしない**
 
 プロトタイプ HTML はブラウザで開けば想定の見た目が確認できるが、技術的な決定の根拠は ADR を見ること。
@@ -49,12 +49,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 0018 | PDF 結合は Rust の `lopdf` で完全ローカル処理 (stateless)。PDF bytes は IPC を通さず path のみ。暗号化・フォーム・署名等は拒否、出力は一時ファイルから原子的置換 |
 | 0019 | required CI の `build-tauri` が生成した portable ZIP + candidate manifest を Release で再利用する。一意に解決できない場合のみ fallback build |
 | 0020 | NRBF は `BinaryFormatter.Deserialize` を使わず、`System.Formats.Nrbf` を参照する .NET 10 NativeAOT sidecar で型非生成解析。入力 64 MiB / node 50 万等の上限、stateless |
-| 0021 | ベクター描画は SVG-Edit 7.4.2 (上流 Editor.js は無改変) を loopback + sandboxed iframe で同梱。payload v1 `{ svg, text }`、SVG は UTF-8 20 MiB 以下。親子通信は `mym-vector-v1` の限定 postMessage のみ |
+| 0021 | **ADR-0026 で置き換え済み**。ベクター描画は SVG-Edit 7.4.2 (上流 Editor.js は無改変) を loopback + sandboxed iframe で同梱。payload v1 `{ svg, text }`、SVG は UTF-8 20 MiB 以下。親子通信は `mym-vector-v1` の限定 postMessage のみ |
 | 0022 | 派生データを同期するトリガの置換 (同一 tx の `DROP TRIGGER` + `CREATE TRIGGER`、同期結果不変、値書き換えなし) は ADR-0011 の `MIGRATIONS` 枠で可。v3 で FTS 更新トリガを `UPDATE OF project_id, module_id, search_text` に絞る |
 | 0023 | PNG最適化 (`pngopt`) は shotq のライブラリ部分を `src-tauri/crates/shotq/` に複製してプロセス内で実行する (shotq は private のため git 依存にしない)。rayon は複製した shotq の内部に限り ADR-0009 R-2 の例外とし、処理は同時に 1 つ。取消しは読込中・最適化の後・置換の直前・ファイルの間。出力は CLI と同じ規則で、契約テストで CLI とのバイト一致を確かめる |
 | 0024 | テキストファイルの文字コード判定・変換 (`encoding`、`csvview` の読込) は Rust の `encoding_rs` で行い、共通処理は `modules/text_encoding.rs`。path だけを渡す。`_without_replacement` 系だけを使い、読めないバイト・表せない文字があれば保存せず位置を返す (¥ / ‾ / − と外字は警告)。同じ文字コード同士はバイトのまま改行・BOM だけ変える。別名保存のみ、64 MiB 上限 |
 | 0025 | フォルダ容量 (`dirsize`) は読み取り専用・ローカル限定。Rust の単一スレッドで再帰的に走査し、リンク・ジャンクションと別のボリュームに入らない。UNC は `modules/network_path.rs` で触る前に拒否し、パス中のリンクは `read_link` で行き先を確かめながら解決する。Windows は `GetDriveTypeW`、macOS は `statfs` の `MNT_LOCAL` でネットワーク上のボリュームを拒否する。「サイズ」と「ディスク上」を集計し、読めないフォルダは昇格せず報告する。結果は基準ごとの上位 10,000 件の和集合と「ほか」にまとめ、フォルダ 1,000,000 件で止める |
-| 0026 | ベクター描画を自作のキャンバスエディタに置き換える (SVG-Edit 同梱を廃止、表示名「キャンバス」)。モジュール ID は `vector` のまま payload v2 `{ pages, nodes, assets, text }` にし、v1 の SVG は編集できない埋め込み SVG として包む。描画は SVG 要素で、モデルと描画層を分ける。実行時の依存を増やさない。**切替 PR までは ADR-0021 の実装が動き**、新しいコードは画面にもストレージにもつながない |
+| 0026 | ベクター描画を自作のキャンバスエディタに置き換える (SVG-Edit 同梱を廃止、表示名「キャンバス」)。モジュール ID は `vector` のまま payload v2 `{ pages, nodes, assets, text }` にし、v1 の SVG は編集できない埋め込み SVG として包む。描画は SVG 要素で、モデルと描画層を分ける。実行時の依存を増やさない。切替済み (SVG-Edit 一式と `vector_editor_url` を削除、ADR-0021 を supersede) |
+| 0027 | payload の版を上げるときの守り方 (ADR-0006 §2.5 の一部を置き換え)。起動時、古い版の行があれば最初の変換の前に pre-op バックアップ `pre-payload-<module_id>-v<版>` を 1 回取り `meta.payload_upgrade_backup.<module_id>` に記録 (失敗したら起動を止める)。アプリの中のリストアの後も同じ判定をする。`StorageService::update_item` は同じトランザクションで、変換できない古い行と新しい版の行の上書きを拒否する。Rust の変換が受け付けた payload は画面の検証も通ること。書き戻しに失敗しても変換した結果を返す。エクスポートは変換できない行を元の版のまま書き出し `ExportSummary.not_upgraded` で知らせる |
 
 ## 絶対に破ってはいけない不変条件
 
@@ -63,14 +64,15 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - **コアスキーマの破壊的マイグレーションをしない**。`DROP` / `RENAME` / 型変更 / 既存値書き換えは禁止 (ADR-0006 のまま。派生データ同期トリガの置換だけは ADR-0022 の条件で可)。本当に必要なら新 ADR + `db_schema_version` 上昇 + C-12 起動停止画面の追加が前提
 - **additive な DDL マイグレーション** (新カラム + DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) は **ADR-0011 の枠組みで許可**。`schema.rs::MIGRATIONS` にエントリを追加 + `db_schema_version` を bump + pre-migration バックアップが自動取得される。PR 説明で「additive か / バックアップ取得を確認したか」を必ず書く。現在の `CURRENT_DB_SCHEMA_VERSION` は 4
 - **モジュールデータ変更は引き続き payload バージョニング + Eager-on-Read** (ADR-0006) で吸収する。コアスキーマには触らない。ADR-0016 の Link / Memo 再所属は限定的な例外であり、値書き換えの前例にしない
+- **payload の版を上げたら、変換できない行を壊さない** (ADR-0027)。最初の変換の前のバックアップは起動時に共通の仕組みが取る。変換できない古い行は上書きを拒否され、エクスポートでは元の版のまま書き出して `not_upgraded` で知らせる。モジュールは、変換できない行から中身を取り出す口 (キャンバスの `vector_export_original_svg` など) を用意する
 - **フロントエンドから SQLite に直接アクセスしない**。`@tauri-apps/plugin-sql` も使わず、`tauri::command` のみを通す (module-contract §6.2)。フロントは `src/ipc/*.ts` 経由の `invoke(...)` で型付き結果を受ける
 - **タイムスタンプは必ずアプリ側で生成**。`CURRENT_TIMESTAMP` 等の DB 生成は禁止。JST `+09:00`、ms 3 桁、固定 29 文字 (ADR-0005)。文字列のまま辞書順ソート可
 - **Zustand 単一ストアを Day 1 から使う**。アプリ全体状態 (現在プロジェクト / 現在モジュール / テーマ / 設定) はここに集約。モジュール内のローカル状態は `useState` でよい。Context には逃さない (architecture.md §2.3)
 - **設定の永続化は `settings.json` だけを使う**。Zustand `persist` / `localStorage` を使わず、Rust の SettingsService 経由で未知キーを保持しながら原子的に保存する (ADR-0002 §4.4.3 / ADR-0012)
 - **フロントエンドのモジュール列挙は `src/modules/registry.ts` を唯一の正典にする**。Shell / router / search / settings / 起動復元へモジュール ID の分岐を重ねない。カテゴリ定義と順序も同ファイル (ADR-0014)。無効化の詳細は ADR-0012 に従う
 - **自動更新なし、起動時の version-check 通信もしない** (ADR-0008)。「最新版を確認」は OS ブラウザで GitHub Releases を開くだけ (`plugin-shell`)
-- **完全オフラインを守る**。同梱エディタ (draw.io / SVG-Edit) はビルド時にもネットワーク取得しない。外部 script / font / plugin を読み込ませない。外部への通信は HTTP モジュールの `http_send_request` だけ (ADR-0015 / ADR-0017 / ADR-0021)
-- **iframe エディタへ Tauri IPC を公開しない**。loopback origin はリモート扱いで、app command ACL は local app origin だけに付与する。親子通信は source / origin / session / token / サイズを検証する (ADR-0017 §3 / ADR-0021)。Tauri 内部の `plugin:__TAURI_CHANNEL__|fetch` は ACL の対象外なので、editor CSP の `connect-src` に `ipc:` / `http://ipc.localhost` を加えない (ADR-0017 §7)
+- **完全オフラインを守る**。同梱エディタ (draw.io) はビルド時にもネットワーク取得しない。外部 script / font / plugin を読み込ませない。キャンバスはフォントを同梱せず PC のものを使う。外部への通信は HTTP モジュールの `http_send_request` だけ (ADR-0015 / ADR-0017 / ADR-0026)
+- **iframe エディタへ Tauri IPC を公開しない**。loopback origin はリモート扱いで、app command ACL は local app origin だけに付与する。親子通信は source / origin / session / token / サイズを検証する (ADR-0017 §3)。Tauri 内部の `plugin:__TAURI_CHANNEL__|fetch` は ACL の対象外なので、editor CSP の `connect-src` に `ipc:` / `http://ipc.localhost` を加えない (ADR-0017 §7)
 - **`src-tauri/crates/shotq/` は編集しない**。shotq 側で直してから複製し直し、`UPSTREAM.md`・依存の版・契約テストの期待値 (`src-tauri/src/modules/pngopt/contract/`) を同じ変更で更新する。rayon は複製した shotq の内部だけで使い、`src-tauri/src` には書かない (ADR-0023)
 - **文字コード変換で置換文字を使わない**。`encoding_rs` の `_without_replacement` が付かない `encode*` / `decode*` は使わず、`Encoding::for_label` で任意のラベルを受け付けない。読めないバイト・表せない文字は拒否して位置を返す (ADR-0024)
 - **NRBF で型を生成しない**。`BinaryFormatter` / `Deserialize` / 任意型ロードは禁止 (CI で検出) (ADR-0020)
@@ -90,8 +92,9 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - M-Link の path でネットワーク上の場所 (UNC / `\\?\` / `\\.\` / `\??\`) を開くのは、確認せずに開くサーバ (`modules.linkmemo.trusted_network_hosts`) か、確認ダイアログで「開く」を選んだ時だけ。`linkmemo_open` は `allowNetworkPath: true` の無い呼び出しを拒否する (Windows では存在確認の時点で NTLM 認証がサーバへ送られるため。data-model §10.2)
 - M-フォルダ容量 (`dirsize`) は読み取り専用で、削除・ごみ箱への移動を足さない (requirements §4.1)。ネットワーク上の場所の文字列判定は `modules/network_path.rs` を M-Link と共有し、ファイルシステムに触る前に行う (ADR-0025)
 - M-Memo (`memo`) の payload v1 は `{ body: string }` (空文字不可)。export schema v1 の旧 `linkmemo` + `type=memo` は import 時に `memo` へ正規化する (ADR-0016)
-- Mermaid は `{ source }`、Diagram は `{ xml, text }` (各 UTF-8 1 MiB 以下)、Vector は `{ svg, text }` (SVG 20 MiB 以下)。`text` は検索用の抽出テキスト。いずれも一覧を挟まず直近 item か新規ドラフトを開く
-- 大きな payload を持つモジュールの一覧・検索は `core_list_item_summaries` / `core_search_previews` (payload を SELECT しない) と `search_preview_field()` を使う (ADR-0021)
+- Mermaid は `{ source }`、Diagram は `{ xml, text }` (各 UTF-8 1 MiB 以下)、キャンバス (`vector`) は payload v2 `{ pages, nodes, assets, text }` (アセット合計 20 MiB 以下、`docs/canvas-editor-design.md` §3)。`text` は検索用の抽出テキストで、Rust が求め直して照合する。いずれも一覧を挟まず直近 item か新規ドラフトを開く
+- キャンバスの v1 (`{ svg, text }`、SVG-Edit 時代) は Eager-on-Read で「編集できない埋め込み SVG 1 個」の v2 へ変換する (`upgrade_payload(1)`。アセットの `text` は SVG から求め直す)。変換できない作品は v1 のまま残し、保存で上書きせず、JSON エクスポートでも v1 のまま書き出して知らせる。画面の「元の SVG を書き出す」(`vector_export_original_svg`) で中身を取り出せる (data-model §7.6 / ADR-0027)
+- 大きな payload を持つモジュールの一覧・検索は `core_list_item_summaries` / `core_search_previews` (payload を SELECT しない) と `search_preview_field()` を使う (ADR-0021 / ADR-0026)
 - アイテムのプロジェクト間移動は `core_move_item` (`ScopedStorage::move_item`) だけで行う。書き換えるのは `project_id` と移動先での `position` で、payload・`search_text`・`updated_at` は変えず、`data_revision` は +1 する。FTS の `project_id` はトリガが同期する。UI は共通の `MoveItemDialog` を使い、編集フォームにプロジェクト欄を足さない (data-model §6.6 / ui-design §6.28)
 - M-Prompt の `variables` は**永続化しない**。読込み時に `body` から正規表現で抽出する
 - Phase 1 の `projects` テーブルは `id / name / description / position / created_at / updated_at` のみ。**`accent` カラムはない**。Phase 1 のアクセント色は blue 固定 (ui-design §10 U-10 に Phase 2 持ち越し記録)
@@ -109,8 +112,8 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - `docs/decisions/` の ADR は**追記専用**。受理済 ADR は書き換えず、覆すなら新 ADR で supersede する。軽微な誤字訂正は可、ただし決定そのものは原文を残す。新 ADR を足したらこのファイルの ADR 一覧にも 1 行追加する
 - `docs/ui-design.md` には末尾に改訂履歴テーブルがある。非自明な変更を入れたら 1 行追加し、冒頭の「v1.X の主な変更」プレリュードとヘッダのバージョン・最終更新日を同期させる
 - `docs/MyMyTools Prototype.bundle.html` は 1.7MB の自己完結 HTML (Claude Design 出力)。オフライン参照のためにそのまま置いてある — 再生成・編集はしない
-- ベクター描画は移行中 (ADR-0026)。切替 PR までは `src/modules/vector/editor/` と Rust の新しいコードを `src/modules/registry.ts` / `VectorWorkspacePage.tsx` / `current_payload_version` につながない。`editor/` の契約のファイル (`model/types.ts`、`model/limits.*`、`model/fixtures/`、`state/types.ts`、`render/types.ts`、`tools/types.ts`、`tools/registry.ts`、`EditorRoot.tsx`) は担当の分かれた作業の前提なので、変えるときは `docs/canvas-editor-design.md` §4.1 も同じ変更で更新する
-- 同梱エンジン (Mermaid / draw.io / SVG-Edit / NRBF sidecar) のバージョンは完全固定。更新時は対応 ADR が列挙するもの (submodule commit、定数、資産契約テスト、ライセンス表記、About 表示、実測サイズ) を同じ変更で更新する
+- キャンバス (`vector`) のエディタは `src/modules/vector/editor/`、画面と IPC の接続は `VectorWorkspacePage.tsx` と `canvasIo.ts`。エディタは Tauri の IPC を直接呼ばず、ファイルの読み書きは登録口 (`setImportFileReader` / `setExportWriter`) に渡された関数で行う。SVG ポリシーは `src/modules/vector/policy/` にあり、Rust (`include_str!`) と TypeScript が共有する。開発用の画面は `canvas-harness.html` (配布物に含めない)。`editor/` の契約のファイル (`model/types.ts`、`model/limits.*`、`model/fixtures/`、`state/types.ts`、`render/types.ts`、`tools/types.ts`、`tools/registry.ts`、`EditorRoot.tsx`) は担当の分かれた作業の前提なので、変えるときは `docs/canvas-editor-design.md` §4.1 も同じ変更で更新する
+- 同梱エンジン (Mermaid / draw.io / NRBF sidecar) のバージョンは完全固定。更新時は対応 ADR が列挙するもの (submodule commit、定数、資産契約テスト、ライセンス表記、About 表示、実測サイズ) を同じ変更で更新する
 - `src-tauri/src/storage/schema.rs::MIGRATIONS` を変更する PR は、PR 説明に以下を必ず書く (ADR-0011 §2.1 チェックリスト):
   - additive (新カラム+定数 DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) のみで構成されているか
   - 同 PR 内に non-additive (DROP / RENAME / 型変更 / 既存値書き換え) が混ざっていないか — 混ざる場合は別 ADR + C-12 起動停止画面の追加が必須 (ADR-0011 §2.2)

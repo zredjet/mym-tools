@@ -50,6 +50,15 @@ export function verifyBackup(path: string): Promise<void> {
  * **戻り値が成功でも、フロントは「アプリを再起動してください」モーダルを表示する責務**
  * (`docs/data-model.md` §13.6 step 7)。
  */
-export function restoreBackup(path: string): Promise<void> {
-  return invoke<void>("core_backup_restore", { path });
+export function restoreBackup(path: string): Promise<RestoreOutcome> {
+  return invoke<RestoreOutcome>("core_backup_restore", { path });
+}
+
+/** リストアの結果 (`commands/backup.rs::RestoreOutcome`)。リストアそのものは成功している。 */
+export interface RestoreOutcome {
+  /**
+   * 戻した DB の、新しい形式への変換の前のバックアップ (`pre-payload-…`、ADR-0027) を取れなかった理由。
+   * 取れた (か要らなかった) なら null。次の起動でもう一度取りにいく
+   */
+  payload_backup_error: string | null;
 }

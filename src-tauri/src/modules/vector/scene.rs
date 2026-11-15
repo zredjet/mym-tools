@@ -3,10 +3,7 @@
 //! 仕様の正典は `docs/canvas-editor-design.md` §3.3〜3.6、型は
 //! `src/modules/vector/editor/model/types.ts`、上限と書式は `model/limits.json`。
 //! 上限の値は Rust に書き写さず、`limits.json` を `include_str!` で読む。
-//!
-//! 切替 PR までは `VectorModule` から呼ばれず、テストからだけ使う。
-// 切替 PR で外す (ADR-0026)。
-#![cfg_attr(not(test), allow(dead_code))]
+//! `VectorModule::validate_payload` がこの `validate` を呼ぶ。
 
 use super::validation::{validate_image, validate_svg};
 use crate::error::AppError;
@@ -43,13 +40,19 @@ pub(crate) struct Limits {
     pub max_shadow_blur: f64,
     pub max_letter_spacing: f64,
     pub max_line_height: f64,
+    // 下の 4 つは、判定を手書きの関数が持ち、値はテストが一致を確かめるだけに読む。
+    // `deny_unknown_fields` で limits.json を読むので、使わなくてもフィールドとしては要る。
     /// PNG の 1 辺の上限。判定は既存の `validate_image` が持ち、一致はテストで確かめる。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub max_image_side: u64,
     /// PNG の総画素数の上限。`max_image_side` と同じくテストで一致を確かめる。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub max_image_pixels: u64,
     /// 手書きの判定 (`is_id`) と同じ意味であることをテストで確かめる。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub id_pattern: String,
     /// 手書きの判定 (`is_color`) と同じ意味であることをテストで確かめる。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub color_pattern: String,
 }
 
@@ -936,6 +939,11 @@ mod tests {
             ("asset-kind-mismatch", "別の種類"),
             ("image-data-mime-mismatch", "画像の形式と内容"),
             ("svg-asset-policy-violation", "未対応のSVG要素"),
+            ("svg-asset-raw-nel", "U+0085"),
+            (
+                "svg-asset-control-character-reference",
+                "使えない文字の参照",
+            ),
             ("svg-asset-text-mismatch", "SVGと一致しません"),
             ("text-mismatch", "文書と一致しません"),
             ("guide-axis-invalid", "axis"),

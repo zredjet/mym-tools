@@ -20,6 +20,7 @@ import {
   type GuideDrag,
 } from "../tools/select/guideDrag";
 import { isEditableTarget } from "./input";
+import { registerPointerDrag } from "./pointerDrag";
 import { formatRulerValue, RULER_SIZE, rulerTicks } from "./rulerTicks";
 import { screenToPage, type Size } from "./viewport";
 
@@ -54,6 +55,20 @@ function useGuidePull(rulerAxis: "x" | "y") {
 
   // アンマウントで取り消す (作りかけのガイド線とジェスチャーを残さない)
   useEffect(() => () => finish(true), [finish]);
+
+  // 画面 (エディタの外) から、引き出しの途中かを確かめ、取り消せるようにする (`pointerDrag.ts`、§4.4)
+  useEffect(
+    () =>
+      registerPointerDrag({
+        isActive: () => pull.current !== null,
+        cancel: () => {
+          if (!pull.current) return false;
+          finish(true);
+          return true;
+        },
+      }),
+    [finish],
+  );
 
   const locate = (event: ReactPointerEvent<Element>) => {
     const canvas = event.currentTarget.closest("[data-canvas-view]");

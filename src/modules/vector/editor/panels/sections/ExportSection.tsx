@@ -152,6 +152,14 @@ export function ExportSection() {
       // 成功の表示は、終えた時点の対象に結び付ける (押してから選択が変わっていても結果は出し、
       // そのあと対象・形式・倍率のどれかを変えたら消す)
       const now = editorStore.getState();
+      // 途中のファイルで失敗したら、書けた数と一緒に失敗として出す
+      if (result.error !== undefined) {
+        setStatus({
+          kind: "error",
+          message: `書き出しに失敗しました: ${result.error} (${result.total} ファイルのうち ${result.written} ファイルは書き出しました)`,
+        });
+        return;
+      }
       setStatus({
         kind: "done",
         message: doneMessage(result.written, result.total),

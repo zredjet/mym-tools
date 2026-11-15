@@ -130,10 +130,15 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
 
     /// items のユーザー編集更新。`data_revision` を **+1** (`data-model.md` §7.2)。
     /// 引数が多いのは items テーブルのカラム数に対応するため意図的。
+    ///
+    /// 保存されている行が今の版で読めないときは上書きしない (ADR-0027)。同じトランザクションの中で、
+    /// 保存されている行の版が `module.current_payload_version()` より古ければ、保存されている payload の
+    /// 引き上げを試し、失敗するなら `PayloadUpgradeFailed` で拒否する (行と `data_revision` は変えない)。
+    /// 新しい版の行は `UnsupportedFuturePayloadVersion` で拒否する。`module` はこの確認のためだけに渡す。
     #[allow(clippy::too_many_arguments)]
     fn update_item(
         &self,
-        module_id: &str,
+        module: &dyn ModuleBackend,
         id: &ItemId,
         title: &str,
         tags: &[String],
@@ -171,6 +176,18 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
         id: &ItemId,
         module: &dyn ModuleBackend,
     ) -> Result<Item, AppError>;
+
+    /// 保存されている行の `payload_schema_version` が `current_version` と違うときだけ、その版と
+    /// 保存されている payload を返す (同じなら `None`。payload を読まない)。Eager-on-Read は
+    /// **発火させない**。変換できない v1 の作品から元の内容を取り出す口 (`vector_export_original_svg`、
+    /// ADR-0027) が使う。
+    /// 行が無ければ `AppError::NotFound`。
+    fn stored_payload_if_not_current(
+        &self,
+        module_id: &str,
+        id: &ItemId,
+        current_version: u32,
+    ) -> Result<Option<(u32, JsonValue)>, AppError>;
 
     /// プロジェクト内のモジュール item を一覧取得 (Eager-on-Read を**発火させない**、
     /// `data-model.md` §7.2 注)。`ORDER BY position ASC, updated_at DESC, id DESC` 順。
@@ -261,6 +278,20 @@ pub trait StorageService: Send + Sync + std::fmt::Debug {
     /// (`data-model.md` §13.2 設計意図: pre-op / manual で 24 時間ゲートを巻き戻さない)。
     /// **`data_revision` は増分しない**。
     fn set_last_auto_backup_at(&self, ts: &str) -> Result<(), AppError>;
+
+    /// payload の引き上げ (Eager-on-Read) の前のバックアップを、どの版のために取ったか
+    /// (`meta.payload_upgrade_backup.<module_id>`、記録が無ければ 0。ADR-0027)。
+    fn payload_upgrade_backup_version(&self, module_id: &str) -> Result<u32, AppError>;
+
+    /// payload の引き上げの前のバックアップを取ったことを記録する。`data_revision` は増やさない (ADR-0027)。
+    fn set_payload_upgrade_backup_version(
+        &self,
+        module_id: &str,
+        version: u32,
+    ) -> Result<(), AppError>;
+
+    /// `version` より古い payload の行が `module_id` にあるか。payload の列は読まない (ADR-0027)。
+    fn has_items_older_than(&self, module_id: &str, version: u32) -> Result<bool, AppError>;
 
     // -------- バックアップ I/O (ADR-0007 §2.1 / `data-model.md` §13.1) --------
 

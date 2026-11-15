@@ -539,6 +539,30 @@ impl StorageService for SqliteStorage {
         })
     }
 
+    fn payload_upgrade_backup_version(&self, module_id: &str) -> Result<u32, AppError> {
+        self.with_conn(|conn| {
+            crate::storage::data_migrations::payload_upgrade_backup_version(conn, module_id)
+        })
+    }
+
+    fn set_payload_upgrade_backup_version(
+        &self,
+        module_id: &str,
+        version: u32,
+    ) -> Result<(), AppError> {
+        self.with_conn(|conn| {
+            crate::storage::data_migrations::set_payload_upgrade_backup_version(
+                conn, module_id, version,
+            )
+        })
+    }
+
+    fn has_items_older_than(&self, module_id: &str, version: u32) -> Result<bool, AppError> {
+        self.with_conn(|conn| {
+            crate::storage::data_migrations::has_items_older_than(conn, module_id, version)
+        })
+    }
+
     fn take_online_backup_to(&self, dst_path: &Path) -> Result<(), AppError> {
         // 親ディレクトリを確保 (UI からの初回呼び出しで <userdata>/backups/<kind>/ が
         // 未作成のことがある)
@@ -771,7 +795,7 @@ impl StorageService for SqliteStorage {
 
     fn update_item(
         &self,
-        module_id: &str,
+        module: &dyn ModuleBackend,
         id: &ItemId,
         title: &str,
         tags: &[String],
@@ -780,7 +804,7 @@ impl StorageService for SqliteStorage {
         search_text: &str,
     ) -> Result<(), AppError> {
         self.update_item_internal(
-            module_id,
+            module,
             id,
             title,
             tags,
@@ -810,6 +834,35 @@ impl StorageService for SqliteStorage {
         module: &dyn ModuleBackend,
     ) -> Result<Item, AppError> {
         self.get_item_with_eager_on_read(module_id, id, module)
+    }
+
+    fn stored_payload_if_not_current(
+        &self,
+        module_id: &str,
+        id: &ItemId,
+        current_version: u32,
+    ) -> Result<Option<(u32, JsonValue)>, AppError> {
+        let row: Option<(i64, Option<String>)> = self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT payload_schema_version, \
+                 CASE WHEN payload_schema_version <> ?1 THEN payload END \
+                 FROM items WHERE id = ?2 AND module_id = ?3",
+                params![current_version as i64, id.as_str(), module_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(AppError::from)
+        })?;
+        let (version, payload) = row.ok_or_else(|| AppError::NotFound {
+            entity: "item".into(),
+            key: id.to_string(),
+        })?;
+        let Some(payload) = payload else {
+            return Ok(None);
+        };
+        let payload = serde_json::from_str(&payload)
+            .map_err(|e| AppError::Storage(format!("invalid payload JSON: {e}")))?;
+        Ok(Some((version as u32, payload)))
     }
 
     fn list_items(
@@ -1047,7 +1100,7 @@ impl SqliteStorage {
     #[allow(clippy::too_many_arguments)]
     fn update_item_internal(
         &self,
-        module_id: &str,
+        module: &dyn ModuleBackend,
         id: &ItemId,
         title: &str,
         tags: &[String],
@@ -1055,6 +1108,7 @@ impl SqliteStorage {
         payload: &JsonValue,
         search_text: &str,
     ) -> Result<(), AppError> {
+        let module_id = module.id();
         if title.trim().is_empty() {
             return Err(AppError::Validation {
                 module_id: module_id.to_string(),
@@ -1067,6 +1121,7 @@ impl SqliteStorage {
             serde_json::to_string(payload).map_err(|e| AppError::Storage(e.to_string()))?;
         self.with_conn(|conn| {
             let tx = conn.transaction().map_err(AppError::from)?;
+            ensure_overwritable(&tx, module, id)?;
             let now = now_jst_iso8601();
             let rows_affected = tx
                 .execute(
@@ -1226,7 +1281,7 @@ impl SqliteStorage {
             while from_version < current_version {
                 current_payload = module
                     .upgrade_payload(from_version, current_payload)
-                    .map_err(|e| e.into_app_error(module_id))?;
+                    .map_err(|e| e.into_upgrade_error(module_id))?;
                 from_version += 1;
             }
             // 新版 payload で search_text 再生成
@@ -1236,13 +1291,27 @@ impl SqliteStorage {
                 &module.index_text(&current_payload),
             );
             // 楽観的並行制御 UPDATE (data-model.md §7.2)
-            let updated = self.upgrade_item_inplace(
+            let updated = match self.upgrade_item_inplace(
                 id,
                 &current_payload,
                 &new_search_text,
                 current_version,
                 row.payload_schema_version, // 元バージョン
-            )?;
+            ) {
+                Ok(updated) => updated,
+                // 書き戻しに失敗しても (ディスクが一杯など) 変換した結果は返す (`data-model.md` §7.6、
+                // ADR-0027)。行は古い版のまま残り、次に読んだときにもう一度変換する。利用者の保存は
+                // `ScopedStorage::update_item` が保存されている payload を引き上げられることを確かめて通す
+                Err(error) => {
+                    tracing::warn!(
+                        module_id,
+                        item_id = %id,
+                        error = %error,
+                        "Eager-on-Read write-back failed; returning the upgraded payload unsaved"
+                    );
+                    true
+                }
+            };
             if updated {
                 // 自分が更新成功 → 最新版の Item を返す
                 return Ok(Item {
@@ -1640,6 +1709,65 @@ impl ItemRowRaw {
     }
 }
 
+/// 保存されている行を利用者の保存で上書きしてよいかを、上書きと同じトランザクションの中で確かめる
+/// (ADR-0027)。
+///
+/// - 今の版の行: そのまま許す (payload を読まない)
+/// - 古い版の行: 保存されている payload の引き上げを試し、失敗するなら拒否する。変換できず開けない
+///   作品を、画面を通さない呼び出しで別の内容に置き換えて消さないため。引き上げられるなら許す
+///   (Eager-on-Read の書き戻しに失敗して古い版のまま残った行への保存を止めない)。引き上げの失敗の
+///   扱いは Eager-on-Read と同じ (`ModuleError::into_upgrade_error`)
+/// - 新しい版の行 (新しいアプリで書いた行): 拒否する。読めない内容を上書きしない
+/// - 行が無い: `NotFound`
+fn ensure_overwritable(
+    tx: &rusqlite::Transaction,
+    module: &dyn ModuleBackend,
+    id: &ItemId,
+) -> Result<(), AppError> {
+    let module_id = module.id();
+    let current = module.current_payload_version();
+    let row: Option<(i64, Option<String>)> = tx
+        .query_row(
+            "SELECT payload_schema_version, \
+             CASE WHEN payload_schema_version <> ?1 THEN payload END \
+             FROM items WHERE id = ?2 AND module_id = ?3",
+            params![current as i64, id.as_str(), module_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(AppError::from)?;
+    let (stored_version, stored_payload) = row.ok_or_else(|| AppError::NotFound {
+        entity: "item".into(),
+        key: id.to_string(),
+    })?;
+    let Some(stored_payload) = stored_payload else {
+        return Ok(());
+    };
+    let stored_version = stored_version as u32;
+    if stored_version > current {
+        return Err(AppError::UnsupportedFuturePayloadVersion {
+            module_id: module_id.to_string(),
+            item_version: stored_version,
+            current_version: current,
+        });
+    }
+    let refused = |reason: String| AppError::PayloadUpgradeFailed {
+        module_id: module_id.to_string(),
+        reason: format!("保存されている内容を今の形式に変換できないため、上書きしません: {reason}"),
+    };
+    let mut payload: JsonValue = serde_json::from_str(&stored_payload)
+        .map_err(|e| refused(format!("payload が JSON として読めません: {e}")))?;
+    for from_version in stored_version..current {
+        payload = module
+            .upgrade_payload(from_version, payload)
+            .map_err(|error| match error.into_upgrade_error(module_id) {
+                AppError::PayloadUpgradeFailed { reason, .. } => refused(reason),
+                other => other,
+            })?;
+    }
+    Ok(())
+}
+
 /// search_text 構築のヘルパ (Eager-on-Read 内部更新でも使う、`module-contract.md` §3.2)。
 fn build_search_text_for_upgrade(title: &str, tags: &[String], module_text: &str) -> String {
     let mut s = String::with_capacity(title.len() + module_text.len() + 16);
@@ -1711,25 +1839,113 @@ mod tests {
         SqliteStorage::open(":memory:").expect("in-memory storage")
     }
 
+    /// キャンバスの契約データ (`docs/canvas-editor-design.md` §3、`model/fixtures/payload-v2.json`)。
+    fn canvas_case(section: &str, name: &str) -> JsonValue {
+        let contract: JsonValue = serde_json::from_str(include_str!(
+            "../../../src/modules/vector/editor/model/fixtures/payload-v2.json"
+        ))
+        .unwrap();
+        contract[section]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["name"] == name)
+            .unwrap_or_else(|| panic!("{section} case {name}"))
+            .clone()
+    }
+
+    fn vector_backend() -> Arc<dyn ModuleBackend> {
+        Arc::new(crate::modules::vector::VectorModule)
+    }
+
+    /// v1 の作品を、切替前のアプリが書いた形 (payload_schema_version = 1) で入れる。
+    /// `search_text` は v2 から求める値と必ず違う値にする (書き戻しが `search_text` も
+    /// 書き換えることを確かめるため)。
+    fn insert_vector_v1(
+        storage: &dyn StorageService,
+        project_id: &ProjectId,
+        title: &str,
+        payload: &JsonValue,
+    ) -> ItemId {
+        storage
+            .create_item(
+                "vector",
+                project_id,
+                title,
+                &[],
+                1,
+                payload,
+                &format!("{title} 切替前の検索用テキスト"),
+            )
+            .unwrap()
+    }
+
+    /// 行の `search_text` を直接読む。
+    fn raw_search_text(storage: &SqliteStorage, id: &ItemId) -> String {
+        storage
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT search_text FROM items WHERE id = ?",
+                    params![id.as_str()],
+                    |row| row.get(0),
+                )
+                .map_err(AppError::from)
+            })
+            .unwrap()
+    }
+
+    /// `payload_schema_version` を変える UPDATE (Eager-on-Read の書き戻し) を失敗させる
+    /// (ディスクが一杯のときの代わり)。`allow_write_backs` で戻す。
+    fn fail_write_backs(storage: &SqliteStorage) {
+        storage
+            .with_conn(|conn| {
+                conn.execute_batch(
+                    "CREATE TRIGGER fail_write_back BEFORE UPDATE OF payload_schema_version \
+                     ON items BEGIN SELECT RAISE(ABORT, 'disk full'); END;",
+                )
+                .map_err(AppError::from)
+            })
+            .unwrap();
+    }
+
+    fn allow_write_backs(storage: &SqliteStorage) {
+        storage
+            .with_conn(|conn| {
+                conn.execute_batch("DROP TRIGGER fail_write_back;")
+                    .map_err(AppError::from)
+            })
+            .unwrap();
+    }
+
+    /// 1 件だけの vector の行を、Eager-on-Read を通さずに読む。
+    fn raw_vector_row(storage: &dyn StorageService, project_id: &ProjectId, id: &ItemId) -> Item {
+        storage
+            .list_items("vector", project_id, 100, 0)
+            .unwrap()
+            .into_iter()
+            .find(|item| &item.id == id)
+            .unwrap()
+    }
+
     #[test]
-    fn vector_summaries_and_previews_never_return_svg_and_keep_other_modules() {
+    fn vector_summaries_and_previews_never_return_assets_and_keep_other_modules() {
         let storage = Arc::new(in_memory_storage());
         let p = storage.create_project("Vectors", None).unwrap();
-        let module: Arc<dyn ModuleBackend> = Arc::new(crate::modules::vector::VectorModule);
-        let scoped = storage.clone().scoped_for(module);
+        let module = vector_backend();
+        let scoped = storage.clone().scoped_for(module.clone());
         let text = format!("検索 sample {}", "文字".repeat(200));
         let svg = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>{text}</text><!--{}--></svg>",
             "large embedded document".repeat(10000)
         );
+        // 大きな埋め込み SVG を持つ v2 の文書 (v1 から変換した形)
+        let payload = module
+            .upgrade_payload(1, serde_json::json!({"svg":svg,"text":text}))
+            .unwrap();
+        assert_eq!(payload["text"], serde_json::json!(text));
         for _ in 0..3 {
             scoped
-                .create_item(
-                    &p.id,
-                    "作品",
-                    &["design".into()],
-                    serde_json::json!({"svg":svg,"text":text}),
-                )
+                .create_item(&p.id, "作品", &["design".into()], payload.clone())
                 .unwrap();
         }
         let list = storage
@@ -1738,6 +1954,7 @@ mod tests {
         assert_eq!(list.len(), 3);
         let encoded = serde_json::to_string(&list).unwrap();
         assert!(!encoded.contains("payload"));
+        assert!(!encoded.contains("assets"));
         assert!(!encoded.contains("svg"));
         assert!(encoded.len() < 2000);
         let projections = vec![("vector".into(), "text".into())];
@@ -1747,7 +1964,8 @@ mod tests {
                 .unwrap();
             assert_eq!(hits.len(), 3);
             for hit in hits {
-                assert!(hit.payload.get("svg").is_none());
+                assert!(hit.payload.get("assets").is_none());
+                assert!(hit.payload.get("nodes").is_none());
                 assert_eq!(hit.payload["text"].as_str().unwrap().chars().count(), 120);
             }
         }
@@ -1755,7 +1973,7 @@ mod tests {
             .search(&SearchScope::Global, "sample", None, 100, 0)
             .unwrap()[0]
             .payload
-            .get("svg")
+            .get("assets")
             .is_some());
         seed_search_data(&storage);
         let old = storage
@@ -1796,61 +2014,374 @@ mod tests {
             .map(|m| (m.id().to_owned(), m.clone()))
             .collect();
         let module = modules.iter().find(|m| m.id() == "vector").unwrap().clone();
+        assert_eq!(module.current_payload_version(), 2);
         let p = storage.create_project("図", None).unwrap();
-        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../scripts/svgedit/validation-fixtures.json"
-        ))
-        .unwrap();
-        let svg = fixtures[1]["svg"].as_str().unwrap();
+        // 画像と埋め込み SVG を含む v2 の文書
+        let full = canvas_case("valid", "full")["payload"].clone();
         let scoped = storage.clone().scoped_for(module.clone());
         let id = scoped
-            .create_item(
-                &p.id,
-                "画像作品",
-                &["tag".into()],
-                serde_json::json!({"svg":svg,"text":""}),
-            )
+            .create_item(&p.id, "画像作品", &["tag".into()], full.clone())
             .unwrap();
         for exported in [
-            build_export_data(&storage, &modules, "test").unwrap(),
-            build_project_export_data(&storage, &modules, "test", &p.id).unwrap(),
+            build_export_data(&storage, &modules, "test").unwrap().data,
+            build_project_export_data(&storage, &modules, "test", &p.id)
+                .unwrap()
+                .data,
         ] {
+            assert_eq!(exported.module_versions["vector"], 2);
+            assert_eq!(exported.projects[0].items[0].payload_schema_version, 2);
             let parsed = parse_export_json(&serde_json::to_string(&exported).unwrap()).unwrap();
             let target: Arc<dyn StorageService> = Arc::new(in_memory_storage());
             let result = apply_import(&target, &registry, &parsed);
-            assert_eq!(result.items_inserted, 1);
-            assert_eq!(
-                target
-                    .clone()
-                    .scoped_for(module.clone())
-                    .get_item(&id)
-                    .unwrap()
-                    .payload["svg"],
-                svg
-            );
-            let mut bad = parsed;
-            bad.projects[0].items[0].payload = serde_json::json!({"svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"evil()\"/>","text":""});
-            let rejected: Arc<dyn StorageService> = Arc::new(in_memory_storage());
-            assert_eq!(apply_import(&rejected, &registry, &bad).items_failed, 1);
-            assert!(rejected
-                .list_item_summaries(&p.id, "vector", 100, 0)
+            assert_eq!(result.items_inserted, 1, "{:?}", result.failures);
+            let imported = target
+                .clone()
+                .scoped_for(module.clone())
+                .get_item(&id)
+                .unwrap();
+            assert_eq!(imported.payload_schema_version, 2);
+            assert_eq!(imported.payload, full);
+            // 検索用テキストが文書と合わない v2 と、ポリシーを通らない埋め込み SVG は取り込まない
+            let mut forged = parsed.clone();
+            forged.projects[0].items[0].payload["text"] = serde_json::json!("forged");
+            // 埋め込み SVG の根に onload を足す。抽出する文字は変わらないので、アセットと文書の
+            // text は合ったまま、SVG ポリシーだけで拒否される
+            let mut unsafe_svg = parsed.clone();
+            let mut patched = 0;
+            for asset in unsafe_svg.projects[0].items[0].payload["assets"]
+                .as_object_mut()
                 .unwrap()
-                .is_empty());
+                .values_mut()
+            {
+                if asset["kind"] == "svg" {
+                    let svg = asset["svg"].as_str().unwrap().replacen(
+                        "<svg ",
+                        "<svg onload=\"evil()\" ",
+                        1,
+                    );
+                    asset["svg"] = serde_json::json!(svg);
+                    patched += 1;
+                }
+            }
+            assert_eq!(patched, 1);
+            for (bad, expected) in [
+                (forged, "検索用テキストが文書と一致しません"),
+                (unsafe_svg, "使用できない属性です: onload"),
+            ] {
+                let rejected: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+                let result = apply_import(&rejected, &registry, &bad);
+                assert_eq!(result.items_failed, 1);
+                assert!(
+                    result.failures[0].reason.contains(expected),
+                    "{:?}",
+                    result.failures
+                );
+                assert!(rejected
+                    .list_item_summaries(&p.id, "vector", 100, 0)
+                    .unwrap()
+                    .is_empty());
+            }
         }
         let dir = tempfile::tempdir().unwrap();
         let backup = dir.path().join("backup.sqlite");
         storage.take_online_backup_to(&backup).unwrap();
         scoped.delete_item(&id).unwrap();
         storage.restore_online_backup_from(&backup).unwrap();
-        assert_eq!(scoped.get_item(&id).unwrap().payload["svg"], svg);
+        let restored = scoped.get_item(&id).unwrap();
+        assert_eq!(restored.payload_schema_version, 2);
+        assert_eq!(restored.payload, full);
+        let mut forged = full.clone();
+        forged["text"] = serde_json::json!("forged");
         assert!(scoped
-            .create_item(
-                &p.id,
-                "invalid index",
-                &[],
-                serde_json::json!({"svg":svg,"text":"forged"})
-            )
+            .create_item(&p.id, "invalid index", &[], forged)
             .is_err());
+        // v1 の形は、もう新しく保存できない
+        let v1 = canvas_case("upgrade", "svgedit-document")["v1"].clone();
+        assert!(scoped.create_item(&p.id, "v1", &[], v1).is_err());
+    }
+
+    /// 切替前に保存した v1 の作品は、読んだときに v2 へ変換して書き戻す (Eager-on-Read、ADR-0006)。
+    /// 利用者の編集ではないので data_revision も updated_at も変えない。
+    #[test]
+    fn vector_v1_items_are_upgraded_on_read_without_bumping_data_revision() {
+        let sqlite = Arc::new(in_memory_storage());
+        let storage: Arc<dyn StorageService> = sqlite.clone();
+        let p = storage.create_project("図", None).unwrap();
+        let case = canvas_case("upgrade", "svgedit-document");
+        let id = insert_vector_v1(storage.as_ref(), &p.id, "古い作品", &case["v1"]);
+        let before = raw_vector_row(storage.as_ref(), &p.id, &id);
+        assert_eq!(before.payload_schema_version, 1);
+        let revision = storage.data_revision().unwrap();
+
+        let module = vector_backend();
+        let scoped = storage.clone().scoped_for(module.clone());
+        let item = scoped.get_item(&id).unwrap();
+        assert_eq!(item.payload_schema_version, 2);
+        assert_eq!(item.payload, case["v2"]);
+        assert_eq!(item.title, "古い作品");
+        module.validate_payload(&item.payload).unwrap();
+        // 見た目は v1 の SVG のまま (埋め込み SVG のアセットが元の SVG を持つ)
+        assert_eq!(item.payload["assets"]["legacy"]["svg"], case["v1"]["svg"]);
+
+        let after = raw_vector_row(storage.as_ref(), &p.id, &id);
+        assert_eq!(after.payload_schema_version, 2);
+        assert_eq!(after.payload, case["v2"]);
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(after.position, before.position);
+        assert_eq!(storage.data_revision().unwrap(), revision);
+        // search_text も v2 の text から求め直す (FTS はトリガが追う)
+        assert_eq!(
+            raw_search_text(&sqlite, &id),
+            format!("古い作品 {}", case["v2"]["text"].as_str().unwrap())
+        );
+        assert!(storage
+            .search(&SearchScope::Global, "切替前の検索用テキスト", None, 100, 0)
+            .unwrap()
+            .is_empty());
+        let projections = vec![("vector".into(), "text".into())];
+        let hits = storage
+            .search_previews(
+                &SearchScope::Global,
+                "こんにちは",
+                None,
+                100,
+                0,
+                &projections,
+            )
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].payload["text"], case["v2"]["text"]);
+
+        // 2 回目の読み込みは何も変えない
+        assert_eq!(scoped.get_item(&id).unwrap().payload, case["v2"]);
+        assert_eq!(storage.data_revision().unwrap(), revision);
+        // 保存は v2 で書き、利用者の編集として data_revision を増やす
+        scoped
+            .update_item(&id, "古い作品", &[], item.payload.clone())
+            .unwrap();
+        assert_eq!(storage.data_revision().unwrap(), revision + 1);
+    }
+
+    /// 変換に失敗する v1 の作品 (今の SVG ポリシーを通らない古い作品など) は、v1 のまま残す。
+    /// 開くとエラーになるが、一覧には出て、エクスポートとバックアップでは元の形のまま運ばれる
+    /// (`data-model.md` §7.6)。
+    #[test]
+    fn vector_v1_items_that_cannot_be_upgraded_stay_v1() {
+        use crate::exchange::{
+            export::{build_export_data, build_project_export_data},
+            import::{apply_import, parse_export_json},
+        };
+        let storage: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+        let modules = crate::modules::registry::module_backends();
+        let registry = modules
+            .iter()
+            .map(|m| (m.id().to_owned(), m.clone()))
+            .collect();
+        let module = vector_backend();
+        let p = storage.create_project("図", None).unwrap();
+        let broken = serde_json::json!({
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>",
+            "text": ""
+        });
+        let broken_id = insert_vector_v1(storage.as_ref(), &p.id, "読めない作品", &broken);
+        let case = canvas_case("upgrade", "svgedit-document");
+        let good_id = insert_vector_v1(storage.as_ref(), &p.id, "古い作品", &case["v1"]);
+        let revision = storage.data_revision().unwrap();
+
+        let scoped = storage.clone().scoped_for(module.clone());
+        let error = scoped.get_item(&broken_id).unwrap_err();
+        assert!(
+            matches!(&error, AppError::PayloadUpgradeFailed { module_id, reason }
+                if module_id == "vector" && reason.contains("検証を通りません")),
+            "{error:?}"
+        );
+        let row = raw_vector_row(storage.as_ref(), &p.id, &broken_id);
+        assert_eq!(row.payload_schema_version, 1);
+        assert_eq!(row.payload, broken);
+        assert_eq!(storage.data_revision().unwrap(), revision);
+        assert_eq!(
+            storage
+                .list_item_summaries(&p.id, "vector", 100, 0)
+                .unwrap()
+                .len(),
+            2
+        );
+
+        for exported in [
+            build_export_data(&storage, &modules, "test").unwrap().data,
+            build_project_export_data(&storage, &modules, "test", &p.id)
+                .unwrap()
+                .data,
+        ] {
+            let items = &exported.projects[0].items;
+            let broken_out = items.iter().find(|item| item.id == broken_id).unwrap();
+            assert_eq!(broken_out.payload_schema_version, 1);
+            assert_eq!(broken_out.payload, broken);
+            let good_out = items.iter().find(|item| item.id == good_id).unwrap();
+            assert_eq!(good_out.payload_schema_version, 2);
+            assert_eq!(good_out.payload, case["v2"]);
+            // 取り込む側でも変換に失敗し、失敗として数える (黙って捨てない)
+            let parsed = parse_export_json(&serde_json::to_string(&exported).unwrap()).unwrap();
+            let target: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+            let result = apply_import(&target, &registry, &parsed);
+            assert_eq!(result.items_inserted, 1);
+            assert_eq!(result.items_failed, 1);
+            assert_eq!(result.failures[0].id, broken_id.as_str());
+        }
+        // エクスポートが変換した作品も、利用者の編集ではないので data_revision は変わらない
+        assert_eq!(storage.data_revision().unwrap(), revision);
+
+        let dir = tempfile::tempdir().unwrap();
+        let backup = dir.path().join("backup.sqlite");
+        storage.take_online_backup_to(&backup).unwrap();
+        scoped.delete_item(&broken_id).unwrap();
+        storage.restore_online_backup_from(&backup).unwrap();
+        let restored = raw_vector_row(storage.as_ref(), &p.id, &broken_id);
+        assert_eq!(restored.payload_schema_version, 1);
+        assert_eq!(restored.payload, broken);
+    }
+
+    /// 変換できない v1 の行は、画面を通さない保存 (`update_item`) でも上書きしない (ADR-0027)。
+    /// 削除はできる。
+    #[test]
+    fn vector_v1_items_that_cannot_be_upgraded_are_not_overwritten() {
+        let storage: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+        let p = storage.create_project("図", None).unwrap();
+        let broken = serde_json::json!({
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>",
+            "text": ""
+        });
+        let id = insert_vector_v1(storage.as_ref(), &p.id, "読めない作品", &broken);
+        let before = raw_vector_row(storage.as_ref(), &p.id, &id);
+        let revision = storage.data_revision().unwrap();
+        let scoped = storage.clone().scoped_for(vector_backend());
+        let empty = canvas_case("valid", "empty")["payload"].clone();
+        let error = scoped
+            .update_item(&id, "上書き", &[], empty.clone())
+            .unwrap_err();
+        assert!(
+            matches!(&error, AppError::PayloadUpgradeFailed { module_id, reason }
+                if module_id == "vector" && reason.contains("上書きしません")),
+            "{error:?}"
+        );
+        let after = raw_vector_row(storage.as_ref(), &p.id, &id);
+        assert_eq!(after.payload_schema_version, 1);
+        assert_eq!(after.payload, broken);
+        assert_eq!(after.title, before.title);
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(storage.data_revision().unwrap(), revision);
+
+        // 無い行は今までどおり NotFound
+        assert!(matches!(
+            scoped.update_item(&ItemId::new("missing"), "x", &[], empty),
+            Err(AppError::NotFound { .. })
+        ));
+        scoped.delete_item(&id).unwrap();
+        assert!(storage
+            .list_item_summaries(&p.id, "vector", 100, 0)
+            .unwrap()
+            .is_empty());
+    }
+
+    /// 書き戻しに失敗しても、変換した結果を返す (`data-model.md` §7.6、ADR-0027)。行は v1 の
+    /// まま残り、利用者の保存は (保存されている payload を引き上げられるので) 通る。
+    #[test]
+    fn vector_v1_items_open_even_if_the_write_back_fails() {
+        let sqlite = Arc::new(in_memory_storage());
+        let storage: Arc<dyn StorageService> = sqlite.clone();
+        let p = storage.create_project("図", None).unwrap();
+        let case = canvas_case("upgrade", "svgedit-document");
+        let id = insert_vector_v1(storage.as_ref(), &p.id, "古い作品", &case["v1"]);
+        let revision = storage.data_revision().unwrap();
+        fail_write_backs(&sqlite);
+
+        let scoped = storage.clone().scoped_for(vector_backend());
+        let item = scoped.get_item(&id).unwrap();
+        assert_eq!(item.payload_schema_version, 2);
+        assert_eq!(item.payload, case["v2"]);
+        let row = raw_vector_row(storage.as_ref(), &p.id, &id);
+        assert_eq!(row.payload_schema_version, 1);
+        assert_eq!(row.payload, case["v1"]);
+        assert_eq!(storage.data_revision().unwrap(), revision);
+        // 次に読んでもまた変換して返す
+        assert_eq!(scoped.get_item(&id).unwrap().payload, case["v2"]);
+
+        // 書けるようになってからの保存は、行がまだ v1 でも (引き上げられるので) 通る
+        allow_write_backs(&sqlite);
+        assert_eq!(
+            raw_vector_row(storage.as_ref(), &p.id, &id).payload_schema_version,
+            1
+        );
+        scoped
+            .update_item(&id, "古い作品", &[], item.payload.clone())
+            .unwrap();
+        let saved = raw_vector_row(storage.as_ref(), &p.id, &id);
+        assert_eq!(saved.payload_schema_version, 2);
+        assert_eq!(saved.payload, case["v2"]);
+        assert_eq!(storage.data_revision().unwrap(), revision + 1);
+    }
+
+    /// 切替前のアプリが書き出した JSON (vector は payload v1) を取り込むと、v2 で入る。
+    #[test]
+    fn vector_v1_items_in_an_old_export_file_are_imported_as_v2() {
+        use crate::exchange::import::{apply_import, parse_export_json};
+        let modules = crate::modules::registry::module_backends();
+        let registry = modules
+            .iter()
+            .map(|m| (m.id().to_owned(), m.clone()))
+            .collect();
+        let cases = [
+            "svgedit-document",
+            "size-from-viewbox",
+            "size-fallback",
+            "text-renormalized",
+            "stale-v1-text",
+        ]
+        .map(|name| canvas_case("upgrade", name));
+        let items: Vec<JsonValue> = cases
+            .iter()
+            .enumerate()
+            .map(|(index, case)| {
+                serde_json::json!({
+                    "id": format!("old-vector-{index}"),
+                    "module_id": "vector",
+                    "title": format!("古い作品 {index}"),
+                    "tags": ["svg"],
+                    "payload_schema_version": 1,
+                    "payload": case["v1"],
+                    "position": index,
+                    "created_at": "2026-09-20T10:00:00.000+09:00",
+                    "updated_at": "2026-09-20T10:00:00.000+09:00"
+                })
+            })
+            .collect();
+        let file = serde_json::json!({
+            "schema_version": 1,
+            "exported_at": "2026-09-20T10:00:00.000+09:00",
+            "app_version": "0.1.0-alpha.19",
+            "scope": "app",
+            "module_versions": { "vector": 1, "memo": 1 },
+            "projects": [{
+                "id": "old-project",
+                "name": "古いプロジェクト",
+                "description": null,
+                "position": 0,
+                "created_at": "2026-09-20T10:00:00.000+09:00",
+                "updated_at": "2026-09-20T10:00:00.000+09:00",
+                "items": items
+            }]
+        });
+        let parsed = parse_export_json(&file.to_string()).unwrap();
+        let storage: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+        let result = apply_import(&storage, &registry, &parsed);
+        assert_eq!(result.items_inserted, cases.len(), "{:?}", result.failures);
+        let project = ProjectId::new("old-project");
+        for (index, case) in cases.iter().enumerate() {
+            let id = ItemId::new(format!("old-vector-{index}"));
+            let row = raw_vector_row(storage.as_ref(), &project, &id);
+            assert_eq!(row.payload_schema_version, 2);
+            assert_eq!(row.payload, case["v2"], "{}", case["name"]);
+        }
     }
 
     // -------- schema initialization --------
@@ -3051,6 +3582,165 @@ mod tests {
         assert_eq!(storage.data_revision().unwrap(), rev_before + 1);
         let fetched = scoped.get_item(&id).unwrap();
         assert_eq!(fetched.title, "Crimson");
+    }
+
+    /// 上書きの前の確認 (ADR-0027): 古い版の行は引き上げられれば上書きでき、引き上げられなければ
+    /// 拒否する。新しい版 (新しいアプリで書いた行) は拒否する。拒否しても行と data_revision は変えない。
+    #[test]
+    fn update_item_refuses_to_overwrite_rows_it_cannot_read() {
+        let storage = Arc::new(in_memory_storage());
+        let p = storage.create_project("P", None).unwrap();
+        let scoped = make_color_scoped(&storage, 2);
+        let insert = |version: u32| {
+            storage
+                .create_item(
+                    "color",
+                    &p.id,
+                    "Old",
+                    &[],
+                    version,
+                    &serde_json::json!({"hex": "#f00"}),
+                    "Old #f00",
+                )
+                .unwrap()
+        };
+        let new_payload = serde_json::json!({"hex": "#0f0"});
+
+        // v1 → v2 は引き上げられるので上書きできる
+        let upgradable = insert(1);
+        scoped
+            .update_item(&upgradable, "New", &[], new_payload.clone())
+            .unwrap();
+
+        // 引き上げの関数が無い版 (0) と新しい版 (3) は拒否する
+        for (version, expect_future) in [(0, false), (3, true)] {
+            let id = insert(version);
+            let revision = storage.data_revision().unwrap();
+            let error = scoped
+                .update_item(&id, "New", &[], new_payload.clone())
+                .unwrap_err();
+            if expect_future {
+                assert!(
+                    matches!(
+                        error,
+                        AppError::UnsupportedFuturePayloadVersion {
+                            item_version: 3,
+                            current_version: 2,
+                            ..
+                        }
+                    ),
+                    "{error:?}"
+                );
+            } else {
+                assert!(
+                    matches!(&error, AppError::PayloadUpgradeFailed { reason, .. }
+                        if reason.contains("上書きしません")),
+                    "{error:?}"
+                );
+            }
+            let row = storage
+                .list_items("color", &p.id, 100, 0)
+                .unwrap()
+                .into_iter()
+                .find(|item| item.id == id)
+                .unwrap();
+            assert_eq!(row.payload_schema_version, version);
+            assert_eq!(row.title, "Old");
+            assert_eq!(storage.data_revision().unwrap(), revision);
+        }
+    }
+
+    /// 上書きの拒否はストレージの層 (`StorageService::update_item`) にあり、`ScopedStorage` を通さない
+    /// 呼び出しでも効く (ADR-0027)。
+    #[test]
+    fn storage_service_update_item_refuses_rows_it_cannot_read() {
+        let storage = Arc::new(in_memory_storage());
+        let p = storage.create_project("P", None).unwrap();
+        let module = TestColorModule { version: 2 };
+        let id = storage
+            .create_item(
+                "color",
+                &p.id,
+                "Old",
+                &[],
+                0,
+                &serde_json::json!({"hex": "#f00"}),
+                "Old",
+            )
+            .unwrap();
+        let revision = storage.data_revision().unwrap();
+        let error = StorageService::update_item(
+            storage.as_ref(),
+            &module,
+            &id,
+            "New",
+            &[],
+            2,
+            &serde_json::json!({"hex": "#0f0"}),
+            "New",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, AppError::PayloadUpgradeFailed { .. }),
+            "{error:?}"
+        );
+        assert_eq!(storage.data_revision().unwrap(), revision);
+        let row = &storage.list_items("color", &p.id, 10, 0).unwrap()[0];
+        assert_eq!(row.payload_schema_version, 0);
+        assert_eq!(row.title, "Old");
+    }
+
+    /// `upgrade_payload` が検証の失敗 (`ValidationFailed`) を返したときも、読み込み・エクスポート・
+    /// 上書きの確認のどれもが「変換できない」(`PayloadUpgradeFailed`) として扱う (ADR-0027)。
+    #[test]
+    fn upgrade_validation_failures_are_treated_as_unconvertible_everywhere() {
+        struct RejectsOnUpgrade;
+        impl ModuleBackend for RejectsOnUpgrade {
+            fn id(&self) -> &'static str {
+                "color"
+            }
+            fn current_payload_version(&self) -> u32 {
+                2
+            }
+            fn upgrade_payload(
+                &self,
+                _from_version: u32,
+                _payload: JsonValue,
+            ) -> Result<JsonValue, ModuleError> {
+                Err(ModuleError::ValidationFailed {
+                    reason: "変換した結果が検証を通りません".into(),
+                })
+            }
+        }
+        let sqlite = Arc::new(in_memory_storage());
+        let storage: Arc<dyn StorageService> = sqlite.clone();
+        let p = storage.create_project("P", None).unwrap();
+        let id = storage
+            .create_item(
+                "color",
+                &p.id,
+                "Old",
+                &[],
+                1,
+                &serde_json::json!({"hex": "#f00"}),
+                "Old",
+            )
+            .unwrap();
+        let module: Arc<dyn ModuleBackend> = Arc::new(RejectsOnUpgrade);
+        let scoped = storage.clone().scoped_for(module.clone());
+        assert!(matches!(
+            scoped.get_item(&id),
+            Err(AppError::PayloadUpgradeFailed { .. })
+        ));
+        let build =
+            crate::exchange::build_export_data(&storage, std::slice::from_ref(&module), "t")
+                .unwrap();
+        assert_eq!(build.not_upgraded.len(), 1);
+        assert_eq!(build.data.projects[0].items[0].payload_schema_version, 1);
+        assert!(matches!(
+            scoped.update_item(&id, "New", &[], serde_json::json!({"hex": "#0f0"})),
+            Err(AppError::PayloadUpgradeFailed { .. })
+        ));
     }
 
     #[test]

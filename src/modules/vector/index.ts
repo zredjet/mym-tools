@@ -7,7 +7,7 @@ const VectorWorkspaceRoute = lazy(() =>
 
 export const vectorModule: ModuleDefinition = {
   id: "vector",
-  displayName: "ベクター描画",
+  displayName: "キャンバス",
   icon: PenTool,
   category: "design",
   enabledByDefault: true,
@@ -18,6 +18,8 @@ export const vectorModule: ModuleDefinition = {
     { path: "/edit/:itemId", component: VectorWorkspaceRoute },
   ],
   defaultRoute: "/",
+  // 検索結果の payload は Rust が `text` (payload v2 の検索用テキスト) の先頭 120 文字だけに絞って返す
+  // (`search_preview_field`)。ページやノードの本文、画像は IPC を通らない
   searchAdapter: {
     formatResult: (item) => ({
       title: item.title,

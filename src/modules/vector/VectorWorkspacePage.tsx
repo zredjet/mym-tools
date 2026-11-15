@@ -1,31 +1,64 @@
+/**
+ * キャンバス (`vector`) の画面 (`docs/canvas-editor-design.md` §5.1 / §7)。
+ *
+ * 上の作品バー (作品の切替、新規、取込、タイトル、タグ、未保存の表示、保存、削除) と、その下の
+ * エディタ (`EditorRoot`) からなる。エディタの状態はエディタの store (`editorStore`) が持ち、
+ * この画面は作品の読み込み・保存と、ファイルの入出力の登録 (`canvasIo.ts`) を受け持つ。
+ *
+ * - 読み込み: payload v2 を `parsePayload` で文書にし、テキストの大きさを求め直してから `load` に渡し、
+ *   全体を表示する。読めない payload はエラーを出し、エディタを出さない (編集させない)
+ * - 保存: 本文の編集と進行中のジェスチャーを確定してから、`checkSavable` → `toPayload` で保存する。
+ *   未保存かどうかは、保存した時点の `revision` とタイトル・タグで判定する
+ * - 作品の切替・新規・削除・画面を離れる・ウィンドウを閉じる前に、本文の編集を終えてから未保存を確かめる。
+ *   取込の途中は作品を切り替えない
+ */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useBlocker, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useHotkeys } from "react-hotkeys-hook";
-import {
-  ChevronsDown,
-  Download,
-  FileInput,
-  FilePlus2,
-  ImagePlus,
-  Save,
-  Trash2,
-} from "lucide-react";
-import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { ChevronsDown, FileDown, FileInput, FilePlus2, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { createItem, updateItem, getItem, deleteItem, listItemSummaries } from "@/ipc/items";
-import { vectorEditorUrl, vectorReadFile, vectorReadImage, vectorWriteFile } from "@/ipc/vector";
-import { formatInvokeError } from "@/lib/error";
 import { registerCloseGuard } from "@/lib/windowClose";
-import type { ItemSummary, VectorPayloadV1 } from "@/lib/types";
+import type { ItemSummary } from "@/lib/types";
 import { modulePath } from "@/modules/registry";
-import { VectorBridge, vectorUrl, type VectorMessage } from "./bridge";
-import { validateSvg } from "../../../scripts/svgedit/svg-policy.js";
-import policy from "../../../scripts/svgedit/policy.json";
+import { EditorRoot } from "./editor/EditorRoot";
+import {
+  importFile,
+  importFromPicker,
+  setImportFileReader,
+  useImportStatus,
+} from "./editor/assets";
+import { notifyImport } from "./editor/assets/importFile";
+import { getImportStatus } from "./editor/assets/status";
+import { isEditableTarget } from "./editor/canvas/input";
+import { commitInPlace } from "./editor/panels/fields/commitInPlace";
+import { cancelPointerDrag, isPointerDragActive } from "./editor/canvas/pointerDrag";
+import { getCanvasViewSize, zoomToFit } from "./editor/canvas/viewCommands";
+import { setExportWriter } from "./editor/export";
+import { createEmptyDocument } from "./editor/model/create";
+import { checkSavable, parsePayload, toPayload } from "./editor/model/payload";
+import type { CanvasDocument } from "./editor/model/types";
+import { canvasTextMeasurer } from "./editor/render/measureText";
+import { editorStore, useEditorStore } from "./editor/state/store";
+import { DEFAULT_VIEW_OPTIONS, type Viewport } from "./editor/state/types";
+import { commitTextEdit } from "./editor/text/editSession";
+import { fitTextNodes } from "./editor/text/fit";
+import { resetLastFrameSize } from "./editor/tools/create/frameSize";
+import {
+  describeInvokeError,
+  dropPointOnCanvas,
+  exportOriginalSvg,
+  pickImportFile,
+  readImportPath,
+  writeExportFiles,
+} from "./canvasIo";
 
-const EMPTY =
-  '<svg xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg" width="640" height="480"><g><title>レイヤー 1</title></g></svg>';
-const DEFAULT_TITLE = "新しいベクター描画";
+const DEFAULT_TITLE = "新しいキャンバス";
+/** store の初期の表示位置。`CanvasView` は、開いたときにこの位置なら全体を表示する */
+const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 const fieldClass =
   "h-8 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg)] px-2 text-sm text-[var(--fg)]";
 const cleanTags = (value: string) => [
@@ -36,6 +69,88 @@ const cleanTags = (value: string) => [
       .filter(Boolean),
   ),
 ];
+
+/** 入力欄のカーソルと選択の範囲 (欄にフォーカスを戻したときに、`onFocus` の全選択で失わないように)。 */
+function readSelection(element: HTMLElement) {
+  if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return null;
+  try {
+    const { selectionStart: start, selectionEnd: end, selectionDirection: direction } = element;
+    return start === null || end === null ? null : { start, end, direction: direction ?? "none" };
+  } catch {
+    // 選択の範囲を持たない種類の入力欄
+    return null;
+  }
+}
+
+/**
+ * 編集の途中のものを文書に入れる (§4.2 / §4.4 / §4.7)。
+ *
+ * - `"save"` (⌘S と保存ボタン): 編集を終えない。打った値を文書に入れるだけで、続けて打てるようにする
+ *   (キーが body へ行き、続けて押した Backspace などが選択中の図形に効かないように)
+ * - `"leave"` (作品の切替、新規、削除、画面の移動、閉じる、同じ URL への開き直しの確認の前):
+ *   編集を終えてから確かめる
+ *
+ * 1. キャンバスのポインターのドラッグは、途中で確定せずに取り消す (Esc と同じ。ツールの `onCancel`)
+ * 2. エディタの中の入力欄 (本文の編集欄を除く) にフォーカスがあれば、打ちかけの値を入れる。
+ *    保存では、欄を閉じずに確定できる欄 (レイヤー名、`commitInPlace`) はその場で確定する。
+ *    ほかの欄 (数値・色・フォント名など。blur か Enter で文書に入る) は blur して値を入れ、欄がまだあれば
+ *    フォーカスと、カーソル・選択の範囲を戻す (確認のモーダルは開いたときのフォーカスを覚えて、閉じたら
+ *    そこへ戻す)
+ * 3. 本文の編集: 離れるときは `commitTextEdit` で終える。保存では終えず、開いているジェスチャーを
+ *    確定するだけにする (セッションは次の入力から新しいジェスチャーにするので、編集とカーソルは残る)
+ * 4. ほかの進行中のジェスチャー (色の選択など) を確定する。ジェスチャーを開いた側があとで
+ *    更新しても、閉じたジェスチャーへの更新は無視される
+ */
+function flushEdits(mode: "save" | "leave"): void {
+  cancelPointerDrag();
+  const focused = document.activeElement;
+  const field =
+    focused instanceof HTMLElement &&
+    focused.closest("[data-canvas-editor]") !== null &&
+    !focused.matches("[data-canvas-text-editor]") &&
+    isEditableTarget(focused)
+      ? focused
+      : null;
+  let refocus: { element: HTMLElement; selection: ReturnType<typeof readSelection> } | null = null;
+  if (field && !(mode === "save" && commitInPlace(field))) {
+    refocus = { element: field, selection: readSelection(field) };
+    field.blur();
+  }
+  if (mode === "leave") commitTextEdit();
+  const state = editorStore.getState();
+  if (state.gestureActive) state.commitGesture();
+  if (refocus?.element.isConnected) {
+    const { element, selection } = refocus;
+    element.focus({ preventScroll: true });
+    if (
+      selection &&
+      (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
+    )
+      element.setSelectionRange(selection.start, selection.end, selection.direction);
+  }
+}
+
+/** Rust の Eager-on-Read が v1 を v2 へ変換できなかった (行は v1 のまま残っている)。 */
+const isUpgradeFailure = (cause: unknown) =>
+  typeof cause === "object" &&
+  cause !== null &&
+  (cause as { code?: unknown }).code === "payload_upgrade_failed";
+
+/** 作品を開けなかった理由 (Rust の Eager-on-Read が v1 を v2 へ変換できなかった場合を含む)。 */
+function describeOpenError(cause: unknown): string {
+  if (isUpgradeFailure(cause))
+    return `この作品は新しい形式に変換できないため開けません。元のデータは変えずに残しています。理由: ${describeInvokeError(cause)}`;
+  return describeInvokeError(cause);
+}
+
+/**
+ * 作品を開けなかったこと。`rescuable` は、変換できない v1 の作品で、元の SVG を書き出せる
+ * (`vector_export_original_svg`、ADR-0027)。
+ */
+interface Failure {
+  message: string;
+  rescuable: boolean;
+}
 
 export function VectorWorkspaceRoute() {
   const location = useLocation();
@@ -51,6 +166,15 @@ export function VectorWorkspaceRoute() {
   );
 }
 
+/** `loading`: 読み込み中 / `ready`: エディタで編集中 / `failed`: 開けなかった (エディタを出さない) */
+type Phase = "loading" | "ready" | "failed";
+
+interface Baseline {
+  title: string;
+  tags: string;
+  revision: number;
+}
+
 function VectorWorkspacePage({
   projectId,
   itemId,
@@ -63,52 +187,107 @@ function VectorWorkspacePage({
   navigationKey: string;
 }) {
   const navigate = useNavigate();
-  const iframe = useRef<HTMLIFrameElement>(null);
-  const bridge = useRef<VectorBridge | null>(null);
-  const documentId = useRef(crypto.randomUUID());
-  const liveRevision = useRef(0);
   const busyLock = useRef(false);
   const alive = useRef(true);
   const allowNavigation = useRef(false);
-  const closeState = useRef({ dirty: false, busy: false });
-  const actions = useRef<(action: string) => void>(() => {});
-  const [url, setUrl] = useState("");
-  const [ready, setReady] = useState(false);
+  /** 確認のモーダルが開いているか (OS からのドロップの中で見る) */
+  const modalOpenRef = useRef(false);
+  const [phase, setPhase] = useState<Phase>("loading");
   const [busy, setBusy] = useState(false);
-  const [revision, setRevision] = useState(0);
+  const revision = useEditorStore((state) => state.revision);
+  /** 本文を編集中で、まだ確定していない変更がある (編集を終えると revision が増える) */
+  const pendingText = useEditorStore(
+    (state) => state.editingTextId !== null && state.gestureActive,
+  );
+  const importing = useImportStatus().busy;
   const [currentId, setCurrentId] = useState(itemId);
   const [title, setTitle] = useState(DEFAULT_TITLE);
   const [tags, setTags] = useState("");
-  const [baseline, setBaseline] = useState({ title: DEFAULT_TITLE, tags: "", revision: 0 });
+  const [baseline, setBaseline] = useState<Baseline>({
+    title: DEFAULT_TITLE,
+    tags: "",
+    revision: 0,
+  });
   const [documents, setDocuments] = useState<ItemSummary[]>([]);
   const [hasMore, setHasMore] = useState(false);
+  /** 操作 (保存、削除、取込など) のエラー */
   const [error, setError] = useState<string | null>(null);
+  /** 作品を開けなかった理由 (`phase === "failed"` の間だけ。操作のエラーとは別に出す) */
+  const [failure, setFailure] = useState<Failure | null>(null);
   const [status, setStatus] = useState("");
   const [attempt, setAttempt] = useState(0);
+  const [dragOver, setDragOver] = useState(false);
   const [confirmation, setConfirmation] = useState<{ message: string; action: () => void } | null>(
     null,
   );
+  const ready = phase === "ready";
+  const working = busy || importing;
   const dirty =
     ready && (revision !== baseline.revision || title !== baseline.title || tags !== baseline.tags);
-  // New/import/delete and first saves keep the URL, so a later navigation to
-  // that URL does not remount this page. Reopen the route's document instead.
-  const [handledNavigation, setHandledNavigation] = useState(navigationKey);
-  if (handledNavigation !== navigationKey) {
-    setHandledNavigation(navigationKey);
-    if (currentId !== itemId) {
-      const reopen = () => {
-        setReady(false);
-        setUrl("");
-        setError(null);
-        setStatus("");
-        setCurrentId(itemId);
-        setAttempt((value) => value + 1);
-      };
-      if (dirty || busy)
-        setConfirmation({ message: "未保存の変更を破棄しますか？", action: reopen });
-      else reopen();
-    }
-  }
+
+  // 未保存の確認はイベントの中で行うので、最新の値を ref に写しておく
+  const latest = useRef({ phase, title, tags, baseline, working, currentId });
+  useEffect(() => {
+    latest.current = { phase, title, tags, baseline, working, currentId };
+  });
+  /** 本文の編集とジェスチャーを確定してから、未保存の変更があるか確かめる。 */
+  const hasUnsavedChanges = useCallback(() => {
+    const now = latest.current;
+    if (now.phase !== "ready") return false;
+    flushEdits("leave");
+    return (
+      editorStore.getState().revision !== now.baseline.revision ||
+      now.title !== now.baseline.title ||
+      now.tags !== now.baseline.tags
+    );
+  }, []);
+
+  /** 文書をエディタで開く。テキストの大きさを求め直してから `load` に渡し、全体を表示する (§7)。 */
+  const openDocument = useCallback(
+    (doc: CanvasDocument, meta: { id: string | undefined; title: string; tags: string }) => {
+      commitTextEdit();
+      const store = editorStore.getState();
+      store.load(fitTextNodes(doc, null, canvasTextMeasurer));
+      // `load` は表示位置を残すので、既定に戻してから全体を表示する (100% まで)。キャンバスがまだ
+      // 無ければ、開いたときに `CanvasView` が (表示位置が既定なので) 全体を表示する
+      store.setViewport(DEFAULT_VIEWPORT);
+      const size = getCanvasViewSize();
+      if (document.querySelector("[data-canvas-view]") && size.width > 0 && size.height > 0)
+        zoomToFit({ store: editorStore, size, measurer: canvasTextMeasurer }, 1);
+      setCurrentId(meta.id);
+      setTitle(meta.title);
+      setTags(meta.tags);
+      setBaseline({
+        title: meta.title,
+        tags: meta.tags,
+        revision: editorStore.getState().revision,
+      });
+      setError(null);
+      setFailure(null);
+      setPhase("ready");
+    },
+    [],
+  );
+
+  // 新規・削除・最初の保存は URL を変えないので、あとでその URL へ移動してもこの画面は作り直されない。
+  // そのときは URL の作品を開き直す。編集の途中のものを入れてから (`hasUnsavedChanges`) 未保存を確かめる
+  const handledNavigation = useRef(navigationKey);
+  useEffect(() => {
+    if (handledNavigation.current === navigationKey) return;
+    handledNavigation.current = navigationKey;
+    if (latest.current.currentId === itemId) return;
+    const reopen = () => {
+      setPhase("loading");
+      setError(null);
+      setFailure(null);
+      setStatus("");
+      setCurrentId(itemId);
+      setAttempt((value) => value + 1);
+    };
+    if (latest.current.working || hasUnsavedChanges())
+      setConfirmation({ message: "未保存の変更を破棄しますか？", action: reopen });
+    else reopen();
+  }, [navigationKey, itemId, hasUnsavedChanges]);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
@@ -119,86 +298,97 @@ function VectorWorkspacePage({
     }
   }, [projectId]);
 
+  // エディタを開くたびに、フレームのクリックの大きさと表示の設定 (ルーラー、グリッドなど) を
+  // 既定へ戻す (§5.5 / §5.6)。画面を離れたら、作品 (大きな画像を含みうる) と履歴を store から外す
+  useEffect(() => {
+    resetLastFrameSize();
+    editorStore.getState().setView(DEFAULT_VIEW_OPTIONS);
+    return () => {
+      commitTextEdit();
+      editorStore.getState().load(createEmptyDocument());
+      editorStore.getState().setViewport(DEFAULT_VIEWPORT);
+    };
+  }, []);
+
+  // ファイルの取込と書き出しを、ファイルのダイアログと Rust の IPC につなぐ (§4.8 / §4.9)
+  useEffect(() => {
+    const unregisterReader = setImportFileReader(pickImportFile);
+    const unregisterWriter = setExportWriter(writeExportFiles);
+    return () => {
+      unregisterReader();
+      unregisterWriter();
+    };
+  }, []);
+
   useEffect(() => {
     alive.current = true;
     if (!projectId) return;
     let cancelled = false;
-    let client: VectorBridge | undefined;
-    const onMessage = (message: VectorMessage) => {
-      if (
-        message.event === "changed" &&
-        message.documentId === documentId.current &&
-        Number.isSafeInteger(message.revision) &&
-        message.revision! >= liveRevision.current
-      ) {
-        liveRevision.current = message.revision!;
-        setRevision(message.revision!);
-      } else if (
-        message.event === "action" &&
-        message.documentId === documentId.current &&
-        message.action
-      )
-        actions.current(message.action);
-    };
+    /** 開こうとした作品の一覧の行 (作品を読めなかったときにタイトルを出す) */
+    let known: ItemSummary | undefined;
     void (async () => {
       const list = await listItemSummaries({ projectId, moduleId: "vector" });
       if (cancelled) return;
+      known = list.find((entry) => entry.id === itemId);
       if (landing && list[0]) {
+        // 入口 (/) から直近の作品へ移すときだけ確認を飛ばす。移したら戻す (残さない)
         allowNavigation.current = true;
-        navigate(modulePath(projectId, "vector", `/edit/${list[0].id}`), { replace: true });
+        void Promise.resolve(
+          navigate(modulePath(projectId, "vector", `/edit/${list[0].id}`), { replace: true }),
+        ).finally(() => {
+          allowNavigation.current = false;
+        });
         return;
       }
       setDocuments(list);
       setHasMore(list.length === 100);
-      const item = itemId ? await getItem({ moduleId: "vector", itemId }) : null;
-      if (item && item.project_id !== projectId)
+      if (!itemId) {
+        openDocument(createEmptyDocument(), { id: undefined, title: DEFAULT_TITLE, tags: "" });
+        return;
+      }
+      const item = await getItem({ moduleId: "vector", itemId });
+      if (cancelled) return;
+      if (item.project_id !== projectId)
         throw new Error("この作品は現在のプロジェクトに属していません。");
-      const payload = item
-        ? validateSvg((item.payload as VectorPayloadV1).svg, policy)
-        : validateSvg(EMPTY, policy);
-      const initialTitle = item?.title ?? DEFAULT_TITLE;
-      const initialTags = item?.tags.join(", ") ?? "";
-      const baseUrl = await vectorEditorUrl();
-      if (cancelled) return;
-      client = new VectorBridge(
-        () => iframe.current?.contentWindow ?? null,
-        new URL(baseUrl).origin,
-        onMessage,
-      );
-      bridge.current = client;
-      setTitle(initialTitle);
-      setTags(initialTags);
-      setUrl(vectorUrl(baseUrl, client.session));
-      await client.ready;
-      await client.request("load", documentId.current, { svg: payload.svg });
-      if (cancelled) return;
-      liveRevision.current = 0;
-      setRevision(0);
-      setBaseline({ title: initialTitle, tags: initialTags, revision: 0 });
-      setReady(true);
+      const parsed = parsePayload(item.payload);
+      if (!parsed.ok) {
+        // 読めない作品は編集させない (保存で上書きしない)。タイトルと削除は出す
+        const itemTags = item.tags.join(", ");
+        setCurrentId(item.id);
+        setTitle(item.title);
+        setTags(itemTags);
+        setBaseline({ title: item.title, tags: itemTags, revision: 0 });
+        setFailure({ message: `この作品は読み込めません: ${parsed.error}`, rescuable: false });
+        setPhase("failed");
+        return;
+      }
+      openDocument(parsed.doc, { id: item.id, title: item.title, tags: item.tags.join(", ") });
     })().catch((cause) => {
-      if (!cancelled) setError(formatInvokeError(cause));
+      if (cancelled) return;
+      // 開けなかった作品のタイトルを、新しい作品の既定のタイトルのまま見せない
+      setTitle(known?.title ?? "");
+      setTags(known?.tags.join(", ") ?? "");
+      setFailure({
+        message: describeOpenError(cause),
+        rescuable: isUpgradeFailure(cause) && itemId !== undefined,
+      });
+      setPhase("failed");
     });
     return () => {
       cancelled = true;
       alive.current = false;
-      client?.dispose();
-      bridge.current = null;
     };
-  }, [projectId, itemId, landing, navigate, attempt]);
+  }, [projectId, itemId, landing, navigate, attempt, openDocument]);
 
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
       !allowNavigation.current &&
-      (dirty || busy) &&
-      currentLocation.pathname !== nextLocation.pathname,
+      currentLocation.pathname !== nextLocation.pathname &&
+      (latest.current.working || hasUnsavedChanges()),
   );
   useEffect(() => {
-    closeState.current = { dirty, busy };
-  }, [dirty, busy]);
-  useEffect(() => {
     const unload = (event: BeforeUnloadEvent) => {
-      if (!closeState.current.dirty && !closeState.current.busy) return;
+      if (!latest.current.working && !hasUnsavedChanges()) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -206,14 +396,13 @@ function VectorWorkspacePage({
     // ウィンドウを閉じる要求は App の単一 listener が調停する (`src/lib/windowClose.ts`)
     const unregister = registerCloseGuard({
       shouldBlock: () =>
-        !allowNavigation.current && (closeState.current.dirty || closeState.current.busy),
+        !allowNavigation.current && (latest.current.working || hasUnsavedChanges()),
       onBlocked: (proceed) => {
+        // 閉じ直しの間は `windowClose.ts` の `closeConfirmed` がガードを飛ばす。閉じるのに失敗しても
+        // 以後の確認が効くよう、ここでは `allowNavigation` を立てない
         setConfirmation({
           message: "未保存の変更を破棄してウィンドウを閉じますか？",
-          action: () => {
-            allowNavigation.current = true;
-            proceed();
-          },
+          action: proceed,
         });
       },
     });
@@ -221,165 +410,179 @@ function VectorWorkspacePage({
       unregister();
       window.removeEventListener("beforeunload", unload);
     };
+  }, [hasUnsavedChanges]);
+
+  const run = useCallback(async (task: () => Promise<void>, { requireReady = true } = {}) => {
+    if (busyLock.current || (requireReady && latest.current.phase !== "ready")) return;
+    busyLock.current = true;
+    setBusy(true);
+    setError(null);
+    setStatus("");
+    try {
+      await task();
+    } catch (cause) {
+      if (alive.current) setError(describeInvokeError(cause));
+    } finally {
+      busyLock.current = false;
+      if (alive.current) setBusy(false);
+    }
   }, []);
 
-  const run = useCallback(
-    async (task: () => Promise<void>) => {
-      if (busyLock.current || !ready) return;
-      busyLock.current = true;
-      setBusy(true);
-      setError(null);
-      setStatus("");
-      try {
-        await task();
-      } catch (cause) {
-        if (alive.current) setError(formatInvokeError(cause));
-      } finally {
-        busyLock.current = false;
-        if (alive.current) setBusy(false);
-      }
-    },
-    [ready],
-  );
-  const request = useCallback((action: string, fields: Record<string, unknown> = {}) => {
-    if (!bridge.current) throw new Error("エディタに接続できません。");
-    return bridge.current.request(action, documentId.current, fields);
-  }, []);
   const save = useCallback(
     () =>
       run(async () => {
         if (!projectId || !title.trim()) throw new Error("タイトルを入力してください。");
-        const snapshot = await request("snapshot");
-        if (snapshot.svg == null || !Number.isSafeInteger(snapshot.revision))
-          throw new Error("保存データが不正です。");
-        const payload = validateSvg(snapshot.svg, policy);
+        // 打った値と進行中のジェスチャーを文書に入れてから取り出す。編集は続けられる (§4.2 / §4.7)
+        flushEdits("save");
+        const state = editorStore.getState();
+        const problem = checkSavable(state.doc);
+        if (problem !== null) throw new Error(`保存できません: ${problem}`);
+        const payload = toPayload(state.doc);
+        const saved: Baseline = { title, tags, revision: state.revision };
         const input = { moduleId: "vector", title: title.trim(), tags: cleanTags(tags), payload };
         let id = currentId;
         if (id) await updateItem({ ...input, itemId: id });
         else id = await createItem({ ...input, projectId });
         if (!alive.current) return;
         setCurrentId(id);
-        // Compare against the requested snapshot, never the latest changed event.
-        setBaseline({ title, tags, revision: snapshot.revision! });
+        // 保存の途中の編集は、次の未保存の内容として残す (取り出した時点の revision と比べる)
+        setBaseline(saved);
         setStatus("保存しました");
         await refresh();
       }),
-    [run, projectId, title, tags, currentId, request, refresh],
+    [run, projectId, title, tags, currentId, refresh],
   );
+
+  /** 未保存の変更を破棄してよいか確かめてから `action` を行う。処理中と取込の途中は何もしない。 */
+  const guard = useCallback(
+    (action: () => void) => {
+      if (busyLock.current) return;
+      if (getImportStatus().busy) {
+        setStatus("取り込みが終わるまでお待ちください。");
+        return;
+      }
+      if (hasUnsavedChanges()) setConfirmation({ message: "未保存の変更を破棄しますか？", action });
+      else action();
+    },
+    [hasUnsavedChanges],
+  );
+  const newDocument = useCallback(() => {
+    if (latest.current.phase === "loading") return;
+    guard(() => {
+      openDocument(createEmptyDocument(), { id: undefined, title: DEFAULT_TITLE, tags: "" });
+      setStatus("新しい作品を開きました");
+    });
+  }, [guard, openDocument]);
+
+  // ポインターのドラッグの途中は、保存と新規のキーを受けない (§4.4。ドラッグを途中で確定しない)
   useHotkeys(
     "mod+s",
     (event) => {
       event.preventDefault();
-      void save();
+      if (isPointerDragActive()) return;
+      if (confirmation === null && blocker.state !== "blocked") void save();
     },
     { enableOnFormTags: true },
-    [save],
+    [save, confirmation, blocker.state],
+  );
+  useHotkeys(
+    "mod+n",
+    (event) => {
+      event.preventDefault();
+      if (isPointerDragActive()) return;
+      if (confirmation === null && blocker.state !== "blocked") newDocument();
+    },
+    { enableOnFormTags: true },
+    [newDocument, confirmation, blocker.state],
   );
 
-  const replaceDocument = useCallback(async (svg: string, nextTitle: string, imported: boolean) => {
-    validateSvg(svg, policy);
-    const nextId = crypto.randomUUID();
-    if (!bridge.current) throw new Error("エディタに接続できません。");
-    await bridge.current.request("load", nextId, { svg });
-    documentId.current = nextId;
-    liveRevision.current = 0;
-    setCurrentId(undefined);
-    setTitle(nextTitle);
-    setTags("");
-    setRevision(0);
-    setBaseline({ title: nextTitle, tags: "", revision: imported ? -1 : 0 });
-    setStatus(
-      imported
-        ? "SVGを取り込みました。保存するとプロジェクトへ追加されます。"
-        : "新しい文書を開きました",
-    );
-  }, []);
-  const guard = useCallback(
-    (action: () => void) => {
-      if (busyLock.current) return;
-      if (dirty) setConfirmation({ message: "未保存の変更を破棄しますか？", action });
-      else action();
-    },
-    [dirty],
-  );
-  const newDocument = useCallback(
-    () => guard(() => void run(() => replaceDocument(EMPTY, DEFAULT_TITLE, false))),
-    [guard, run, replaceDocument],
-  );
-  const importFile = useCallback(
-    () =>
-      guard(
-        () =>
-          void run(async () => {
-            const path = await open({
-              multiple: false,
-              filters: [{ name: "SVG", extensions: ["svg"] }],
-            });
-            if (!path) return;
-            const payload = await vectorReadFile(path);
-            const nextTitle =
-              path
-                .split(/[\\/]/)
-                .pop()
-                ?.replace(/\.svg$/i, "") || DEFAULT_TITLE;
-            await replaceDocument(payload.svg, nextTitle, true);
-            // draw.io の SVG などを取り込み用に変換した場合は、その内容を併せて示す
-            if (payload.notices.length > 0) {
-              setStatus(
-                `SVGを取り込みました。保存するとプロジェクトへ追加されます。${payload.notices.join(" ")}`,
-              );
-            }
-          }),
-      ),
-    [guard, run, replaceDocument],
-  );
-  const insertImage = () =>
-    run(async () => {
-      const path = await open({
-        multiple: false,
-        filters: [{ name: "画像", extensions: ["png", "jpg", "jpeg", "webp"] }],
-      });
-      if (path) {
-        await request("insertImage", { data: await vectorReadImage(path) });
-        setStatus("画像を挿入しました");
-      }
-    });
-  const exportFile = useCallback(
-    (format: "svg" | "png") =>
-      run(async () => {
-        const path = await saveDialog({
-          defaultPath: `${title.replace(/[\\/:*?"<>|]/g, "_")}.${format}`,
-          filters: [{ name: format.toUpperCase(), extensions: [format] }],
-        });
-        if (!path) return;
-        const snapshot = await request(format === "png" ? "png" : "snapshot");
-        const data = format === "png" ? snapshot.data : snapshot.svg;
-        if (!data) throw new Error("出力データがありません。");
-        if (format === "svg") validateSvg(data, policy);
-        await vectorWriteFile(path, format, data);
-        setStatus(`${format.toUpperCase()}を書き出しました`);
-      }),
-    [run, title, request],
-  );
+  /** 作品バーの「取込」: 今の作品に画像や SVG を置く (ツールバーの「画像」と同じ、§4.8)。 */
+  const importIntoDocument = () => {
+    const state = editorStore.getState();
+    if (state.toolId !== "select") state.setTool("select");
+    void importFromPicker(editorStore);
+  };
+
+  // OS からのドロップ (Tauri の webview のイベント。HTML5 のドラッグ&ドロップは使わない)。
+  // ファイルを読む間も作品を切り替えないよう、画面の処理中として扱う
+  const dropRef = useRef<(paths: string[], position: { x: number; y: number }) => void>(() => {});
   useEffect(() => {
-    actions.current = (action) => {
-      if (action === "save") void save();
-      else if (action === "import") importFile();
-      else if (action === "new") newDocument();
-      else if (action === "exportPng") void exportFile("png");
+    dropRef.current = (paths, position) => {
+      const path = paths[0];
+      if (path === undefined || latest.current.phase !== "ready") return;
+      // 確認のモーダルの間は受け付けない (「破棄しますか？」の裏で文書を変えない)
+      if (modalOpenRef.current) {
+        notifyImport(editorStore, {
+          tone: "error",
+          message: "確認を閉じてから、もう一度ドロップしてください。",
+        });
+        return;
+      }
+      if (busyLock.current || getImportStatus().busy) {
+        notifyImport(editorStore, {
+          tone: "error",
+          message:
+            "ほかの処理の途中のため、取り込みませんでした。終わってからもう一度試してください。",
+        });
+        return;
+      }
+      const at = dropPointOnCanvas(position, editorStore.getState().viewport);
+      void run(async () => {
+        let file;
+        try {
+          file = await readImportPath(path);
+        } catch (cause) {
+          notifyImport(editorStore, {
+            tone: "error",
+            message: `ファイルを読み込めません: ${describeInvokeError(cause)}`,
+          });
+          return;
+        }
+        if (!alive.current) return;
+        await importFile(editorStore, file, at ? { at } : {});
+      });
     };
-  }, [save, importFile, newDocument, exportFile]);
+  });
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "over" || event.payload.type === "enter") setDragOver(true);
+        else if (event.payload.type === "drop") {
+          setDragOver(false);
+          dropRef.current(event.payload.paths, event.payload.position);
+        } else setDragOver(false);
+      })
+      .then((dispose) => {
+        if (disposed) dispose();
+        else unlisten = dispose;
+      })
+      .catch((cause: unknown) => {
+        if (!disposed) setError(describeInvokeError(cause));
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  const modalOpen = blocker.state === "blocked" || confirmation !== null;
+  useEffect(() => {
+    modalOpenRef.current = modalOpen;
+  });
 
   if (!projectId) return <p>プロジェクトを選択してください。</p>;
   return (
     <div className="flex h-full min-h-[560px] flex-col gap-2 px-[var(--page-pad)] py-3">
       <header className="flex flex-wrap items-center gap-2">
-        <h1 className="mr-2 text-lg font-semibold">ベクター描画</h1>
+        <h1 className="mr-2 text-lg font-semibold">キャンバス</h1>
         <select
           aria-label="作品を切り替え"
           className={fieldClass}
           value={currentId ?? ""}
-          disabled={busy}
+          disabled={working || phase === "loading"}
           onChange={(event) => {
             if (event.currentTarget.value)
               navigate(modulePath(projectId, "vector", `/edit/${event.currentTarget.value}`));
@@ -397,44 +600,61 @@ function VectorWorkspacePage({
         </select>
         {hasMore && (
           <Button
-            disabled={busy}
+            disabled={working}
             onClick={() =>
-              void run(async () => {
-                const page = await listItemSummaries({
-                  moduleId: "vector",
-                  projectId,
-                  offset: documents.length,
-                });
-                setDocuments((old) => [...old, ...page]);
-                setHasMore(page.length === 100);
-              })
+              void run(
+                async () => {
+                  const page = await listItemSummaries({
+                    moduleId: "vector",
+                    projectId,
+                    offset: documents.length,
+                  });
+                  setDocuments((old) => [...old, ...page]);
+                  setHasMore(page.length === 100);
+                },
+                { requireReady: false },
+              )
             }
           >
             <ChevronsDown size={14} aria-hidden /> さらに読込
           </Button>
         )}
-        <Button disabled={!ready || busy} onClick={newDocument}>
+        <Button
+          disabled={phase === "loading" || working}
+          title="新しい作品を開く (⌘N)"
+          onClick={newDocument}
+        >
           <FilePlus2 size={14} aria-hidden /> 新規
         </Button>
-        <Button disabled={!ready || busy} title="SVGファイルを取り込む" onClick={importFile}>
+        <Button
+          disabled={!ready || working}
+          title="画像 (PNG / JPEG / WebP) や SVG ファイルを、今の作品に置く"
+          onClick={importIntoDocument}
+        >
           <FileInput size={14} aria-hidden /> 取込
         </Button>
-        <Button disabled={!ready || busy} onClick={() => void insertImage()}>
-          <ImagePlus size={14} aria-hidden /> 画像を挿入
-        </Button>
+        <span role="status" className="ml-auto min-w-0 truncate text-xs text-[var(--fg-muted)]">
+          {status}
+        </span>
+        <span className="text-xs text-[var(--fg-muted)]">
+          {working
+            ? "処理中…"
+            : dirty || pendingText
+              ? "未保存"
+              : ready
+                ? "保存済み"
+                : phase === "loading"
+                  ? "読み込み中…"
+                  : ""}
+        </span>
         <Button
-          disabled={!ready || busy}
-          title="SVGとして書き出す"
-          onClick={() => void exportFile("svg")}
+          variant="primary"
+          disabled={!ready || working || !title.trim()}
+          title="プロジェクトに保存する (⌘S)"
+          onClick={() => void save()}
         >
-          <Download size={14} aria-hidden /> SVG
-        </Button>
-        <Button
-          disabled={!ready || busy}
-          title="PNGとして書き出す"
-          onClick={() => void exportFile("png")}
-        >
-          <Download size={14} aria-hidden /> PNG
+          <Save size={14} aria-hidden /> 保存
+          <span className="text-[10px] opacity-70">⌘S</span>
         </Button>
       </header>
       <div className="flex flex-wrap items-center gap-2">
@@ -457,70 +677,96 @@ function VectorWorkspacePage({
             onChange={(event) => setTags(event.currentTarget.value)}
           />
         </label>
-        <Button
-          variant="primary"
-          disabled={!ready || busy || !title.trim()}
-          onClick={() => void save()}
-        >
-          <Save size={14} aria-hidden /> 保存
-          <span className="text-[10px] opacity-70">⌘S</span>
-        </Button>
-        <span className="text-xs text-[var(--fg-muted)]">
-          {busy ? "処理中…" : dirty ? "未保存" : "保存済み"}
-        </span>
-        {currentId && (
+        {currentId && phase !== "loading" && (
           <Button
             variant="ghost"
-            disabled={busy}
-            onClick={() =>
+            disabled={working}
+            onClick={() => {
+              flushEdits("leave");
               setConfirmation({
-                message: "この作品を削除しますか？",
+                message: failure?.rescuable
+                  ? "この作品を削除しますか？ 削除すると元に戻せません。先に「元の SVG を書き出す」で中身を取り出せます。"
+                  : "この作品を削除しますか？",
                 action: () =>
-                  void run(async () => {
-                    await deleteItem({ moduleId: "vector", itemId: currentId });
-                    await replaceDocument(EMPTY, DEFAULT_TITLE, false);
-                    await refresh();
-                  }),
-              })
-            }
+                  void run(
+                    async () => {
+                      await deleteItem({ moduleId: "vector", itemId: currentId });
+                      if (!alive.current) return;
+                      openDocument(createEmptyDocument(), {
+                        id: undefined,
+                        title: DEFAULT_TITLE,
+                        tags: "",
+                      });
+                      setStatus("削除しました");
+                      await refresh();
+                    },
+                    { requireReady: false },
+                  ),
+              });
+            }}
           >
             <Trash2 size={14} aria-hidden /> 削除
           </Button>
         )}
       </div>
-      {error && (
-        <p role="alert" className="text-sm text-[var(--destructive)]">
-          {error}
-          {!ready && (
+      {phase === "failed" && failure && (
+        <div role="alert" className="flex items-center gap-2 text-sm text-[var(--destructive)]">
+          <span className="min-w-0 break-words">{failure.message}</span>
+          {failure.rescuable && currentId && (
             <Button
-              onClick={() => {
-                setError(null);
-                setUrl("");
-                setAttempt((value) => value + 1);
-              }}
+              className="shrink-0"
+              disabled={working}
+              onClick={() =>
+                void run(
+                  async () => {
+                    if (await exportOriginalSvg(currentId, title))
+                      if (alive.current) setStatus("元の SVG を書き出しました");
+                  },
+                  { requireReady: false },
+                )
+              }
             >
-              再試行
+              <FileDown size={14} aria-hidden /> 元の SVG を書き出す
             </Button>
           )}
-        </p>
+          <Button
+            className="shrink-0"
+            disabled={working}
+            onClick={() => {
+              setError(null);
+              setFailure(null);
+              setPhase("loading");
+              setAttempt((value) => value + 1);
+            }}
+          >
+            再試行
+          </Button>
+        </div>
       )}
-      <p role="status" className="min-h-4 text-xs text-[var(--fg-muted)]">
-        {status ||
-          (!ready
-            ? "エディタを読み込んでいます…"
-            : "SVG-Edit 7.4.2 · 完全オフライン · SVG/PNG 20MiB以下")}
-      </p>
-      {url && (
-        <iframe
-          ref={iframe}
-          title="SVG-Edit オフラインエディタ"
-          src={url}
-          sandbox="allow-scripts allow-same-origin"
-          className="min-h-0 flex-1 rounded-[var(--radius)] border border-[var(--border)] bg-white"
-        />
+      {error && (
+        <div role="alert" className="flex items-center gap-2 text-sm text-[var(--destructive)]">
+          <span className="min-w-0 break-words">{error}</span>
+        </div>
       )}
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-[var(--radius)] border border-[var(--border)]">
+        {ready ? (
+          <EditorRoot />
+        ) : (
+          <p className="p-6 text-sm text-[var(--fg-muted)]">
+            {phase === "loading"
+              ? "作品を読み込んでいます…"
+              : "この作品は開けません。ほかの作品を選ぶか、新規で作り直してください。"}
+          </p>
+        )}
+        {dragOver && ready && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 rounded-[var(--radius)] ring-2 ring-[var(--accent)] ring-inset"
+          />
+        )}
+      </div>
       <Modal
-        open={blocker.state === "blocked" || confirmation !== null}
+        open={modalOpen}
         title="変更の確認"
         onClose={() => {
           setConfirmation(null);
@@ -528,7 +774,7 @@ function VectorWorkspacePage({
         }}
       >
         <p className="text-sm">
-          {busy
+          {working
             ? "処理が完了するまでお待ちください。"
             : (confirmation?.message ?? "未保存の変更を破棄して移動しますか？")}
         </p>
@@ -543,7 +789,7 @@ function VectorWorkspacePage({
           </Button>
           <Button
             variant="destructive"
-            disabled={busy}
+            disabled={working}
             onClick={() => {
               if (confirmation) {
                 const action = confirmation.action;

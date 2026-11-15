@@ -202,5 +202,52 @@
     "name": "external CSS hidden by a character reference",
     "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect fill=\"u&#x72;l(https://example.com/a)\"/></svg>",
     "valid": false
+  },
+  {
+    "name": "control character",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a\u0001b</text></svg>",
+    "valid": false
+  },
+  {
+    "name": "control character reference",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a&#x1;b</text></svg>",
+    "valid": false
+  },
+  {
+    "name": "NUL reference",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a&#0;b</text></svg>",
+    "valid": false
+  },
+  {
+    "name": "noncharacter reference",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a&#xFFFE;b</text></svg>",
+    "valid": false
+  },
+  {
+    "name": "noncharacter",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a￿b</text></svg>",
+    "valid": false
+  },
+  {
+    "name": "control character reference in an attribute",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text x=\"&#x8;\">a</text></svg>",
+    "valid": false
+  },
+  {
+    "name": "raw NEL",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>ab</text></svg>",
+    "valid": false
+  },
+  {
+    "name": "NEL character reference",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a&#x85;b</text></svg>",
+    "valid": true,
+    "text": "ab"
+  },
+  {
+    "name": "tab, line feed and carriage return",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a\tb\nc\r\nd</text></svg>",
+    "valid": true,
+    "text": "a b c d"
   }
 ]

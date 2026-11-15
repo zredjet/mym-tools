@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { validateSvg, MAX_SVG_BYTES, MAX_TEXT_BYTES } from "../../../scripts/svgedit/svg-policy.js";
-import policy from "../../../scripts/svgedit/policy.json";
-import fixtures from "../../../scripts/svgedit/validation-fixtures.json";
+import { validateSvg, MAX_SVG_BYTES, MAX_TEXT_BYTES } from "./svg-policy.js";
+import policy from "./policy.json";
+import fixtures from "./validation-fixtures.json";
 
 describe("SVG persistence policy (shared Rust/browser fixtures)", () => {
   for (const fixture of fixtures)

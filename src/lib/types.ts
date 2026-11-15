@@ -24,10 +24,6 @@ export type ModuleId = string;
 export type ItemSummary = Omit<Item, "payload" | "payload_schema_version">;
 /** Search presentation only: payload may be a module-declared projection. */
 export type SearchPreview = Omit<Item, "payload"> & { payload: unknown };
-export interface VectorPayloadV1 {
-  svg: string;
-  text: string;
-}
 
 /**
  * `Item` (`storage/types.rs::Item`)。`payload` はモジュール固有の JSON で、コアからは
@@ -80,6 +76,13 @@ export interface DiagramPayloadV1 {
   xml: string;
   text: string;
 }
+
+/**
+ * M-Canvas (`vector`) payload v2 (`data-model.md` §10.9)。シーン形式の型はエディタのモデルが正典
+ * (`src/modules/vector/editor/model/types.ts`、`docs/canvas-editor-design.md` §3)。
+ * v1 (`{ svg, text }`) は Rust の Eager-on-Read が読んだときに v2 へ変換するので、画面には届かない。
+ */
+export type { VectorPayloadV2 } from "@/modules/vector/editor/model/types";
 
 /** M-Color payload v1 (`data-model.md` §10.4) */
 export interface ColorPayloadV1 {

@@ -8,6 +8,7 @@ import { updateNodes } from "../../model/transform";
 import { getNode } from "../../model/tree";
 import type { NodeId } from "../../model/types";
 import { editorStore, useEditorStore } from "../../state/store";
+import { registerCommitInPlace } from "../fields/commitInPlace";
 import { isComposing } from "../fields/keys";
 import { selectionSet } from "../selection";
 import { commitLayerName, NODE_TYPE_ICONS } from "./layerActions";
@@ -207,10 +208,25 @@ export const LayerRow = memo(function LayerRow({
  * 欄が外れるときの後片付けは、打った名前の確定だけを行い、欄を閉じる (`onClose`) ことも
  * 終わった印を付けることもしない。StrictMode は表示の直後に後片付けを 1 回余分に実行するが、
  * その時点では何も打っていないので何も起きず、編集は続く。
+ *
+ * 画面の保存 (⌘S) は、欄を閉じずに打った名前を確定する (`commitInPlace`)。確定した名前を
+ * 「入力を始めた時点の値」にするので、後で Enter を押しても変わっていなければ二重に確定しない。
  */
 function NameInput({ id, initial, onClose }: { id: NodeId; initial: string; onClose(): void }) {
   const [value, setValue] = useState(initial);
   const state = useRef({ done: false, value: initial, initial });
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const element = inputRef.current;
+    if (!element) return;
+    return registerCommitInPlace(element, () => {
+      const current = state.current;
+      if (current.done || current.value === current.initial) return;
+      commitLayerName(id, current.value);
+      current.initial = current.value;
+    });
+  }, [id]);
 
   useEffect(
     () => () => {
@@ -232,6 +248,7 @@ function NameInput({ id, initial, onClose }: { id: NodeId; initial: string; onCl
 
   return (
     <input
+      ref={inputRef}
       type="text"
       aria-label="レイヤーの名前"
       // 編集を始めたらすぐに入力できるようにする
@@ -248,7 +265,9 @@ function NameInput({ id, initial, onClose }: { id: NodeId; initial: string; onCl
       onDoubleClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
-        event.stopPropagation();
+        // キャンバスとパネルへは渡さない。ただし Cmd / Ctrl 付きのキー (画面の保存・新規など) は、
+        // 変換中でなければ止めない (キャンバスは入力欄のキーを取らない、§4.4)
+        if (isComposing(event) || !(event.metaKey || event.ctrlKey)) event.stopPropagation();
         if (isComposing(event)) return;
         if (event.key === "Enter") {
           event.preventDefault();

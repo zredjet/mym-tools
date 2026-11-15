@@ -1,6 +1,6 @@
 /**
  * 開発用の画面のファイルを読む関数 (§4.8)。`<input type="file">` で画像と SVG を選んで読む。
- * アプリの画面からは参照しない (切替 PR が `plugin-dialog` と `vector_read_image` / `vector_read_file` につなぐ)。
+ * アプリの画面からは参照しない (アプリは `canvasIo.ts` が `plugin-dialog` と `vector_read_image` / `vector_read_file` につなぐ)。
  *
  * Rust の検証の代わりに、大きさと種類だけを確かめる。SVG の `text` は Rust の代わりに
  * `validateSvg` で抽出する (draw.io の SVG の変換はしない)。
@@ -11,8 +11,8 @@
  *   __canvasImport.importAt(file, { x, y })                   OS からのドロップの代わり
  *   __canvasImport.pngDataUrl(width, height, color)          試し用の PNG を作る
  */
-import policy from "../../../../../scripts/svgedit/policy.json";
-import { validateSvg } from "../../../../../scripts/svgedit/svg-policy.js";
+import policy from "../../policy/policy.json";
+import { validateSvg } from "../../policy/svg-policy.js";
 import { importFile } from "../assets/importFile";
 import type { ImportedFile, ImportFileReader } from "../assets/types";
 import type { Point } from "../model/types";

@@ -106,6 +106,23 @@ describe("frontend module registry", () => {
       subtitle: "Client Server",
       targetPath: "/edit/diagram-1",
     });
+    // キャンバスの検索結果は、Rust が payload v2 の `text` の先頭 120 文字だけに絞って返す
+    const vector = getModuleDefinition("vector");
+    expect(vector?.displayName).toBe("キャンバス");
+    expect(
+      vector?.searchAdapter?.formatResult({
+        ...base,
+        id: "vector-1",
+        module_id: "vector",
+        title: "トップ画面",
+        payload_schema_version: 2,
+        payload: { text: `ログイン ${"あ".repeat(200)}` },
+      }),
+    ).toEqual({
+      title: "トップ画面",
+      subtitle: `ログイン ${"あ".repeat(115)}`,
+      targetPath: "/edit/vector-1",
+    });
   });
 
   it("routes palette search results to the saved editor", () => {

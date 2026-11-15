@@ -1,4 +1,4 @@
-//! 同梱エディタ (draw.io / SVG-Edit) の loopback asset server が使う、埋め込み asset の存在確認。
+//! 同梱エディタ (draw.io) の loopback asset server が使う、埋め込み asset の存在確認。
 //!
 //! `AssetResolver::get` は該当キーが無いと `{path}.html` → `{path}/index.html` → アプリ本体の
 //! `index.html` の順にフォールバックする。そのまま使うと、エディタ用の IPC 無し origin に

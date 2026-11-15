@@ -1,6 +1,6 @@
 # ADR-0021: SVG-Editによるオフラインのベクター描画
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR-0026
 - **Date**: 2026-09-12
 - **Deciders**: zredjet（実装計画の承認）
 - **Related**: ADR-0004 / ADR-0007 / ADR-0009 / ADR-0012 / ADR-0017

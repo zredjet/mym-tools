@@ -51,6 +51,22 @@ describe("window close coordinator", () => {
     expect(task).toHaveBeenCalledOnce();
   });
 
+  it("asks again after a confirmed close fails to destroy the window", async () => {
+    let proceed: (() => void) | undefined;
+    registerCloseGuard({ shouldBlock: () => true, onBlocked: (next) => (proceed = next) });
+    const closeWindow = vi.fn().mockResolvedValue(undefined);
+    await handleCloseRequested({ preventDefault: vi.fn() }, closeWindow);
+    proceed?.();
+    // close() が発行した要求は止めない。その後の destroy() が失敗してウィンドウが残ったとする
+    const confirmed = { preventDefault: vi.fn() };
+    await handleCloseRequested(confirmed, closeWindow);
+    expect(confirmed.preventDefault).not.toHaveBeenCalled();
+    // 次の閉じる要求はまた確かめる
+    const next = { preventDefault: vi.fn() };
+    await handleCloseRequested(next, closeWindow);
+    expect(next.preventDefault).toHaveBeenCalledOnce();
+  });
+
   it("stops consulting a guard after it unregisters", async () => {
     const unregister = registerCloseGuard({ shouldBlock: () => true, onBlocked: vi.fn() });
     unregister();

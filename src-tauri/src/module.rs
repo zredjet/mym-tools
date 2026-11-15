@@ -28,6 +28,19 @@ pub enum ModuleError {
 impl ModuleError {
     /// `ModuleError` を `AppError` に変換する (module_id 付与)。
     /// 呼び出し側 (StorageService / Tauri command) が module_id を知っている前提。
+    /// `upgrade_payload` の失敗を `AppError` にする (ADR-0027)。検証の失敗 (`ValidationFailed`) も
+    /// 「変換できない」(`PayloadUpgradeFailed`) として扱う。Eager-on-Read (読み込み・エクスポート) と
+    /// 上書きの確認が同じ扱いにするため。内部エラーは `Internal` のまま。
+    pub fn into_upgrade_error(self, module_id: &str) -> AppError {
+        match self {
+            ModuleError::ValidationFailed { reason } => AppError::PayloadUpgradeFailed {
+                module_id: module_id.to_string(),
+                reason,
+            },
+            other => other.into_app_error(module_id),
+        }
+    }
+
     pub fn into_app_error(self, module_id: &str) -> AppError {
         match self {
             ModuleError::ValidationFailed { reason } => AppError::Validation {

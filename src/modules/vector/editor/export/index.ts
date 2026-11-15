@@ -1,4 +1,4 @@
-/** 書き出しの入口 (§4.9)。切替 PR は `setExportWriter` で保存先の関数を登録する。 */
+/** 書き出しの入口 (§4.9)。画面 (`VectorWorkspacePage`) は `setExportWriter` で保存先の関数を登録する。 */
 export { DEFAULT_EXPORT_FILE_NAME, sanitizeFileStem, uniqueFileNames } from "./fileName";
 export {
   DEFAULT_PAGE_EXPORT_NAME,

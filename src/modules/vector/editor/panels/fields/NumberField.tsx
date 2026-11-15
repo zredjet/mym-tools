@@ -70,7 +70,7 @@ function commitNumberSession(session: NumberSession | null): void {
  *   打ったまま欄が外れたとき (選択が空になったなど) は、その時点で確定する
  * - Esc で入力を取り消す。日本語入力の変換中の Enter と Esc は変換の操作として扱う
  * - 上下の矢印で ±1、Shift と一緒なら ±10 (範囲に収める)。「混在」で何も打っていなければ何もしない
- * - 範囲外や数値でない入力は確定せず、元の値に戻す
+ * - 範囲外や数値でない入力は確定せず、元の値に戻す。打っている間は欄を赤くして (`aria-invalid`) 知らせる
  */
 export function NumberField({
   label,
@@ -91,6 +91,17 @@ export function NumberField({
   const [draft, setDraft] = useState<string | null>(null);
   const session = useRef<NumberSession | null>(null);
   const shown = value === MIXED ? "" : formatNumber(value, precision);
+  /**
+   * 打っている値が確定されない (数値でないか範囲外。欄を離れると元の値に戻る) ことを、打っている間に
+   * 欄を赤くして知らせる。空の間は打ちかけとして知らせない
+   */
+  const rejected =
+    draft !== null &&
+    draft.trim() !== "" &&
+    (() => {
+      const parsed = parseNumberInput(draft);
+      return parsed === null || !inRange(roundTo(parsed, precision), range);
+    })();
 
   // 打ったまま欄が外れたら確定する (フォーカスのある要素が消えても blur は来ないため)
   useEffect(
@@ -154,8 +165,11 @@ export function NumberField({
         "bg-[var(--bg-muted)] px-1.5 text-[12px] focus-within:border-[var(--accent)]",
         "focus-within:bg-[var(--bg)] hover:border-[var(--border)]",
         disabled && "opacity-60",
+        rejected &&
+          "border-[var(--destructive)] focus-within:border-[var(--destructive)] hover:border-[var(--destructive)]",
         className,
       )}
+      title={rejected ? "範囲外か数値でない値は確定されず、元の値に戻ります" : undefined}
     >
       {label !== "" && (
         <span
@@ -169,6 +183,7 @@ export function NumberField({
         type="text"
         inputMode="decimal"
         aria-label={ariaLabel}
+        aria-invalid={rejected || undefined}
         className="w-full min-w-0 bg-transparent text-[var(--fg)] tabular-nums outline-none placeholder:text-[var(--fg-muted)] focus-visible:outline-none"
         value={draft ?? shown}
         placeholder={value === MIXED ? "混在" : undefined}
