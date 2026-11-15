@@ -105,20 +105,23 @@ export function siblingPath(previous: string, name: string): string {
 /**
  * 書き出したファイルを保存する。ファイルごとに保存ダイアログを出し (上書きの確認は OS のダイアログに
  * 任せる)、2 つ目からは直前に選んだフォルダを既定にする。取り消したら、そこで止めて書いた数を返す。
- * 書き込みに失敗したら、そこで止めて、それまでに書いた数と理由を返す (1 つ目で失敗したら reject する)。
+ * 保存ダイアログか書き込みが失敗したら、そこで止めて、それまでに書いた数と理由を返す
+ * (1 つ目で失敗したら reject する)。
  */
 export const writeExportFiles: ExportWriter = async (files) => {
   let written = 0;
   let previous: string | null = null;
   for (const file of files) {
-    const path = await save({
-      defaultPath: previous === null ? file.fileName : siblingPath(previous, file.fileName),
-      filters: [{ name: file.format.toUpperCase(), extensions: [file.format] }],
-    });
-    if (!path) break;
+    let path: string | null;
     try {
+      path = await save({
+        defaultPath: previous === null ? file.fileName : siblingPath(previous, file.fileName),
+        filters: [{ name: file.format.toUpperCase(), extensions: [file.format] }],
+      });
+      if (!path) break;
       await vectorWriteFile(path, file.format, file.data);
     } catch (cause) {
+      // 保存ダイアログの失敗も、書き込みの失敗と同じく扱う
       if (written === 0) throw readableError(cause);
       return { written, error: describeInvokeError(cause) };
     }

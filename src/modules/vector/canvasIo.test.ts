@@ -125,6 +125,23 @@ describe("書き出したファイルを保存する", () => {
     expect(vectorWriteFile).toHaveBeenCalledTimes(1);
     expect(dialog.save).toHaveBeenCalledTimes(2);
   });
+  it("2 つ目以降で保存ダイアログが失敗しても、書けた数と理由を返す", async () => {
+    dialog.save
+      .mockResolvedValueOnce("/out/1.svg")
+      .mockRejectedValueOnce(new Error("dialog failed"));
+    vi.mocked(vectorWriteFile).mockResolvedValue(undefined);
+    const files = ["1", "2"].map((name) => ({
+      fileName: `${name}.svg`,
+      format: "svg" as const,
+      data: "<svg/>",
+    }));
+    await expect(writeExportFiles(files)).resolves.toEqual({
+      written: 1,
+      error: "dialog failed",
+    });
+    expect(vectorWriteFile).toHaveBeenCalledTimes(1);
+  });
+
   it("書き込めなければ Rust の理由で失敗する", async () => {
     dialog.save.mockResolvedValueOnce("/out/a.png");
     vi.mocked(vectorWriteFile).mockRejectedValueOnce(validation("PNGデータが不正です。"));

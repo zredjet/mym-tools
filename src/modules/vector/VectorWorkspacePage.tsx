@@ -74,23 +74,27 @@ const cleanTags = (value: string) => [
  *
  * 1. キャンバスのポインターのドラッグは、途中で確定せずに取り消す (Esc と同じ。ツールの `onCancel`)
  * 2. エディタの中の入力欄 (プロパティの数値・色・フォント名、レイヤー名など。blur か Enter で文書に入る)
- *    にフォーカスがあれば、blur して打ちかけの値を入れる。本文の編集欄は 3. の `commitTextEdit` に任せる
+ *    にフォーカスがあれば、blur して打ちかけの値を入れ、欄がまだあればフォーカスを戻す (保存の後も
+ *    打ち続けられ、キーが body へ行って Backspace などが選択中の図形に効かないように。確認のモーダルは
+ *    開いたときのフォーカスを覚えて、閉じたらそこへ戻す)。本文の編集欄は 3. の `commitTextEdit` に任せる
  * 3. 本文の編集と、進行中のジェスチャー (色の選択など) を確定する。ジェスチャーを開いた側があとで
  *    更新しても、閉じたジェスチャーへの更新は無視される
  */
 function flushEdits(): void {
   cancelPointerDrag();
   const focused = document.activeElement;
-  if (
+  const field =
     focused instanceof HTMLElement &&
     focused.closest("[data-canvas-editor]") !== null &&
     !focused.matches("[data-canvas-text-editor]") &&
     isEditableTarget(focused)
-  )
-    focused.blur();
+      ? focused
+      : null;
+  field?.blur();
   commitTextEdit();
   const state = editorStore.getState();
   if (state.gestureActive) state.commitGesture();
+  if (field?.isConnected) field.focus({ preventScroll: true });
 }
 
 /** Rust の Eager-on-Read が v1 を v2 へ変換できなかった (行は v1 のまま残っている)。 */

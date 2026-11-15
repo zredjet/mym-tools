@@ -2,8 +2,9 @@
  * キャンバスのポインターのドラッグを、エディタの外 (画面) から確かめて取り消す口 (§4.4)。
  *
  * ドラッグの途中は保存と新規のキーを受けない。閉じる要求や画面の移動の確認の前には、ドラッグを
- * 途中で確定せずに取り消す (Esc と同じく、ツールの `onCancel` を呼び、ドラッグが開いたジェスチャーを
- * 戻す)。`useCanvasInput` が登録する (エディタは同時に 1 つだけ)。
+ * 途中で確定せずに取り消す (Esc と同じく、ドラッグを開いた側が自分のジェスチャーを戻す)。
+ * キャンバスのポインター (`useCanvasInput`) と、ルーラーからのガイド線の引き出し (`Rulers.tsx`) が
+ * それぞれ登録する。
  */
 export interface PointerDragHandle {
   /** ポインターのドラッグの途中か */
@@ -12,21 +13,25 @@ export interface PointerDragHandle {
   cancel: () => boolean;
 }
 
-let current: PointerDragHandle | null = null;
+const handles = new Set<PointerDragHandle>();
 
-/** 登録する。戻り値で外す (登録し直されていたら何もしない)。 */
+/** 登録する。戻り値で外す。 */
 export function registerPointerDrag(handle: PointerDragHandle): () => void {
-  current = handle;
+  handles.add(handle);
   return () => {
-    if (current === handle) current = null;
+    handles.delete(handle);
   };
 }
 
+/** 登録されたどれかがドラッグの途中か。 */
 export function isPointerDragActive(): boolean {
-  return current?.isActive() ?? false;
+  for (const handle of handles) if (handle.isActive()) return true;
+  return false;
 }
 
-/** ポインターのドラッグを取り消す。ドラッグがなければ false。 */
+/** 進んでいるドラッグをすべて取り消す。取り消したものがなければ false。 */
 export function cancelPointerDrag(): boolean {
-  return current?.cancel() ?? false;
+  let cancelled = false;
+  for (const handle of [...handles]) if (handle.isActive() && handle.cancel()) cancelled = true;
+  return cancelled;
 }

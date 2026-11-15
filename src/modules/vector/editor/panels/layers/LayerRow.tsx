@@ -248,7 +248,9 @@ function NameInput({ id, initial, onClose }: { id: NodeId; initial: string; onCl
       onDoubleClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
-        event.stopPropagation();
+        // キャンバスとパネルへは渡さない。ただし Cmd / Ctrl 付きのキー (画面の保存・新規など) は、
+        // 変換中でなければ止めない (キャンバスは入力欄のキーを取らない、§4.4)
+        if (isComposing(event) || !(event.metaKey || event.ctrlKey)) event.stopPropagation();
         if (isComposing(event)) return;
         if (event.key === "Enter") {
           event.preventDefault();

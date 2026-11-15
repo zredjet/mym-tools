@@ -564,6 +564,102 @@ describe("未保存の確認", () => {
     uninstall();
   });
 
+  it("⌘S の後も、値を打った欄にフォーカスが残る (Backspace が図形を消さない)", async () => {
+    await start();
+    addRect();
+    typeX("200");
+    const field = screen.getByLabelText("X 座標");
+    pressMod("s");
+    await flush();
+    expect(items.createItem).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(field);
+    // 欄で打ち続けられ、Backspace や矢印は欄に効く (図形は消えず、動かない)
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Backspace" });
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowLeft" });
+    expect(state().doc.nodes["r1"]).toMatchObject({ x: 200, y: 10 });
+    fireEvent.change(field, { target: { value: "210" } });
+    pressMod("s");
+    await flush();
+    expect(state().doc.nodes["r1"]).toMatchObject({ x: 210 });
+    expect(document.activeElement).toBe(field);
+  });
+
+  it("⌘N の確認を「戻る」で閉じたら、値を打った欄へフォーカスが戻る", async () => {
+    await start();
+    addRect();
+    typeX("200");
+    const field = screen.getByLabelText("X 座標");
+    pressMod("n");
+    expect(screen.getByRole("dialog")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "戻る" }));
+    expect(document.activeElement).toBe(field);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Backspace" });
+    expect(state().doc.nodes).toHaveProperty("r1");
+  });
+
+  it("範囲外の値を打っている間は、欄を赤くして確定されないことを知らせる", async () => {
+    await start();
+    addRect();
+    act(() => state().setSelection(["r1"]));
+    const width = screen.getByLabelText("幅");
+    act(() => width.focus());
+    fireEvent.change(width, { target: { value: "-5" } });
+    expect(width).toHaveAttribute("aria-invalid", "true");
+    fireEvent.change(width, { target: { value: "abc" } });
+    expect(width).toHaveAttribute("aria-invalid", "true");
+    fireEvent.change(width, { target: { value: "" } });
+    expect(width).not.toHaveAttribute("aria-invalid");
+    fireEvent.change(width, { target: { value: "60" } });
+    expect(width).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("レイヤー名の欄でも ⌘S が効き、打った名前を含めて保存する", async () => {
+    await start();
+    addRect();
+    const layer = screen
+      .getAllByRole("treeitem")
+      .find((element) => element.dataset.layerId === "r1")!;
+    fireEvent.doubleClick(layer);
+    const input = screen.getByRole("textbox", { name: "レイヤーの名前" });
+    fireEvent.change(input, { target: { value: "背景" } });
+    fireEvent.keyDown(input, { key: "s", code: "KeyS", metaKey: true, ctrlKey: true });
+    await flush();
+    expect(items.createItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          nodes: expect.objectContaining({ r1: expect.objectContaining({ name: "背景" }) }),
+        }),
+      }),
+    );
+  });
+
+  it("ルーラーからガイド線を引き出している途中は ⌘S を受けず、閉じる要求では取り消す", async () => {
+    native.enabled = true;
+    const uninstall = installWindowCloseCoordinator();
+    await start();
+    addRect();
+    const ruler = document.querySelector<SVGElement>('[data-canvas-ruler="x"]')!;
+    fireEvent.pointerDown(ruler, pointer(100, 10));
+    fireEvent.pointerMove(ruler, pointer(100, 120));
+    expect(state().gestureActive).toBe(true);
+    pressMod("s");
+    await flush();
+    expect(items.createItem).not.toHaveBeenCalled();
+    expect(state().gestureActive).toBe(true);
+    const handler = native.onCloseRequested.mock.calls[0]![0];
+    const event = { preventDefault: vi.fn() };
+    await act(async () => {
+      await handler(event);
+    });
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    // 作りかけのガイド線は文書にも履歴にも残らない
+    expect(state().gestureActive).toBe(false);
+    expect(state().doc.pages[0]!.guides).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "戻る" }));
+    expect(state().doc.pages[0]!.guides).toEqual([]);
+    uninstall();
+  });
+
   it("同じ URL へ開き直すときも、入力欄に打っただけの値を入れてから確かめる", async () => {
     vi.mocked(items.listItemSummaries).mockResolvedValue([summary("a1", "既存")]);
     vi.mocked(items.getItem).mockResolvedValue(item("a1", "既存", fixturePayload("empty")));
