@@ -195,8 +195,9 @@ fn payload_upgrade_backup_prefix(module_id: &str, version: u32) -> String {
 /// まだ取っていなければ、pre-op backup を 1 回取って `meta` に記録する (ADR-0027)。
 ///
 /// - 記録 (`meta.payload_upgrade_backup.<module_id>`) が今の版以上なら、行を調べずに飛ばす
-/// - 古い版の行が無ければ取らない (記録もしない。後から古い行が入ることは、取込が変換してから
-///   書くので無い。旧版のバックアップをリストアした後は、次の起動で取り直す)
+/// - 古い版の行が無ければ取らない (記録もしない)。取込は変換してから書く。古い版の行が後から入る
+///   道は、記録の無いバックアップのリストア (`core_backup_restore` がその場で取り直す) と、記録が
+///   付いた後に旧版のアプリで作った行 (防がない。ADR-0027 の Consequences)
 /// - 変換できない行は古い版のまま残るので、記録が無いと起動のたびに取ることになる。そのための記録
 /// - stateless モジュールは行を持たないので見ない
 ///
@@ -465,33 +466,6 @@ mod startup_data_migration_tests {
         // 2 回目の起動では取らない
         prepare_storage(&db_path, &backups_root, &backends).unwrap();
         assert_eq!(pre_payload_backups(&backups_root).len(), 1);
-    }
-
-    /// アプリの中のリストアで記録の無いバックアップを戻したら、次の起動を待たずに取る (ADR-0027)。
-    #[test]
-    fn restoring_a_backup_without_the_record_takes_the_backup_again() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("data.sqlite");
-        let backups_root = dir.path().join("backups");
-        let backends = modules::registry::module_backends();
-        let (storage, backup) = prepare_storage(&db_path, &backups_root, &backends).unwrap();
-        let project = storage.create_project("P", None).unwrap();
-        let v1 = json!({ "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"/>", "text": "" });
-        storage
-            .create_item("vector", &project.id, "古い作品", &[], 1, &v1, "古い作品")
-            .unwrap();
-        // 記録の無い (切替前の版で取った) バックアップの代わり
-        let old = backup.take(BackupKind::Manual).unwrap();
-        take_payload_upgrade_backups_with(storage.as_ref(), backup.as_ref(), &backends).unwrap();
-        assert_eq!(pre_payload_backups(&backups_root).len(), 1);
-        assert_eq!(storage.payload_upgrade_backup_version("vector").unwrap(), 2);
-        // リストア (core_backup_restore と同じ手順) で記録が消え、もう一度取る
-        backup.restore_from(&old.path).unwrap();
-        assert_eq!(storage.payload_upgrade_backup_version("vector").unwrap(), 0);
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        take_payload_upgrade_backups_with(storage.as_ref(), backup.as_ref(), &backends).unwrap();
-        assert_eq!(pre_payload_backups(&backups_root).len(), 2);
-        assert_eq!(storage.payload_upgrade_backup_version("vector").unwrap(), 2);
     }
 
     #[test]

@@ -34,6 +34,7 @@ import {
 import { notifyImport } from "./editor/assets/importFile";
 import { getImportStatus } from "./editor/assets/status";
 import { isEditableTarget } from "./editor/canvas/input";
+import { commitInPlace } from "./editor/panels/fields/commitInPlace";
 import { cancelPointerDrag, isPointerDragActive } from "./editor/canvas/pointerDrag";
 import { getCanvasViewSize, zoomToFit } from "./editor/canvas/viewCommands";
 import { setExportWriter } from "./editor/export";
@@ -69,18 +70,38 @@ const cleanTags = (value: string) => [
   ),
 ];
 
+/** 入力欄のカーソルと選択の範囲 (欄にフォーカスを戻したときに、`onFocus` の全選択で失わないように)。 */
+function readSelection(element: HTMLElement) {
+  if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return null;
+  try {
+    const { selectionStart: start, selectionEnd: end, selectionDirection: direction } = element;
+    return start === null || end === null ? null : { start, end, direction: direction ?? "none" };
+  } catch {
+    // 選択の範囲を持たない種類の入力欄
+    return null;
+  }
+}
+
 /**
- * 編集の途中のものを文書に入れる。保存と、未保存の確認の前に呼ぶ (§4.2 / §4.4 / §4.7)。
+ * 編集の途中のものを文書に入れる (§4.2 / §4.4 / §4.7)。
+ *
+ * - `"save"` (⌘S と保存ボタン): 編集を終えない。打った値を文書に入れるだけで、続けて打てるようにする
+ *   (キーが body へ行き、続けて押した Backspace などが選択中の図形に効かないように)
+ * - `"leave"` (作品の切替、新規、削除、画面の移動、閉じる、同じ URL への開き直しの確認の前):
+ *   編集を終えてから確かめる
  *
  * 1. キャンバスのポインターのドラッグは、途中で確定せずに取り消す (Esc と同じ。ツールの `onCancel`)
- * 2. エディタの中の入力欄 (プロパティの数値・色・フォント名、レイヤー名など。blur か Enter で文書に入る)
- *    にフォーカスがあれば、blur して打ちかけの値を入れ、欄がまだあればフォーカスを戻す (保存の後も
- *    打ち続けられ、キーが body へ行って Backspace などが選択中の図形に効かないように。確認のモーダルは
- *    開いたときのフォーカスを覚えて、閉じたらそこへ戻す)。本文の編集欄は 3. の `commitTextEdit` に任せる
- * 3. 本文の編集と、進行中のジェスチャー (色の選択など) を確定する。ジェスチャーを開いた側があとで
+ * 2. エディタの中の入力欄 (本文の編集欄を除く) にフォーカスがあれば、打ちかけの値を入れる。
+ *    保存では、欄を閉じずに確定できる欄 (レイヤー名、`commitInPlace`) はその場で確定する。
+ *    ほかの欄 (数値・色・フォント名など。blur か Enter で文書に入る) は blur して値を入れ、欄がまだあれば
+ *    フォーカスと、カーソル・選択の範囲を戻す (確認のモーダルは開いたときのフォーカスを覚えて、閉じたら
+ *    そこへ戻す)
+ * 3. 本文の編集: 離れるときは `commitTextEdit` で終える。保存では終えず、開いているジェスチャーを
+ *    確定するだけにする (セッションは次の入力から新しいジェスチャーにするので、編集とカーソルは残る)
+ * 4. ほかの進行中のジェスチャー (色の選択など) を確定する。ジェスチャーを開いた側があとで
  *    更新しても、閉じたジェスチャーへの更新は無視される
  */
-function flushEdits(): void {
+function flushEdits(mode: "save" | "leave"): void {
   cancelPointerDrag();
   const focused = document.activeElement;
   const field =
@@ -90,11 +111,23 @@ function flushEdits(): void {
     isEditableTarget(focused)
       ? focused
       : null;
-  field?.blur();
-  commitTextEdit();
+  let refocus: { element: HTMLElement; selection: ReturnType<typeof readSelection> } | null = null;
+  if (field && !(mode === "save" && commitInPlace(field))) {
+    refocus = { element: field, selection: readSelection(field) };
+    field.blur();
+  }
+  if (mode === "leave") commitTextEdit();
   const state = editorStore.getState();
   if (state.gestureActive) state.commitGesture();
-  if (field?.isConnected) field.focus({ preventScroll: true });
+  if (refocus?.element.isConnected) {
+    const { element, selection } = refocus;
+    element.focus({ preventScroll: true });
+    if (
+      selection &&
+      (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
+    )
+      element.setSelectionRange(selection.start, selection.end, selection.direction);
+  }
 }
 
 /** Rust の Eager-on-Read が v1 を v2 へ変換できなかった (行は v1 のまま残っている)。 */
@@ -201,7 +234,7 @@ function VectorWorkspacePage({
   const hasUnsavedChanges = useCallback(() => {
     const now = latest.current;
     if (now.phase !== "ready") return false;
-    flushEdits();
+    flushEdits("leave");
     return (
       editorStore.getState().revision !== now.baseline.revision ||
       now.title !== now.baseline.title ||
@@ -399,8 +432,8 @@ function VectorWorkspacePage({
     () =>
       run(async () => {
         if (!projectId || !title.trim()) throw new Error("タイトルを入力してください。");
-        // 本文の編集と進行中のジェスチャーを確定してから文書を取り出す (§4.2)
-        flushEdits();
+        // 打った値と進行中のジェスチャーを文書に入れてから取り出す。編集は続けられる (§4.2 / §4.7)
+        flushEdits("save");
         const state = editorStore.getState();
         const problem = checkSavable(state.doc);
         if (problem !== null) throw new Error(`保存できません: ${problem}`);
@@ -649,7 +682,7 @@ function VectorWorkspacePage({
             variant="ghost"
             disabled={working}
             onClick={() => {
-              flushEdits();
+              flushEdits("leave");
               setConfirmation({
                 message: failure?.rescuable
                   ? "この作品を削除しますか？ 削除すると元に戻せません。先に「元の SVG を書き出す」で中身を取り出せます。"

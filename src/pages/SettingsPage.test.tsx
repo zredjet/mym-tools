@@ -3,7 +3,7 @@ import { Outlet, RouterProvider, createMemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppShellOutletContext } from "@/components/shell/AppShell";
-import { listBackups } from "@/ipc/backup";
+import { listBackups, restoreBackup } from "@/ipc/backup";
 import { exportJson, importJson, type ExportSummary, type ImportSummary } from "@/ipc/transfer";
 import { useAppStore } from "@/store/useAppStore";
 
@@ -133,6 +133,56 @@ describe("SettingsPage export", () => {
 
     expect(await screen.findByText("エクスポート完了")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage restore", () => {
+  const record = {
+    path: "/data/backups/manual/manual-2026-11-15T10-00-00.000+09-00-r3.sqlite",
+    kind: { type: "manual" as const },
+    created_at: "2026-11-15T10:00:00.000+09:00",
+    data_revision: 3,
+    size_bytes: 4096,
+  };
+  const name = "manual-2026-11-15T10-00-00.000+09-00-r3.sqlite";
+
+  async function confirmRestore() {
+    renderSettings(vi.fn().mockResolvedValue(undefined));
+    fireEvent.click(await screen.findByRole("button", { name: "このバックアップに戻す" }));
+    fireEvent.change(screen.getByLabelText("削除確認"), { target: { value: name } });
+    fireEvent.click(screen.getByRole("button", { name: "リストアを削除" }));
+  }
+
+  beforeEach(() => {
+    vi.mocked(listBackups).mockResolvedValue([record]);
+  });
+
+  it("変換の前のバックアップを取れなくても、再起動を促し、理由を出す", async () => {
+    vi.mocked(restoreBackup).mockResolvedValue({ payload_backup_error: "disk full" });
+    await confirmRestore();
+    expect(await screen.findByText("アプリを再起動してください")).toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("変換の前のバックアップ");
+    expect(alert).toHaveTextContent("disk full");
+    expect(alert).toHaveTextContent("次の起動でもう一度取ります");
+  });
+
+  it("取れたときは知らせを出さない", async () => {
+    vi.mocked(restoreBackup).mockResolvedValue({ payload_backup_error: null });
+    await confirmRestore();
+    expect(await screen.findByText("アプリを再起動してください")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("リストアの失敗は、AppError の理由を確認のダイアログに出す", async () => {
+    vi.mocked(restoreBackup).mockRejectedValue({
+      code: "storage",
+      message: "integrity check failed",
+    });
+    await confirmRestore();
+    expect(await screen.findByText(/integrity check failed/)).toBeInTheDocument();
+    expect(screen.queryByText("[object Object]")).not.toBeInTheDocument();
+    expect(screen.queryByText("アプリを再起動してください")).not.toBeInTheDocument();
   });
 });
 

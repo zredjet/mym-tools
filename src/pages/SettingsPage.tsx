@@ -48,7 +48,8 @@ export function SettingsPage() {
   const [taking, setTaking] = useState(false);
   const [deletingBackup, setDeletingBackup] = useState<BackupRecord | null>(null);
   const [restoringBackup, setRestoringBackup] = useState<BackupRecord | null>(null);
-  const [restartPrompt, setRestartPrompt] = useState(false);
+  /** リストアの後の再起動のお願い。`warning` は、変換の前のバックアップを取れなかった理由 (ADR-0027) */
+  const [restartPrompt, setRestartPrompt] = useState<{ warning: string | null } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -107,8 +108,8 @@ export function SettingsPage() {
 
   const handleConfirmRestore = useCallback(async () => {
     if (restoringBackup == null) return;
-    await restoreBackup(restoringBackup.path);
-    setRestartPrompt(true);
+    const outcome = await restoreBackup(restoringBackup.path);
+    setRestartPrompt({ warning: outcome.payload_backup_error });
   }, [restoringBackup]);
 
   return (
@@ -220,12 +221,12 @@ export function SettingsPage() {
 
       {/* リストア完了後の再起動プロンプト (data-model.md §13.6 step 7) */}
       <Modal
-        open={restartPrompt}
+        open={restartPrompt !== null}
         onClose={() => {}}
         title="アプリを再起動してください"
         widthClassName="w-full max-w-md"
       >
-        {restartPrompt && (
+        {restartPrompt !== null && (
           <div className="flex flex-col gap-3">
             <p className="text-[13px] text-[var(--fg)]">
               バックアップからのリストアが完了しました。DB 接続をクリーンに作り直すため、 アプリを
@@ -234,6 +235,14 @@ export function SettingsPage() {
             <p className="text-[12px] text-[var(--fg-muted)]">
               再起動するまでの間も古い一覧や編集中の内容を使わないよう、閉じると画面を読み込み直します。
             </p>
+            {restartPrompt.warning !== null && (
+              <p role="alert" className="text-[12px] text-[var(--destructive)]">
+                ただし、新しい形式への変換の前のバックアップ (
+                <code className="font-mono">pre-payload-...</code>) を取れませんでした:{" "}
+                {restartPrompt.warning}
+                。次の起動でもう一度取ります。再起動するまで、古い形式の作品を開かないでください。
+              </p>
+            )}
             <p className="text-[12px] text-[var(--fg-muted)]">
               戻る前の状態は <code className="font-mono">pre-restore-...</code>{" "}
               として保存されており、 必要なら再起動後にそのファイルからもう一度リストアできます。

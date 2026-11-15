@@ -14,6 +14,7 @@ import { AlertTriangle } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { formatInvokeError } from "@/lib/error";
 
 interface Props {
   open: boolean;
@@ -73,7 +74,8 @@ function ConfirmDeleteContent({
       // 成功時は親側で onClose する前提だが、保険として閉じる
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // Tauri の AppError (`{ code, message }`) も理由を出す (`[object Object]` にしない)
+      setError(formatInvokeError(err));
       setSubmitting(false);
     }
   };

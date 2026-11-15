@@ -438,7 +438,7 @@ describe("保存", () => {
     expect(screen.getByLabelText("タイトル")).toHaveValue("保存中に追加編集");
   });
 
-  it("本文の編集と進行中のジェスチャーを確定してから保存する", async () => {
+  it("本文の編集の打ちかけと進行中のジェスチャーを文書に入れて保存し、編集は続ける", async () => {
     vi.mocked(items.getItem).mockResolvedValue(item("a1", "既存", fixturePayload("full")));
     await start("/projects/p1/m/vector/edit/a1");
     const textId = Object.values(state().doc.nodes).find((node) => node.type === "text")!.id;
@@ -453,10 +453,19 @@ describe("保存", () => {
     const saved = vi.mocked(items.updateItem).mock.calls[0]![0];
     const nodes = (saved.payload as { nodes: Record<string, TextNode> }).nodes;
     expect(nodes[textId]!.text).toBe("打ちかけ");
-    expect(state().editingTextId).toBeNull();
-    expect(getTextEditSession()).toBeNull();
+    // 保存は編集を終えない (§4.7)。ジェスチャーだけを確定する
+    expect(state().editingTextId).toBe(textId);
+    expect(getTextEditSession()?.nodeId).toBe(textId);
     expect(state().gestureActive).toBe(false);
     expect(screen.getByText("保存済み")).toBeVisible();
+    // 続けて打つと、新しいジェスチャーになり、次の保存に入る
+    act(() => {
+      getTextEditSession()!.setText("打ちかけの続き");
+    });
+    expect(screen.getByText("未保存", { exact: true })).toBeVisible();
+    act(() => {
+      getTextEditSession()!.finish();
+    });
 
     // 色の選択のように長く開くジェスチャーも、保存の前に確定する
     act(() => {
@@ -584,6 +593,65 @@ describe("未保存の確認", () => {
     expect(document.activeElement).toBe(field);
   });
 
+  it("数値欄: ⌘S の後もカーソルの位置が残り、続けて打った値が次の保存に入る", async () => {
+    await start();
+    addRect();
+    typeX("200");
+    const field = screen.getByLabelText<HTMLInputElement>("X 座標");
+    field.setSelectionRange(1, 1);
+    pressMod("s");
+    await flush();
+    expect(document.activeElement).toBe(field);
+    // onFocus の全選択で値を選んだままにしない
+    expect([field.selectionStart, field.selectionEnd]).toEqual([1, 1]);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Backspace" });
+    expect(state().doc.nodes).toHaveProperty("r1");
+    fireEvent.change(field, { target: { value: "2050" } });
+    pressMod("s");
+    await flush();
+    expect(items.updateItem).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          nodes: expect.objectContaining({ r1: expect.objectContaining({ x: 2050 }) }),
+        }),
+      }),
+    );
+  });
+
+  it("本文の編集: ⌘S の後も編集が続き、カーソルの位置が変わらず、Backspace がノードを消さない", async () => {
+    vi.mocked(items.getItem).mockResolvedValue(item("a1", "既存", fixturePayload("full")));
+    await start("/projects/p1/m/vector/edit/a1");
+    const textId = Object.values(state().doc.nodes).find((node) => node.type === "text")!.id;
+    act(() => {
+      state().setSelection([textId]);
+      state().startTextEdit(textId);
+    });
+    const editor = document.querySelector<HTMLTextAreaElement>("[data-canvas-text-editor]")!;
+    act(() => editor.focus());
+    fireEvent.change(editor, { target: { value: "打ちかけ" } });
+    editor.setSelectionRange(2, 2);
+    fireEvent.keyDown(editor, { key: "s", code: "KeyS", metaKey: true, ctrlKey: true });
+    await flush();
+    const first = vi.mocked(items.updateItem).mock.calls[0]![0];
+    expect((first.payload as { nodes: Record<string, TextNode> }).nodes[textId]!.text).toBe(
+      "打ちかけ",
+    );
+    expect(state().editingTextId).toBe(textId);
+    expect(document.activeElement).toBe(editor);
+    expect([editor.selectionStart, editor.selectionEnd]).toEqual([2, 2]);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Backspace" });
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "r" });
+    expect(state().doc.nodes).toHaveProperty(textId);
+    expect(state().toolId).toBe("select");
+    fireEvent.change(editor, { target: { value: "打ちかけの続き" } });
+    pressMod("s");
+    await flush();
+    const second = vi.mocked(items.updateItem).mock.calls[1]![0];
+    expect((second.payload as { nodes: Record<string, TextNode> }).nodes[textId]!.text).toBe(
+      "打ちかけの続き",
+    );
+  });
+
   it("⌘N の確認を「戻る」で閉じたら、値を打った欄へフォーカスが戻る", async () => {
     await start();
     addRect();
@@ -631,6 +699,32 @@ describe("未保存の確認", () => {
         }),
       }),
     );
+    // 欄は閉じず、フォーカスも残る。Backspace は図形を消さない
+    expect(input).toBeInTheDocument();
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Backspace" });
+    expect(state().doc.nodes).toHaveProperty("r1");
+    // 続けて打った名前が次の保存に入る
+    fireEvent.change(input, { target: { value: "背景2" } });
+    pressMod("s");
+    await flush();
+    expect(items.updateItem).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          nodes: expect.objectContaining({ r1: expect.objectContaining({ name: "背景2" }) }),
+        }),
+      }),
+    );
+    // 保存で確定した名前を Undo してから、変えずに Enter で閉じても、確定し直さない
+    // (保存で確定した名前を「入力を始めた時点の値」にしている)
+    act(() => state().undo());
+    const undone = state().doc.nodes["r1"]!.name;
+    expect(undone).toBe("背景");
+    const revision = state().revision;
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).not.toBeInTheDocument();
+    expect(state().revision).toBe(revision);
+    expect(state().doc.nodes["r1"]!.name).toBe(undone);
   });
 
   it("ルーラーからガイド線を引き出している途中は ⌘S を受けず、閉じる要求では取り消す", async () => {

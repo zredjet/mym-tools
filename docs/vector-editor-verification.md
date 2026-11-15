@@ -9,9 +9,9 @@ SVG-Edit (ADR-0021) の時の検証記録は、このファイルの git の履�
 | 対象 | 結果 |
 |---|---|
 | Frontend typecheck / ESLint / Prettier | 成功 |
-| Frontend 全体 (`npx vitest run`) | 150 ファイル・1,744 テスト成功 (`--dir src` は 145 ファイル・1,701 テスト) |
+| Frontend 全体 (`npx vitest run`) | 150 ファイル・1,749 テスト成功 (`--dir src` は 145 ファイル・1,706 テスト) |
 | Rust fmt / Clippy (警告禁止、`--all-targets --all-features`) | 成功 |
-| Rust 全体 (`cargo test`) | 536 テスト成功 (所要時間の比較用の 1 件は手動実行のため ignored) |
+| Rust 全体 (`cargo test`) | 537 テスト成功 (所要時間の比較用の 1 件は手動実行のため ignored) |
 | `npm run build` | 成功 (`dist` に SVG-Edit の資産が入らないことを確認) |
 | payload v2 の検証 | 契約データ (`model/fixtures/payload-v2.json`) の合否と変換の例を、Rust (`scene.rs` / `upgrade.rs`) と TypeScript (`model/validate.ts`) が同じ結果で通す |
 | v1 → v2 (Eager-on-Read) | v1 の行を `VectorModule` を通して読むと v2 (埋め込み SVG 1 個) になり、行に書き戻される。`data_revision` と `updated_at` は変わらない。2 回目の読み込みは何も変えない。保存は v2 で書き、`data_revision` を 1 増やす |
@@ -30,7 +30,9 @@ SVG-Edit (ADR-0021) の時の検証記録は、このファイルの git の履�
 | 設定の画面 (`SettingsPage.test.tsx`) | エクスポートの完了に、元の形式のまま書き出した作品 (タイトル、モジュール、ID、理由) を出す。無ければ出さない |
 | `prepare:drawio` (`prepare-assets.test.mjs`) | 前の版の作業フォルダに残った SVG-Edit の生成物 (`.generated/public/svgedit/`、`licenses/svgedit/`、`.svgedit-stamp.json`) を消し、ほかは残す |
 | SVG ポリシーの文字 (`validation-fixtures.json`、`payload-v2.json`) | XML 1.0 の Char にない文字 (制御文字、U+FFFF、`&#x1;`、`&#0;`、`&#xFFFE;`、属性の中の `&#x8;`) と、U+0085 をそのまま書いた SVG を、Rust と TypeScript の両方が拒否する。`&#x85;` と、タブ・改行は両方が通し、同じ文字を抽出する。こうした文字を含む v1 は変換を失敗にして v1 のまま残す |
-| 起動とリストア (`lib.rs`) | 起動の手順 (`prepare_storage`) が v1 の行のある DB で `pre-payload-vector-v2` を取り、行は変えない。2 回目は取らない。記録の無いバックアップをリストアしたら、もう一度取る |
+| 起動 (`lib.rs`) | 起動の手順 (`prepare_storage`) が v1 の行のある DB で `pre-payload-vector-v2` を取り、行は変えない。2 回目は取らない |
+| 保存の後の編集 (`VectorWorkspacePage.test.tsx`) | 数値欄・レイヤー名・本文の編集の 3 種類で、⌘S の後に Backspace を押しても図形が消えず、欄で打ち続けられ、打ち続けた値が後の保存に入る。数値欄と本文の編集はカーソルの位置が変わらない。レイヤー名は保存で確定した名前を Undo してから Enter を押しても確定し直さない。各テストは、実装を外すと失敗することを確かめた |
+| リストア (`commands/backup.rs`、`SettingsPage.test.tsx`) | `core_backup_restore` の本体 (`restore_backup`) で記録の無いバックアップを戻すと、その場で `pre-payload-vector-v2` を取る。取れなくてもリストアは成功として返し、理由を再起動のお願いと一緒に出す。リストアの失敗は、AppError の理由を確認のダイアログに出す |
 | `windowClose.test.ts` | 確認済みの閉じ直しの後に `destroy()` が失敗してウィンドウが残っても、次の閉じる要求はまた確かめる |
 | `canvasIo.test.ts` | ファイル選択の種類、SVG と画像の読み分け、エラーの理由、ファイルごとの保存ダイアログ (2 つ目から直前のフォルダ、取り消しで止める、2 つ目以降で書き込みか保存ダイアログが失敗したら書いた数と理由を返す)、ドロップの位置 (macOS は point のまま Retina でも割らない、Windows は物理 px を `devicePixelRatio` で割る → ページ座標) |
 
@@ -85,8 +87,9 @@ CI の portable ZIP は普段のアプリと同じ identifier (`com.zredjet.mymt
 - [ ] 色の選択、ピンチでのズーム
 - [ ] 画像と埋め込み SVG を含む文書の PNG の書き出し
 - [ ] ファイル選択での取込と、Finder からのドロップ (Retina のディスプレイで、ドロップした位置に置かれる。UI スケール 100% 以外でも)
-- [ ] プロパティの数値欄に打ったまま (Enter を押さずに) Cmd+N / Cmd+Q / 作品の切替をすると、未保存の確認が出る。Cmd+S は打った値を含めて保存し、保存の後も欄で打ち続けられる (続けて押した Backspace や矢印が図形に効かない)。確認を「戻る」で閉じても欄に戻る
-- [ ] レイヤー名を変えている途中に Cmd+S で保存できる。範囲外の値 (幅に -5 など) を打つと、欄が赤くなる
+- [ ] プロパティの数値欄に打ったまま (Enter を押さずに) Cmd+N / Cmd+Q / 作品の切替をすると、未保存の確認が出る。Cmd+S は打った値を含めて保存し、保存の後も欄で打ち続けられる (カーソルの位置が残り、続けて押した Backspace や矢印が図形に効かない)。確認を「戻る」で閉じても欄に戻る
+- [ ] テキストの本文を編集している途中に Cmd+S を押すと、保存され、編集が続く (カーソルの位置が変わらず、Backspace は文字を消す)
+- [ ] レイヤー名を変えている途中に Cmd+S で保存でき、欄は閉じずに打ち続けられる。範囲外の値 (幅に -5 など) を打つと、欄が赤くなる
 - [ ] ルーラーからガイド線を引き出している途中に Cmd+S を押しても保存せず、Cmd+Q の確認を「戻る」で閉じても作りかけのガイド線が残らない
 - [ ] 図形をドラッグしている途中に Cmd+S を押しても保存せず、ドラッグが続く
 - [ ] 未保存や削除の確認のモーダルの間に、Delete や Space などがキャンバスに効かない
@@ -114,6 +117,12 @@ CI の portable ZIP は普段のアプリと同じ identifier (`com.zredjet.mymt
    ```
 
 6. 「戻しました」が出たことを確かめる。`com.zredjet.mymtools.empty-…` (取り込んだ写し) は、確かめ終わったら自分で消す
+
+   5. で「戻しました」が出ずに止まったとき (2. の後に新しい版を一度も起動しなかったなどで、空のフォルダが無い): データは `com.zredjet.mymtools.keep` に残っている。元の名前のフォルダが無いことを確かめてから戻す
+
+   ```sh
+   D="$HOME/Library/Application Support"; [ ! -e "$D/com.zredjet.mymtools" ] && [ -d "$D/com.zredjet.mymtools.keep" ] && mv "$D/com.zredjet.mymtools.keep" "$D/com.zredjet.mymtools" && echo 戻しました
+   ```
 
 ### そのほか未実施
 
