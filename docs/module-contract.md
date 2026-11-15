@@ -939,7 +939,7 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-10-17 | 1.12 | ADR-0025を反映し、§12.15 M-フォルダ容量を追加 |
 | 2026-11-10 | 1.13 | §12.11 に `jsonfmt` を追加し、`JSON.parse` の往復を使わない理由、値を書き換えない規則、上限を記載 |
 | 2026-11-10 | 1.14 | §5.1 に `ScopedStorage::move_item` と `core_move_item` を追加 |
-| 2026-11-15 | 1.15 | ADR-0026 を反映。末尾の vector の契約をキャンバス (payload v2、`upgrade_payload(1)`、`vector_editor_url` の廃止、書き出す SVG の検証) に書き換え |
+| 2026-11-15 | 1.15 | ADR-0026 / ADR-0027 を反映。末尾の vector の契約をキャンバス (payload v2、`upgrade_payload(1)`、`vector_editor_url` の廃止、書き出す SVG の検証、変換できない作品の `vector_export_original_svg`、取り込める画像の大きさ) に書き換え |
 
 ## キャンバスと検索投影の追加契約（ADR-0026、ADR-0021 を置き換え）
 
@@ -948,14 +948,15 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | id / 表示名 / カテゴリ | `vector` / キャンバス / `design` (ID は ADR-0021 のまま変えない) |
 | 状態 | stateful、既定有効、プロジェクト所属 |
 | payload | v2 `{ pages, nodes, assets, text }` (`data-model.md` §10.9、`canvas-editor-design.md` §3)。`current_payload_version() = 2` |
-| アップグレード | `upgrade_payload(1, { svg, text })` は v1 の SVG を編集できない埋め込み SVG 1 個の文書にする。結果が v2 の検証を通らなければ `UpgradeFailed` (行は v1 のまま残る、`data-model.md` §7.6) |
+| アップグレード | `upgrade_payload(1, { svg, text })` は v1 の SVG を編集できない埋め込み SVG 1 個の文書にする。アセットの `text` は v1 の値ではなく SVG から求め直す。SVG が今の SVG ポリシーを通らないなど、結果が v2 の検証を通らなければ `UpgradeFailed` (行は v1 のまま残る、`data-model.md` §7.6)。そうした行は保存で上書きされず (ADR-0027)、`vector_export_original_svg` で元の SVG を取り出せる |
 | 検証 | `validate_payload` は v2 の構造・上限・参照・アセットの中身 (画像の形式、埋め込み SVG の SVG ポリシー) を確かめ、`text` を文書から求め直して一致しなければ拒否する。`index_text` は `text` |
 | ルート | `/projects/:projectId/m/vector`、`/new`、`/edit/:itemId` |
 | 保存 | 共通CRUD、タイトル・タグ、明示保存・Cmd/Ctrl+S |
-| 固有IPC | `vector_read_file`、`vector_read_image`、`vector_write_file` (`vector_editor_url` は廃止) |
-| 取込 | PNG / JPEG / WebP (`vector_read_image` が形式と内容を照合した data URL) と SVG ファイル (`vector_read_file`、SVG ポリシーを通った SVG と検索用テキスト)。いずれも 20MiB 以下。draw.io が書き出した SVG は取込時だけ変換する (HTML ラベル `<switch><foreignObject>` → 代替 `<text>`、`light-dark()` / `var()` → 明るい側の色 / 既定値、`<style>`・ルートの背景指定・外部リンク付きの注意書きを削除)。`vector_read_file` は行った変換を `notices` で返し、画面に表示する (黙って除去しない) |
-| 書き出し | `vector_write_file(path, format, data)`。拡張子と形式の一致を確かめ、一時ファイルから原子的に置換する。SVG はエディタが作った出力なので SVG ポリシーでは検証せず (埋め込み SVG を `data:image/svg+xml` で持つため)、空でないことと 28 MiB 以下だけを確かめる。PNG は `data:image/png;base64,` を復号して形式と寸法を確かめ、20 MiB 以下 |
+| 固有IPC | `vector_read_file`、`vector_read_image`、`vector_write_file`、`vector_export_original_svg` (`vector_editor_url` は廃止) |
+| 取込 | PNG / JPEG / WebP (`vector_read_image` が形式と内容を照合した data URL) と SVG ファイル (`vector_read_file`、SVG ポリシーを通った SVG と検索用テキスト)。SVG ファイルは 20MiB 以下。画像はファイルが 20MiB 以下で、かつ base64 の data URL (`data:image/...;base64,` を含む) が 20MiB 以下なので、画像ファイルとしては約 15MiB まで (文書の全アセットの合計も data URL で数えて 20MiB 以下)。draw.io が書き出した SVG は取込時だけ変換する (HTML ラベル `<switch><foreignObject>` → 代替 `<text>`、`light-dark()` / `var()` → 明るい側の色 / 既定値、`<style>`・ルートの背景指定・外部リンク付きの注意書きを削除)。`vector_read_file` は行った変換を `notices` で返し、画面に表示する (黙って除去しない) |
+| 書き出し | `vector_write_file(path, format, data)`。拡張子と形式の一致を確かめ、一時ファイルから原子的に置換する。SVG はエディタが作った出力なので SVG ポリシーでは検証せず (埋め込み SVG を `data:image/svg+xml` で持ち、ルートに `lang`・`xml:lang`・`style` を持つため)、空でないこと、28 MiB 以下、XML として整形式でルートの要素が `svg` 1 つであることだけを確かめる。PNG は `data:image/png;base64,` を復号して形式と寸法を確かめ、20 MiB 以下 |
 | 検索 | `search_preview_field() = Some("text")`、先頭120文字、編集先`/edit/:id` |
+| 変換できない作品 | `vector_export_original_svg(item_id, path)`。保存されている行が v1 のときだけ、その `svg` を拡張子 `.svg` の path へ原子的に書く。読み取りだけで行は変えず、Eager-on-Read を発火しない (ADR-0027) |
 
 `ModuleBackend::search_preview_field()`は`Option<&'static str>`を返し、デフォルトNoneは従来の検索表示データを維持する。指定フィールドはモジュール契約で定義したトップレベルの検索用文字列だけに使う。コアはこの定義からSQL投影を作り、モジュールIDをハードコードしない。`core_search_previews`のSearchPreviewは保存payloadではない。本文の大きいモジュールの一覧は`core_list_item_summaries`、編集は`core_get_item`を使う。
 

@@ -1,6 +1,6 @@
 # ADR-0006: payload バージョニング (Eager-on-Read 方式)
 
-- **Status**: Accepted
+- **Status**: Accepted (一部を ADR-0027 が置き換え: §2.5 のエクスポートで変換に失敗した行の扱いとバックアップ、§2 の表の「UPDATE 失敗」の扱い)
 - **Date**: 2026-04-30
 - **Deciders**: zredjet
 - **Related**: `requirements.md` D-03 / D-11 / E-04 / `data-model.md` §7 / `module-contract.md` §3 / §7

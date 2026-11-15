@@ -105,6 +105,7 @@ INSERT INTO meta (key, value) VALUES ('last_auto_backup_at',   '');
 | `data_revision` | StorageService のコミットごとに +1 される単調増加カウンタ (§13.2)。SQLite INTEGER (signed 64-bit) で持ち、Rust 側も `i64` で扱う |
 | `last_backup_revision` | **最後に成功した任意種別の DB バックアップ** (auto / pre-op / manual いずれでも) 時点の `data_revision` (§13.2) |
 | `last_auto_backup_at` | 直近の **auto** バックアップ取得時刻 (JST_ISO8601、未取得時は空文字)。auto 専用の 24 時間ゲート判定にのみ使う。pre-op / manual では更新しない |
+| `payload_upgrade_backup.<module_id>` | そのモジュールの payload の引き上げ (Eager-on-Read) の前のバックアップ (`pre-payload-<module_id>-v<N>`) を、どの版のために取ったか (整数の文字列)。初期値の行は無く、起動時に初めて取ったときに足す。無ければ 0 とみなす。`data_revision` は増やさない (ADR-0027 / §7.6) |
 
 - 起動時にアプリは `db_schema_version` を読み、想定値より新しければ起動を停止しエラー画面を表示 (architecture.md §9)
 - 古ければ DB 内蔵のマイグレーションシーケンスを順次適用 (D-03 例外運用、後述 §14)
@@ -406,7 +407,7 @@ Eager-on-Read により、**読まれた行は必ず最新の search_text を持
 ただし**読まれていない古い行は古い search_text のまま残る** ため、その行は最新の検索条件に部分的にしかヒットしない可能性がある。
 
 **緩和策 — 管理コマンド「検索インデックス再構築」**:
-- ユーザーが設定画面から起動できる Rust 側コマンド `core_rebuild_search_index(module_id?)` を提供 (C-16 の実装時に追加)
+- ユーザーが設定画面から起動できる Rust 側コマンド `core_rebuild_search_index(module_id?)` を提供 (C-16 の実装時に追加)。**未実装**。初めて版を上げたキャンバス (v1 → v2) では、v1 と v2 の `search_text` が U+0085 を含む作品のほかは同じ値になるので作っていない (ADR-0027)
 - 指定モジュール (省略時は全モジュール) の全行を読み出して Eager-on-Read を強制発火 → 全行最新化
 - ペイロードバージョンを上げたモジュールアップデート直後にユーザーに案内する選択肢として持つ
 - バックグラウンドで黙って走らせない (data_revision を一気に増やしバックアップ判定を狂わせるため、ユーザー判断にする)
@@ -446,23 +447,24 @@ impl ModuleBackend for PromptModule {
 
 | 失敗ケース | 原因例 | 扱い |
 |---------|-------|-----|
-| `payload_schema_version` が現行版より**新しい** | 新版アプリで作ったデータを旧版アプリで開いた | 起動時の `db_schema_version` 同様、**起動を停止しエラー画面**を出す (黙って動作させない) |
-| `payload_schema_version` が現行版より古いが**未知の値**(連続性が無い) | バージョン番号スキップ等の運用ミス | `AppError::PayloadUpgradeFailed { reason: "unknown version" }` を返す |
-| アップグレード関数が例外を投げる | 旧データに想定外の形 / panic | `AppError::PayloadUpgradeFailed { reason: "upgrade error", source: ... }` を返す |
-| アップグレード後の `validate_payload()` が失敗 | アップグレード関数のバグでスキーマ違反を生成 | `AppError::PayloadUpgradeFailed { reason: "validation failed" }` を返す |
-| items の UPDATE が失敗 | DB ロック / ディスク満杯等 | `AppError::Storage` を返す。アップグレード後オブジェクトはメモリ上にあるのでアプリは**結果は返す**が「永続化未完了」フラグを立てて UI に通知 |
-| FTS5 トリガが失敗 | トリガ定義の不整合等 | `AppError::Storage` (UPDATE 全体がロールバックされる) |
+| `payload_schema_version` が現行版より**新しい** | 新版アプリで作ったデータを旧版アプリで開いた | 項目ごとに `AppError::UnsupportedFuturePayloadVersion` を返す (起動は止めない。`db_schema_version` と違い、項目単位で扱う)。開けず、上書きも拒否する (ADR-0027)。**エクスポートはその 1 件で全体が失敗する** (旧版へ戻す前に、最初の変換の前のバックアップ (ADR-0027) をリストアする) |
+| `payload_schema_version` が現行版より古いが**未知の値**(連続性が無い) | バージョン番号スキップ等の運用ミス | `AppError::PayloadUpgradeFailed { reason: "unknown payload version: <N>" }` を返す |
+| アップグレード関数が失敗を返す | 旧データに想定外の形 | `AppError::PayloadUpgradeFailed { reason }` を返す |
+| アップグレード後の検証が失敗 | アップグレード関数のバグ、今の検証を通らない旧データ | StorageService はアップグレードの後に `validate_payload()` を呼ばない。検証はモジュールのアップグレード関数の中で行い、通らなければ失敗を返す (キャンバスは `scene::validate`、§10.9)。扱いは上の行と同じ |
+| items の UPDATE (書き戻し) が失敗 | DB ロック / ディスク満杯等 | ログに残し、**アップグレード後の結果を返す** (エクスポートも変換した結果を書き出す)。行は古い版のまま残り、次に読んだときにもう一度変換して書き戻しを試す。「永続化未完了」のフラグと UI の通知は作らない (保存は下の「保存」のとおり通るため。ADR-0027) |
+| FTS5 トリガが失敗 | トリガ定義の不整合等 | UPDATE 全体がロールバックされる。扱いは上の行と同じ |
 
 **呼び出し元の振る舞い**:
-- **詳細取得 API** (1件読み込み): エラーをそのまま返す。UI 側でエラーカード表示 (「この項目はアップグレードに失敗しました。詳細はログを参照」)
-- **一覧取得 API** (複数件): 失敗 item は**スキップせず**、共通カラム (`title` / `tags` / `updated_at` 等) は表示し、本文・詳細領域には「破損項目」マーカーを出す。少なくともログに残す
+- **詳細取得 API** (1件読み込み): エラーをそのまま返す。UI 側でエラーを表示し、編集させない (キャンバスは理由を出し、「元の SVG を書き出す」・削除・再試行を出す。§10.9)
+- **一覧取得 API** (複数件): Eager-on-Read を発火しないので、失敗する item も共通カラム (`title` / `tags` / `updated_at` 等) で一覧に出る。本文・詳細領域の「破損項目」マーカーは**未実装** (開いたときに上の扱いになる)
 - **検索経路**: §7.3 の通り Eager-on-Read を発火しないため、検索ヒット自体は古い search_text に基づいて発生し得る。クリックして詳細を開いたタイミングで上記のエラー扱いに進む
-- **エクスポート経路**: 失敗 item は**そのままの (古い) payload と payload_schema_version で書き出す**。アップグレード前提の処理を export 時にも行うと「アプリで開けなかった item を export で消す」事故が起きるため
+- **エクスポート経路**: 失敗 item は**そのままの (古い) payload と payload_schema_version で書き出す**。アップグレード前提の処理を export 時にも行うと「アプリで開けなかった item を export で消す」事故が起きるため。書き出した item の ID・モジュール・タイトル・版・理由は `ExportSummary.not_upgraded` で返し、完了の表示に出す (取り込む側では失敗として数えられる。ADR-0027)。変換の失敗でないエラー (DB の読み取りの失敗、モジュールの内部エラー) ではエクスポートを止める
+- **保存 (`update_item`)**: 保存されている行が古い版なら、保存されている payload の引き上げを試し、失敗するなら上書きを拒否する。引き上げられるなら書く (書き戻しに失敗して古い版のまま残った行への保存を止めない)。新しい版の行も拒否する。いずれも行と `data_revision` は変えない (ADR-0027)
+- **最初の変換の前のバックアップ**: 起動時、古い版の行があるモジュールごとに 1 回、pre-op バックアップ `pre-payload-<module_id>-v<N>` を取り、`meta.payload_upgrade_backup.<module_id>` に記録する (§4 / §13.4。失敗したら起動を止める。ADR-0027)
 
 **ユーザー向けリカバリ**:
-- アプリは「破損項目」を一覧化する管理画面を持つ (Phase 1 では設定 → メンテナンスから手動起動)
-- 各破損項目に対して「個別に payload を表示してコピー (退避)」「項目を削除 (確認モーダル付き)」のアクションを提供
-- バックアップから復元する選択肢も同画面から案内
+- 「破損項目」を一覧化する管理画面 (C-14、設定 → メンテナンスから手動起動。「個別に payload を表示してコピー (退避)」「項目を削除 (確認モーダル付き)」) は**未実装**
+- 今あるのは、モジュールごとの口 (キャンバスでは開けない作品の画面の「元の SVG を書き出す」と、確認付きの削除) と、バックアップからの復元 (最初の変換の前の `pre-payload-<module_id>-v<N>` を含む)
 
 ---
 
@@ -791,7 +793,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
 - 表示位置、ルーラー・グリッドなどの表示設定、選択、Undo/Redo 履歴は保存しない
 - DB schema と JSON export schema は変えない
 
-**v1 からの変換 (Eager-on-Read)**: payload v1 `{ svg, text }` (ADR-0021 のベクター描画) は、読んだときに `upgrade_payload(1)` で「編集できない埋め込み SVG 1 個」の v2 文書にして書き戻す (§7.2。`data_revision` と `updated_at` は変えない)。SVG は v1 のまま埋め込むので見た目は残り、書き出せる。変換は戻せず、新しい版で開いた作品は古い版のアプリでは読めない。変換結果が v2 の検証を通らない作品 (今の SVG ポリシーを通らなくなった古い作品など) は変換を失敗にして v1 のまま残し (§7.6)、開こうとすると理由を表示する。そうした作品も JSON エクスポートでは元の payload と `payload_schema_version: 1` のまま書き出す
+**v1 からの変換 (Eager-on-Read)**: payload v1 `{ svg, text }` (ADR-0021 のベクター描画) は、読んだときに `upgrade_payload(1)` で「編集できない埋め込み SVG 1 個」の v2 文書にして書き戻す (§7.2。`data_revision` と `updated_at` は変えない)。SVG は v1 のまま埋め込むので見た目は残り、書き出せる。変換は戻せず、新しい版で開いた作品は古い版のアプリでは読めない。アセットの `text` は v1 の `text` を使わず、SVG から求め直す (v1 の `text` が今の抽出と違うだけで開けなくならないように)。SVG が今の SVG ポリシーを通らない古い作品などは変換を失敗にして v1 のまま残し (§7.6)、開こうとすると理由を表示する。そうした作品は、画面の「元の SVG を書き出す」(`vector_export_original_svg`。行は変えない) で中身を取り出せ、保存では上書きされない。JSON エクスポートでは元の payload と `payload_schema_version: 1` のまま書き出し、完了の表示で知らせる。最初の変換の前に、起動時に `pre-payload-vector-v2` のバックアップを 1 回取る (ADR-0027)
 
 **search_text 生成**: `title + " " + tags + " " + text`
 
@@ -957,7 +959,7 @@ project 削除実行時、StorageService は**削除トランザクションの�
 - インポート時のプロジェクト名衝突は許容 (別プロジェクトとしてそのまま投入)
 - `projects.id` が既存 DB と衝突した場合は、その project と配下 items をまとめてスキップする (§3.3)
 - モジュールの UI 有効状態はデータ移送のフィルタに使わない。無効モジュールの items も export / import 対象に含める (ADR-0012)
-- **エクスポートは StorageService の高レベル読み込み API を通すため、古い payload を含む items は Eager-on-Read により自動的に最新版へ更新された上で出力される**。結果として、エクスポート JSON 内の `payload_schema_version` は該当モジュールの現行版に揃う。ただしアップグレードに失敗した item は、エクスポートを止めず、古い payload と版のまま書き出す (§7.6)
+- **エクスポートは StorageService の高レベル読み込み API を通すため、古い payload を含む items は Eager-on-Read により自動的に最新版へ更新された上で出力される**。結果として、エクスポート JSON 内の `payload_schema_version` は該当モジュールの現行版に揃う。ただしアップグレードに失敗した item は、エクスポートを止めず、古い payload と版のまま書き出し、`ExportSummary.not_upgraded` で知らせる (§7.6 / ADR-0027)
 - 実行中は UI を二重送信不可にして処理中状態を表示する。件数ベースの詳細進捗は、実測で同期 export が体感停止する規模に達した場合に Tauri Event / Channel を追加する
 - エクスポート前の pre-op backup は取らない (個別 UPDATE が独立トランザクション + idempotent なので、export 中の中断は data の一貫性を損なわない)。ADR-0006 §2.5 参照
 
@@ -1091,7 +1093,9 @@ import 実行ボタン押下時、StorageService は**実行前に pre-op バッ
 | import 実行 | `pre-import` |
 | DB schema migration 適用 | `pre-migration-v<N>` |
 | restore 実行 (バックアップからの DB 上書き) | `pre-restore` |
-| `core_rebuild_search_index` (検索インデックス一括再構築) | `pre-rebuild-search-index-<module_id>` (全体実行時は `pre-rebuild-search-index-all`) |
+| `core_rebuild_search_index` (検索インデックス一括再構築、未実装) | `pre-rebuild-search-index-<module_id>` (全体実行時は `pre-rebuild-search-index-all`) |
+| payload の版を上げたモジュールの最初の変換 (起動時、古い版の行があり `meta.payload_upgrade_backup.<module_id>` が新しい版より小さいとき、1 回だけ。ADR-0027) | `pre-payload-<module_id>-v<N>` (`<N>` は新しい `current_payload_version`) |
+| Link / Memo 分離前の単独 Memo の再所属 (起動時、ADR-0016) | `pre-split-linkmemo` |
 
 - バックアップ取得が失敗した場合、操作自体を中止する (バックアップ無しで破壊的操作を実行しない)
 - **対象操作が失敗した場合の扱い**: pre-op バックアップ取得後に対象操作 (project 削除等) が失敗しても、**取得済みバックアップは削除しない**。失敗直前の状態を示す診断資料として残し、必要に応じてユーザーが復元に使える。ローテーションで自然に古くなったときに削除される (ADR-0007 §2.3)
@@ -1318,8 +1322,8 @@ ADR-0011 §2.1 のチェックリストを満たすものに限る:
 | T-27 | 同一行を 2 つのコマンドが v1 として並行に読み込んだ後、両方が v2 へアップグレードを試みる | 楽観的並行制御により、後発の UPDATE は `WHERE payload_schema_version = ?` で空振りし、再読み込み後に最新版と認識して再衝突せず収束する (§7.2) |
 | T-28 | `core_rebuild_search_index` 実行 | 実行前に `pre-rebuild-search-index-<module_id>` (or `-all`) のバックアップが取得されている (§13.4) |
 | T-29 | `core_rebuild_search_index` 実行後 | 全行が最新の `payload_schema_version` と最新の `search_text` に揃う |
-| T-30 | エクスポート実行 | 出力 JSON 内の各 item の `payload_schema_version` がすべて該当モジュールの現行版に揃う (Eager-on-Read による自動最新化、§12.2)。アップグレードに失敗した item だけは古い payload と版のまま出力され、エクスポート全体は失敗しない (§7.6) |
-| T-31 | モジュールの `current_payload_version` 上昇後の起動 | `settings.json` の `modules.<id>.last_seen_payload_version` と比較、不一致なら再構築推奨通知が出る (§11.2 例外) |
+| T-30 | エクスポート実行 | 出力 JSON 内の各 item の `payload_schema_version` がすべて該当モジュールの現行版に揃う (Eager-on-Read による自動最新化、§12.2)。アップグレードに失敗した item だけは古い payload と版のまま出力され、`ExportSummary.not_upgraded` に入り、エクスポート全体は失敗しない (§7.6)。変換の失敗でないエラーではエクスポートが止まる |
+| T-31 | モジュールの `current_payload_version` 上昇後の起動 | `settings.json` の `modules.<id>.last_seen_payload_version` と比較、不一致なら再構築推奨通知が出る (§11.2 例外)。**未実装** (§7.3 の再構築コマンドとともに、ADR-0027) |
 | T-32 | リストア対象に破損ファイルを選択 | `PRAGMA integrity_check` が失敗を返し、リストアが中止される。別ファイル選択を促すダイアログが出る (ADR-0007 §2.4.1) |
 | T-33 | pre-op バックアップ取得後に対象操作が失敗 | pre-op バックアップは削除されず `<userdata>/backups/pre-op/` に残る (§13.4) |
 | T-34 | pre-op / manual バックアップ取得 | `last_backup_revision` は更新されるが、`last_auto_backup_at` は変わらない (§13.2) |
@@ -1342,6 +1346,9 @@ ADR-0011 §2.1 のチェックリストを満たすものに限る:
 | T-51 | `core_move_item` で item を別プロジェクトへ移動 | `project_id` と `position` だけが変わり、title / tags / payload / `created_at` / `updated_at` は不変。`data_revision` は +1。移動先の `position` は未編集スコープで 0、並び替え済みスコープで末尾。移動元の残りの `position` は不変 |
 | T-52 | 移動後の検索 | プロジェクト内検索 (FTS と 3 文字未満の LIKE) が、移動元では 0 件、移動先では 1 件になる。横断検索は 1 件のまま |
 | T-53 | `core_move_item` の拒否 | 今と同じプロジェクト (`Validation`)、無い item / module_id の不一致 / 無いプロジェクト (`NotFound`)、stateless module のいずれも何も書かず、`data_revision` を増やさない |
+| T-54 | 古い版の行がある DB で起動 (ADR-0027) | `pre-payload-<module_id>-v<N>` が 1 回だけ取られ、中身は古い版のまま。`meta.payload_upgrade_backup.<module_id>` が `<N>` になり、2 回目の起動では取らない。取得に失敗すると起動が止まり、記録は残らない。古い版の行が無ければ取らない |
+| T-55 | 変換できない古い行 / 新しい版の行への `update_item` (ADR-0027) | 拒否され、行・`updated_at`・`data_revision` は変わらない。変換できる古い行は書ける。削除はできる |
+| T-56 | Eager-on-Read の書き戻しの失敗 (ADR-0027) | 読み込みとエクスポートは変換した結果を返し、行は古い版のまま。その後の保存は通る |
 
 ---
 
@@ -1396,7 +1403,7 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-09-25 | 1.7 | §5 にプロジェクトの並び替えで `updated_at` を変えないことを明記 |
 | 2026-10-02 | 1.8 | §10.2 に Link のネットワーク上の場所を開く時の確認を、§11 に `modules.linkmemo.trusted_network_hosts` を追加 |
 | 2026-11-10 | 1.9 | §6.6 プロジェクト間の移動 (`core_move_item`) を追加。書き換える列、`position` と `updated_at` の扱い、`data_revision +1`、§13.2 の増分対象、§15 の T-51〜T-53 |
-| 2026-11-15 | 1.10 | ADR-0026 を反映。§10.9 キャンバスの payload v2 と v1 からの変換を追加し、末尾の参照APIの節を v2 に合わせる。§7.6 のエクスポート経路 (失敗した item を古い payload のまま書き出す) を実装に合わせた |
+| 2026-11-15 | 1.10 | ADR-0026 / ADR-0027 を反映。§10.9 キャンバスの payload v2 と v1 からの変換を追加し、末尾の参照APIの節を v2 に合わせる。エクスポートの実装を §7.6 (失敗した item を古い payload のまま書き出す) に合わせた。§7.6 を ADR-0027 と実装に合わせて書き直す (新しい版は項目ごとのエラーで起動は止めない、書き戻しの失敗でも結果を返す、上書きの拒否、エクスポートの `not_upgraded`、最初の変換の前のバックアップ。破損項目の管理画面 C-14 は未実装と明記)。§4 に `meta.payload_upgrade_backup.<module_id>`、§13.4 に `pre-payload-<module_id>-v<N>` と `pre-split-linkmemo` を追加。§7.3 の再構築コマンドと T-31 は未実装と明記。T-54〜T-56 を追加 |
 
 ## 大きな作品と軽量な参照API（ADR-0021、ADR-0026）
 

@@ -55,6 +55,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 0024 | テキストファイルの文字コード判定・変換 (`encoding`、`csvview` の読込) は Rust の `encoding_rs` で行い、共通処理は `modules/text_encoding.rs`。path だけを渡す。`_without_replacement` 系だけを使い、読めないバイト・表せない文字があれば保存せず位置を返す (¥ / ‾ / − と外字は警告)。同じ文字コード同士はバイトのまま改行・BOM だけ変える。別名保存のみ、64 MiB 上限 |
 | 0025 | フォルダ容量 (`dirsize`) は読み取り専用・ローカル限定。Rust の単一スレッドで再帰的に走査し、リンク・ジャンクションと別のボリュームに入らない。UNC は `modules/network_path.rs` で触る前に拒否し、パス中のリンクは `read_link` で行き先を確かめながら解決する。Windows は `GetDriveTypeW`、macOS は `statfs` の `MNT_LOCAL` でネットワーク上のボリュームを拒否する。「サイズ」と「ディスク上」を集計し、読めないフォルダは昇格せず報告する。結果は基準ごとの上位 10,000 件の和集合と「ほか」にまとめ、フォルダ 1,000,000 件で止める |
 | 0026 | ベクター描画を自作のキャンバスエディタに置き換える (SVG-Edit 同梱を廃止、表示名「キャンバス」)。モジュール ID は `vector` のまま payload v2 `{ pages, nodes, assets, text }` にし、v1 の SVG は編集できない埋め込み SVG として包む。描画は SVG 要素で、モデルと描画層を分ける。実行時の依存を増やさない。切替済み (SVG-Edit 一式と `vector_editor_url` を削除、ADR-0021 を supersede) |
+| 0027 | payload の版を上げるときの守り方 (ADR-0006 §2.5 の一部を置き換え)。起動時、古い版の行があれば最初の変換の前に pre-op バックアップ `pre-payload-<module_id>-v<版>` を 1 回取り `meta.payload_upgrade_backup.<module_id>` に記録 (失敗したら起動を止める)。`update_item` は変換できない古い行と新しい版の行の上書きを拒否する。書き戻しに失敗しても変換した結果を返す。エクスポートは変換できない行を元の版のまま書き出し `ExportSummary.not_upgraded` で知らせる |
 
 ## 絶対に破ってはいけない不変条件
 
@@ -63,6 +64,7 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - **コアスキーマの破壊的マイグレーションをしない**。`DROP` / `RENAME` / 型変更 / 既存値書き換えは禁止 (ADR-0006 のまま。派生データ同期トリガの置換だけは ADR-0022 の条件で可)。本当に必要なら新 ADR + `db_schema_version` 上昇 + C-12 起動停止画面の追加が前提
 - **additive な DDL マイグレーション** (新カラム + DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) は **ADR-0011 の枠組みで許可**。`schema.rs::MIGRATIONS` にエントリを追加 + `db_schema_version` を bump + pre-migration バックアップが自動取得される。PR 説明で「additive か / バックアップ取得を確認したか」を必ず書く。現在の `CURRENT_DB_SCHEMA_VERSION` は 4
 - **モジュールデータ変更は引き続き payload バージョニング + Eager-on-Read** (ADR-0006) で吸収する。コアスキーマには触らない。ADR-0016 の Link / Memo 再所属は限定的な例外であり、値書き換えの前例にしない
+- **payload の版を上げたら、変換できない行を壊さない** (ADR-0027)。最初の変換の前のバックアップは起動時に共通の仕組みが取る。変換できない古い行は上書きを拒否され、エクスポートでは元の版のまま書き出して `not_upgraded` で知らせる。モジュールは、変換できない行から中身を取り出す口 (キャンバスの `vector_export_original_svg` など) を用意する
 - **フロントエンドから SQLite に直接アクセスしない**。`@tauri-apps/plugin-sql` も使わず、`tauri::command` のみを通す (module-contract §6.2)。フロントは `src/ipc/*.ts` 経由の `invoke(...)` で型付き結果を受ける
 - **タイムスタンプは必ずアプリ側で生成**。`CURRENT_TIMESTAMP` 等の DB 生成は禁止。JST `+09:00`、ms 3 桁、固定 29 文字 (ADR-0005)。文字列のまま辞書順ソート可
 - **Zustand 単一ストアを Day 1 から使う**。アプリ全体状態 (現在プロジェクト / 現在モジュール / テーマ / 設定) はここに集約。モジュール内のローカル状態は `useState` でよい。Context には逃さない (architecture.md §2.3)
@@ -91,7 +93,7 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - M-フォルダ容量 (`dirsize`) は読み取り専用で、削除・ごみ箱への移動を足さない (requirements §4.1)。ネットワーク上の場所の文字列判定は `modules/network_path.rs` を M-Link と共有し、ファイルシステムに触る前に行う (ADR-0025)
 - M-Memo (`memo`) の payload v1 は `{ body: string }` (空文字不可)。export schema v1 の旧 `linkmemo` + `type=memo` は import 時に `memo` へ正規化する (ADR-0016)
 - Mermaid は `{ source }`、Diagram は `{ xml, text }` (各 UTF-8 1 MiB 以下)、キャンバス (`vector`) は payload v2 `{ pages, nodes, assets, text }` (アセット合計 20 MiB 以下、`docs/canvas-editor-design.md` §3)。`text` は検索用の抽出テキストで、Rust が求め直して照合する。いずれも一覧を挟まず直近 item か新規ドラフトを開く
-- キャンバスの v1 (`{ svg, text }`、SVG-Edit 時代) は Eager-on-Read で「編集できない埋め込み SVG 1 個」の v2 へ変換する (`upgrade_payload(1)`)。変換できない作品は v1 のまま残し、JSON エクスポートでも v1 のまま書き出す (data-model §7.6)
+- キャンバスの v1 (`{ svg, text }`、SVG-Edit 時代) は Eager-on-Read で「編集できない埋め込み SVG 1 個」の v2 へ変換する (`upgrade_payload(1)`。アセットの `text` は SVG から求め直す)。変換できない作品は v1 のまま残し、保存で上書きせず、JSON エクスポートでも v1 のまま書き出して知らせる。画面の「元の SVG を書き出す」(`vector_export_original_svg`) で中身を取り出せる (data-model §7.6 / ADR-0027)
 - 大きな payload を持つモジュールの一覧・検索は `core_list_item_summaries` / `core_search_previews` (payload を SELECT しない) と `search_preview_field()` を使う (ADR-0021 / ADR-0026)
 - アイテムのプロジェクト間移動は `core_move_item` (`ScopedStorage::move_item`) だけで行う。書き換えるのは `project_id` と移動先での `position` で、payload・`search_text`・`updated_at` は変えず、`data_revision` は +1 する。FTS の `project_id` はトリガが同期する。UI は共通の `MoveItemDialog` を使い、編集フォームにプロジェクト欄を足さない (data-model §6.6 / ui-design §6.28)
 - M-Prompt の `variables` は**永続化しない**。読込み時に `body` から正規表現で抽出する
