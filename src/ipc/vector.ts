@@ -18,3 +18,9 @@ export const vectorReadImage = (path: string) => invoke<string>("vector_read_ima
 /** 書き出し。SVG は文字列 (28 MiB 以下)、PNG は `data:image/png;base64,` の data URL。 */
 export const vectorWriteFile = (path: string, format: "svg" | "png", data: string) =>
   invoke<void>("vector_write_file", { path, format, data });
+/**
+ * 新しい形式に変換できない v1 の作品の、保存されている元の SVG を `path` へ書く (ADR-0027)。
+ * 行は変えない。v1 でない作品は拒否する。
+ */
+export const vectorExportOriginalSvg = (itemId: string, path: string) =>
+  invoke<void>("vector_export_original_svg", { itemId, path });

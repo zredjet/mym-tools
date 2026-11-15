@@ -3,7 +3,8 @@
 //! `VectorModule::upgrade_payload(1, ..)` がこの `upgrade_v1` を呼ぶ。
 
 use super::scene::{clip_reason, search_text, validate, LIMITS};
-use crate::module::ModuleError;
+use super::validation::validate_svg;
+use crate::{error::AppError, module::ModuleError};
 use quick_xml::{events::Event, Reader, XmlVersion};
 use serde_json::{json, Value};
 
@@ -18,10 +19,10 @@ fn failed(reason: impl Into<String>) -> ModuleError {
 
 /// v1 の payload を v2 にする。結果は入力だけで決まる。`VectorModule::upgrade_payload(1, ..)` から呼ぶ形。
 ///
-/// `text` は §3.6 の規則で変換後の文書から求める。v1 の `text` は SVG から抽出した時点で空白が
-/// 正規化されているので通常は v1 の `text` と同じになる。違いが出るのは v1 の空白の集合
-/// (`js_whitespace`) に無く `char::is_whitespace` にある U+0085 を含むときだけで、
-/// v1 の `text` をそのまま入れると変換結果が v2 の検証を通らなくなるため、求め直した値を使う。
+/// アセットの `text` は v1 の `text` を使わず、今の SVG の抽出 (`validate_svg`) で求め直す。v1 の
+/// `text` は書いた時点の抽出の結果なので、抽出の規則が変わった作品 (空白の扱いなど) では今の抽出と
+/// 違うことがあり、そのまま入れると v2 の検証 (アセットの `text` が SVG と一致すること) を通らない。
+/// 文書の `text` は §3.6 の規則で変換後の文書から求める。
 ///
 /// 作った v2 は `scene::validate` で確かめ、通らなければ `UpgradeFailed` を返す (壊れた v2 を返さない)。
 pub fn upgrade_v1(payload: &Value) -> Result<Value, ModuleError> {
@@ -29,10 +30,14 @@ pub fn upgrade_v1(payload: &Value) -> Result<Value, ModuleError> {
         .get("svg")
         .and_then(Value::as_str)
         .ok_or_else(|| failed("v1 の svg が文字列ではありません。"))?;
-    let text = payload
-        .get("text")
-        .and_then(Value::as_str)
-        .ok_or_else(|| failed("v1 の text が文字列ではありません。"))?;
+    // 今の SVG ポリシーを通らない古い作品 (`<script>` を含むものなど) はここで失敗にし、v1 のまま残す
+    let text = validate_svg(svg).map_err(|error| {
+        let reason = match error {
+            AppError::Validation { reason, .. } => reason,
+            other => other.to_string(),
+        };
+        failed(format!("SVG が今の検証を通りません: {reason}"))
+    })?;
     let (width, height) = svg_size(svg).unwrap_or(FALLBACK_SIZE);
     let max = LIMITS.max_size;
     let (width, height) = (
@@ -333,6 +338,26 @@ mod tests {
     }
 
     #[test]
+    fn asset_text_is_rederived_from_the_svg() {
+        // v1 の text は書いた時点の抽出の結果。今の抽出と違っても (空白の正規化の違い、古い値など)
+        // 変換は失敗にせず、SVG から求め直した値を入れる
+        let svg =
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a  b</text><title>題</title></svg>";
+        let extracted = super::super::validate_svg(svg).unwrap();
+        for stale in ["a  b", "古い値", ""] {
+            let v2 = upgrade_v1(&json!({ "svg": svg, "text": stale })).unwrap();
+            assert_eq!(v2["assets"]["legacy"]["text"], json!(extracted), "{stale}");
+            assert_eq!(v2["text"], json!(extracted), "{stale}");
+            validate(&v2).unwrap();
+        }
+        // v1 の text が無い・文字列でない行も、SVG が読めれば変換する
+        for payload in [json!({ "svg": svg }), json!({ "svg": svg, "text": 1 })] {
+            let v2 = upgrade_v1(&payload).unwrap();
+            assert_eq!(v2["assets"]["legacy"]["text"], json!(extracted));
+        }
+    }
+
+    #[test]
     fn text_is_rederived_from_the_document() {
         // v1 の text は SVG からの抽出で正規化済みなので通常はそのまま。U+0085 だけは v1 の空白に
         // 含まれず v2 では空白なので、v1 の text をそのまま入れると v2 の検証を通らない。
@@ -359,12 +384,6 @@ mod tests {
             };
             assert!(reason.contains("検証を通りません"), "{reason}");
         }
-        // v1 の text が SVG と一致しない場合も同じ
-        let result = upgrade_v1(&json!({
-            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>a</text></svg>",
-            "text": "b"
-        }));
-        assert!(matches!(result, Err(ModuleError::UpgradeFailed { .. })));
     }
 
     #[test]
@@ -386,6 +405,7 @@ mod tests {
             json!({}),
             json!({ "svg": 1, "text": "" }),
             json!({ "svg": "" }),
+            json!({ "svg": "   ", "text": "" }),
         ] {
             assert!(matches!(
                 upgrade_v1(&payload),

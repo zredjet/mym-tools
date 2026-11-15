@@ -1,9 +1,9 @@
 import { StrictMode } from "react";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as items from "@/ipc/items";
-import { vectorReadFile, vectorWriteFile } from "@/ipc/vector";
+import { vectorExportOriginalSvg, vectorReadFile, vectorWriteFile } from "@/ipc/vector";
 import type { Item, ItemSummary } from "@/lib/types";
 import {
   installWindowCloseCoordinator,
@@ -36,6 +36,7 @@ vi.mock("@/ipc/vector", () => ({
   vectorReadFile: vi.fn(),
   vectorReadImage: vi.fn(),
   vectorWriteFile: vi.fn(),
+  vectorExportOriginalSvg: vi.fn(),
 }));
 vi.mock("@/ipc/items", () => ({
   listItemSummaries: vi.fn(),
@@ -179,6 +180,8 @@ describe("読み込み", () => {
     );
     await start("/projects/p1/m/vector/edit/bad");
     expect(screen.getByRole("alert")).toHaveTextContent("この作品は読み込めません");
+    // v1 の行ではないので、元の SVG は書き出せない
+    expect(screen.queryByRole("button", { name: "元の SVG を書き出す" })).toBeNull();
     expect(editor()).toBeNull();
     expect(saveButton()).toBeDisabled();
     expect(screen.getByLabelText("タイトル")).toHaveValue("壊れた作品");
@@ -206,6 +209,53 @@ describe("読み込み", () => {
     // 新しい作品の既定のタイトルではなく、一覧のタイトルを出す
     expect(screen.getByLabelText("タイトル")).toHaveValue("古い作品");
     expect(saveButton()).toBeDisabled();
+  });
+
+  it("変換できなかった作品は、元の SVG を書き出せる (行は変えない)", async () => {
+    vi.mocked(items.listItemSummaries).mockResolvedValue([summary("broken", "古い/作品")]);
+    vi.mocked(items.getItem).mockRejectedValue({
+      code: "payload_upgrade_failed",
+      message: { module_id: "vector", reason: "SVG が今の検証を通りません: script" },
+    });
+    await start("/projects/p1/m/vector/edit/broken");
+    dialog.save.mockResolvedValueOnce("/out/古い_作品.svg");
+    vi.mocked(vectorExportOriginalSvg).mockResolvedValueOnce(undefined);
+    fireEvent.click(screen.getByRole("button", { name: "元の SVG を書き出す" }));
+    await screen.findByText("元の SVG を書き出しました");
+    expect(dialog.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: "古い_作品.svg",
+        filters: [{ name: "SVG", extensions: ["svg"] }],
+      }),
+    );
+    expect(vectorExportOriginalSvg).toHaveBeenCalledWith("broken", "/out/古い_作品.svg");
+    // 理由と再試行は残る
+    expect(screen.getByText(/新しい形式に変換できないため開けません/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "再試行" })).toBeVisible();
+    expect(items.updateItem).not.toHaveBeenCalled();
+
+    // 書き出せなかったときは理由を出す (開けなかった理由とは別に)
+    dialog.save.mockResolvedValueOnce("/out/x.svg");
+    vi.mocked(vectorExportOriginalSvg).mockRejectedValueOnce({
+      code: "validation",
+      message: { module_id: "vector", reason: "拡張子を .svg にしてください。" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "元の SVG を書き出す" }));
+    await screen.findByText("拡張子を .svg にしてください。");
+    expect(screen.getByText(/新しい形式に変換できないため開けません/)).toBeVisible();
+
+    // 取り消したら何もしない
+    dialog.save.mockResolvedValueOnce(null);
+    vi.mocked(vectorExportOriginalSvg).mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "元の SVG を書き出す" }));
+    await waitFor(() => expect(dialog.save).toHaveBeenCalledTimes(3));
+    expect(vectorExportOriginalSvg).not.toHaveBeenCalled();
+
+    // 削除の確認で、先に書き出せることを添える
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      "先に「元の SVG を書き出す」で中身を取り出せます",
+    );
   });
 
   it("StrictMode でも 1 回だけ開き、新規では作品を読まない", async () => {

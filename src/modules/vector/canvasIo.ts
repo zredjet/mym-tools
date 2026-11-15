@@ -7,10 +7,15 @@
  * `vector_write_file` が行う。
  */
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { vectorReadFile, vectorReadImage, vectorWriteFile } from "@/ipc/vector";
+import {
+  vectorExportOriginalSvg,
+  vectorReadFile,
+  vectorReadImage,
+  vectorWriteFile,
+} from "@/ipc/vector";
 import { formatInvokeError } from "@/lib/error";
 import type { ImportedFile, ImportFileReader } from "./editor/assets";
-import type { ExportWriter } from "./editor/export";
+import { sanitizeFileStem, type ExportWriter } from "./editor/export";
 import { screenToPage } from "./editor/canvas/viewport";
 import type { Point } from "./editor/model/types";
 import type { Viewport } from "./editor/state/types";
@@ -119,6 +124,25 @@ export const writeExportFiles: ExportWriter = async (files) => {
   }
   return { written };
 };
+
+/**
+ * 変換できず開けない v1 の作品の、保存されている元の SVG を書き出す (ADR-0027)。保存ダイアログで
+ * 選んだ場所へ Rust が書く (作品の行は変えない)。取り消したら false。
+ */
+export async function exportOriginalSvg(itemId: string, title: string): Promise<boolean> {
+  const path = await save({
+    title: "元の SVG を書き出す",
+    defaultPath: `${sanitizeFileStem(title, "作品")}.svg`,
+    filters: [{ name: "SVG", extensions: ["svg"] }],
+  });
+  if (!path) return false;
+  try {
+    await vectorExportOriginalSvg(itemId, path);
+  } catch (cause) {
+    throw readableError(cause);
+  }
+  return true;
+}
 
 /**
  * OS からドロップした位置 (Tauri の `onDragDropEvent` の位置。webview の左上からの物理 px) を、

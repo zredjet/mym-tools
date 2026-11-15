@@ -141,6 +141,7 @@ pub fn register_invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Bu
         crate::modules::vector::commands::vector_read_file,
         crate::modules::vector::commands::vector_read_image,
         crate::modules::vector::commands::vector_write_file,
+        crate::modules::vector::commands::vector_export_original_svg,
         crate::commands::items::core_list_item_summaries,
         crate::commands::search::core_search_previews,
         // M-Mermaid: user-selected local SVG / PNG files only

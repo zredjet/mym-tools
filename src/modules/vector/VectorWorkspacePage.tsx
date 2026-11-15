@@ -17,7 +17,7 @@ import { useBlocker, useLocation, useNavigate, useParams } from "react-router-do
 import { useHotkeys } from "react-hotkeys-hook";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { ChevronsDown, FileInput, FilePlus2, Save, Trash2 } from "lucide-react";
+import { ChevronsDown, FileDown, FileInput, FilePlus2, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { createItem, updateItem, getItem, deleteItem, listItemSummaries } from "@/ipc/items";
@@ -47,6 +47,7 @@ import { resetLastFrameSize } from "./editor/tools/create/frameSize";
 import {
   describeInvokeError,
   dropPointOnCanvas,
+  exportOriginalSvg,
   pickImportFile,
   readImportPath,
   writeExportFiles,
@@ -76,15 +77,26 @@ function flushEdits(): void {
   if (state.gestureActive) state.commitGesture();
 }
 
+/** Rust の Eager-on-Read が v1 を v2 へ変換できなかった (行は v1 のまま残っている)。 */
+const isUpgradeFailure = (cause: unknown) =>
+  typeof cause === "object" &&
+  cause !== null &&
+  (cause as { code?: unknown }).code === "payload_upgrade_failed";
+
 /** 作品を開けなかった理由 (Rust の Eager-on-Read が v1 を v2 へ変換できなかった場合を含む)。 */
 function describeOpenError(cause: unknown): string {
-  if (
-    typeof cause === "object" &&
-    cause !== null &&
-    (cause as { code?: unknown }).code === "payload_upgrade_failed"
-  )
+  if (isUpgradeFailure(cause))
     return `この作品は新しい形式に変換できないため開けません。元のデータは変えずに残しています。理由: ${describeInvokeError(cause)}`;
   return describeInvokeError(cause);
+}
+
+/**
+ * 作品を開けなかったこと。`rescuable` は、変換できない v1 の作品で、元の SVG を書き出せる
+ * (`vector_export_original_svg`、ADR-0027)。
+ */
+interface Failure {
+  message: string;
+  rescuable: boolean;
 }
 
 export function VectorWorkspaceRoute() {
@@ -143,7 +155,10 @@ function VectorWorkspacePage({
   });
   const [documents, setDocuments] = useState<ItemSummary[]>([]);
   const [hasMore, setHasMore] = useState(false);
+  /** 操作 (保存、削除、取込など) のエラー */
   const [error, setError] = useState<string | null>(null);
+  /** 作品を開けなかった理由 (`phase === "failed"` の間だけ。操作のエラーとは別に出す) */
+  const [failure, setFailure] = useState<Failure | null>(null);
   const [status, setStatus] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [dragOver, setDragOver] = useState(false);
@@ -193,6 +208,7 @@ function VectorWorkspacePage({
         revision: editorStore.getState().revision,
       });
       setError(null);
+      setFailure(null);
       setPhase("ready");
     },
     [],
@@ -207,6 +223,7 @@ function VectorWorkspacePage({
       const reopen = () => {
         setPhase("loading");
         setError(null);
+        setFailure(null);
         setStatus("");
         setCurrentId(itemId);
         setAttempt((value) => value + 1);
@@ -281,7 +298,7 @@ function VectorWorkspacePage({
         setTitle(item.title);
         setTags(itemTags);
         setBaseline({ title: item.title, tags: itemTags, revision: 0 });
-        setError(`この作品は読み込めません: ${parsed.error}`);
+        setFailure({ message: `この作品は読み込めません: ${parsed.error}`, rescuable: false });
         setPhase("failed");
         return;
       }
@@ -291,7 +308,10 @@ function VectorWorkspacePage({
       // 開けなかった作品のタイトルを、新しい作品の既定のタイトルのまま見せない
       setTitle(known?.title ?? "");
       setTags(known?.tags.join(", ") ?? "");
-      setError(describeOpenError(cause));
+      setFailure({
+        message: describeOpenError(cause),
+        rescuable: isUpgradeFailure(cause) && itemId !== undefined,
+      });
       setPhase("failed");
     });
     return () => {
@@ -589,7 +609,9 @@ function VectorWorkspacePage({
             disabled={working}
             onClick={() =>
               setConfirmation({
-                message: "この作品を削除しますか？",
+                message: failure?.rescuable
+                  ? "この作品を削除しますか？ 削除すると元に戻せません。先に「元の SVG を書き出す」で中身を取り出せます。"
+                  : "この作品を削除しますか？",
                 action: () =>
                   void run(
                     async () => {
@@ -612,21 +634,43 @@ function VectorWorkspacePage({
           </Button>
         )}
       </div>
+      {phase === "failed" && failure && (
+        <div role="alert" className="flex items-center gap-2 text-sm text-[var(--destructive)]">
+          <span className="min-w-0 break-words">{failure.message}</span>
+          {failure.rescuable && currentId && (
+            <Button
+              className="shrink-0"
+              disabled={working}
+              onClick={() =>
+                void run(
+                  async () => {
+                    if (await exportOriginalSvg(currentId, title))
+                      if (alive.current) setStatus("元の SVG を書き出しました");
+                  },
+                  { requireReady: false },
+                )
+              }
+            >
+              <FileDown size={14} aria-hidden /> 元の SVG を書き出す
+            </Button>
+          )}
+          <Button
+            className="shrink-0"
+            disabled={working}
+            onClick={() => {
+              setError(null);
+              setFailure(null);
+              setPhase("loading");
+              setAttempt((value) => value + 1);
+            }}
+          >
+            再試行
+          </Button>
+        </div>
+      )}
       {error && (
         <div role="alert" className="flex items-center gap-2 text-sm text-[var(--destructive)]">
           <span className="min-w-0 break-words">{error}</span>
-          {phase === "failed" && (
-            <Button
-              className="shrink-0"
-              onClick={() => {
-                setError(null);
-                setPhase("loading");
-                setAttempt((value) => value + 1);
-              }}
-            >
-              再試行
-            </Button>
-          )}
         </div>
       )}
       <div className="relative min-h-0 flex-1 overflow-hidden rounded-[var(--radius)] border border-[var(--border)]">

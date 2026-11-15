@@ -36,6 +36,7 @@ fn main() {
         "vector_read_file",
         "vector_read_image",
         "vector_write_file",
+        "vector_export_original_svg",
         "core_list_item_summaries",
         "core_search_previews",
         "diagram_editor_url",
