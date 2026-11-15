@@ -55,7 +55,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 0024 | テキストファイルの文字コード判定・変換 (`encoding`、`csvview` の読込) は Rust の `encoding_rs` で行い、共通処理は `modules/text_encoding.rs`。path だけを渡す。`_without_replacement` 系だけを使い、読めないバイト・表せない文字があれば保存せず位置を返す (¥ / ‾ / − と外字は警告)。同じ文字コード同士はバイトのまま改行・BOM だけ変える。別名保存のみ、64 MiB 上限 |
 | 0025 | フォルダ容量 (`dirsize`) は読み取り専用・ローカル限定。Rust の単一スレッドで再帰的に走査し、リンク・ジャンクションと別のボリュームに入らない。UNC は `modules/network_path.rs` で触る前に拒否し、パス中のリンクは `read_link` で行き先を確かめながら解決する。Windows は `GetDriveTypeW`、macOS は `statfs` の `MNT_LOCAL` でネットワーク上のボリュームを拒否する。「サイズ」と「ディスク上」を集計し、読めないフォルダは昇格せず報告する。結果は基準ごとの上位 10,000 件の和集合と「ほか」にまとめ、フォルダ 1,000,000 件で止める |
 | 0026 | ベクター描画を自作のキャンバスエディタに置き換える (SVG-Edit 同梱を廃止、表示名「キャンバス」)。モジュール ID は `vector` のまま payload v2 `{ pages, nodes, assets, text }` にし、v1 の SVG は編集できない埋め込み SVG として包む。描画は SVG 要素で、モデルと描画層を分ける。実行時の依存を増やさない。切替済み (SVG-Edit 一式と `vector_editor_url` を削除、ADR-0021 を supersede) |
-| 0027 | payload の版を上げるときの守り方 (ADR-0006 §2.5 の一部を置き換え)。起動時、古い版の行があれば最初の変換の前に pre-op バックアップ `pre-payload-<module_id>-v<版>` を 1 回取り `meta.payload_upgrade_backup.<module_id>` に記録 (失敗したら起動を止める)。`update_item` は変換できない古い行と新しい版の行の上書きを拒否する。書き戻しに失敗しても変換した結果を返す。エクスポートは変換できない行を元の版のまま書き出し `ExportSummary.not_upgraded` で知らせる |
+| 0027 | payload の版を上げるときの守り方 (ADR-0006 §2.5 の一部を置き換え)。起動時、古い版の行があれば最初の変換の前に pre-op バックアップ `pre-payload-<module_id>-v<版>` を 1 回取り `meta.payload_upgrade_backup.<module_id>` に記録 (失敗したら起動を止める)。アプリの中のリストアの後も同じ判定をする。`StorageService::update_item` は同じトランザクションで、変換できない古い行と新しい版の行の上書きを拒否する。Rust の変換が受け付けた payload は画面の検証も通ること。書き戻しに失敗しても変換した結果を返す。エクスポートは変換できない行を元の版のまま書き出し `ExportSummary.not_upgraded` で知らせる |
 
 ## 絶対に破ってはいけない不変条件
 

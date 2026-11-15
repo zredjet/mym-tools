@@ -450,7 +450,7 @@ impl ModuleBackend for PromptModule {
 | `payload_schema_version` が現行版より**新しい** | 新版アプリで作ったデータを旧版アプリで開いた | 項目ごとに `AppError::UnsupportedFuturePayloadVersion` を返す (起動は止めない。`db_schema_version` と違い、項目単位で扱う)。開けず、上書きも拒否する (ADR-0027)。**エクスポートはその 1 件で全体が失敗する** (旧版へ戻す前に、最初の変換の前のバックアップ (ADR-0027) をリストアする) |
 | `payload_schema_version` が現行版より古いが**未知の値**(連続性が無い) | バージョン番号スキップ等の運用ミス | `AppError::PayloadUpgradeFailed { reason: "unknown payload version: <N>" }` を返す |
 | アップグレード関数が失敗を返す | 旧データに想定外の形 | `AppError::PayloadUpgradeFailed { reason }` を返す |
-| アップグレード後の検証が失敗 | アップグレード関数のバグ、今の検証を通らない旧データ | StorageService はアップグレードの後に `validate_payload()` を呼ばない。検証はモジュールのアップグレード関数の中で行い、通らなければ失敗を返す (キャンバスは `scene::validate`、§10.9)。扱いは上の行と同じ |
+| アップグレード後の検証が失敗 | アップグレード関数のバグ、今の検証を通らない旧データ | StorageService はアップグレードの後に `validate_payload()` を呼ばない。検証はモジュールのアップグレード関数の中で行い、通らなければ失敗を返す (キャンバスは `scene::validate`、§10.9)。`ValidationFailed` を返しても `PayloadUpgradeFailed` として扱い、読み込み・エクスポート・上書きの確認で同じになる (ADR-0027)。変換の結果は画面 (TypeScript) の検証も通ること (ADR-0027 §2.1) |
 | items の UPDATE (書き戻し) が失敗 | DB ロック / ディスク満杯等 | ログに残し、**アップグレード後の結果を返す** (エクスポートも変換した結果を書き出す)。行は古い版のまま残り、次に読んだときにもう一度変換して書き戻しを試す。「永続化未完了」のフラグと UI の通知は作らない (保存は下の「保存」のとおり通るため。ADR-0027) |
 | FTS5 トリガが失敗 | トリガ定義の不整合等 | UPDATE 全体がロールバックされる。扱いは上の行と同じ |
 
@@ -459,8 +459,8 @@ impl ModuleBackend for PromptModule {
 - **一覧取得 API** (複数件): Eager-on-Read を発火しないので、失敗する item も共通カラム (`title` / `tags` / `updated_at` 等) で一覧に出る。本文・詳細領域の「破損項目」マーカーは**未実装** (開いたときに上の扱いになる)
 - **検索経路**: §7.3 の通り Eager-on-Read を発火しないため、検索ヒット自体は古い search_text に基づいて発生し得る。クリックして詳細を開いたタイミングで上記のエラー扱いに進む
 - **エクスポート経路**: 失敗 item は**そのままの (古い) payload と payload_schema_version で書き出す**。アップグレード前提の処理を export 時にも行うと「アプリで開けなかった item を export で消す」事故が起きるため。書き出した item の ID・モジュール・タイトル・版・理由は `ExportSummary.not_upgraded` で返し、完了の表示に出す (取り込む側では失敗として数えられる。ADR-0027)。変換の失敗でないエラー (DB の読み取りの失敗、モジュールの内部エラー) ではエクスポートを止める
-- **保存 (`update_item`)**: 保存されている行が古い版なら、保存されている payload の引き上げを試し、失敗するなら上書きを拒否する。引き上げられるなら書く (書き戻しに失敗して古い版のまま残った行への保存を止めない)。新しい版の行も拒否する。いずれも行と `data_revision` は変えない (ADR-0027)
-- **最初の変換の前のバックアップ**: 起動時、古い版の行があるモジュールごとに 1 回、pre-op バックアップ `pre-payload-<module_id>-v<N>` を取り、`meta.payload_upgrade_backup.<module_id>` に記録する (§4 / §13.4。失敗したら起動を止める。ADR-0027)
+- **保存 (`StorageService::update_item`、上書きと同じトランザクション)**: 保存されている行が古い版なら、保存されている payload の引き上げを試し、失敗するなら上書きを拒否する。引き上げられるなら書く (書き戻しに失敗して古い版のまま残った行への保存を止めない)。新しい版の行も拒否する。いずれも行と `data_revision` は変えない (ADR-0027)
+- **最初の変換の前のバックアップ**: 起動時 (とアプリの中のリストアの後)、古い版の行があるモジュールごとに 1 回、pre-op バックアップ `pre-payload-<module_id>-v<N>` を取り、`meta.payload_upgrade_backup.<module_id>` に記録する (§4 / §13.4。失敗したら起動を止める。ADR-0027)
 
 **ユーザー向けリカバリ**:
 - 「破損項目」を一覧化する管理画面 (C-14、設定 → メンテナンスから手動起動。「個別に payload を表示してコピー (退避)」「項目を削除 (確認モーダル付き)」) は**未実装**
@@ -1346,8 +1346,8 @@ ADR-0011 §2.1 のチェックリストを満たすものに限る:
 | T-51 | `core_move_item` で item を別プロジェクトへ移動 | `project_id` と `position` だけが変わり、title / tags / payload / `created_at` / `updated_at` は不変。`data_revision` は +1。移動先の `position` は未編集スコープで 0、並び替え済みスコープで末尾。移動元の残りの `position` は不変 |
 | T-52 | 移動後の検索 | プロジェクト内検索 (FTS と 3 文字未満の LIKE) が、移動元では 0 件、移動先では 1 件になる。横断検索は 1 件のまま |
 | T-53 | `core_move_item` の拒否 | 今と同じプロジェクト (`Validation`)、無い item / module_id の不一致 / 無いプロジェクト (`NotFound`)、stateless module のいずれも何も書かず、`data_revision` を増やさない |
-| T-54 | 古い版の行がある DB で起動 (ADR-0027) | `pre-payload-<module_id>-v<N>` が 1 回だけ取られ、中身は古い版のまま。`meta.payload_upgrade_backup.<module_id>` が `<N>` になり、2 回目の起動では取らない。取得に失敗すると起動が止まり、記録は残らない。古い版の行が無ければ取らない |
-| T-55 | 変換できない古い行 / 新しい版の行への `update_item` (ADR-0027) | 拒否され、行・`updated_at`・`data_revision` は変わらない。変換できる古い行は書ける。削除はできる |
+| T-54 | 古い版の行がある DB で起動 (ADR-0027) | `pre-payload-<module_id>-v<N>` が 1 回だけ取られ、中身は古い版のまま。`meta.payload_upgrade_backup.<module_id>` が `<N>` になり、2 回目の起動では取らない。取得に失敗すると起動が止まり、記録は残らない。古い版の行が無ければ取らない。記録の無いバックアップをアプリの中でリストアすると、その場でもう一度取る |
+| T-55 | 変換できない古い行 / 新しい版の行への `update_item` (ADR-0027) | `ScopedStorage` を通しても `StorageService` を直接呼んでも拒否され、行・`updated_at`・`data_revision` は変わらない。変換できる古い行は書ける。削除はできる。`upgrade_payload` の `ValidationFailed` も変換できないとして扱う |
 | T-56 | Eager-on-Read の書き戻しの失敗 (ADR-0027) | 読み込みとエクスポートは変換した結果を返し、行は古い版のまま。その後の保存は通る |
 
 ---

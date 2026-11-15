@@ -9,14 +9,14 @@ SVG-Edit (ADR-0021) の時の検証記録は、このファイルの git の履�
 | 対象 | 結果 |
 |---|---|
 | Frontend typecheck / ESLint / Prettier | 成功 |
-| Frontend 全体 (`npx vitest run`) | 150 ファイル・1,726 テスト成功 (`--dir src` は 145 ファイル・1,683 テスト) |
+| Frontend 全体 (`npx vitest run`) | 150 ファイル・1,744 テスト成功 (`--dir src` は 145 ファイル・1,701 テスト) |
 | Rust fmt / Clippy (警告禁止、`--all-targets --all-features`) | 成功 |
-| Rust 全体 (`cargo test`) | 531 テスト成功 (所要時間の比較用の 1 件は手動実行のため ignored) |
+| Rust 全体 (`cargo test`) | 536 テスト成功 (所要時間の比較用の 1 件は手動実行のため ignored) |
 | `npm run build` | 成功 (`dist` に SVG-Edit の資産が入らないことを確認) |
 | payload v2 の検証 | 契約データ (`model/fixtures/payload-v2.json`) の合否と変換の例を、Rust (`scene.rs` / `upgrade.rs`) と TypeScript (`model/validate.ts`) が同じ結果で通す |
 | v1 → v2 (Eager-on-Read) | v1 の行を `VectorModule` を通して読むと v2 (埋め込み SVG 1 個) になり、行に書き戻される。`data_revision` と `updated_at` は変わらない。2 回目の読み込みは何も変えない。保存は v2 で書き、`data_revision` を 1 増やす |
 | 変換できない v1 | 今の SVG ポリシーを通らない v1 は v1 のまま残る (行の payload と版は変わらない)。開くと `payload_upgrade_failed`、一覧には出る。アプリ / プロジェクトの JSON エクスポートでは v1 のまま書き出し (エクスポートは止まらない)、`ExportSummary.not_upgraded` に入り、取り込む側では失敗として数える。バックアップとリストアで残る |
-| 上書きの拒否 (ADR-0027) | 変換できない v1 の行と新しい版の行への `update_item` は拒否され、行・`updated_at`・`data_revision` が変わらない。変換できる v1 の行は書ける。削除はできる |
+| 上書きの拒否 (ADR-0027) | 変換できない v1 の行と新しい版の行への `update_item` は、`ScopedStorage` を通しても `StorageService` を直接呼んでも拒否され (`upgrade_payload` の `ValidationFailed` も同じ)、行・`updated_at`・`data_revision` が変わらない。変換できる v1 の行は書ける。削除はできる |
 | 書き戻しの失敗 (ADR-0027) | 書き戻しの UPDATE をトリガで失敗させても、読み込みとエクスポートは変換した v2 を返し、行は v1 のまま。その後の保存は通る |
 | 最初の変換の前のバックアップ (ADR-0027) | v1 の行があると起動時に `pre-payload-vector-v2-…` を 1 回だけ取り (中身は v1 のまま)、`meta.payload_upgrade_backup.vector` を 2 にする。2 回目は取らない。取得に失敗すると起動が止まり、記録は残らない。古い版の行が無ければ取らない |
 | v1 の `text` | v1 の `text` が今の抽出と違っても (`a  b` など)、アセットの `text` を SVG から求め直して変換する (契約データ `stale-v1-text`) |
@@ -26,10 +26,13 @@ SVG-Edit (ADR-0021) の時の検証記録は、このファイルの git の履�
 | 古いエクスポートファイル | 切替前のアプリが書き出した JSON (vector は payload v1。契約データの 4 例: SVG-Edit の文書、`viewBox` だけ、大きさなし、U+0085 を含む文字) を取り込むと、v2 で入る |
 | 一覧・検索 | 大きな埋め込み SVG を持つ v2 を保存しても、一覧は payload を返さず、検索は `text` の先頭 120 文字だけを返す |
 | 書き出し (`vector_write_file`) | SVG は取込用の SVG ポリシーを当てず、大きさ (28 MiB = 29,360,128 bytes ちょうどは書け、1 バイト超えと空は拒否) と、XML として整形式でルートの要素が `svg` 1 つであることを確かめる (ルートの `lang`・`xml:lang`・`style`、XML 宣言、CDATA は通る。閉じていない、ルートが 2 つ・`svg` でない、ルートの外の文字、未定義の実体参照、重なった属性は拒否)。`data:image/svg+xml` の `<image>` を含む SVG を書ける。失敗しても既存のファイルは変わらない。PNG は今までどおり |
-| 画面 (jsdom、`VectorWorkspacePage.test.tsx`) | 読み込みと全体表示、v1 から変換した作品、読めない payload、変換できない作品と「元の SVG を書き出す」(取り消し、失敗の理由、削除の確認の文)、保存 (保存した時点の revision、保存中の編集、本文の編集と進行中のジェスチャーの確定、保存できない文書)、未保存の確認 (新規、本文の編集中、作品の切替、画面の移動、ウィンドウを閉じる、削除)、確認のモーダルの間にキャンバスがキーを取らないこと、取込 (登録、SVG と draw.io の知らせ、取込中の切替の禁止、OS からのドロップ、読めないファイル)、書き出しの登録と外し。画面の接続のレビューを受けて: 入力欄に打っただけの値 (blur の前) を ⌘N・⌘S・閉じる要求・同じ URL への開き直しの前に文書へ入れる、ドラッグの途中の ⌘S・⌘N を受けずドラッグが続く、ドラッグの途中の閉じる要求と画面の移動はドラッグを取り消してから確かめる、閉じるのに失敗しても以後の確認が効く、確認のモーダルの間のドロップを置かない、読めない作品・変換できない作品で ⌘S が保存しない、読み込みの途中の切替で古い結果を開かない、未保存を revision で判定する、StrictMode で作品を 1 回だけ読む、入口のリダイレクト、変換できない作品の削除。各テストは、対応する実装を外すと失敗することを確かめた |
+| 画面 (jsdom、`VectorWorkspacePage.test.tsx`) | 読み込みと全体表示、v1 から変換した作品、読めない payload、変換できない作品と「元の SVG を書き出す」(取り消し、失敗の理由、削除の確認の文)、保存 (保存した時点の revision、保存中の編集、本文の編集と進行中のジェスチャーの確定、保存できない文書)、未保存の確認 (新規、本文の編集中、作品の切替、画面の移動、ウィンドウを閉じる、削除)、確認のモーダルの間にキャンバスがキーを取らないこと、取込 (登録、SVG と draw.io の知らせ、取込中の切替の禁止、OS からのドロップ、読めないファイル)、書き出しの登録と外し。画面の接続のレビューを受けて: 入力欄に打っただけの値 (blur の前) を ⌘N・⌘S・閉じる要求・同じ URL への開き直しの前に文書へ入れる、ドラッグの途中の ⌘S・⌘N を受けずドラッグが続く、ドラッグの途中の閉じる要求と画面の移動はドラッグを取り消してから確かめる、閉じるのに失敗しても以後の確認が効く、確認のモーダルの間のドロップを置かない、読めない作品・変換できない作品で ⌘S が保存しない、読み込みの途中の切替で古い結果を開かない、未保存を revision で判定する、StrictMode で作品を 1 回だけ読む、入口のリダイレクト、変換できない作品の削除。各テストは、対応する実装を外すと失敗することを確かめた。照合のレビューを受けて: ⌘S と ⌘N →「戻る」の後もフォーカスが欄に残る (Backspace が図形を消さない)、範囲外の値で欄を赤くする、レイヤー名の欄で ⌘S が効く、ルーラーからの引き出しの途中の ⌘S と閉じる要求 (これらも、実装を外すと失敗することを確かめた) |
 | 設定の画面 (`SettingsPage.test.tsx`) | エクスポートの完了に、元の形式のまま書き出した作品 (タイトル、モジュール、ID、理由) を出す。無ければ出さない |
 | `prepare:drawio` (`prepare-assets.test.mjs`) | 前の版の作業フォルダに残った SVG-Edit の生成物 (`.generated/public/svgedit/`、`licenses/svgedit/`、`.svgedit-stamp.json`) を消し、ほかは残す |
-| `canvasIo.test.ts` | ファイル選択の種類、SVG と画像の読み分け、エラーの理由、ファイルごとの保存ダイアログ (2 つ目から直前のフォルダ、取り消しで止める、2 つ目以降で失敗したら書いた数と理由を返す)、ドロップの位置 (macOS は point のまま Retina でも割らない、Windows は物理 px を `devicePixelRatio` で割る → ページ座標) |
+| SVG ポリシーの文字 (`validation-fixtures.json`、`payload-v2.json`) | XML 1.0 の Char にない文字 (制御文字、U+FFFF、`&#x1;`、`&#0;`、`&#xFFFE;`、属性の中の `&#x8;`) と、U+0085 をそのまま書いた SVG を、Rust と TypeScript の両方が拒否する。`&#x85;` と、タブ・改行は両方が通し、同じ文字を抽出する。こうした文字を含む v1 は変換を失敗にして v1 のまま残す |
+| 起動とリストア (`lib.rs`) | 起動の手順 (`prepare_storage`) が v1 の行のある DB で `pre-payload-vector-v2` を取り、行は変えない。2 回目は取らない。記録の無いバックアップをリストアしたら、もう一度取る |
+| `windowClose.test.ts` | 確認済みの閉じ直しの後に `destroy()` が失敗してウィンドウが残っても、次の閉じる要求はまた確かめる |
+| `canvasIo.test.ts` | ファイル選択の種類、SVG と画像の読み分け、エラーの理由、ファイルごとの保存ダイアログ (2 つ目から直前のフォルダ、取り消しで止める、2 つ目以降で書き込みか保存ダイアログが失敗したら書いた数と理由を返す)、ドロップの位置 (macOS は point のまま Retina でも割らない、Windows は物理 px を `devicePixelRatio` で割る → ページ座標) |
 
 ## 開発用の画面 (Vite) での確認
 
@@ -82,7 +85,9 @@ CI の portable ZIP は普段のアプリと同じ identifier (`com.zredjet.mymt
 - [ ] 色の選択、ピンチでのズーム
 - [ ] 画像と埋め込み SVG を含む文書の PNG の書き出し
 - [ ] ファイル選択での取込と、Finder からのドロップ (Retina のディスプレイで、ドロップした位置に置かれる。UI スケール 100% 以外でも)
-- [ ] プロパティの数値欄に打ったまま (Enter を押さずに) Cmd+N / Cmd+Q / 作品の切替をすると、未保存の確認が出る。Cmd+S は打った値を含めて保存する
+- [ ] プロパティの数値欄に打ったまま (Enter を押さずに) Cmd+N / Cmd+Q / 作品の切替をすると、未保存の確認が出る。Cmd+S は打った値を含めて保存し、保存の後も欄で打ち続けられる (続けて押した Backspace や矢印が図形に効かない)。確認を「戻る」で閉じても欄に戻る
+- [ ] レイヤー名を変えている途中に Cmd+S で保存できる。範囲外の値 (幅に -5 など) を打つと、欄が赤くなる
+- [ ] ルーラーからガイド線を引き出している途中に Cmd+S を押しても保存せず、Cmd+Q の確認を「戻る」で閉じても作りかけのガイド線が残らない
 - [ ] 図形をドラッグしている途中に Cmd+S を押しても保存せず、ドラッグが続く
 - [ ] 未保存や削除の確認のモーダルの間に、Delete や Space などがキャンバスに効かない
 - [ ] 検索 (⌘K) で作品が見つかり、開ける
@@ -90,24 +95,25 @@ CI の portable ZIP は普段のアプリと同じ identifier (`com.zredjet.mymt
 
 ### 切替前の JSON を取り込む (データフォルダを一時的に退避する)
 
-普段のデータに取り込むと作品が重なるので、空のデータフォルダで確かめる。
+普段のデータに取り込むと作品が重なるので、空のデータフォルダで確かめる。**`rm -rf` は使わない** (退避が済んでいないときに本物のデータフォルダと `backups/` を消さないため)。下のコマンドは、退避の状態を確かめてからだけ動く形にしてある (macOS。`D` はデータフォルダの親)。
 
 1. アプリを終了する
-2. データフォルダの名前を変えて退避する (macOS の例)
+2. 前の確認の退避 (`com.zredjet.mymtools.keep`) が残っていないことを確かめてから、データフォルダを退避する。残っていれば何もせずに止まる (先に中身を確かめて片付ける)
 
    ```sh
-   mv ~/Library/Application\ Support/com.zredjet.mymtools ~/Library/Application\ Support/com.zredjet.mymtools.keep
+   D="$HOME/Library/Application Support"; [ ! -e "$D/com.zredjet.mymtools.keep" ] && mv "$D/com.zredjet.mymtools" "$D/com.zredjet.mymtools.keep" && echo 退避しました
    ```
 
-3. 新しい版を起動する (空のデータで始まる)
+3. 「退避しました」が出たことを確かめて、新しい版を起動する (空のデータで始まる)
 4. 設定 > データの可搬 >「JSON からインポート」で、上の「確認の前に」の 2. の JSON を取り込む
 - [ ] 取り込みの結果に失敗が無く (変換できない作品があればその件数だけ失敗)、キャンバスの作品が開け、見た目が残っている
-5. アプリを終了し、空から作ったフォルダを消して、退避したフォルダを戻す
+5. アプリを終了し、空から作ったフォルダに日時を付けて名前を変え、退避したフォルダを戻す。退避したフォルダがあるときだけ動く
 
    ```sh
-   rm -rf ~/Library/Application\ Support/com.zredjet.mymtools
-   mv ~/Library/Application\ Support/com.zredjet.mymtools.keep ~/Library/Application\ Support/com.zredjet.mymtools
+   D="$HOME/Library/Application Support"; [ -d "$D/com.zredjet.mymtools.keep" ] && mv "$D/com.zredjet.mymtools" "$D/com.zredjet.mymtools.empty-$(date +%Y%m%d-%H%M%S)" && mv "$D/com.zredjet.mymtools.keep" "$D/com.zredjet.mymtools" && echo 戻しました
    ```
+
+6. 「戻しました」が出たことを確かめる。`com.zredjet.mymtools.empty-…` (取り込んだ写し) は、確かめ終わったら自分で消す
 
 ### そのほか未実施
 
