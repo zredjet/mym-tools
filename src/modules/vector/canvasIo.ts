@@ -16,6 +16,7 @@ import {
 import { formatInvokeError } from "@/lib/error";
 import type { ImportedFile, ImportFileReader } from "./editor/assets";
 import { sanitizeFileStem, type ExportWriter } from "./editor/export";
+import { IS_MAC } from "./editor/canvas/input";
 import { screenToPage } from "./editor/canvas/viewport";
 import type { Point } from "./editor/model/types";
 import type { Viewport } from "./editor/state/types";
@@ -104,6 +105,7 @@ export function siblingPath(previous: string, name: string): string {
 /**
  * 書き出したファイルを保存する。ファイルごとに保存ダイアログを出し (上書きの確認は OS のダイアログに
  * 任せる)、2 つ目からは直前に選んだフォルダを既定にする。取り消したら、そこで止めて書いた数を返す。
+ * 書き込みに失敗したら、そこで止めて、それまでに書いた数と理由を返す (1 つ目で失敗したら reject する)。
  */
 export const writeExportFiles: ExportWriter = async (files) => {
   let written = 0;
@@ -117,7 +119,8 @@ export const writeExportFiles: ExportWriter = async (files) => {
     try {
       await vectorWriteFile(path, file.format, file.data);
     } catch (cause) {
-      throw readableError(cause);
+      if (written === 0) throw readableError(cause);
+      return { written, error: describeInvokeError(cause) };
     }
     written += 1;
     previous = path;
@@ -145,20 +148,28 @@ export async function exportOriginalSvg(itemId: string, title: string): Promise<
 }
 
 /**
- * OS からドロップした位置 (Tauri の `onDragDropEvent` の位置。webview の左上からの物理 px) を、
+ * OS からドロップした位置 (Tauri の `onDragDropEvent` の `position`。webview の左上から) を、
  * キャンバスのページ座標にする。キャンバスの外なら null (呼び出し側は表示範囲の中央に置く)。
- * キャンバスのポインターと同じく、`clientX - キャンバスの左上` を画面座標とする (`useCanvasInput`)。
+ *
+ * `position` の型は `PhysicalPosition` だが、単位は OS で違う (wry 0.55 / tauri-runtime-wry 2.11 で確認):
+ * - macOS: `draggingLocation` を point のまま渡す (Retina でも倍率を掛けない)。そのまま使う
+ * - Windows: `ScreenToClient` の物理 px。`devicePixelRatio` で割る
+ *
+ * 割った後の値は、同じ場所のマウスのイベントの `clientX` / `clientY` に当たる (アプリの UI スケールの
+ * `body { zoom }` は掛かっていない)。キャンバスのポインターと同じく `clientX - キャンバスの左上` を
+ * 画面座標とする (`useCanvasInput`) ので、UI スケールの扱いもポインターと同じになる。
  */
 export function dropPointOnCanvas(
   position: { x: number; y: number },
   viewport: Viewport,
   root: ParentNode = document,
   devicePixelRatio: number = window.devicePixelRatio || 1,
+  mac: boolean = IS_MAC,
 ): Point | null {
   const canvas = root.querySelector("[data-canvas-view]");
   if (!canvas) return null;
   const rect = canvas.getBoundingClientRect();
-  const ratio = devicePixelRatio > 0 ? devicePixelRatio : 1;
+  const ratio = mac || !(devicePixelRatio > 0) ? 1 : devicePixelRatio;
   const client = { x: position.x / ratio, y: position.y / ratio };
   if (
     client.x < rect.left ||

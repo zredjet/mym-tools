@@ -33,6 +33,8 @@ import {
 } from "./editor/assets";
 import { notifyImport } from "./editor/assets/importFile";
 import { getImportStatus } from "./editor/assets/status";
+import { isEditableTarget } from "./editor/canvas/input";
+import { cancelPointerDrag, isPointerDragActive } from "./editor/canvas/pointerDrag";
 import { getCanvasViewSize, zoomToFit } from "./editor/canvas/viewCommands";
 import { setExportWriter } from "./editor/export";
 import { createEmptyDocument } from "./editor/model/create";
@@ -68,10 +70,24 @@ const cleanTags = (value: string) => [
 ];
 
 /**
- * 本文の編集と、進行中のジェスチャー (色の選択など) をその場で確定する。保存と、未保存の確認の前に呼ぶ
- * (§4.2 / §4.7)。ジェスチャーを開いた側があとで更新しても、閉じたジェスチャーへの更新は無視される。
+ * 編集の途中のものを文書に入れる。保存と、未保存の確認の前に呼ぶ (§4.2 / §4.4 / §4.7)。
+ *
+ * 1. キャンバスのポインターのドラッグは、途中で確定せずに取り消す (Esc と同じ。ツールの `onCancel`)
+ * 2. エディタの中の入力欄 (プロパティの数値・色・フォント名、レイヤー名など。blur か Enter で文書に入る)
+ *    にフォーカスがあれば、blur して打ちかけの値を入れる。本文の編集欄は 3. の `commitTextEdit` に任せる
+ * 3. 本文の編集と、進行中のジェスチャー (色の選択など) を確定する。ジェスチャーを開いた側があとで
+ *    更新しても、閉じたジェスチャーへの更新は無視される
  */
 function flushEdits(): void {
+  cancelPointerDrag();
+  const focused = document.activeElement;
+  if (
+    focused instanceof HTMLElement &&
+    focused.closest("[data-canvas-editor]") !== null &&
+    !focused.matches("[data-canvas-text-editor]") &&
+    isEditableTarget(focused)
+  )
+    focused.blur();
   commitTextEdit();
   const state = editorStore.getState();
   if (state.gestureActive) state.commitGesture();
@@ -137,6 +153,8 @@ function VectorWorkspacePage({
   const busyLock = useRef(false);
   const alive = useRef(true);
   const allowNavigation = useRef(false);
+  /** 確認のモーダルが開いているか (OS からのドロップの中で見る) */
+  const modalOpenRef = useRef(false);
   const [phase, setPhase] = useState<Phase>("loading");
   const [busy, setBusy] = useState(false);
   const revision = useEditorStore((state) => state.revision);
@@ -171,9 +189,9 @@ function VectorWorkspacePage({
     ready && (revision !== baseline.revision || title !== baseline.title || tags !== baseline.tags);
 
   // 未保存の確認はイベントの中で行うので、最新の値を ref に写しておく
-  const latest = useRef({ phase, title, tags, baseline, working });
+  const latest = useRef({ phase, title, tags, baseline, working, currentId });
   useEffect(() => {
-    latest.current = { phase, title, tags, baseline, working };
+    latest.current = { phase, title, tags, baseline, working, currentId };
   });
   /** 本文の編集とジェスチャーを確定してから、未保存の変更があるか確かめる。 */
   const hasUnsavedChanges = useCallback(() => {
@@ -214,25 +232,25 @@ function VectorWorkspacePage({
     [],
   );
 
-  // New/delete and first saves keep the URL, so a later navigation to that URL
-  // does not remount this page. Reopen the route's document instead.
-  const [handledNavigation, setHandledNavigation] = useState(navigationKey);
-  if (handledNavigation !== navigationKey) {
-    setHandledNavigation(navigationKey);
-    if (currentId !== itemId) {
-      const reopen = () => {
-        setPhase("loading");
-        setError(null);
-        setFailure(null);
-        setStatus("");
-        setCurrentId(itemId);
-        setAttempt((value) => value + 1);
-      };
-      if (dirty || pendingText || working)
-        setConfirmation({ message: "未保存の変更を破棄しますか？", action: reopen });
-      else reopen();
-    }
-  }
+  // 新規・削除・最初の保存は URL を変えないので、あとでその URL へ移動してもこの画面は作り直されない。
+  // そのときは URL の作品を開き直す。編集の途中のものを入れてから (`hasUnsavedChanges`) 未保存を確かめる
+  const handledNavigation = useRef(navigationKey);
+  useEffect(() => {
+    if (handledNavigation.current === navigationKey) return;
+    handledNavigation.current = navigationKey;
+    if (latest.current.currentId === itemId) return;
+    const reopen = () => {
+      setPhase("loading");
+      setError(null);
+      setFailure(null);
+      setStatus("");
+      setCurrentId(itemId);
+      setAttempt((value) => value + 1);
+    };
+    if (latest.current.working || hasUnsavedChanges())
+      setConfirmation({ message: "未保存の変更を破棄しますか？", action: reopen });
+    else reopen();
+  }, [navigationKey, itemId, hasUnsavedChanges]);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
@@ -276,8 +294,13 @@ function VectorWorkspacePage({
       if (cancelled) return;
       known = list.find((entry) => entry.id === itemId);
       if (landing && list[0]) {
+        // 入口 (/) から直近の作品へ移すときだけ確認を飛ばす。移したら戻す (残さない)
         allowNavigation.current = true;
-        navigate(modulePath(projectId, "vector", `/edit/${list[0].id}`), { replace: true });
+        void Promise.resolve(
+          navigate(modulePath(projectId, "vector", `/edit/${list[0].id}`), { replace: true }),
+        ).finally(() => {
+          allowNavigation.current = false;
+        });
         return;
       }
       setDocuments(list);
@@ -338,12 +361,11 @@ function VectorWorkspacePage({
       shouldBlock: () =>
         !allowNavigation.current && (latest.current.working || hasUnsavedChanges()),
       onBlocked: (proceed) => {
+        // 閉じ直しの間は `windowClose.ts` の `closeConfirmed` がガードを飛ばす。閉じるのに失敗しても
+        // 以後の確認が効くよう、ここでは `allowNavigation` を立てない
         setConfirmation({
           message: "未保存の変更を破棄してウィンドウを閉じますか？",
-          action: () => {
-            allowNavigation.current = true;
-            proceed();
-          },
+          action: proceed,
         });
       },
     });
@@ -415,10 +437,12 @@ function VectorWorkspacePage({
     });
   }, [guard, openDocument]);
 
+  // ポインターのドラッグの途中は、保存と新規のキーを受けない (§4.4。ドラッグを途中で確定しない)
   useHotkeys(
     "mod+s",
     (event) => {
       event.preventDefault();
+      if (isPointerDragActive()) return;
       if (confirmation === null && blocker.state !== "blocked") void save();
     },
     { enableOnFormTags: true },
@@ -428,6 +452,7 @@ function VectorWorkspacePage({
     "mod+n",
     (event) => {
       event.preventDefault();
+      if (isPointerDragActive()) return;
       if (confirmation === null && blocker.state !== "blocked") newDocument();
     },
     { enableOnFormTags: true },
@@ -448,6 +473,14 @@ function VectorWorkspacePage({
     dropRef.current = (paths, position) => {
       const path = paths[0];
       if (path === undefined || latest.current.phase !== "ready") return;
+      // 確認のモーダルの間は受け付けない (「破棄しますか？」の裏で文書を変えない)
+      if (modalOpenRef.current) {
+        notifyImport(editorStore, {
+          tone: "error",
+          message: "確認を閉じてから、もう一度ドロップしてください。",
+        });
+        return;
+      }
       if (busyLock.current || getImportStatus().busy) {
         notifyImport(editorStore, {
           tone: "error",
@@ -498,8 +531,12 @@ function VectorWorkspacePage({
     };
   }, []);
 
-  if (!projectId) return <p>プロジェクトを選択してください。</p>;
   const modalOpen = blocker.state === "blocked" || confirmation !== null;
+  useEffect(() => {
+    modalOpenRef.current = modalOpen;
+  });
+
+  if (!projectId) return <p>プロジェクトを選択してください。</p>;
   return (
     <div className="flex h-full min-h-[560px] flex-col gap-2 px-[var(--page-pad)] py-3">
       <header className="flex flex-wrap items-center gap-2">
@@ -607,7 +644,8 @@ function VectorWorkspacePage({
           <Button
             variant="ghost"
             disabled={working}
-            onClick={() =>
+            onClick={() => {
+              flushEdits();
               setConfirmation({
                 message: failure?.rescuable
                   ? "この作品を削除しますか？ 削除すると元に戻せません。先に「元の SVG を書き出す」で中身を取り出せます。"
@@ -627,8 +665,8 @@ function VectorWorkspacePage({
                     },
                     { requireReady: false },
                   ),
-              })
-            }
+              });
+            }}
           >
             <Trash2 size={14} aria-hidden /> 削除
           </Button>

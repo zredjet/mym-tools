@@ -132,6 +132,22 @@ describe("書き出したファイルを保存する", () => {
       writeExportFiles([{ fileName: "a.png", format: "png", data: "data:image/png;base64," }]),
     ).rejects.toThrow("PNGデータが不正です。");
   });
+  it("2 つ目以降で失敗したら、そこで止めて書けた数と理由を返す", async () => {
+    dialog.save.mockResolvedValueOnce("/out/1.svg").mockResolvedValueOnce("/out/2.svg");
+    vi.mocked(vectorWriteFile)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(validation("書き出す SVG の XML が不正です: x"));
+    const files = ["1", "2", "3"].map((name) => ({
+      fileName: `${name}.svg`,
+      format: "svg" as const,
+      data: "<svg/>",
+    }));
+    await expect(writeExportFiles(files)).resolves.toEqual({
+      written: 1,
+      error: "書き出す SVG の XML が不正です: x",
+    });
+    expect(dialog.save).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("OS からのドロップの位置", () => {
@@ -143,17 +159,34 @@ describe("OS からのドロップの位置", () => {
     document.body.append(canvas);
   }
 
-  it("物理 px をキャンバスの画面座標にし、ページ座標へ直す", () => {
+  it("Windows: 物理 px を devicePixelRatio で割ってキャンバスの画面座標にし、ページ座標へ直す", () => {
     canvasAt(100, 50, 400, 300);
     // devicePixelRatio 2 で (300, 200) は CSS px で (150, 100)。キャンバスの中で (50, 50)
-    expect(dropPointOnCanvas({ x: 300, y: 200 }, { x: 10, y: 20, zoom: 2 }, document, 2)).toEqual({
-      x: 35,
-      y: 45,
-    });
+    expect(
+      dropPointOnCanvas({ x: 300, y: 200 }, { x: 10, y: 20, zoom: 2 }, document, 2, false),
+    ).toEqual({ x: 35, y: 45 });
+    // devicePixelRatio 1.5 (表示の拡大 150%)
+    expect(
+      dropPointOnCanvas({ x: 225, y: 150 }, { x: 0, y: 0, zoom: 1 }, document, 1.5, false),
+    ).toEqual({ x: 50, y: 50 });
+  });
+  it("macOS: 位置は point のままなので、Retina (devicePixelRatio 2) でも割らない", () => {
+    canvasAt(100, 50, 400, 300);
+    // (150, 100) は Retina でもそのまま CSS px。キャンバスの中で (50, 50)
+    expect(
+      dropPointOnCanvas({ x: 150, y: 100 }, { x: 10, y: 20, zoom: 2 }, document, 2, true),
+    ).toEqual({ x: 35, y: 45 });
+    expect(
+      dropPointOnCanvas({ x: 150, y: 100 }, { x: 0, y: 0, zoom: 1 }, document, 1, true),
+    ).toEqual({ x: 50, y: 50 });
   });
   it("キャンバスの外やキャンバスがないときは null", () => {
     expect(dropPointOnCanvas({ x: 0, y: 0 }, { x: 0, y: 0, zoom: 1 }, document, 1)).toBeNull();
     canvasAt(100, 50, 400, 300);
     expect(dropPointOnCanvas({ x: 20, y: 60 }, { x: 0, y: 0, zoom: 1 }, document, 1)).toBeNull();
+    // Retina の macOS で、割ると中に入るが point のままでは外
+    expect(
+      dropPointOnCanvas({ x: 600, y: 200 }, { x: 0, y: 0, zoom: 1 }, document, 2, true),
+    ).toBeNull();
   });
 });

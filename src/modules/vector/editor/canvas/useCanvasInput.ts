@@ -40,6 +40,7 @@ import {
 } from "./input";
 import { runShortcut, type Shortcut } from "./shortcuts";
 import { applyWheel, zoomAt, type Size } from "./viewport";
+import { registerPointerDrag } from "./pointerDrag";
 
 /** ツールへ渡さない要素 (ルーラー、本文の編集欄など) に付ける属性。 */
 export const CANVAS_IGNORE_ATTR = "data-canvas-ignore";
@@ -166,6 +167,21 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
 
   // ---- 画面から外れるとき ----
   useEffect(() => cancelAll, [cancelAll]);
+
+  // ---- 画面 (エディタの外) からのドラッグの確認と取消 (`pointerDrag.ts`) ----
+  useEffect(
+    () =>
+      registerPointerDrag({
+        isActive: () => active.current !== null,
+        // Esc と同じ: ツールの onCancel を呼び、ツールが取り消さなくても文書を戻す
+        cancel: () => {
+          if (!cancelActive()) return false;
+          if (store.getState().gestureActive) store.getState().cancelGesture();
+          return true;
+        },
+      }),
+    [store, cancelActive],
+  );
 
   // ---- フォーカス喪失 ----
   useEffect(() => {

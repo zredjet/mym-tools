@@ -91,6 +91,7 @@ function addRect(id = "r1") {
 async function start(path = "/projects/p1/m/vector/new", strict = false) {
   const router = createMemoryRouter(
     [
+      { path: "/projects/:projectId/m/vector", element: <VectorWorkspaceRoute /> },
       { path: "/projects/:projectId/m/vector/new", element: <VectorWorkspaceRoute /> },
       { path: "/projects/:projectId/m/vector/edit/:itemId", element: <VectorWorkspaceRoute /> },
       { path: "/elsewhere", element: <p>別画面</p> },
@@ -120,6 +121,30 @@ const pressMod = (key: string) =>
     ctrlKey: true,
   });
 const saveButton = () => screen.getByRole("button", { name: /保存/ });
+const canvas = () => document.querySelector<HTMLElement>("[data-canvas-view]")!;
+const pointer = (x: number, y: number) => ({ pointerId: 1, button: 0, clientX: x, clientY: y });
+/** 矩形ツールでドラッグを始め、途中まで動かす (離さない)。 */
+function startRectDrag() {
+  act(() => state().setTool("rect"));
+  fireEvent.pointerDown(canvas(), pointer(100, 100));
+  fireEvent.pointerMove(canvas(), pointer(160, 150));
+  expect(state().gestureActive).toBe(true);
+}
+/** 矩形を選んで、プロパティの X 座標の欄に打つ (フォーカスを残したまま、blur しない)。 */
+function typeX(value: string) {
+  act(() => state().setSelection(["r1"]));
+  const field = screen.getByLabelText("X 座標");
+  act(() => field.focus());
+  fireEvent.change(field, { target: { value } });
+  expect(document.activeElement).toBe(field);
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 beforeEach(() => {
   resetWindowCloseCoordinatorForTest();
@@ -188,9 +213,32 @@ describe("読み込み", () => {
     // 新規と削除はできる
     expect(screen.getByRole("button", { name: "新規" })).toBeEnabled();
     expect(screen.getByRole("button", { name: /削除/ })).toBeEnabled();
+    // ⌘S でも保存しない (読めない作品を上書きしない)
+    pressMod("s");
+    await flush();
+    expect(items.updateItem).not.toHaveBeenCalled();
+    expect(items.createItem).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "新規" }));
     expect(editor()).not.toBeNull();
     expect(items.updateItem).not.toHaveBeenCalled();
+  });
+
+  it("読めない作品と変換できない作品は、⌘S で保存せず、削除はできる", async () => {
+    vi.mocked(items.listItemSummaries).mockResolvedValue([summary("broken", "古い作品")]);
+    vi.mocked(items.getItem).mockRejectedValue({
+      code: "payload_upgrade_failed",
+      message: { module_id: "vector", reason: "SVG が今の検証を通りません: script" },
+    });
+    await start("/projects/p1/m/vector/edit/broken");
+    pressMod("s");
+    await flush();
+    expect(items.updateItem).not.toHaveBeenCalled();
+    expect(items.createItem).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /削除/ }));
+    fireEvent.click(screen.getByRole("button", { name: "続行" }));
+    await flush();
+    expect(items.deleteItem).toHaveBeenCalledWith({ moduleId: "vector", itemId: "broken" });
+    expect(editor()).not.toBeNull();
   });
 
   it("v1 から変換できなかった作品は、理由を出して開かない", async () => {
@@ -264,6 +312,57 @@ describe("読み込み", () => {
     expect(items.listItemSummaries).toHaveBeenCalledWith({ projectId: "p1", moduleId: "vector" });
     expect(editor()).not.toBeNull();
     expect(screen.getByLabelText("タイトル")).toHaveValue("新しいキャンバス");
+    expect(Object.keys(state().doc.nodes)).toEqual([]);
+  });
+
+  it("StrictMode でも、作品の読み込みは 1 回だけ", async () => {
+    vi.mocked(items.listItemSummaries).mockResolvedValue([summary("a1", "既存")]);
+    vi.mocked(items.getItem).mockResolvedValue(item("a1", "既存", fixturePayload("full")));
+    await start("/projects/p1/m/vector/edit/a1", true);
+    expect(items.getItem).toHaveBeenCalledTimes(1);
+    expect(editor()).not.toBeNull();
+    expect(screen.getByLabelText("タイトル")).toHaveValue("既存");
+    expect(state().revision).toBe(0);
+  });
+
+  it("入口は直近の作品へ移し、移した後も未保存の確認は効く", async () => {
+    vi.mocked(items.listItemSummaries).mockResolvedValue([
+      summary("a1", "直近"),
+      summary("a2", "前"),
+    ]);
+    vi.mocked(items.getItem).mockResolvedValue(item("a1", "直近", fixturePayload("empty")));
+    const { router } = await start("/projects/p1/m/vector");
+    await flush();
+    expect(router.state.location.pathname).toBe("/projects/p1/m/vector/edit/a1");
+    expect(items.getItem).toHaveBeenCalledWith({ moduleId: "vector", itemId: "a1" });
+    addRect();
+    await act(async () => {
+      void router.navigate("/elsewhere");
+    });
+    expect(screen.getByRole("dialog")).toHaveTextContent("未保存の変更を破棄して移動しますか？");
+  });
+
+  it("読み込みの途中で作品を切り替えたら、古い作品の結果を開かない", async () => {
+    vi.mocked(items.listItemSummaries).mockResolvedValue([
+      summary("a1", "古い"),
+      summary("a2", "新しい"),
+    ]);
+    const slow = deferred<Item>();
+    vi.mocked(items.getItem).mockImplementation(({ itemId }) =>
+      itemId === "a1"
+        ? slow.promise
+        : Promise.resolve(item("a2", "新しい", fixturePayload("empty"))),
+    );
+    const { router } = await start("/projects/p1/m/vector/edit/a1");
+    expect(screen.getByText("作品を読み込んでいます…")).toBeVisible();
+    await act(async () => {
+      await router.navigate("/projects/p1/m/vector/edit/a2");
+    });
+    await flush();
+    expect(screen.getByLabelText("タイトル")).toHaveValue("新しい");
+    slow.resolve(item("a1", "古い", fixturePayload("full")));
+    await flush();
+    expect(screen.getByLabelText("タイトル")).toHaveValue("新しい");
     expect(Object.keys(state().doc.nodes)).toEqual([]);
   });
 
@@ -402,6 +501,155 @@ describe("未保存の確認", () => {
     expect(state().doc.nodes).not.toHaveProperty("r1");
     expect(state().revision).toBe(0);
     expect(screen.getByText("保存済み")).toBeVisible();
+  });
+
+  it("未保存は revision で判定する (タイトルとタグが同じでも)", async () => {
+    vi.mocked(items.getItem).mockResolvedValue(item("a1", "既存", fixturePayload("full")));
+    await start("/projects/p1/m/vector/edit/a1");
+    // 文書を変えない操作 (選択、表示位置) では未保存にならない
+    act(() => {
+      state().setSelection(Object.keys(state().doc.nodes).slice(0, 1));
+      state().setViewport({ x: 5, y: 5, zoom: 2 });
+    });
+    expect(screen.getByText("保存済み")).toBeVisible();
+    addRect();
+    expect(screen.getByLabelText("タイトル")).toHaveValue("既存");
+    expect(screen.getByText("未保存", { exact: true })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "新規" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("未保存の変更を破棄しますか？");
+  });
+
+  it("入力欄に打っただけの値も、確認と保存の前に文書へ入れる", async () => {
+    await start();
+    addRect();
+    fireEvent.click(saveButton());
+    await flush();
+    expect(screen.getByText("保存済み")).toBeVisible();
+    // ⌘N: 値を入れてから未保存を確かめる
+    typeX("200");
+    pressMod("n");
+    expect(screen.getByRole("dialog")).toHaveTextContent("未保存の変更を破棄しますか？");
+    expect(state().doc.nodes["r1"]).toMatchObject({ x: 200 });
+    fireEvent.click(screen.getByRole("button", { name: "戻る" }));
+    // ⌘S: 打った値を含めて保存する
+    typeX("300");
+    pressMod("s");
+    await flush();
+    expect(items.updateItem).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        itemId: "created",
+        payload: expect.objectContaining({
+          nodes: expect.objectContaining({ r1: expect.objectContaining({ x: 300 }) }),
+        }),
+      }),
+    );
+    expect(screen.getByText("保存済み")).toBeVisible();
+  });
+
+  it("入力欄に打っただけの値があれば、ウィンドウを閉じる要求を止める", async () => {
+    native.enabled = true;
+    const uninstall = installWindowCloseCoordinator();
+    await start();
+    addRect();
+    fireEvent.click(saveButton());
+    await flush();
+    typeX("200");
+    const handler = native.onCloseRequested.mock.calls[0]![0];
+    const event = { preventDefault: vi.fn() };
+    await act(async () => {
+      await handler(event);
+    });
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(screen.getByRole("dialog")).toHaveTextContent("ウィンドウを閉じますか？");
+    uninstall();
+  });
+
+  it("同じ URL へ開き直すときも、入力欄に打っただけの値を入れてから確かめる", async () => {
+    vi.mocked(items.listItemSummaries).mockResolvedValue([summary("a1", "既存")]);
+    vi.mocked(items.getItem).mockResolvedValue(item("a1", "既存", fixturePayload("empty")));
+    const { router } = await start("/projects/p1/m/vector/edit/a1");
+    fireEvent.click(screen.getByRole("button", { name: "新規" }));
+    addRect();
+    fireEvent.click(saveButton());
+    await flush();
+    expect(items.createItem).toHaveBeenCalledOnce();
+    typeX("200");
+    await act(async () => {
+      await router.navigate("/projects/p1/m/vector/edit/a1");
+    });
+    await flush();
+    expect(screen.getByRole("dialog")).toHaveTextContent("未保存の変更を破棄しますか？");
+    expect(state().doc.nodes["r1"]).toMatchObject({ x: 200 });
+    expect(items.getItem).toHaveBeenCalledTimes(1);
+  });
+
+  it("ウィンドウを閉じるのに失敗しても、以後の未保存の確認は効く", async () => {
+    native.enabled = true;
+    native.close.mockRejectedValueOnce(new Error("close failed"));
+    const uninstall = installWindowCloseCoordinator();
+    const { router } = await start();
+    addRect();
+    const handler = native.onCloseRequested.mock.calls[0]![0];
+    const first = { preventDefault: vi.fn() };
+    await act(async () => {
+      await handler(first);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "続行" }));
+    await flush();
+    expect(native.close).toHaveBeenCalledOnce();
+    // 閉じられなかった。次の閉じる要求も、画面の移動も確かめる
+    const second = { preventDefault: vi.fn() };
+    await act(async () => {
+      await handler(second);
+    });
+    expect(second.preventDefault).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "戻る" }));
+    await act(async () => {
+      void router.navigate("/elsewhere");
+    });
+    expect(screen.getByRole("dialog")).toHaveTextContent("未保存の変更を破棄して移動しますか？");
+    uninstall();
+  });
+
+  it("ドラッグの途中は ⌘S と ⌘N を受けず、ドラッグは続く", async () => {
+    await start();
+    startRectDrag();
+    pressMod("s");
+    pressMod("n");
+    await flush();
+    expect(items.createItem).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(state().gestureActive).toBe(true);
+    fireEvent.pointerMove(canvas(), pointer(200, 180));
+    fireEvent.pointerUp(canvas(), pointer(200, 180));
+    const rects = Object.values(state().doc.nodes).filter((node) => node.type === "rect");
+    expect(rects).toEqual([expect.objectContaining({ width: 100, height: 80 })]);
+  });
+
+  it("ドラッグの途中の閉じる要求と画面の移動は、ドラッグを取り消してから確かめる", async () => {
+    native.enabled = true;
+    const uninstall = installWindowCloseCoordinator();
+    const { router } = await start();
+    addRect();
+    startRectDrag();
+    const handler = native.onCloseRequested.mock.calls[0]![0];
+    const event = { preventDefault: vi.fn() };
+    await act(async () => {
+      await handler(event);
+    });
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    // 作りかけの矩形は残さない (途中で確定しない)
+    expect(state().gestureActive).toBe(false);
+    expect(Object.keys(state().doc.nodes)).toEqual(["r1"]);
+    fireEvent.click(screen.getByRole("button", { name: "戻る" }));
+    startRectDrag();
+    await act(async () => {
+      void router.navigate("/elsewhere");
+    });
+    expect(screen.getByRole("dialog")).toHaveTextContent("未保存の変更を破棄して移動しますか？");
+    expect(state().gestureActive).toBe(false);
+    expect(Object.keys(state().doc.nodes)).toEqual(["r1"]);
+    uninstall();
   });
 
   it("本文の編集中は、確定してから未保存を確かめる", async () => {
@@ -556,6 +804,25 @@ describe("取込と書き出し", () => {
     expect(Object.values(state().doc.nodes)).toEqual([
       expect.objectContaining({ type: "svg", name: "a" }),
     ]);
+  });
+
+  it("確認のモーダルの間にドロップしたファイルは、知らせを出して置かない", async () => {
+    native.enabled = true;
+    await start();
+    addRect();
+    fireEvent.click(screen.getByRole("button", { name: "新規" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    const listener = webview.onDragDropEvent.mock.calls[0]![0];
+    const revision = state().revision;
+    act(() =>
+      listener({ payload: { type: "drop", paths: ["/tmp/a.svg"], position: { x: 1, y: 1 } } }),
+    );
+    await flush();
+    expect(vectorReadFile).not.toHaveBeenCalled();
+    expect(state().revision).toBe(revision);
+    expect(
+      screen.getByText("確認を閉じてから、もう一度ドロップしてください。"),
+    ).toBeInTheDocument();
   });
 
   it("ドロップしたファイルが読めなければ、理由を知らせて文書を変えない", async () => {

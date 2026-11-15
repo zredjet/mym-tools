@@ -27,12 +27,17 @@ export interface ExportFile {
 export interface ExportWriteResult {
   /** 書き込んだファイルの数。利用者が保存ダイアログを取り消したら、それまでに書いた数 (0 もありうる) */
   written: number;
+  /**
+   * 途中のファイルで書き込みに失敗して止めたときの理由。それまでに書いたファイルの数は `written`。
+   * 1 つも書けずに失敗したときは、これを返さずに reject する
+   */
+  error?: string;
 }
 
 /**
  * ファイルを書き込む関数。1 回の書き出しのファイルをまとめて受け取る
  * (1 つずつ保存ダイアログを出すか、フォルダを選ぶかは、この関数が決める)。
- * 書き込みに失敗したら reject する。
+ * 1 つも書けずに失敗したら reject する。途中のファイルで失敗したら、書いた数と理由 (`error`) を返す。
  */
 export type ExportWriter = (files: readonly ExportFile[]) => Promise<ExportWriteResult>;
 

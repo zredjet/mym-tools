@@ -117,6 +117,17 @@ describe("ExportSection", () => {
     );
   });
 
+  it("途中のファイルで失敗したら、理由と書けた数を出す", async () => {
+    // 1 つ目は書けて、2 つ目で失敗した (canvasIo.ts の writeExportFiles の返し方)
+    setExportWriter(async (files) => ({ written: files.length - 1, error: "disk full" }));
+    act(() => state().setSelection(["fa", "fb"]));
+    render(<ExportSection />);
+    fireEvent.click(exportButton());
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "書き出しに失敗しました: disk full (2 ファイルのうち 1 ファイルは書き出しました)",
+    );
+  });
+
   it("書き出しの途中で選択が変わっても、失敗を表示する。失敗は形式を変えても残る", async () => {
     let fail: (error: Error) => void = () => {};
     setExportWriter(
