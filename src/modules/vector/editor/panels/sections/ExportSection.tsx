@@ -84,6 +84,11 @@ type Status =
     }
   | { kind: "error"; message: string };
 
+/** 文書の言語 (`<html lang>`)。文字幅の計測と同じく、画面の言語で書き出す。 */
+function documentLanguage(): string | undefined {
+  return typeof document === "undefined" ? undefined : document.documentElement.lang || undefined;
+}
+
 function doneMessage(written: number, total: number): string {
   if (written === 0) return "書き出しを取り消しました。";
   if (written < total) return `${total} ファイルのうち ${written} ファイルを書き出しました。`;
@@ -142,6 +147,7 @@ export function ExportSection() {
         format,
         scale,
         measurer: canvasTextMeasurer,
+        lang: documentLanguage(),
       });
       // 成功の表示は、終えた時点の対象に結び付ける (押してから選択が変わっていても結果は出し、
       // そのあと対象・形式・倍率のどれかを変えたら消す)

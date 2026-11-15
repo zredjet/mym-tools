@@ -23,6 +23,8 @@ export interface BuildFilesOptions {
   /** PNG の倍率。SVG では使わない */
   scale: ExportScale;
   measurer: TextMeasurer;
+  /** 文書の言語 (`<html lang>` の値)。SVG のルートに付ける (`exportLanguageAttrs`) */
+  lang?: string | undefined;
   /** PNG を描く関数 (テストで差し替える)。既定は `renderPng` */
   render?: (svg: string, width: number, height: number) => Promise<string>;
 }
@@ -39,7 +41,7 @@ export async function buildExportFiles(
   options: BuildFilesOptions,
 ): Promise<ExportFile[]> {
   if (!plan.ok) throw new ExportError(plan.reason);
-  const { format, scale, measurer } = options;
+  const { format, scale, measurer, lang } = options;
   const names = uniqueFileNames(
     plan.targets.map((target) => target.name),
     format,
@@ -47,7 +49,7 @@ export async function buildExportFiles(
 
   if (format === "svg") {
     return plan.targets.map((target, index) => {
-      const data = buildExportSvg(doc, target, { measurer });
+      const data = buildExportSvg(doc, target, { measurer, lang });
       const problem = checkExportSvg(data);
       if (problem) throw new ExportError(problem);
       return { fileName: names[index] ?? "", format, data };
@@ -66,7 +68,7 @@ export async function buildExportFiles(
     const size = sizes[index];
     if (!size) continue;
     // 画像としての大きさを書き出す大きさにそろえる (倍率は整数なので範囲の整数 × 倍率と一致する)
-    const svg = buildExportSvg(doc, target, { measurer, scale });
+    const svg = buildExportSvg(doc, target, { measurer, scale, lang });
     // 中間の SVG はファイルにしないので大きさは見ない (上限は PNG の大きさで確かめる)
     const problem = checkExportSvg(svg, null);
     if (problem) throw new ExportError(problem);

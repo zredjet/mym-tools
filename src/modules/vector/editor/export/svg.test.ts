@@ -13,6 +13,7 @@ import {
   buildExportSvg,
   checkExportSvg,
   EXPORT_ID_PREFIX,
+  exportLanguageAttrs,
   MAX_EXPORT_SVG_BYTES,
   utf8ByteLength,
 } from "./svg";
@@ -55,6 +56,26 @@ describe("buildExportSvg", () => {
     expect(root.getAttribute("width")).toBe("40");
     expect(root.getAttribute("height")).toBe("30");
     expect(root.getAttribute("viewBox")).toBe("150 70 40 30");
+  });
+
+  it("言語を渡せば、ルートに lang・xml:lang・-webkit-locale を付ける", () => {
+    const doc = deepFreeze(exportDocument());
+    const svg = buildExportSvg(doc, onlyTarget(doc, ["fn"]), { measurer, lang: "ja" });
+    expect(svg).toMatch(
+      /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" lang="ja" xml:lang="ja" style="-webkit-locale:&quot;ja&quot;" width="40"/,
+    );
+    const root = parse(svg).documentElement;
+    expect(root.getAttribute("lang")).toBe("ja");
+    expect(root.getAttributeNS("http://www.w3.org/XML/1998/namespace", "lang")).toBe("ja");
+    expect(root.getAttribute("style")).toBe('-webkit-locale:"ja"');
+  });
+
+  it("言語がなければ、言語の属性を付けない", () => {
+    const doc = deepFreeze(exportDocument());
+    for (const lang of [undefined, "", "  "]) {
+      const svg = buildExportSvg(doc, onlyTarget(doc, ["fn"]), { measurer, lang });
+      expect(svg).not.toMatch(/lang=|style=/);
+    }
   });
 
   it("ノードは画面と同じ buildNodeSvg の結果を、親の座標系の原点へ移して置く", () => {
@@ -248,5 +269,32 @@ describe("utf8ByteLength / checkExportSvg", () => {
       "SVG は 28 MiB 以下にしてください。",
     );
     expect(checkExportSvg("\uD800")).toBe("SVG に UTF-8 にできない文字があります。");
+  });
+});
+
+describe("exportLanguageAttrs", () => {
+  it("言語タグの形なら 3 つの属性にする (前後の空白は除く)", () => {
+    expect(exportLanguageAttrs("ja")).toEqual({
+      lang: "ja",
+      "xml:lang": "ja",
+      style: '-webkit-locale:"ja"',
+    });
+    expect(exportLanguageAttrs(" zh-Hant-TW ")["lang"]).toBe("zh-Hant-TW");
+    expect(exportLanguageAttrs("en-US")["style"]).toBe('-webkit-locale:"en-US"');
+  });
+
+  it("言語タグの形でなければ付けない (CSS や属性を壊す文字を入れない)", () => {
+    for (const lang of [
+      undefined,
+      "",
+      "ja_JP",
+      'ja";color:red',
+      "ja jp",
+      "-ja",
+      "ja-",
+      "toolongtag",
+    ]) {
+      expect(exportLanguageAttrs(lang)).toEqual({});
+    }
   });
 });
