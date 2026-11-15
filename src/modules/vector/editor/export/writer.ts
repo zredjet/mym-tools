@@ -1,8 +1,8 @@
 /**
  * 保存先の関数の登録口 (§4.9)。
  *
- * エディタはファイルの書き込み方を知らない。画面 (切替 PR では `VectorWorkspacePage`、
- * 開発用の画面では `dev/main.tsx`) が `setExportWriter` で関数を渡す。
+ * エディタはファイルの書き込み方を知らない。画面 (アプリでは `VectorWorkspacePage` が `canvasIo.ts` の
+ * `writeExportFiles` を、開発用の画面では `dev/main.tsx` がダウンロードの関数を) `setExportWriter` で渡す。
  * 登録がない間は、書き出しのボタンを無効にする。
  */
 import { useSyncExternalStore } from "react";

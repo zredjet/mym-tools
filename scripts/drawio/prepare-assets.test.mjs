@@ -1,4 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,7 +10,9 @@ import {
   DRAWIO_DOMPURIFY_VERSION,
   DRAWIO_VERSION,
   REQUIRED_CLIENT_ASSETS,
+  RETIRED_GENERATED_PATHS,
   drawioAssetStamp,
+  removeRetiredAssets,
 } from "./prepare-assets.mjs";
 
 const APP_BUNDLE = "vendor/drawio/src/main/webapp/js/app.min.js";
@@ -64,5 +68,31 @@ describe("draw.io offline asset contract", () => {
       lopdfLicenseSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
       shotqNoticesSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
+  });
+});
+
+describe("retired generated assets", () => {
+  it("removes SVG-Edit leftovers and keeps everything else", () => {
+    const root = mkdtempSync(join(tmpdir(), "mym-generated-"));
+    try {
+      mkdirSync(join(root, "svgedit/dist"), { recursive: true });
+      writeFileSync(join(root, "svgedit/dist/index.html"), "old");
+      mkdirSync(join(root, "licenses/svgedit"), { recursive: true });
+      writeFileSync(join(root, "licenses/svgedit/LICENSE"), "old");
+      writeFileSync(join(root, "licenses/drawio-LICENSE.txt"), "keep");
+      writeFileSync(join(root, ".svgedit-stamp.json"), "{}");
+      mkdirSync(join(root, "drawio"), { recursive: true });
+      writeFileSync(join(root, ".drawio-stamp.json"), "{}");
+
+      expect(removeRetiredAssets(root)).toEqual(RETIRED_GENERATED_PATHS);
+      for (const path of RETIRED_GENERATED_PATHS) expect(existsSync(join(root, path))).toBe(false);
+      expect(readFileSync(join(root, "licenses/drawio-LICENSE.txt"), "utf8")).toBe("keep");
+      expect(existsSync(join(root, "drawio"))).toBe(true);
+      expect(existsSync(join(root, ".drawio-stamp.json"))).toBe(true);
+      // 2 回目は何もしない
+      expect(removeRetiredAssets(root)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

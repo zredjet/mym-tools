@@ -1,7 +1,7 @@
 /**
  * 画像と SVG の取込 (§4.8) で、ファイルを読む関数が返すもの。
  *
- * 切替 PR では、ファイル選択 (`plugin-dialog`) で選んだ path を Rust の
+ * アプリでは (`canvasIo.ts`)、ファイル選択 (`plugin-dialog`) で選んだ path を Rust の
  * `vector_read_image(path)` (data URL) と `vector_read_file(path)` (`{ svg, text, notices }`) に渡し、
  * 戻り値をそのまま入れる。検証 (大きさ、種類、SVG ポリシー、draw.io の変換) は Rust が行う。
  */

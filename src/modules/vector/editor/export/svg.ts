@@ -21,7 +21,7 @@ import type { ExportTarget } from "./types";
  * 書き出す SVG の上限 (UTF-8 のバイト数)。28 MiB。
  * 埋め込み SVG と画像は base64 の data URL で入り 4/3 倍になるので、v1 の上限いっぱい (20 MiB) の
  * 作品を v2 に包んだものも書き出せるよう、20 MiB × 4/3 に余裕を足した値にする。
- * Rust の `vector_write_file` の上限 (今は 20 MiB) は切替 PR でこの値に合わせる。
+ * Rust の `vector_write_file` の上限 (`MAX_EXPORT_SVG_BYTES`、`commands.rs`) も同じ値。
  */
 export const MAX_EXPORT_SVG_BYTES = 28 * 1024 * 1024;
 

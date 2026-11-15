@@ -2,7 +2,7 @@
  * 読んだファイルをアセットにする (§4.8 / §3.4)。
  *
  * - 画像: data URL を mime と base64 に分け、読み込んで本来の大きさを求める。読み込めなければ取り込まない
- * - SVG: 今のベクター描画と同じ SVG ポリシー (`src/modules/vector/policy/svg-policy.js` の `validateSvg`) を通し、
+ * - SVG: Rust の `vector_read_file` と共有する SVG ポリシー (`src/modules/vector/policy/svg-policy.js` の `validateSvg`) を通し、
  *   抽出した文字が読む関数の返した `text` (Rust の抽出結果) と一致することを確かめる。
  *   U+0085 をそのまま含む SVG は Rust とブラウザで抽出が違い、置いても保存できないため
  */
