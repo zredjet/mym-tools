@@ -2,6 +2,7 @@
 export {
   assetDataUrl,
   assetOf,
+  booleanEvaluationOf,
   TEXT_INK_OVERFLOW,
   textInkExtent,
   buildNodeShell,

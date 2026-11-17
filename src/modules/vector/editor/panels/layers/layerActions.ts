@@ -5,7 +5,9 @@ import {
   Group,
   Image,
   Minus,
+  Spline,
   Square,
+  SquaresUnite,
   Type,
   type LucideIcon,
 } from "lucide-react";
@@ -28,6 +30,8 @@ export const NODE_TYPE_ICONS: Record<NodeType, LucideIcon> = {
   text: Type,
   image: Image,
   svg: FileCode,
+  path: Spline,
+  boolean: SquaresUnite,
 };
 
 /** 名前を確定する。上限の文字数で切り、変わらなければ何もしない。 */

@@ -1,9 +1,12 @@
 /**
- * 文書とノードの作成。既定値は `docs/canvas-editor-design.md` §3 と §5.7 に合わせる。
+ * 文書とノードの作成。既定値は `docs/canvas-editor-design.md` §3、§5.7、§8.3 に合わせる。
  * どの関数も `init` で任意のフィールドを上書きできる (`id` を省くと新しい ID を振る)。
  */
+import { pathBounds } from "../path/measure";
 import { createId } from "./ids";
 import type {
+  BooleanNode,
+  BooleanOp,
   CanvasDocument,
   EllipseNode,
   FrameNode,
@@ -12,9 +15,13 @@ import type {
   LineNode,
   NodeId,
   Page,
+  PathNode,
   RectNode,
   SolidPaint,
   Stroke,
+  StrokeCap,
+  StrokeJoin,
+  Subpath,
   SvgNode,
   TextNode,
 } from "./types";
@@ -38,14 +45,29 @@ export const DEFAULT_NODE_NAMES = {
   text: "テキスト",
   image: "画像",
   svg: "SVG",
+  path: "パス",
+  boolean: "ブーリアン",
 } as const;
+
+/** ブーリアンの演算ごとの名前 (§8.9.4)。新しいブーリアンの名前と、画面の演算の表示に使う。 */
+export const BOOLEAN_OP_NAMES: Readonly<Record<BooleanOp, string>> = {
+  union: "合体",
+  subtract: "型抜き",
+  intersect: "交差",
+  exclude: "中マド",
+};
+
+/** 線の端・角・破線の既定 (§8.4)。描画はこの値のとき属性を付けない (v2 と同じ出力)。 */
+export const DEFAULT_STROKE_CAP: StrokeCap = "butt";
+export const DEFAULT_STROKE_JOIN: StrokeJoin = "miter";
 
 export function solidPaint(color: string, opacity = 1): SolidPaint {
   return { type: "solid", color, opacity };
 }
 
+/** 線。端・角・破線は既定 (なし・マイター・実線)。 */
 export function createStroke(color = "#000000", width = 1, opacity = 1): Stroke {
-  return { color, opacity, width };
+  return { color, opacity, width, cap: DEFAULT_STROKE_CAP, join: DEFAULT_STROKE_JOIN, dash: [] };
 }
 
 /** ページ 1 つ、ノードなしの文書。 */
@@ -78,6 +100,7 @@ export function createFrame(init: Init<FrameNode> = {}): FrameNode {
     y: 0,
     width: 100,
     height: 100,
+    rotation: 0,
     children: [],
     clip: true,
     fill: solidPaint("#FFFFFF"),
@@ -106,6 +129,7 @@ export function createRect(init: Init<RectNode> = {}): RectNode {
     y: 0,
     width: 100,
     height: 100,
+    rotation: 0,
     fill: solidPaint("#D9D9D9"),
     stroke: null,
     radius: 0,
@@ -122,6 +146,7 @@ export function createEllipse(init: Init<EllipseNode> = {}): EllipseNode {
     y: 0,
     width: 100,
     height: 100,
+    rotation: 0,
     fill: solidPaint("#D9D9D9"),
     stroke: null,
     shadow: null,
@@ -150,6 +175,7 @@ export function createText(init: Init<TextNode> = {}): TextNode {
     y: 0,
     width: 0,
     height: 0,
+    rotation: 0,
     text: "",
     fontFamily: DEFAULT_FONT_FAMILY,
     fontSize: DEFAULT_FONT_SIZE,
@@ -174,6 +200,7 @@ export function createImage(assetId: string, init: Init<ImageNode> = {}): ImageN
     y: 0,
     width: 100,
     height: 100,
+    rotation: 0,
     radius: 0,
     shadow: null,
     ...init,
@@ -190,8 +217,66 @@ export function createSvg(assetId: string, init: Init<SvgNode> = {}): SvgNode {
     y: 0,
     width: 100,
     height: 100,
+    rotation: 0,
     ...init,
     assetId,
     type: "svg",
+  };
+}
+
+/**
+ * パス。箱を形にぴったり合わせる (§8.6): 点を曲線の範囲 (`pathBounds`、ハンドルの先は含めない) の左上が
+ * (0, 0) になるよう動かし、動かした分を `x` / `y` に足す。`width` / `height` は範囲の大きさ。
+ * `init.x` / `init.y` は点の座標系の原点の位置 (省くと 0) なので、渡した点はその分だけずらした位置に来る。
+ * 既定はペンと同じ (塗りなし、線は `createStroke()`、名前は「パス」)。多角形・星は塗りと線を上書きする。
+ */
+export function createPath(subpaths: readonly Subpath[], init: Init<PathNode> = {}): PathNode {
+  const bounds = pathBounds(subpaths);
+  const minX = bounds?.minX ?? 0;
+  const minY = bounds?.minY ?? 0;
+  return {
+    ...common(init, DEFAULT_NODE_NAMES.path),
+    rotation: 0,
+    fillRule: "nonzero",
+    fill: null,
+    stroke: createStroke(),
+    shadow: null,
+    ...init,
+    x: (init.x ?? 0) + minX,
+    y: (init.y ?? 0) + minY,
+    width: bounds ? bounds.maxX - bounds.minX : 0,
+    height: bounds ? bounds.maxY - bounds.minY : 0,
+    subpaths: subpaths.map((sub) => ({
+      closed: sub.closed,
+      points: sub.points.map((p) => ({
+        x: p.x - minX,
+        y: p.y - minY,
+        in: p.in && { x: p.in.x, y: p.in.y },
+        out: p.out && { x: p.out.x, y: p.out.y },
+        mirror: p.mirror,
+      })),
+    })),
+    type: "path",
+  };
+}
+
+/**
+ * ブーリアン。子は 1 個以上 (rect / ellipse / path / boolean) なので、子の ID を必ず受け取る。
+ * 名前は演算の名前 (§8.9.4)。塗り・線・影は、作る操作が最背面の子のものを写して上書きする。
+ */
+export function createBoolean(
+  op: BooleanOp,
+  children: readonly NodeId[],
+  init: Init<BooleanNode> = {},
+): BooleanNode {
+  return {
+    ...common(init, BOOLEAN_OP_NAMES[op]),
+    fill: solidPaint("#D9D9D9"),
+    stroke: null,
+    shadow: null,
+    ...init,
+    op,
+    children: [...children],
+    type: "boolean",
   };
 }

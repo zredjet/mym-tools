@@ -13,8 +13,8 @@ import { getImportFileReader } from "./editor/assets";
 import { resetImportStatus } from "./editor/assets/status";
 import { getExportWriter } from "./editor/export";
 import { createRect, FIRST_PAGE_ID } from "./editor/model/create";
-import fixtures from "./editor/model/fixtures/payload-v2.json";
-import { toPayload } from "./editor/model/payload";
+import fixtures from "./editor/model/fixtures/payload-v3.json";
+import { PAYLOAD_VERSION, toPayload } from "./editor/model/payload";
 import { insertNode } from "./editor/model/structure";
 import { fixturePayload } from "./editor/model/testing";
 import type { CanvasDocument, SvgNode, TextNode } from "./editor/model/types";
@@ -71,10 +71,10 @@ const summary = (id: string, title: string): ItemSummary => ({
 });
 const item = (id: string, title: string, payload: unknown): Item => ({
   ...summary(id, title),
-  payload_schema_version: 2,
+  payload_schema_version: PAYLOAD_VERSION,
   payload,
 });
-/** v1 の作品を Rust の Eager-on-Read が v2 にした形 (契約データの upgrade の結果)。 */
+/** v1 の作品を Rust の Eager-on-Read が v3 にした形 (契約データの upgrade の結果)。 */
 const upgradedV1 = fixtures.upgrade.find((entry) => entry.name === "svgedit-document")!;
 
 function addRect(id = "r1") {
@@ -194,7 +194,7 @@ afterEach(() => {
 });
 
 describe("読み込み", () => {
-  it("v2 の作品を文書にしてエディタで開く", async () => {
+  it("v3 の作品を文書にしてエディタで開く", async () => {
     const payload = fixturePayload("full");
     vi.mocked(items.listItemSummaries).mockResolvedValue([summary("a1", "既存")]);
     vi.mocked(items.getItem).mockResolvedValue({
@@ -212,14 +212,14 @@ describe("読み込み", () => {
   });
 
   it("v1 から変換された作品 (埋め込み SVG 1 個) を開ける", async () => {
-    vi.mocked(items.getItem).mockResolvedValue(item("old", "古い作品", upgradedV1.v2));
+    vi.mocked(items.getItem).mockResolvedValue(item("old", "古い作品", upgradedV1.v3));
     await start("/projects/p1/m/vector/edit/old");
     expect(editor()).not.toBeNull();
     const node = state().doc.nodes["legacy"] as SvgNode;
     expect(node.type).toBe("svg");
     expect(state().doc.assets[node.assetId]).toMatchObject({
       kind: "svg",
-      svg: upgradedV1.v1.svg,
+      svg: (upgradedV1.input as { svg: string }).svg,
     });
   });
 
@@ -415,7 +415,7 @@ describe("読み込み", () => {
 });
 
 describe("保存", () => {
-  it("文書を payload v2 にして保存し、保存した時点の revision と比べる", async () => {
+  it("文書を payload v3 にして保存し、保存した時点の revision と比べる", async () => {
     await start();
     addRect();
     expect(screen.getByText("未保存", { exact: true })).toBeVisible();

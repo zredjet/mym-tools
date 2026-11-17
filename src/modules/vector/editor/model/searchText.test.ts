@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createFrame, createGroup, createText } from "./create";
+import { createBoolean, createFrame, createGroup, createRect, createText } from "./create";
 import { collapseWhiteSpace, computeSearchText, isWhiteSpace } from "./searchText";
 import type { CanvasDocument } from "./types";
 
@@ -30,5 +30,19 @@ describe("検索用テキスト", () => {
       assets: {},
     };
     expect(computeSearchText(doc)).toBe("画面 1 本文 2 行目 次のページ");
+  });
+
+  it("ブーリアンは拾わずに子へ進む (Rust と同じたどり方。子にテキストがある壊れた文書でも)", () => {
+    const doc: CanvasDocument = {
+      pages: [{ id: "a", name: "", children: ["b", "t2"], guides: [] }],
+      nodes: {
+        b: createBoolean("union", ["r", "t1"], { id: "b", name: "合体" }),
+        r: createRect({ id: "r" }),
+        t1: createText({ id: "t1", text: "中" }),
+        t2: createText({ id: "t2", text: "後" }),
+      },
+      assets: {},
+    };
+    expect(computeSearchText(doc)).toBe("中 後");
   });
 });

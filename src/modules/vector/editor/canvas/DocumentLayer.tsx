@@ -8,7 +8,7 @@ import { useShallow } from "zustand/shallow";
 import { CANVAS_LIMITS } from "../model/limits";
 import { getNode, isContainer } from "../model/tree";
 import type { NodeId } from "../model/types";
-import { assetOf, buildNodeShell } from "../render/buildNodeSvg";
+import { assetOf, booleanEvaluationOf, buildNodeShell } from "../render/buildNodeSvg";
 import { canvasTextMeasurer } from "../render/measureText";
 import { svgElToReact } from "../render/svgEl";
 import { useEditorStore } from "../state/store";
@@ -24,21 +24,33 @@ interface NodeViewProps {
   depth: number;
 }
 
-/** ノード 1 個。frame / group は子の `NodeView` を差し込み位置に置く。 */
+/**
+ * ノード 1 個。frame / group は子の `NodeView` を差し込み位置に置く。
+ * ブーリアンは子を描かず、演算の結果を購読する (子孫が変われば結果のオブジェクトが変わる。§8.9.3)。
+ */
 export const NodeView = memo(function NodeView({ id, depth }: NodeViewProps) {
   const node = useEditorStore((state) => getNode(state.doc, id));
   const asset = useEditorStore((state) => {
     const current = getNode(state.doc, id);
     return current ? assetOf(state.doc, current) : undefined;
   });
+  const boolean = useEditorStore((state) => {
+    const current = getNode(state.doc, id);
+    return current ? booleanEvaluationOf(state.doc, current) : undefined;
+  });
   // 本文の編集中のテキストは描かない (入力欄と二重に見えるため。§4.7)
   const editing = useEditorStore((state) => state.editingTextId === id);
   const shell = useMemo(
     () =>
       node
-        ? buildNodeShell(node, { measurer: canvasTextMeasurer, idPrefix: SCREEN_ID_PREFIX, asset })
+        ? buildNodeShell(node, {
+            measurer: canvasTextMeasurer,
+            idPrefix: SCREEN_ID_PREFIX,
+            asset,
+            boolean,
+          })
         : null,
-    [node, asset],
+    [node, asset, boolean],
   );
   if (!node || !shell || editing) return null;
   // 壊れた文書の循環で止まらなくならないよう、深さの上限を超えたら子を描かない

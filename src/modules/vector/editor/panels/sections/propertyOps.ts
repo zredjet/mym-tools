@@ -19,7 +19,14 @@ export type LineField = "x1" | "y1" | "x2" | "y2";
 export const DEFAULT_SHADOW: Shadow = { x: 0, y: 4, blur: 8, color: "#000000", opacity: 0.25 };
 
 /** 線を足したときの既定 (`createStroke` と同じ)。 */
-export const DEFAULT_STROKE: Stroke = { color: "#000000", opacity: 1, width: 1 };
+export const DEFAULT_STROKE: Stroke = {
+  color: "#000000",
+  opacity: 1,
+  width: 1,
+  cap: "butt",
+  join: "miter",
+  dash: [],
+};
 
 // ---------------------------------------------------------------------------
 // 位置と大きさ
