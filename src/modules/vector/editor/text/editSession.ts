@@ -93,6 +93,15 @@ export class TextEditSession {
     return this.closed;
   }
 
+  /**
+   * テキストツールで作ったばかりで、本文が空のまま (作成を含むジェスチャーが開いている) なら、作る前の文書。
+   * このまま終えれば何も残らない。そうでなければ null (本文がある、作成がほかの操作で確定された、など)。
+   */
+  get emptyCreationBase(): CanvasDocument | null {
+    if (this.closed || this.insert === null || this.base === null || this.text !== "") return null;
+    return getNode(this.base, this.nodeId) ? null : this.base;
+  }
+
   /** 本文を `text` にする変更 (ジェスチャーの開始時点の文書に当てる)。 */
   private recipe(text: string): DocRecipe {
     const { nodeId, insert, measurer } = this;
@@ -255,6 +264,15 @@ export function startTextCreation(
   current = session;
   store.getState().startTextEdit(node.id);
   return true;
+}
+
+/**
+ * 今の本文の編集が、作ったばかりで空のテキストなら、作る前の文書 (`TextEditSession.emptyCreationBase`)。
+ * 編集を終えない保存 (⌘S) は、このときジェスチャーを確定せず、この文書を保存する (§4.7。空のまま終えたときと
+ * 同じく、空の新しいテキストを残さない)。そうでなければ null。
+ */
+export function emptyTextCreationBase(): CanvasDocument | null {
+  return getTextEditSession()?.emptyCreationBase ?? null;
 }
 
 /** 今のセッションを終える。`byOthers` は `TextEditSession.finish` と同じ。 */
