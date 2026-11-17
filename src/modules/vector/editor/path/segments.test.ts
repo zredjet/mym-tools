@@ -92,6 +92,20 @@ describe("segmentsToSubpath", () => {
     expect(sub.points[0]!.x).toBe(0.1);
   });
 
+  it("uses the same tolerance as the intersections for the closing point", () => {
+    // 5e-8 px のずれは交点の許容値 (1e-7) の中: 閉じる辺にまとめる
+    const segs = [
+      lineSegment({ x: 0, y: 0 }, { x: 10, y: 0 }),
+      lineSegment({ x: 10, y: 0 }, { x: 10, y: 10 }),
+      lineSegment({ x: 10, y: 10 }, { x: 0, y: 5e-8 }),
+    ];
+    expect(segmentsToSubpath(segs, true).points).toHaveLength(3);
+    // 許容値を渡せる
+    expect(segmentsToSubpath(segs, true, { tolerance: 1e-9 }).points).toHaveLength(4);
+    const far = [...segs.slice(0, 2), lineSegment({ x: 10, y: 10 }, { x: 0, y: 1e-6 })];
+    expect(segmentsToSubpath(far, true).points).toHaveLength(4);
+  });
+
   it("splits a single closed loop into two points", () => {
     const loop = cubicSegment({ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 0 });
     const sub = segmentsToSubpath([loop], true);

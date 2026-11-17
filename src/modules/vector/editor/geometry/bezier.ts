@@ -16,13 +16,14 @@
  * - `splitSegment` / `subSegment` は端の点をちょうど元の値にする (0 と 1 は元の端点そのもの)。
  *   切り出しは blossom (極形式) で直接求めるので、続けて分けても誤差が積み重ならない
  * - `segmentExtrema` の極値は 2 次方程式を解いて求め、端 (t = 0, 1) は含めない。範囲は端と極値の値の min / max
- * - `nearestPoint` は 32 等分の標本から局所的な最小を拾い、Newton 法 (後退つき) で t を 1e-12 程度まで詰める。
- *   1/32 より細かい間隔に最小が 2 つある場合は、浅い方を見落とすことがある (距離の差はごく小さい)
+ * - `nearestPoint` は 32 等分の標本で、距離の局所的な最小と、距離の微分 (B - p)·B' が負から正へ変わる区間を
+ *   拾い、それぞれ Newton 法 (後退つき) で t を 1e-12 程度まで詰めて最も近いものを選ぶ (端点も候補)。
+ *   1/32 より細かい間隔に最小が 2 つある場合だけ、浅い方を見落とすことがある
  * - `segmentLength` は 8 点の Gauss–Legendre を区間を分けながら当て、相対誤差 1e-10 以内
  * - `tAtLength` は長さの誤差が (1 + 全長) × 1e-9 以内の t
  * - `flattenSegment` の誤差は「制御点から弦までの距離の最大」で判定する (曲線は制御点の凸包の中にあるので、
- *   曲線と折れ線の距離はこれ以下)。`tolerance` は正の数 (小さすぎる値は `MIN_FLATTEN_TOLERANCE` 倍の大きさに
- *   切り上げる)。分割の深さは 24 まで
+ *   曲線と折れ線の距離はこれ以下)。`tolerance` は max(`MIN_FLATTEN_TOLERANCE` (1e-4 px)、座標の大きさ × 1e-10)
+ *   より小さければ切り上げる (0 を渡しても点の数が爆発しない)。分割の深さは 24 まで
  */
 import type { Point } from "../model/types";
 import { applyToPoint, type Matrix } from "./matrix";
@@ -55,8 +56,8 @@ export interface Bounds {
 export const GEOMETRIC_EPSILON = 1e-7;
 /** 座標の大きさに比例する許容値の係数。座標が大きいほど丸めの誤差も大きいため。 */
 export const RELATIVE_EPSILON = 1e-10;
-/** 折れ線化の許容値を、座標の大きさに対してこれより小さくしない。 */
-export const MIN_FLATTEN_TOLERANCE = 1e-12;
+/** 折れ線化の許容値の下限 (px)。0 などを渡しても点の数が爆発しないように。 */
+export const MIN_FLATTEN_TOLERANCE = 1e-4;
 
 const MAX_FLATTEN_DEPTH = 24;
 const NEAREST_SAMPLES = 32;
@@ -354,22 +355,40 @@ export function nearestPoint(seg: Segment, p: Point): NearestPoint {
   }
   const n = NEAREST_SAMPLES;
   const d2: number[] = [];
-  for (let i = 0; i <= n; i++) d2.push(dist2(pointAt(seg, i / n), p));
-  let best: NearestPoint | null = null;
+  // g(t) = (B(t) - p)·B'(t)。距離の 2 乗の微分の半分で、局所的な最小では負から正へ変わる
+  const g: number[] = [];
   for (let i = 0; i <= n; i++) {
+    const b = pointAt(seg, i / n);
+    const d = derivativeAt(seg, i / n);
+    d2.push(dist2(b, p));
+    g.push((b.x - p.x) * d.x + (b.y - p.y) * d.y);
+  }
+  let best: NearestPoint = { t: 0, point: pointAt(seg, 0), distance: Math.sqrt(d2[0]!) };
+  const consider = (t: number) => {
+    const point = pointAt(seg, t);
+    const distance = Math.hypot(point.x - p.x, point.y - p.y);
+    if (distance < best.distance || (distance === best.distance && t < best.t)) {
+      best = { t, point, distance };
+    }
+  };
+  consider(1);
+  for (let i = 0; i <= n; i++) {
+    // 標本の局所的な最小のまわり
     const v = d2[i]!;
     const left = i > 0 ? d2[i - 1]! : Infinity;
     const right = i < n ? d2[i + 1]! : Infinity;
-    if (v > left || v > right) continue;
-    const t = refineNearest(seg, p, i / n, Math.max(0, (i - 1) / n), Math.min(1, (i + 1) / n));
-    const point = pointAt(seg, t);
-    const distance = Math.hypot(point.x - p.x, point.y - p.y);
-    if (!best || distance < best.distance || (distance === best.distance && t < best.t)) {
-      best = { t, point, distance };
+    if (v <= left && v <= right) {
+      consider(refineNearest(seg, p, i / n, Math.max(0, (i - 1) / n), Math.min(1, (i + 1) / n)));
+    }
+    // g が負から正へ変わる区間 (標本の間に隠れた最小も拾う)
+    if (i < n && g[i]! < 0 && g[i + 1]! >= 0) {
+      const t0 = i / n;
+      const t1 = (i + 1) / n;
+      const guess = t0 + ((t1 - t0) * -g[i]!) / (g[i + 1]! - g[i]!);
+      consider(refineNearest(seg, p, guess, t0, t1));
     }
   }
-  // 標本はすべて局所的な最小の候補を通るので、ここに来ないことはない
-  return best ?? { t: 0, point: pointAt(seg, 0), distance: Math.sqrt(d2[0]!) };
+  return best;
 }
 
 /** [lo, hi] の中で |B(t) - p|² を最小にする t を Newton 法 (後退つき) で求める。 */
@@ -489,7 +508,7 @@ export function flattenSegment(seg: Segment, tolerance: number): Point[] {
 /** `flattenSegment` の点の t (0 と 1 を含む昇順)。 */
 export function flattenSegmentParams(seg: Segment, tolerance: number): number[] {
   if (seg.kind === "line") return [0, 1];
-  const tol = Math.max(tolerance, MIN_FLATTEN_TOLERANCE * Math.max(1, segmentMagnitude(seg)));
+  const tol = Math.max(tolerance, MIN_FLATTEN_TOLERANCE, segmentMagnitude(seg) * RELATIVE_EPSILON);
   const out: number[] = [0];
   flattenInto(seg, 0, 1, tol, 0, out);
   return out;

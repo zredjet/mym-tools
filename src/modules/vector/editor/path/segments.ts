@@ -9,8 +9,11 @@
  *   - 前の点の `out` と次の点の `in` がどちらも null なら線分、そうでなければ 3 次ベジェ
  *     (null の側は点そのものを制御点にする)。`d` の書き出しと同じ規則
  *   - 点が 1 個の輪郭は空 (描かれない、§8.4)
- * - `segmentsToSubpath(segments, closed)`: 逆向き。各線分の `from` を点にし、制御点をハンドル (点からの相対) に
- *   する。ハンドルが点と同じ (長さ 0) なら null。`mirror` は `inferMirror` で決める
+ * - `segmentsToSubpath(segments, closed, options)`: 逆向き。各線分の `from` を点にし、制御点をハンドル
+ *   (点からの相対) にする。ハンドルが点と同じ (長さ 0) なら null。`mirror` は `inferMirror` で決める
+ *   - **新しく形を作るとき** (`d` の読み込み、ブーリアンの結果、SVG の変換) のためのもの。既存のパスの編集には
+ *     使わない: 往復すると、編集していない点の `mirror` と長さ 0 のハンドルまで書き換わる。点を足すのは
+ *     `edit.ts` の `insertPointAt` (前後の 2 点のハンドルだけを直す)
  *   - 閉じた輪郭で、最後の線分の `to` が先頭の `from` と (許容値の中で) 同じなら、その線分を閉じる辺にする
  *     (先頭の点を最後に重ねて持たない)。違えば `to` を最後の点にし、閉じる辺は線分になる
  *   - 点が 1 個になる閉じた輪郭 (始点に戻る曲線 1 本) は、曲線を t = 0.5 で分けて 2 点にする
@@ -20,11 +23,12 @@
  *
  * 誤差と前提:
  * - 純関数。点とハンドルは新しいオブジェクト
- * - 「同じ点」の許容値は max(1e-9, 座標の大きさ × 1e-12) (`samePointTolerance`)。相対座標の `d` を足し合わせた
- *   丸めの誤差を吸収する程度
+ * - 「同じ点」(閉じる辺の判定) の許容値は、交点 (`geometry/intersect.ts`) と同じ `toleranceFor(座標の大きさ)`
+ *   = max(1e-7, 大きさ × 1e-10)。`options.tolerance` で変えられる。交点で分けた曲線をつなぎ直した結果
+ *   (端が許容値の中でずれる) も 1 つの閉じた輪郭になる
  * - `inferMirror` は向きの sin と長さの比の差が 1e-6 以内でそろっているとみなす
  */
-import { cross, dot, splitSegment, type Segment } from "../geometry/bezier";
+import { cross, dot, splitSegment, toleranceFor, type Segment } from "../geometry/bezier";
 import type { HandleMirror, PathPoint, Point, Subpath } from "../model/types";
 
 export interface SubpathToSegmentsOptions {
@@ -74,12 +78,23 @@ export function segmentBetween(p: PathPoint, q: PathPoint): Segment {
   };
 }
 
-export function samePointTolerance(magnitude: number): number {
-  return Math.max(1e-9, magnitude * 1e-12);
+export interface SegmentsToSubpathOptions {
+  /** 最後の線分の終点が先頭の始点と同じとみなす距離 (px)。省くと `toleranceFor(座標の大きさ)` */
+  tolerance?: number;
 }
 
-export function segmentsToSubpath(segments: readonly Segment[], closed: boolean): Subpath {
+export function segmentsToSubpath(
+  segments: readonly Segment[],
+  closed: boolean,
+  options: SegmentsToSubpathOptions = {},
+): Subpath {
   if (segments.length === 0) throw new RangeError("segmentsToSubpath: segments is empty");
+  const nearlySame = (p: Point, q: Point): boolean => {
+    const tol =
+      options.tolerance ??
+      toleranceFor(Math.max(Math.abs(p.x), Math.abs(p.y), Math.abs(q.x), Math.abs(q.y)));
+    return Math.hypot(p.x - q.x, p.y - q.y) <= tol;
+  };
   const first = segments[0]!;
   const lastSeg = segments[segments.length - 1]!;
   if (closed && segments.length === 1 && nearlySame(lastSeg.to, first.from)) {
@@ -88,7 +103,7 @@ export function segmentsToSubpath(segments: readonly Segment[], closed: boolean)
       return { closed: true, points: [plainPoint(first.from), plainPoint(lastSeg.to)] };
     }
     const [a, b] = splitSegment(lastSeg, 0.5);
-    return segmentsToSubpath([a, b], true);
+    return segmentsToSubpath([a, b], true, options);
   }
   const points: { x: number; y: number; in: Point | null; out: Point | null }[] = [];
   for (let i = 0; i < segments.length; i++) {
@@ -129,13 +144,6 @@ function nonZero(v: Point): Point | null {
 
 function plainPoint(p: Point): PathPoint {
   return { x: p.x, y: p.y, in: null, out: null, mirror: "none" };
-}
-
-function nearlySame(p: Point, q: Point): boolean {
-  const tol = samePointTolerance(
-    Math.max(Math.abs(p.x), Math.abs(p.y), Math.abs(q.x), Math.abs(q.y)),
-  );
-  return Math.abs(p.x - q.x) <= tol && Math.abs(p.y - q.y) <= tol;
 }
 
 const MIRROR_EPSILON = 1e-6;
