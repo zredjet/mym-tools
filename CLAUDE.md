@@ -56,6 +56,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 0025 | フォルダ容量 (`dirsize`) は読み取り専用・ローカル限定。Rust の単一スレッドで再帰的に走査し、リンク・ジャンクションと別のボリュームに入らない。UNC は `modules/network_path.rs` で触る前に拒否し、パス中のリンクは `read_link` で行き先を確かめながら解決する。Windows は `GetDriveTypeW`、macOS は `statfs` の `MNT_LOCAL` でネットワーク上のボリュームを拒否する。「サイズ」と「ディスク上」を集計し、読めないフォルダは昇格せず報告する。結果は基準ごとの上位 10,000 件の和集合と「ほか」にまとめ、フォルダ 1,000,000 件で止める |
 | 0026 | ベクター描画を自作のキャンバスエディタに置き換える (SVG-Edit 同梱を廃止、表示名「キャンバス」)。モジュール ID は `vector` のまま payload v2 `{ pages, nodes, assets, text }` にし、v1 の SVG は編集できない埋め込み SVG として包む。描画は SVG 要素で、モデルと描画層を分ける。実行時の依存を増やさない。切替済み (SVG-Edit 一式と `vector_editor_url` を削除、ADR-0021 を supersede) |
 | 0027 | payload の版を上げるときの守り方 (ADR-0006 §2.5 の一部を置き換え)。起動時、古い版の行があれば最初の変換の前に pre-op バックアップ `pre-payload-<module_id>-v<版>` を 1 回取り `meta.payload_upgrade_backup.<module_id>` に記録 (失敗したら起動を止める)。アプリの中のリストアの後も同じ判定をする。`StorageService::update_item` は同じトランザクションで、変換できない古い行と新しい版の行の上書きを拒否する。Rust の変換が受け付けた payload は画面の検証も通ること。書き戻しに失敗しても変換した結果を返す。エクスポートは変換できない行を元の版のまま書き出し `ExportSummary.not_upgraded` で知らせる |
+| 0028 | キャンバスの第 2 段階 (アイコン・ロゴ)。全ノードの回転 (箱を持つノードに `rotation`、中心まわり)、線の端・角・破線、パス (輪郭の並び、vector network は採らない)、元の図形を残すブーリアン演算 (`boolean` ノード、子は矩形・楕円・パス・ブーリアン)、多角形・星・鉛筆 (作った後は普通のパス)、パスに変換、線のアウトライン化、埋め込み SVG を利用者の操作で編集できる形に変換。payload v3 は v2 に回転 0 と線の既定値を足すだけの変換。難しい計算も依存を足さずに自作する。作業は統合ブランチ `canvas-stage2` に集め、`main` への PR 1 本で切り替える (それまで `main` は第 1 段階のまま) |
 
 ## 絶対に破ってはいけない不変条件
 
@@ -113,6 +114,7 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - `docs/ui-design.md` には末尾に改訂履歴テーブルがある。非自明な変更を入れたら 1 行追加し、冒頭の「v1.X の主な変更」プレリュードとヘッダのバージョン・最終更新日を同期させる
 - `docs/MyMyTools Prototype.bundle.html` は 1.7MB の自己完結 HTML (Claude Design 出力)。オフライン参照のためにそのまま置いてある — 再生成・編集はしない
 - キャンバス (`vector`) のエディタは `src/modules/vector/editor/`、画面と IPC の接続は `VectorWorkspacePage.tsx` と `canvasIo.ts`。エディタは Tauri の IPC を直接呼ばず、ファイルの読み書きは登録口 (`setImportFileReader` / `setExportWriter`) に渡された関数で行う。SVG ポリシーは `src/modules/vector/policy/` にあり、Rust (`include_str!`) と TypeScript が共有する。開発用の画面は `canvas-harness.html` (配布物に含めない)。`editor/` の契約のファイル (`model/types.ts`、`model/limits.*`、`model/fixtures/`、`state/types.ts`、`render/types.ts`、`tools/types.ts`、`tools/registry.ts`、`EditorRoot.tsx`) は担当の分かれた作業の前提なので、変えるときは `docs/canvas-editor-design.md` §4.1 も同じ変更で更新する
+- キャンバスの第 2 段階 (ADR-0028) は統合ブランチ `canvas-stage2` で進める。このブランチの上の作業は `docs/canvas-editor-design.md` §8 に従い (§3〜§6 と食い違えば §8 が優先)、PR は `canvas-stage2` 宛ての下書きで出す。`main` には切替の PR (§8.15) まで第 2 段階のコードを入れない
 - 同梱エンジン (Mermaid / draw.io / NRBF sidecar) のバージョンは完全固定。更新時は対応 ADR が列挙するもの (submodule commit、定数、資産契約テスト、ライセンス表記、About 表示、実測サイズ) を同じ変更で更新する
 - `src-tauri/src/storage/schema.rs::MIGRATIONS` を変更する PR は、PR 説明に以下を必ず書く (ADR-0011 §2.1 チェックリスト):
   - additive (新カラム+定数 DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) のみで構成されているか

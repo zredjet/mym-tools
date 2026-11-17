@@ -205,6 +205,38 @@ export type NodeType = CanvasNode["type"];
 export type ContainerNode = FrameNode | GroupNode;
 
 // ---------------------------------------------------------------------------
+// パスの形 (第 2 段階、payload v3。`docs/canvas-editor-design.md` §8.3)
+//
+// 次の型は v3 の基盤で `PathNode` / `BooleanNode` が使う。ブーリアン演算などの純関数が先に使えるよう、
+// ノードの型より先に置いてある。v2 の文書には現れない。
+// ---------------------------------------------------------------------------
+
+export type FillRule = "nonzero" | "evenodd";
+
+/** ハンドルの連動。none は別々、angle は向きだけ、angle-length は向きと長さをそろえる */
+export type HandleMirror = "none" | "angle" | "angle-length";
+
+export interface PathPoint {
+  /** ノードの箱の左上を原点とする座標 (回転の前) */
+  x: number;
+  y: number;
+  /** 前の点から来る曲線のハンドル。点からの相対。null は直線で入る */
+  in: Point | null;
+  /** 次の点へ出る曲線のハンドル。点からの相対。null は直線で出る */
+  out: Point | null;
+  mirror: HandleMirror;
+}
+
+export interface Subpath {
+  /** true なら最後の点から先頭の点へ戻る線分 (または曲線) を描く */
+  closed: boolean;
+  /** 1 個以上 */
+  points: PathPoint[];
+}
+
+export type BooleanOp = "union" | "subtract" | "intersect" | "exclude";
+
+// ---------------------------------------------------------------------------
 // アセット
 // ---------------------------------------------------------------------------
 
