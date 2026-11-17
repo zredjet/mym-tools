@@ -1,9 +1,23 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { addAsset } from "./assets";
-import { createEmptyDocument, createFrame, createText, FIRST_PAGE_ID } from "./create";
+import {
+  BOOLEAN_OP_NAMES,
+  createBoolean,
+  createEllipse,
+  createEmptyDocument,
+  createFrame,
+  createLine,
+  createPath,
+  createRect,
+  createStroke,
+  createText,
+  FIRST_PAGE_ID,
+} from "./create";
 import { createId, ID_LENGTH } from "./ids";
 import { CANVAS_LIMITS, NODE_ID_PATTERN } from "./limits";
-import { checkSavable, fromPayload, parsePayload, toPayload } from "./payload";
+import { checkSavable, fromPayload, PAYLOAD_VERSION, parsePayload, toPayload } from "./payload";
 import { insertNode } from "./structure";
 import { fixturePayload } from "./testing";
 import { validatePayload } from "./validate";
@@ -64,5 +78,78 @@ describe("payload との変換", () => {
     for (let i = 0; i < 4; i++)
       doc = insertNode(doc, createText({ text }), { kind: "page", id: FIRST_PAGE_ID });
     expect(checkSavable(doc)).toMatch(/^text: /);
+  });
+});
+
+describe("v3 の作成の既定値 (§8.3)", () => {
+  const curve = [
+    {
+      closed: false,
+      points: [
+        { x: 0, y: 10, in: null, out: { x: 10, y: -20 }, mirror: "none" as const },
+        { x: 40, y: 10, in: { x: -10, y: -20 }, out: null, mirror: "none" as const },
+      ],
+    },
+  ];
+
+  it("箱を持つノードは回転 0、線は端なし・マイター・実線", () => {
+    expect(createRect().rotation).toBe(0);
+    expect(createFrame().rotation).toBe(0);
+    expect(createStroke()).toEqual({
+      color: "#000000",
+      opacity: 1,
+      width: 1,
+      cap: "butt",
+      join: "miter",
+      dash: [],
+    });
+  });
+
+  it("パスの箱は曲線の範囲 (ハンドルの先は含めない)。既定はペンと同じ見た目", () => {
+    const path = createPath(curve);
+    expect(path).toMatchObject({ x: 0, y: 0, width: 40, rotation: 0, fillRule: "nonzero" });
+    expect(path.height).toBeCloseTo(15, 10);
+    expect(path).toMatchObject({ fill: null, stroke: createStroke(), shadow: null, name: "パス" });
+    // 渡した点の形を共有しない
+    expect(path.subpaths[0]).not.toBe(curve[0]);
+    expect(path.subpaths).toEqual(curve);
+  });
+
+  it("ブーリアンの名前は演算の名前", () => {
+    expect(createBoolean("exclude", ["a"]).name).toBe(BOOLEAN_OP_NAMES.exclude);
+    expect(createBoolean("subtract", ["a"], { name: "穴" })).toMatchObject({
+      name: "穴",
+      op: "subtract",
+      children: ["a"],
+    });
+  });
+
+  it("作ったパスとブーリアンを含む文書が検証を通る", () => {
+    let doc = createEmptyDocument();
+    const page = { kind: "page" as const, id: FIRST_PAGE_ID };
+    doc = insertNode(doc, createLine({ id: "l" }), page);
+    doc = insertNode(doc, createPath(curve, { id: "p" }), page);
+    const rect = createRect({ id: "r" });
+    const ellipse = createEllipse({ id: "e" });
+    doc = {
+      ...doc,
+      pages: doc.pages.map((p) => ({ ...p, children: [...p.children, "b"] })),
+      nodes: {
+        ...doc.nodes,
+        r: rect,
+        e: ellipse,
+        b: createBoolean("union", ["r", "e"], { id: "b" }),
+      },
+    };
+    expect(checkSavable(doc)).toBeNull();
+  });
+
+  it("保存する版は 3 で、Rust の CURRENT_PAYLOAD_VERSION と同じ", () => {
+    expect(PAYLOAD_VERSION).toBe(3);
+    const rust = readFileSync(
+      resolve(process.cwd(), "src-tauri/src/modules/vector/mod.rs"),
+      "utf8",
+    );
+    expect(rust).toMatch(new RegExp(`const CURRENT_PAYLOAD_VERSION: u32 = ${PAYLOAD_VERSION};`));
   });
 });

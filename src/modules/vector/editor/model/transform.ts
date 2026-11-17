@@ -18,6 +18,7 @@ export function translateInDraft(draft: DocDraft, id: NodeId, dx: number, dy: nu
   if (!node) return;
   switch (node.type) {
     case "group":
+    case "boolean":
       for (const child of node.children) translateInDraft(draft, child, dx, dy);
       return;
     case "line":
@@ -110,6 +111,7 @@ export function resizeNodes(
     let next: CanvasNode;
     switch (node.type) {
       case "group":
+      case "boolean":
         for (const child of node.children) visit(child, origin);
         return;
       case "line":

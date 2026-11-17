@@ -147,7 +147,7 @@ describe("planExport", () => {
 
   it("frame の範囲は矩形ちょうどで、線の外側半分は入らない", () => {
     const doc = updateNodes(exportDocument(), ["fb"], {
-      stroke: { color: "#000000", opacity: 1, width: 10 },
+      stroke: { color: "#000000", opacity: 1, width: 10, cap: "butt", join: "miter", dash: [] },
     });
     expect(targets(planExport(doc, "p1", ["fb"], measurer))[0]?.bounds).toEqual({
       x: 400,

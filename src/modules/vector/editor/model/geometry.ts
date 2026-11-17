@@ -14,11 +14,11 @@ export interface Rect {
 
 const ORIGIN: Point = { x: 0, y: 0 };
 
-/** 位置と大きさを持つノード (line と group 以外)。 */
+/** 位置と大きさを持つノード (line と group とブーリアン以外)。 */
 export type BoxNode = Extract<CanvasNode, { width: number }>;
 
 export function isBoxNode(node: CanvasNode): node is BoxNode {
-  return node.type !== "line" && node.type !== "group";
+  return node.type !== "line" && node.type !== "group" && node.type !== "boolean";
 }
 
 /** frame の座標系の原点 (frame の左上) のページ座標。祖先の frame の位置を足し合わせる。 */
@@ -75,6 +75,7 @@ export function getLocalBounds(doc: CanvasDocument, id: NodeId): Rect | null {
         height: Math.abs(node.y2 - node.y1),
       };
     case "group":
+    case "boolean":
       return unionRects(node.children.map((child) => getLocalBounds(doc, child)));
     default:
       return { x: node.x, y: node.y, width: node.width, height: node.height };

@@ -8,7 +8,24 @@
  */
 import type { CanvasDocument, NodeId, PageId } from "../model/types";
 
-export type ToolId = "select" | "hand" | "frame" | "rect" | "ellipse" | "line" | "text" | "image";
+/**
+ * ツールの ID。`pathEdit` はパスの点の編集を受けるツールで、ツールバーには出さない
+ * (`startPathEdit` が切り替える。§8.7.1)。
+ */
+export type ToolId =
+  | "select"
+  | "hand"
+  | "frame"
+  | "rect"
+  | "ellipse"
+  | "polygon"
+  | "star"
+  | "line"
+  | "pen"
+  | "pencil"
+  | "text"
+  | "image"
+  | "pathEdit";
 
 /**
  * 表示位置と倍率。`x` / `y` は画面の左上に見えているページ座標。
@@ -41,6 +58,11 @@ export interface EditorState {
   scopeId: NodeId | null;
   /** 本文を編集中のテキスト */
   editingTextId: NodeId | null;
+  /**
+   * 点を編集中のパス (§8.7.1)。本文の編集と同時には開かない。選んでいる点やペンの描きかけの状態は
+   * `path/editSession.ts` が持ち、ここには入れない
+   */
+  editingPathId: NodeId | null;
   toolId: ToolId;
   viewport: Viewport;
   view: ViewOptions;
@@ -74,19 +96,33 @@ export interface EditorActions {
 
   /**
    * 履歴は文書と選択を組で持ち、戻すと選択も戻る。スコープと本文の編集は解除する。上限 100 件。
+   * 点の編集は、編集中のパスが残っていれば続け (選択はそのパスにする)、消えていれば終える (§8.7.1)。
    * ジェスチャーの途中なら、ジェスチャーを取り消すだけにする。
    */
   undo(): void;
   redo(): void;
 
+  /** 選択を変える。点の編集中に、編集中のパスだけの選択から変えると、点の編集を終える (§8.7.1) */
   setSelection(ids: readonly NodeId[]): void;
   setHovered(id: NodeId | null): void;
   setScope(id: NodeId | null): void;
+  /**
+   * ツールを切り替える。点の編集中は、`pathEdit` とペン (`pen`) 以外へ切り替えると点の編集を終える
+   * (ペンへの切替だけは、同じパスに輪郭を足すため `editingPathId` を残す。§8.7.1)
+   */
   setTool(id: ToolId): void;
   setViewport(viewport: Viewport): void;
   setView(patch: Partial<ViewOptions>): void;
+  /** 本文の編集を始める。点の編集中なら、先に点の編集を終える (同時には開かない) */
   startTextEdit(id: NodeId): void;
   endTextEdit(): void;
+  /**
+   * パスの点の編集を始める (§8.7.1)。表示中のページのパスでなければ何もしない。
+   * `editingPathId` を決め、そのパスだけを選び、ツールを `pathEdit` にする。本文の編集中なら終える
+   */
+  startPathEdit(id: NodeId): void;
+  /** 点の編集を終え、選択ツールへ戻す。編集中でなければ何もしない */
+  endPathEdit(): void;
 }
 
 export type EditorStore = EditorState & EditorActions;

@@ -240,7 +240,14 @@ describe("線と影", () => {
     select("r1", "l1");
     const stroke = section("線");
     fireEvent.click(within(stroke).getByRole("button", { name: "線を追加" }));
-    expect(node("r1").stroke).toEqual({ color: "#000000", opacity: 1, width: 1 });
+    expect(node("r1").stroke).toEqual({
+      color: "#000000",
+      opacity: 1,
+      width: 1,
+      cap: "butt",
+      join: "miter",
+      dash: [],
+    });
     type(within(stroke).getByRole("textbox", { name: "線の太さ" }), "3");
     expect(node("r1").stroke).toMatchObject({ width: 3 });
     expect(node("l1").stroke).toMatchObject({ width: 3 });

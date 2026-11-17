@@ -17,7 +17,7 @@ export function geometryWithinLimits(doc: CanvasDocument, ids: readonly NodeId[]
   for (const id of ids)
     for (const nodeId of [id, ...getDescendantIds(doc, id)]) {
       const node = getNode(doc, nodeId);
-      if (!node || node.type === "group") continue;
+      if (!node || node.type === "group" || node.type === "boolean") continue;
       if (node.type === "line") {
         if (![node.x1, node.y1, node.x2, node.y2].every(coord)) return false;
       } else if (!coord(node.x) || !coord(node.y) || !size(node.width) || !size(node.height))

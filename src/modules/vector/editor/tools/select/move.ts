@@ -22,7 +22,7 @@ function movedLeaves(doc: CanvasDocument, ids: readonly NodeId[]): NodeId[] {
     seen.add(id);
     const node = getNode(doc, id);
     if (!node) return;
-    if (node.type === "group") node.children.forEach(visit);
+    if (node.type === "group" || node.type === "boolean") node.children.forEach(visit);
     else result.push(id);
   };
   topLevelIds(doc, ids).forEach(visit);
@@ -35,6 +35,7 @@ function translatePatch(node: CanvasNode, dx: number, dy: number): NodePatch | n
   const my = (v: number) => (dy === 0 ? v : round(v + dy));
   switch (node.type) {
     case "group":
+    case "boolean":
       return null;
     case "line":
       return { x1: mx(node.x1), y1: my(node.y1), x2: mx(node.x2), y2: my(node.y2) };

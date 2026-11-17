@@ -84,3 +84,41 @@ describe("Toolbar の「画像」", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+describe("Toolbar のツール (§8.13)", () => {
+  it("決めた順に並べ、点の編集のツールは出さない", () => {
+    render(<Toolbar />);
+    const labels = screen
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"))
+      .filter((label) => label !== "倍率");
+    expect(labels).toEqual([
+      "選択",
+      "フレーム",
+      "矩形",
+      "楕円",
+      "多角形",
+      "星",
+      "線",
+      "ペン",
+      "鉛筆",
+      "テキスト",
+      "画像",
+      "手のひら",
+    ]);
+  });
+
+  it("新しいツールのボタンで切り替え、押されている状態を出す", () => {
+    render(<Toolbar />);
+    for (const [label, id] of [
+      ["多角形", "polygon"],
+      ["星", "star"],
+      ["ペン", "pen"],
+      ["鉛筆", "pencil"],
+    ] as const) {
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      expect(state().toolId).toBe(id);
+      expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-pressed", "true");
+    }
+  });
+});

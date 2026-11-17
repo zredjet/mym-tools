@@ -18,9 +18,10 @@ pub use validation::{validate_svg, MAX_SVG_BYTES, MAX_TEXT_BYTES};
 /// v1 は `{ svg, text }` (ADR-0021)、v2 は `{ pages, nodes, assets, text }` (ADR-0026)、v3 は v2 に
 /// 回転・線の端と角と破線・パス・ブーリアンを足したもの (ADR-0028)。
 ///
-/// この定数を 3 にするだけで、`upgrade_payload` が v1 / v2 を v3 へ変換し、`validate_payload` が v3 を
-/// 検証し、起動時に `pre-payload-vector-v3` のバックアップを取るようになる (C1 が変える。§8.15)。
-const CURRENT_PAYLOAD_VERSION: u32 = 2;
+/// 3 なので、`upgrade_payload` が v1 / v2 を v3 へ変換し、`validate_payload` が v3 を検証し、起動時に
+/// `pre-payload-vector-v3` のバックアップを取る (§8.15 の C1)。画面の `PAYLOAD_VERSION`
+/// (`src/modules/vector/editor/model/payload.ts`) と同じ値にする。
+const CURRENT_PAYLOAD_VERSION: u32 = 3;
 
 /// `version` の文書を検証する。2 は凍結した v2 の規則、3 は v3 の規則。
 fn validate_as(version: u32, payload: &Value) -> Result<(), ModuleError> {

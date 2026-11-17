@@ -66,6 +66,12 @@ function leafBounds(node: CanvasNode, measurer: TextMeasurer): Rect | null {
     case "svg":
       result = { x: node.x, y: node.y, width: node.width, height: node.height };
       break;
+    case "path": {
+      // 線はマイターの角が太さの 2 倍まで届く
+      const box = { x: node.x, y: node.y, width: node.width, height: node.height };
+      result = withShadow(expand(box, (node.stroke?.width ?? 0) * 2), node.shadow);
+      break;
+    }
     default:
       return null;
   }
@@ -86,12 +92,15 @@ export function localRenderBounds(
 ): Rect | null {
   const node = getNode(doc, id);
   if (!node || !node.visible || ancestors.has(id)) return null;
-  if (node.type === "group") {
+  if (node.type === "group" || node.type === "boolean") {
     ancestors.add(id);
     const result = unionRects(
       node.children.map((child) => localRenderBounds(doc, child, measurer, ancestors)),
     );
     ancestors.delete(id);
+    // ブーリアンは自分の線と影で描く (線はマイターの角が太さの 2 倍まで届く)
+    if (node.type === "boolean" && result)
+      return withShadow(expand(result, (node.stroke?.width ?? 0) * 2), node.shadow);
     return result;
   }
   if (node.type !== "frame") return leafBounds(node, measurer);

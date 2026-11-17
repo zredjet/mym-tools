@@ -1,60 +1,43 @@
 import { describe, expect, it } from "vitest";
-import fixtures from "./fixtures/payload-v2.json";
+import fixtures from "./fixtures/payload-v3.json";
 import { fromPayload, toPayload } from "./payload";
 import { computeSearchText } from "./searchText";
 import { fixturePayload } from "./testing";
-import type { VectorPayloadV2 } from "./types";
+import type { VectorPayloadV3 } from "./types";
 import { CANVAS_LIMITS } from "./limits";
 import { checkSavable } from "./payload";
 import { createFrame, createText } from "./create";
+import { applyFixturePatch, type FixturePatchOp } from "./testing";
 import { hasLoneSurrogate, isCanonicalBase64, validatePayload } from "./validate";
 
-type Path = (string | number)[];
-interface PatchOp {
-  op: string;
-  path: Path;
-  value?: unknown;
-}
-
-/** 契約データの patch を当てる (op は set / remove / append)。 */
-function applyPatch(base: unknown, patch: PatchOp[]): unknown {
-  const root = structuredClone(base) as Record<string | number, unknown>;
-  for (const { op, path, value } of patch) {
-    const parentPath = path.slice(0, -1);
-    const last = path[path.length - 1] as string | number;
-    let target = root as Record<string | number, unknown>;
-    for (const key of parentPath) target = target[key] as Record<string | number, unknown>;
-    if (op === "set") target[last] = structuredClone(value);
-    else if (op === "remove") {
-      if (Array.isArray(target)) target.splice(Number(last), 1);
-      else delete target[last];
-    } else if (op === "append") (target[last] as unknown[]).push(structuredClone(value));
-    else throw new Error(`unknown op: ${op}`);
-  }
-  return root;
-}
-
-describe("payload v2 の契約データ", () => {
-  for (const { name, payload } of fixtures.valid)
+describe("payload v3 の契約データ", () => {
+  for (const { name } of fixtures.valid)
     it(`valid: ${name} は検証を通り、検索用テキストが一致する`, () => {
+      const payload = fixturePayload(name);
       expect(validatePayload(payload)).toBeNull();
-      const doc = fromPayload(payload as unknown as VectorPayloadV2);
+      const doc = fromPayload(payload);
       expect(computeSearchText(doc)).toBe(payload.text);
       expect(toPayload(doc)).toEqual(payload);
     });
 
   for (const { name, reason, base, patch } of fixtures.invalid)
     it(`invalid: ${name} (${reason}) を拒否する`, () => {
-      const payload = applyPatch(fixturePayload(base), patch as PatchOp[]);
+      const payload = applyFixturePatch(fixturePayload(base), patch as FixturePatchOp[]);
       const error = validatePayload(payload);
       expect(error).toEqual(expect.any(String));
       if (process.env["SHOW_REASONS"]) console.log(name, "=>", error);
     });
 
-  for (const { name, v2 } of fixtures.upgrade)
-    it(`upgrade: ${name} の v2 は検証を通る`, () => {
-      expect(validatePayload(v2)).toBeNull();
+  for (const { name, from, v3 } of fixtures.upgrade)
+    it(`upgrade: ${name} (v${from} から) の v3 は検証を通り、検索用テキストが一致する`, () => {
+      expect(validatePayload(v3)).toBeNull();
+      expect(computeSearchText(fromPayload(v3 as unknown as VectorPayloadV3))).toBe(v3.text);
     });
+
+  it("どの invalid も土台の文書は検証を通る (理由が土台の誤りにならない)", () => {
+    const bases = new Set(fixtures.invalid.map((entry) => entry.base));
+    for (const base of bases) expect(validatePayload(fixturePayload(base))).toBeNull();
+  });
 });
 
 describe("validatePayload の個別の規則", () => {
@@ -107,14 +90,14 @@ describe("validatePayload の個別の規則", () => {
     for (let i = 0; i < 32; i++) {
       const id = `deep${i}`;
       payload["nodes"][id] = { ...structuredClone(payload["nodes"].frame2), id, children: [] };
-      parent.children = [id];
+      parent.children.push(id);
       parent = payload["nodes"][id];
     }
     expect(validatePayload(payload)).toMatch(/深さ/);
     // 1 段減らすと通る
     payload["nodes"].deep30.children = [];
     delete payload["nodes"].deep31;
-    payload["text"] = computeSearchText(fromPayload(payload as unknown as VectorPayloadV2));
+    payload["text"] = computeSearchText(fromPayload(payload as unknown as VectorPayloadV3));
     expect(validatePayload(payload)).toBeNull();
   });
 

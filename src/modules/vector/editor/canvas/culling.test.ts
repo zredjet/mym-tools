@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { createFrame, createGroup, createLine, createRect, createText } from "../model/create";
+import {
+  createBoolean,
+  createFrame,
+  createGroup,
+  createLine,
+  createPath,
+  createRect,
+  createStroke,
+  createText,
+} from "../model/create";
 import type { CanvasDocument, CanvasNode } from "../model/types";
 import { fixedWidthMeasurer } from "../render/testing";
 import { pageContentBounds, renderBounds, visibleTopLevelIds } from "./culling";
@@ -24,7 +33,7 @@ describe("描く範囲", () => {
           y: 0,
           width: 10,
           height: 10,
-          stroke: { color: "#000000", opacity: 1, width: 4 },
+          stroke: { color: "#000000", opacity: 1, width: 4, cap: "butt", join: "miter", dash: [] },
           shadow: { x: 5, y: 0, blur: 2, color: "#000000", opacity: 1 },
         }),
       ],
@@ -103,6 +112,36 @@ describe("描く範囲", () => {
   it("水平な線も幅 0 にならない", () => {
     const doc = docOf([createLine({ id: "l", x1: 0, y1: 5, x2: 10, y2: 5 })], ["l"]);
     expect(renderBounds(doc, "l", measurer)).toEqual({ x: -0.5, y: 4.5, width: 11, height: 1 });
+  });
+});
+
+describe("描く範囲 (v3 のパスとブーリアン。回転は第 2 段階の C2 で扱う)", () => {
+  it("ページ直下のパスとブーリアンも描く範囲を持つ (画面外の判定で消えない)", () => {
+    const square = [
+      {
+        closed: true,
+        points: [
+          { x: 0, y: 0, in: null, out: null, mirror: "none" as const },
+          { x: 10, y: 0, in: null, out: null, mirror: "none" as const },
+          { x: 10, y: 10, in: null, out: null, mirror: "none" as const },
+        ],
+      },
+    ];
+    const doc = docOf(
+      [
+        createPath(square, { id: "p", x: 100, y: 100, stroke: createStroke("#000000", 2) }),
+        createBoolean("union", ["a", "b"], { id: "u", stroke: null }),
+        createRect({ id: "a", x: 0, y: 0, width: 10, height: 10 }),
+        createRect({ id: "b", x: 20, y: 0, width: 10, height: 10 }),
+      ],
+      ["p", "u"],
+    );
+    // パスの線はマイターの角が太さの 2 倍まで届く
+    expect(renderBounds(doc, "p", measurer)).toEqual({ x: 96, y: 96, width: 18, height: 18 });
+    expect(renderBounds(doc, "u", measurer)).toEqual({ x: 0, y: 0, width: 30, height: 10 });
+    expect(
+      visibleTopLevelIds(doc, "p1", { x: 0, y: 0, width: 200, height: 200 }, measurer),
+    ).toEqual(["p", "u"]);
   });
 });
 
