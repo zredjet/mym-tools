@@ -12,13 +12,14 @@ permissions:
 
 on:
   pull_request:
-    branches: [main]
+    # canvas-stage2 はキャンバスの第 2 段階の統合ブランチ (ADR-0028)。main へ切り替える PR で外す
+    branches: [main, canvas-stage2]
     # paths-ignore は撤廃 (ADR-0010 §7.15.5: GitHub の実挙動では skip された
     # required check は「Expected」のまま BLOCKED になり mergeable にならない)。
     # 課金は public 化 (§1.2 / §2.8) で Free tier 無制限のため doc-only PR でも
     # 6 ジョブ走らせる方針に変更。
   push:
-    branches: [main]
+    branches: [main, canvas-stage2]
   workflow_dispatch:
 
 # 同一 PR で連続 push したときの古い run を自動キャンセル (ADR-0010 §2.2 / Round 2 M-3)
@@ -132,6 +133,13 @@ jobs:
         if: always()
       - run: npx prettier --check .
         if: always()
+      # 配布するアプリの identifier を確かめる。キャンバスの統合ブランチ canvas-stage2 は普段のデータに
+      # 触れないよう別の identifier で動かす (ADR-0028)。戻し忘れたまま main に入ると、利用者のアプリが
+      # 別のデータフォルダを開き、作品が消えたように見えるので、main 宛ての PR と main への push で止める
+      - name: identifier が配布用か確かめる (ADR-0028)
+        if: always() && (github.base_ref == 'main' || github.ref == 'refs/heads/main')
+        run: |
+          node -e "const id = require('./src-tauri/tauri.conf.json').identifier; if (id !== 'com.zredjet.mymtools') { console.error('tauri.conf.json の identifier が ' + id + ' です。main では com.zredjet.mymtools にする (ADR-0028)'); process.exit(1); }"
 
   test-frontend:
     runs-on: ubuntu-latest
