@@ -260,6 +260,9 @@ fn try_take_auto_backup(backup: &dyn BackupService) {
 #[cfg(test)]
 mod startup_data_migration_tests {
     use super::*;
+    use crate::modules::vector::testing::{
+        module_backends_at, pre_payload_prefix, valid_payload, versions, VectorModuleAt, CURRENT,
+    };
     use serde_json::json;
 
     #[test]
@@ -406,6 +409,7 @@ mod startup_data_migration_tests {
         );
         let modules: Vec<Arc<dyn module::ModuleBackend>> =
             vec![Arc::new(modules::vector::VectorModule)];
+        assert_eq!(modules[0].current_payload_version(), CURRENT);
         take_payload_upgrade_backups(storage.as_ref(), &modules, |prefix| {
             backup
                 .take(BackupKind::PreOp {
@@ -419,25 +423,105 @@ mod startup_data_migration_tests {
         assert_eq!(
             records[0].kind,
             BackupKind::PreOp {
-                prefix: "pre-payload-vector-v2".into()
+                prefix: pre_payload_prefix(CURRENT)
             }
         );
         // バックアップの中の行は v1 のまま (変換の前の控え)
         let copy = SqliteStorage::open(&records[0].path).unwrap();
-        assert!(copy.has_items_older_than("vector", 2).unwrap());
+        assert!(copy.has_items_older_than("vector", CURRENT).unwrap());
     }
 
-    fn pre_payload_backups(backups_root: &std::path::Path) -> Vec<String> {
+    /// pre-op のフォルダにある、版 `version` の引き上げの前のバックアップ。
+    fn pre_payload_backups_for(backups_root: &std::path::Path, version: u32) -> Vec<String> {
+        let prefix = format!("{}-", pre_payload_prefix(version));
         let mut names: Vec<String> = std::fs::read_dir(backups_root.join("pre-op"))
             .map(|entries| {
                 entries
                     .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-                    .filter(|name| name.starts_with("pre-payload-vector-v2-"))
+                    .filter(|name| name.starts_with(&prefix))
                     .collect()
             })
             .unwrap_or_default();
         names.sort();
         names
+    }
+
+    fn pre_payload_backups(backups_root: &std::path::Path) -> Vec<String> {
+        pre_payload_backups_for(backups_root, CURRENT)
+    }
+
+    /// 版を 3 にしたとき、起動の手順が v1 と v2 の行の最初の変換の前に `pre-payload-vector-v3` を
+    /// 1 回だけ取り、行は変えない (ADR-0027 の規則 1、§8.3.3)。版が 2 のときに v2 の分を取った後でも取る。
+    #[test]
+    fn startup_takes_the_v3_backup_once_for_v1_and_v2_rows() {
+        for rows in [&[1u32, 2][..], &[1], &[2]] {
+            let dir = tempfile::tempdir().unwrap();
+            let db_path = dir.path().join("data.sqlite");
+            let backups_root = dir.path().join("backups");
+            let v1 = json!({ "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"/>", "text": "" });
+            let v2 = valid_payload(2, "full");
+            {
+                let storage = SqliteStorage::open(&db_path).unwrap();
+                let project = storage.create_project("P", None).unwrap();
+                for version in rows {
+                    let payload = if *version == 1 { &v1 } else { &v2 };
+                    storage
+                        .create_item(
+                            "vector",
+                            &project.id,
+                            "作品",
+                            &[],
+                            *version,
+                            payload,
+                            "作品",
+                        )
+                        .unwrap();
+                }
+            }
+            // 版が 2 のアプリで一度起動していた (v1 の行があれば v2 の分を取る)
+            let (storage, _backup) =
+                prepare_storage(&db_path, &backups_root, &module_backends_at(2)).unwrap();
+            let v2_backups = pre_payload_backups_for(&backups_root, 2).len();
+            assert_eq!(v2_backups, usize::from(rows.contains(&1)), "{rows:?}");
+            drop(storage);
+
+            let (storage, _backup) =
+                prepare_storage(&db_path, &backups_root, &module_backends_at(3)).unwrap();
+            assert_eq!(
+                pre_payload_backups_for(&backups_root, 3).len(),
+                1,
+                "{rows:?}"
+            );
+            assert_eq!(storage.payload_upgrade_backup_version("vector").unwrap(), 3);
+            // 行は変えない (変換は読んだときに Eager-on-Read が行う)
+            let project = &storage.list_projects().unwrap()[0];
+            let mut stored: Vec<u32> = storage
+                .list_items("vector", &project.id, 10, 0)
+                .unwrap()
+                .iter()
+                .map(|row| row.payload_schema_version)
+                .collect();
+            stored.sort();
+            assert_eq!(stored, rows, "{rows:?}");
+            drop(storage);
+            // 2 回目の起動では取らない
+            prepare_storage(&db_path, &backups_root, &module_backends_at(3)).unwrap();
+            assert_eq!(pre_payload_backups_for(&backups_root, 3).len(), 1);
+            assert_eq!(pre_payload_backups_for(&backups_root, 2).len(), v2_backups);
+        }
+    }
+
+    /// 起動時のバックアップの接頭辞は、モジュールの版の定数から決まる (`VectorModuleAt` も同じ)。
+    #[test]
+    fn payload_backup_prefix_follows_the_version_constant() {
+        for version in versions() {
+            let storage = SqliteStorage::open(":memory:").unwrap();
+            insert(&storage, "vector", version - 1);
+            let modules: Vec<Arc<dyn module::ModuleBackend>> =
+                vec![Arc::new(VectorModuleAt(version))];
+            let taken = take_payload_upgrade_backups(&storage, &modules, |_| Ok(())).unwrap();
+            assert_eq!(taken, vec![pre_payload_prefix(version)]);
+        }
     }
 
     /// 起動の手順 (`prepare_storage`、`run()` の setup が AppState::build の前に呼ぶ) が、

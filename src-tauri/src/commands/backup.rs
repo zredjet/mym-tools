@@ -158,15 +158,19 @@ pub(crate) fn restore_backup(
 mod tests {
     use super::*;
     use crate::backup::LocalBackupService;
+    use crate::modules::vector::testing::{module_backends_at, pre_payload_prefix, versions};
     use crate::storage::SqliteStorage;
     use serde_json::json;
 
-    fn pre_payload_count(root: &Path) -> usize {
+    /// 版 `version` の引き上げの前のバックアップの数。版は vector の版の定数か、版が 3 のときの経路を
+    /// 確かめる 3 (`versions()`)。
+    fn pre_payload_count(root: &Path, version: u32) -> usize {
+        let prefix = format!("{}-", pre_payload_prefix(version));
         std::fs::read_dir(root.join("pre-op"))
             .map(|entries| {
                 entries
                     .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-                    .filter(|name| name.starts_with("pre-payload-vector-v2-"))
+                    .filter(|name| name.starts_with(&prefix))
                     .count()
             })
             .unwrap_or(0)
@@ -180,9 +184,10 @@ mod tests {
         modules: Vec<Arc<dyn ModuleBackend>>,
         /// 記録の無い (切替前の版で取った) バックアップの代わり。v1 の作品が 1 つある
         old_backup: std::path::PathBuf,
+        version: u32,
     }
 
-    fn fixture() -> Fixture {
+    fn fixture(version: u32) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("backups");
         let storage: Arc<dyn StorageService> =
@@ -195,9 +200,9 @@ mod tests {
             .unwrap();
         let old_backup = backup.take(BackupKind::Manual).unwrap().path;
         // 新しい版での起動の後 (記録が付いている)
-        let modules = crate::modules::registry::module_backends();
+        let modules = module_backends_at(version);
         crate::take_payload_upgrade_backups_with(storage.as_ref(), &backup, &modules).unwrap();
-        assert_eq!(pre_payload_count(&root), 1);
+        assert_eq!(pre_payload_count(&root, version), 1);
         Fixture {
             _dir: dir,
             root,
@@ -205,29 +210,37 @@ mod tests {
             backup,
             modules,
             old_backup,
+            version,
         }
     }
 
     /// 記録の無いバックアップを `core_backup_restore` の本体で戻すと、その場でもう一度取る (ADR-0027)。
     #[test]
     fn restoring_a_backup_without_the_record_takes_the_payload_backup_again() {
-        let f = fixture();
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        let outcome =
-            restore_backup(f.storage.as_ref(), &f.backup, &f.modules, &f.old_backup).unwrap();
-        assert_eq!(outcome.payload_backup_error, None);
-        assert_eq!(pre_payload_count(&f.root), 2);
-        assert_eq!(
-            f.storage.payload_upgrade_backup_version("vector").unwrap(),
-            2
-        );
+        for version in versions() {
+            let f = fixture(version);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            let outcome =
+                restore_backup(f.storage.as_ref(), &f.backup, &f.modules, &f.old_backup).unwrap();
+            assert_eq!(outcome.payload_backup_error, None);
+            assert_eq!(pre_payload_count(&f.root, f.version), 2);
+            assert_eq!(
+                f.storage.payload_upgrade_backup_version("vector").unwrap(),
+                f.version
+            );
+        }
     }
 
     /// 引き上げの前のバックアップを取れなくても、リストアは成功として返し、理由を知らせる。
     /// 記録は付かないので、次の起動でもう一度取りにいく。
     #[test]
     fn restore_succeeds_even_if_the_payload_backup_fails() {
-        let f = fixture();
+        for version in versions() {
+            check_restore_succeeds_even_if_the_payload_backup_fails(fixture(version));
+        }
+    }
+
+    fn check_restore_succeeds_even_if_the_payload_backup_fails(f: Fixture) {
         // pre-restore は取れて、pre-payload だけが失敗するバックアップサービス
         #[derive(Debug)]
         struct FailingBackup<'a>(&'a LocalBackupService);
@@ -269,6 +282,6 @@ mod tests {
             f.storage.payload_upgrade_backup_version("vector").unwrap(),
             0
         );
-        assert!(f.storage.has_items_older_than("vector", 2).unwrap());
+        assert!(f.storage.has_items_older_than("vector", f.version).unwrap());
     }
 }
