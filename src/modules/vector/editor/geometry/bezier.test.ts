@@ -204,6 +204,26 @@ describe("nearest point", () => {
     expect(m.t).toBeCloseTo(0.4321, 9);
   });
 
+  it("finds the global minimum on random curves (no hidden minima between samples)", () => {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) * 100;
+    let worst = 0;
+    for (let k = 0; k < 150; k++) {
+      const seg = cubicSegment(
+        { x: rnd(), y: rnd() },
+        { x: rnd() * 3 - 100, y: rnd() * 3 - 100 },
+        { x: rnd() * 3 - 100, y: rnd() * 3 - 100 },
+        { x: rnd(), y: rnd() },
+      );
+      const p = { x: rnd(), y: rnd() };
+      const n = nearestPoint(seg, p);
+      let best = Infinity;
+      for (let i = 0; i <= 4000; i++) best = Math.min(best, distance(pointAt(seg, i / 4000), p));
+      worst = Math.max(worst, n.distance - best);
+    }
+    expect(worst).toBeLessThanOrEqual(1e-9);
+  });
+
   it("agrees with brute force sampling", () => {
     const probes = [
       { x: 50, y: 50 },
@@ -286,10 +306,19 @@ describe("flatten", () => {
     expect(cubicFlatness(straight)).toBe(0);
   });
 
-  it("survives a zero or negative tolerance", () => {
+  it("raises a zero or negative tolerance to the 1e-4 px floor", () => {
     const pts = flattenSegment(quarter(10), 0);
     expect(pts.length).toBeGreaterThan(2);
-    expect(pts.length).toBeLessThanOrEqual(2 ** 24 + 1);
+    expect(pts).toEqual(flattenSegment(quarter(10), 1e-4));
+    expect(flattenSegment(quarter(10), -1)).toEqual(pts);
+    // 1000 px の曲線でも点の数は数千で止まる
+    const big = cubicSegment(
+      { x: 0, y: 0 },
+      { x: 300, y: 1000 },
+      { x: 700, y: -1000 },
+      { x: 1000, y: 0 },
+    );
+    expect(flattenSegment(big, 0).length).toBeLessThan(10000);
   });
 
   it("detects degenerate segments", () => {

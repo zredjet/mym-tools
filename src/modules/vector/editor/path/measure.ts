@@ -11,6 +11,8 @@
  *   交わりから求めた巻き数。時計回りの輪郭の内側で +1。開いた輪郭は閉じた形として扱う
  *   (`windingNumberOfSegments` は閉じた線分の並びを受け、閉じない)
  * - `containsPoint(subpaths, p, fillRule)`: `nonzero` は巻き数が 0 でない、`evenodd` は奇数
+ * - `windingsBeside(segments, index, t)`: 輪郭の上の点のすぐ左右の巻き数 (ブーリアン演算で、分けた曲線の
+ *   部分を残すかを決めるのに使う)。自分を除いて数え、曲線が横向きの所では縦の光線に切り替える
  * - `nearestOnPath(subpaths, p)` / `distanceToPath(subpaths, p)`: 描かれる輪郭 (閉じた輪郭は閉じる辺を含み、
  *   開いた輪郭は含まない。点が 1 個の輪郭は描かれないので除く) で最も近い点と距離。
  *   `segmentIndex` は `subpathToSegments` の添字 (点 i から点 i + 1 への辺。閉じる辺は n - 1)
@@ -30,6 +32,9 @@ import {
   type Segment,
   segmentBounds,
   segmentExtrema,
+  segmentMagnitude,
+  tangentAt,
+  toleranceFor,
   transformSegment,
   unionBounds,
 } from "../geometry/bezier";
@@ -136,58 +141,140 @@ export function containsPoint(subpaths: readonly Subpath[], p: Point, fillRule: 
 }
 
 function segmentWinding(seg: Segment, p: Point): number {
-  if (seg.kind === "line") {
-    return monotoneWinding(seg, 0, 1, seg.from.y, seg.to.y, p);
-  }
   // 範囲の外なら交わらない
-  const minY = Math.min(seg.from.y, seg.c1.y, seg.c2.y, seg.to.y);
-  const maxY = Math.max(seg.from.y, seg.c1.y, seg.c2.y, seg.to.y);
-  if (p.y < minY || p.y >= maxY) return 0;
-  const maxX = Math.max(seg.from.x, seg.c1.x, seg.c2.x, seg.to.x);
-  if (p.x >= maxX) return 0;
-  const stops = [0, ...segmentExtrema(seg).y, 1];
+  if (seg.kind === "cubic") {
+    const minY = Math.min(seg.from.y, seg.c1.y, seg.c2.y, seg.to.y);
+    const maxY = Math.max(seg.from.y, seg.c1.y, seg.c2.y, seg.to.y);
+    if (p.y < minY || p.y >= maxY) return 0;
+    if (p.x >= Math.max(seg.from.x, seg.c1.x, seg.c2.x, seg.to.x)) return 0;
+  }
   let w = 0;
-  let prevY = seg.from.y;
-  for (let i = 1; i < stops.length; i++) {
-    const t1 = stops[i]!;
-    const y1 = i === stops.length - 1 ? seg.to.y : pointAt(seg, t1).y;
-    w += monotoneWinding(seg, stops[i - 1]!, t1, prevY, y1, p);
-    prevY = y1;
+  for (const c of axisCrossings(seg, "y", p.y)) {
+    if (c.other > p.x) w += c.increasing ? 1 : -1;
   }
   return w;
 }
 
-/** y が単調な区間 [t0, t1] (両端の y は y0, y1) と、点から右への半直線の交わり。下向き (+y) なら +1。 */
-function monotoneWinding(
-  seg: Segment,
-  t0: number,
-  t1: number,
-  y0: number,
-  y1: number,
-  p: Point,
-): number {
-  if (y0 === y1) return 0;
-  const dir = y1 > y0 ? 1 : -1;
-  const lo = Math.min(y0, y1);
-  const hi = Math.max(y0, y1);
-  if (p.y < lo || p.y >= hi) return 0;
-  let x: number;
-  if (seg.kind === "line") {
-    const s = (p.y - seg.from.y) / (seg.to.y - seg.from.y);
-    x = seg.from.x + (seg.to.x - seg.from.x) * s;
-  } else {
-    // y(t) = p.y を挟み撃ちで解く
-    let a = t0;
-    let b = t1;
-    for (let i = 0; i < 80 && b - a > 1e-15; i++) {
-      const m = (a + b) / 2;
-      const ym = pointAt(seg, m).y;
-      if ((ym - p.y) * dir < 0) a = m;
-      else b = m;
+interface AxisCrossing {
+  t: number;
+  /** 交わる点のもう一方の座標 (`axis` が y なら x) */
+  other: number;
+  /** `axis` の座標が増える向きに横切るか */
+  increasing: boolean;
+}
+
+/**
+ * 曲線と直線 (`axis` の座標 = `value`) の交わり。曲線を `axis` の極値で単調な区間に分け、区間ごとに
+ * 半開区間 [下端, 上端) の規則で数える (頂点や接線を二重に数えない)。交わる t は挟み撃ちで 1e-15 まで詰める。
+ */
+function axisCrossings(seg: Segment, axis: "x" | "y", value: number): AxisCrossing[] {
+  const coord = (q: Point) => (axis === "y" ? q.y : q.x);
+  const otherOf = (q: Point) => (axis === "y" ? q.x : q.y);
+  const out: AxisCrossing[] = [];
+  const stops = seg.kind === "line" ? [0, 1] : [0, ...segmentExtrema(seg)[axis], 1];
+  let c0 = coord(seg.from);
+  for (let i = 1; i < stops.length; i++) {
+    const t0 = stops[i - 1]!;
+    const t1 = stops[i]!;
+    const c1 = i === stops.length - 1 ? coord(seg.to) : coord(pointAt(seg, t1));
+    const prev = c0;
+    c0 = c1;
+    if (prev === c1) continue;
+    const increasing = c1 > prev;
+    const lo = Math.min(prev, c1);
+    const hi = Math.max(prev, c1);
+    if (value < lo || value >= hi) continue;
+    let t: number;
+    if (seg.kind === "line") {
+      t = (value - prev) / (c1 - prev);
+    } else {
+      let a = t0;
+      let b = t1;
+      for (let k = 0; k < 80 && b - a > 1e-15; k++) {
+        const m = (a + b) / 2;
+        if ((coord(pointAt(seg, m)) - value) * (increasing ? 1 : -1) < 0) a = m;
+        else b = m;
+      }
+      t = (a + b) / 2;
     }
-    x = pointAt(seg, (a + b) / 2).x;
+    out.push({ t, other: otherOf(pointAt(seg, t)), increasing });
   }
-  return x > p.x ? dir : 0;
+  return out;
+}
+
+export interface SideWindings {
+  /** 曲線の進む向きに見て左 (y が下向きの画面で見たとおり) の巻き数 */
+  left: number;
+  /** 右の巻き数。この曲線だけを見れば right = left + 1 (時計回りの内側は右) */
+  right: number;
+  /**
+   * ほかの曲線が同じ点 (許容値以内) を通る、または t が端にあり、どちらの側に数えるかが決まらない。
+   * ブーリアン演算では、この曲線の別の t で求め直す
+   */
+  ambiguous: boolean;
+}
+
+/**
+ * 輪郭の上の点 (曲線 `segments[index]` の t の点) のすぐ左右の巻き数 (paper.js の windingL / windingR に当たる)。
+ * - `segments` は閉じた線分の並び (`subpathToSegments(sub, { implicitClose: true })` を輪郭の分つなげたもの)
+ * - その点を通る光線で、ほかの曲線 (同じ曲線のほかの t を含む) の交わりを数える。曲線がそこで縦寄りなら
+ *   横の光線、横寄りなら縦の光線を使う (光線が曲線に沿って当たらないように)
+ * - 自分の寄与は向きから決める (自分を交わりとして数えない)
+ * - t は 0 と 1 から離れた値で呼ぶ (端では隣の曲線も同じ点を通るので `ambiguous`)
+ */
+export function windingsBeside(
+  segments: readonly Segment[],
+  index: number,
+  t: number,
+  options: { tolerance?: number } = {},
+): SideWindings {
+  const seg = segments[index];
+  if (!seg) throw new RangeError(`windingsBeside: no segment at ${index}`);
+  const p = pointAt(seg, t);
+  const dir = tangentAt(seg, t);
+  const tol =
+    options.tolerance ??
+    toleranceFor(Math.max(segmentMagnitude(seg), Math.abs(p.x), Math.abs(p.y)));
+  let ambiguous = !dir || t <= 1e-9 || t >= 1 - 1e-9;
+  if (!dir) return { left: 0, right: 0, ambiguous };
+  const horizontalRay = Math.abs(dir.y) >= Math.abs(dir.x);
+  const axis = horizontalRay ? "y" : "x";
+  const value = horizontalRay ? p.y : p.x;
+  const at = horizontalRay ? p.x : p.y;
+  // 光線: 横なら +x、縦なら +y の向き。巻き数は横なら y が増える横切りで +1、縦なら x が減る横切りで +1
+  // (どちらも時計回りの輪郭の内側で +1 になる向き)
+  const weight = (c: AxisCrossing) =>
+    horizontalRay ? (c.increasing ? 1 : -1) : c.increasing ? -1 : 1;
+  let beyond = 0; // 点より光線の先 (+x / +y) にある交わり
+  segments.forEach((other, k) => {
+    let crossings = axisCrossings(other, axis, value);
+    if (k === index) {
+      // 自分の t の交わりを除く
+      let nearest = -1;
+      crossings.forEach((c, i) => {
+        if (
+          Math.abs(c.t - t) <= 1e-6 &&
+          (nearest < 0 || Math.abs(c.t - t) < Math.abs(crossings[nearest]!.t - t))
+        ) {
+          nearest = i;
+        }
+      });
+      if (nearest >= 0) crossings = crossings.filter((_, i) => i !== nearest);
+    }
+    for (const c of crossings) {
+      if (Math.abs(c.other - at) <= tol) ambiguous = true;
+      if (c.other > at) beyond += weight(c);
+    }
+  });
+  // 自分の寄与。光線の手前 (−x / −y) の点からは、自分も先にある
+  const selfWeight = horizontalRay ? (dir.y > 0 ? 1 : -1) : dir.x < 0 ? 1 : -1;
+  const behindSide = beyond + selfWeight; // 点の手前 (−x / −y) 側の巻き数
+  const aheadSide = beyond; // 点の先 (+x / +y) 側の巻き数
+  // 進む向きの左は (dir.y, −dir.x) の向き
+  const leftIsAhead = horizontalRay ? dir.y > 0 : dir.x < 0;
+  return leftIsAhead
+    ? { left: aheadSide, right: behindSide, ambiguous }
+    : { left: behindSide, right: aheadSide, ambiguous };
 }
 
 // ---------------------------------------------------------------------------

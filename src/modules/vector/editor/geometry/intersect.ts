@@ -2,39 +2,52 @@
  * 線分と 3 次ベジェの交点 (`docs/canvas-editor-design.md` §8.9.3 のブーリアン演算の土台)。
  *
  * 返すもの:
- * - `intersectSegments(a, b)` は `{ intersections, overlaps }`
+ * - `intersectSegments(a, b)` は `{ intersections, overlaps, complete }`
  *   - `intersections`: 1 点で交わる・接する所。`t1` は a、`t2` は b の媒介変数。t1 の昇順
  *   - `overlaps`: 同じ曲線の一部が重なっている区間。`t1` は a の区間 (昇順)、`t2` はそれに対応する b の区間
  *     (`t2[0]` の点が `t1[0]` の点と同じ。b が逆向きに重なれば `t2[0] > t2[1]`)。重なりの端は交点には入れない
  *   - 重なりと交点は排他: 重なりがある組では交点を返さない (多項式の曲線が一部で重なるなら同じ曲線の一部なので、
  *     ほかの所で交わるのは元の曲線の自己交差だけ。そこは扱わない)
+ *   - `complete`: 探し尽くしたか。曲線同士で調べる組が上限 (`MAX_PAIRS`) に達して打ち切ったときだけ false。
+ *     false の結果は交点が欠けているかもしれない。ブーリアン演算はこのとき求められなかった (`null`) とする
+ *   - 返す配列は呼び出しごとに新しい (足したり変えたりしても、ほかの呼び出しの結果に混ざらない)
  * - `selfIntersection(seg)` は 3 次ベジェ 1 本の自己交差 (輪) の点 (`t1 < t2`)。なければ null。
- *   3 次ベジェの自己交差は高々 1 つ
+ *   3 次ベジェの自己交差は高々 1 つ。交点が端点に許容値以内なら t は 0 / 1 ちょうど、点は端点そのもの
  *
  * 誤差と前提:
  * - 許容値 `tolerance` (px) は既定で `toleranceFor(2 本の座標の大きさ)` (= max(1e-7, 大きさ × 1e-10))。
- *   2 本の距離が許容値以内なら交わっているとみなす。接している (触れているだけの) 所も 1 点として返す
+ *   2 本の距離が許容値以内なら交わっているとみなす。接している (触れているだけの) 所も 1 点として返す。
+ *   `path/segments.ts` の「閉じている」の判定も同じ許容値を使う
  * - 端点はちょうどの値にする: 端点が相手の曲線から許容値以内なら、その t は 0 か 1 ちょうど。点 `point` は、
  *   端点なら端点の値そのもの (a の端点を優先)、そうでなければ a の上の点
+ * - 継ぎ目の近くの交点は重なって報告されうる: 輪郭の隣り合う 2 本の継ぎ目 (前の曲線の t = 1 と次の曲線の
+ *   t = 0) の近くを相手が横切ると、両方の組が同じ交点を (許容値の中でずれた t で) 返す。ブーリアン演算は、
+ *   許容値以内の交点を 1 つにまとめる前提で使う
  * - `tangent` は 2 本の向きがほぼ平行 (sin の絶対値が `TANGENT_EPSILON` 以下) な交点。触れているだけか
- *   横切るかは決めない (呼び出し側が両側の巻き数で決める)。重なった線分同士が 1 点だけで接する所も `tangent`
+ *   横切るかは決めない (呼び出し側が両側の巻き数 `windingsBeside` で決める)。重なった線分同士が 1 点だけで
+ *   接する所も `tangent`
  * - まっすぐな曲線 (制御点が弦から許容値以内) は線分として扱う。媒介変数は最近点で戻す。折り返す
  *   (制御点が弦の外へ出る) まっすぐな曲線の重なりの t は、最近点で選んだ側になる
  * - 線分と曲線: 曲線を線分の向きへ回し、距離の 3 次式の根を、微分の根で区切った単調な区間ごとに挟み撃ちで
  *   求める。区切りの点の値が許容値以内なら 0 とみなす (接する所はここで 1 点になる)
- * - 曲線と曲線: 端点を調べたうえで、制御点の範囲が重なる間は分け続け、十分平ら (弦からのずれが
- *   max(許容値, 大きさ × 1e-6)) になった組の弦の最近点から Newton 法で詰める (2 本の距離が許容値以下で採る)。
- *   接していて Newton 法の行列が潰れる所は、交互の射影に切り替える。その場合の t の精度は √許容値 程度に落ちる
- * - 2 つの交点が「大きさ × 1e-6」より近いと 1 つにまとまることがある。組の数が `MAX_PAIRS` を超えたら
- *   (ほぼ重なっているが許容値の外にある曲線など) 分けるのをやめ、それまでに見つかった交点を返す。
- *   ふつうの組 (横切る、接する) は 100〜200 組で終わり、1 回 0.2 ms ほど。上限に当たる組は 2〜3 ms
+ * - 曲線と曲線: 端点を調べたうえで、組を次の順に調べる (`search`)
+ *   1. 制御点の範囲が重ならない、または片方が相手の fat line (弦からの距離の帯) の外にあれば交わらない
+ *   2. 両方が共通の向きのグラフ (制御点の辺がどれもその向きから 30° 以内) なら、その向きの座標 s で
+ *      2 本の法線方向の差 h(s) を直接解く: 16 等分の標本で符号が変わる区間を挟み撃ち、|h| が局所的に
+ *      小さい所は黄金分割で極値を求めて、許容値以内なら接する点、0 をまたげば 2 つの交点にする。
+ *      寄り添う曲線 (1e-5〜1 px 離れたもの) も、ここで深く分けずに解ける
+ *   3. 両方が十分平ら (弦からのずれが max(許容値, 大きさ × 1e-6)) なら、弦の最近点から Newton 法で詰める
+ *      (接して行列が潰れる所は交互の射影)
+ *   4. それ以外は大きい方 (または両方) を半分に分ける
+ *   1 回の目安 (幅 100 px の曲線): 横切る・接する組は 0.02〜0.05 ms、1〜0.001 px 離れて寄り添う組は 0.09 ms、
+ *   1e-5 px で 0.3 ms。2 つの交点がグラフの標本の間隔より近く、h の極値が標本の局所的な最小に現れない形でだけ、
+ *   交点を落としうる
  */
 import type { Point } from "../model/types";
 import {
   type Bounds,
   boundsOverlap,
   controlBounds,
-  cubicFlatness,
   type CubicSegment,
   cross,
   derivativeAt,
@@ -72,11 +85,18 @@ export interface SegmentOverlap {
 export interface IntersectionResult {
   intersections: SegmentIntersection[];
   overlaps: SegmentOverlap[];
+  /**
+   * 探し尽くしたか。曲線同士で調べる組が `MAX_PAIRS` に達して打ち切ったときだけ false
+   * (見つからなかった交点がありうる)。ブーリアン演算はこのとき結果を求められなかった (`null`) とする
+   */
+  complete: boolean;
 }
 
 export interface IntersectOptions {
   /** 交わるとみなす距離 (px)。省くと座標の大きさから決める */
   tolerance?: number;
+  /** 曲線同士で調べる組の数の上限。省くと `MAX_PAIRS` (テストで打ち切りを起こすのに使う) */
+  maxPairs?: number;
 }
 
 /** `tangent` とみなす向きの sin の絶対値の上限。 */
@@ -84,9 +104,12 @@ export const TANGENT_EPSILON = 1e-4;
 /** 同じ交点とみなす媒介変数の差。 */
 export const PARAM_EPSILON = 1e-9;
 /** 曲線と曲線の分割で調べる組の数の上限。 */
-export const MAX_PAIRS = 4000;
+export const MAX_PAIRS = 4096;
 
-const EMPTY: IntersectionResult = { intersections: [], overlaps: [] };
+/** 毎回新しい空の結果 (呼び出し側が配列に足しても、ほかの結果に混ざらない)。 */
+function empty(): IntersectionResult {
+  return { intersections: [], overlaps: [], complete: true };
+}
 
 export function intersectSegments(
   a: Segment,
@@ -94,16 +117,21 @@ export function intersectSegments(
   options: IntersectOptions = {},
 ): IntersectionResult {
   const tol = options.tolerance ?? toleranceFor(Math.max(segmentMagnitude(a), segmentMagnitude(b)));
-  if (!boundsOverlap(controlBounds(a), controlBounds(b), tol)) {
-    return { intersections: [], overlaps: [] };
-  }
+  if (!boundsOverlap(controlBounds(a), controlBounds(b), tol)) return empty();
   const aStraight = isStraight(a, tol);
   const bStraight = isStraight(b, tol);
   let result: IntersectionResult;
   if (aStraight && bStraight) result = intersectStraight(a, b, tol);
   else if (aStraight) result = intersectStraightCurve(a, b as CubicSegment, tol);
   else if (bStraight) result = swap(intersectStraightCurve(b, a as CubicSegment, tol));
-  else result = intersectCurves(a as CubicSegment, b as CubicSegment, tol);
+  else {
+    result = intersectCurves(
+      a as CubicSegment,
+      b as CubicSegment,
+      tol,
+      options.maxPairs ?? MAX_PAIRS,
+    );
+  }
   return finish(a, b, result);
 }
 
@@ -149,10 +177,14 @@ export function selfIntersection(
     t2 = refined.t2;
   }
   if (distance(pointAt(seg, t1), pointAt(seg, t2)) > tol) return null;
+  // 端点に許容値以内なら 0 / 1 ちょうど (輪の一部を切り出した曲線で、交点が端点に来る場合)
+  if (distance(pointAt(seg, t1), seg.from) <= tol) t1 = 0;
+  if (distance(pointAt(seg, t2), seg.to) <= tol) t2 = 1;
+  if (t2 - t1 < 1e-7) return null;
   return {
     t1,
     t2,
-    point: t1 === 0 ? { ...seg.from } : pointAt(seg, t1),
+    point: t1 === 0 ? { ...seg.from } : t2 === 1 ? { ...seg.to } : pointAt(seg, t1),
     tangent: isTangent(seg, t1, seg, t2),
   };
 }
@@ -229,11 +261,11 @@ function intersectStraight(a: Segment, b: Segment, tol: number): IntersectionRes
     // 長さがほぼ 0: 点として相手に触れているか
     if (lenA <= tol) {
       const np = nearestPoint(b, a.from);
-      if (np.distance > tol) return EMPTY;
+      if (np.distance > tol) return empty();
       return single(0, paramOnStraight(b, a.from, tol), a.from, true);
     }
     const np = nearestPoint(a, b.from);
-    if (np.distance > tol) return EMPTY;
+    if (np.distance > tol) return empty();
     return single(paramOnStraight(a, b.from, tol), 0, b.from, true);
   }
 
@@ -250,7 +282,7 @@ function intersectStraight(a: Segment, b: Segment, tol: number): IntersectionRes
     const sb = [proj(B.from), proj(B.to)].sort((x, y) => x - y) as [number, number];
     const lo = Math.max(sa[0], sb[0]);
     const hi = Math.min(sa[1], sb[1]);
-    if (hi < lo - tol) return EMPTY;
+    if (hi < lo - tol) return empty();
     const at = (s: number): Point => ({ x: base.from.x + ux * s, y: base.from.y + uy * s });
     // 重なりの端は、近ければ元の端点そのものを使う (t を 0 か 1 ちょうどにするため)
     const endpoints = [a.from, a.to, b.from, b.to];
@@ -269,7 +301,7 @@ function intersectStraight(a: Segment, b: Segment, tol: number): IntersectionRes
       [ta0, ta1] = [ta1, ta0];
       [tb0, tb1] = [tb1, tb0];
     }
-    return { intersections: [], overlaps: [{ t1: [ta0, ta1], t2: [tb0, tb1] }] };
+    return { intersections: [], overlaps: [{ t1: [ta0, ta1], t2: [tb0, tb1] }], complete: true };
   }
 
   // 1 点で交わるか。端点が相手に触れていれば、その端点を使う
@@ -293,17 +325,17 @@ function intersectStraight(a: Segment, b: Segment, tol: number): IntersectionRes
   if (candidates.length > 0) {
     // 交わる直線同士なので交点は 1 つ。端点どうしが重なるもの (両方の t がちょうど) を選ぶ
     candidates.sort((p, q) => exactness(q) - exactness(p));
-    return { intersections: [candidates[0]!], overlaps: [] };
+    return { intersections: [candidates[0]!], overlaps: [], complete: true };
   }
   const dA = { x: A.to.x - A.from.x, y: A.to.y - A.from.y };
   const dB = { x: B.to.x - B.from.x, y: B.to.y - B.from.y };
   const den = cross(dA, dB);
-  if (den === 0) return EMPTY;
+  if (den === 0) return empty();
   const r = { x: B.from.x - A.from.x, y: B.from.y - A.from.y };
   const sA = cross(r, dB) / den;
   const sB = cross(r, dA) / den;
   if (sA < -tol / lenA || sA > 1 + tol / lenA || sB < -tol / lenB || sB > 1 + tol / lenB) {
-    return EMPTY;
+    return empty();
   }
   const p = { x: A.from.x + dA.x * clamp01(sA), y: A.from.y + dA.y * clamp01(sA) };
   const t1 = a.kind === "line" ? clamp01(sA) : paramOnStraight(a, p, tol);
@@ -329,7 +361,7 @@ function intersectStraightCurve(a: Segment, b: CubicSegment, tol: number): Inter
   const len = distance(L.from, L.to);
   if (len <= tol) {
     const np = nearestPoint(b, a.from);
-    if (np.distance > tol) return EMPTY;
+    if (np.distance > tol) return empty();
     return single(0, snapEnd(b, np.t, tol), a.from, true);
   }
   const ux = (L.to.x - L.from.x) / len;
@@ -346,7 +378,7 @@ function intersectStraightCurve(a: Segment, b: CubicSegment, tol: number): Inter
     const t1 = a.kind === "line" ? paramOnStraight(a, onLine, tol) : paramOnStraight(a, p, tol);
     intersections.push({ t1, t2: t, point: p, tangent: false });
   }
-  return { intersections, overlaps: [] };
+  return { intersections, overlaps: [], complete: true };
 }
 
 /**
@@ -426,21 +458,38 @@ interface Candidate {
   residual: number;
 }
 
-function intersectCurves(a: CubicSegment, b: CubicSegment, tol: number): IntersectionResult {
-  const overlap = curveOverlap(a, b, tol);
-  if (overlap) return { intersections: [], overlaps: [overlap] };
+interface SearchState {
+  pairs: number;
+  maxPairs: number;
+  truncated: boolean;
+}
 
-  const found: Candidate[] = [];
-  // 端点
-  for (const t1 of [0, 1]) {
-    const np = nearestPoint(b, pointAt(a, t1));
-    if (np.distance <= tol) found.push({ t1, t2: snapEnd(b, np.t, tol), residual: np.distance });
-  }
-  for (const t2 of [0, 1]) {
-    const np = nearestPoint(a, pointAt(b, t2));
-    if (np.distance <= tol) found.push({ t1: snapEnd(a, np.t, tol), t2, residual: np.distance });
-  }
+interface EndPair {
+  ta: number;
+  tb: number;
+  residual: number;
+}
 
+function intersectCurves(
+  a: CubicSegment,
+  b: CubicSegment,
+  tol: number,
+  maxPairs: number,
+): IntersectionResult {
+  // 端点が相手の上にある組 (重なりの判定と端点の交点の両方に使う)
+  const ends: EndPair[] = [];
+  for (const ta of [0, 1]) {
+    const np = nearestPoint(b, pointAt(a, ta));
+    if (np.distance <= tol) ends.push({ ta, tb: snapEnd(b, np.t, tol), residual: np.distance });
+  }
+  for (const tb of [0, 1]) {
+    const np = nearestPoint(a, pointAt(b, tb));
+    if (np.distance <= tol) ends.push({ ta: snapEnd(a, np.t, tol), tb, residual: np.distance });
+  }
+  const overlap = curveOverlap(a, b, tol, ends);
+  if (overlap) return { intersections: [], overlaps: [overlap], complete: true };
+
+  const found: Candidate[] = ends.map((e) => ({ t1: e.ta, t2: e.tb, residual: e.residual }));
   const ba = controlBounds(a);
   const bb = controlBounds(b);
   const extent = Math.max(
@@ -450,8 +499,8 @@ function intersectCurves(a: CubicSegment, b: CubicSegment, tol: number): Interse
     bb.maxY - bb.minY,
   );
   const flatTol = Math.max(tol, extent * 1e-6);
-  const state = { pairs: 0 };
-  subdivide(a, b, a, 0, 1, b, 0, 1, tol, flatTol, 0, found, state);
+  const state: SearchState = { pairs: 0, maxPairs, truncated: false };
+  search(a, b, a, 0, 1, b, 0, 1, tol, flatTol, 0, found, state);
 
   const intersections = mergeCandidates(a, b, found).map((c) => ({
     t1: c.t1,
@@ -459,10 +508,20 @@ function intersectCurves(a: CubicSegment, b: CubicSegment, tol: number): Interse
     point: pointAt(a, c.t1),
     tangent: false,
   }));
-  return { intersections, overlaps: [] };
+  return { intersections, overlaps: [], complete: !state.truncated };
 }
 
-function subdivide(
+const MAX_DEPTH = 40;
+
+/**
+ * 部分 a (元の a0 の [aT0, aT1]) と部分 b (元の b0 の [bT0, bT1]) の交点を探す。
+ * 1. 制御点の範囲が重ならない、または fat line (相手の弦からの距離の帯) の外にあれば交わらない
+ * 2. 両方が同じ向きのグラフ (制御点の辺がどれも共通の向きから `GRAPH_ANGLE` 以内) なら、その向きに沿った
+ *    符号つきの距離を直接解く (`solveAsGraphs`)。寄り添う曲線もここで分けずに済む
+ * 3. 両方が十分平らなら、弦の最近点から Newton 法で詰める
+ * 4. それ以外は大きい方 (または両方) を半分に分ける
+ */
+function search(
   a0: CubicSegment,
   b0: CubicSegment,
   a: CubicSegment,
@@ -475,23 +534,23 @@ function subdivide(
   flatTol: number,
   depth: number,
   out: Candidate[],
-  state: { pairs: number },
+  state: SearchState,
 ): void {
-  if (state.pairs++ > MAX_PAIRS) return;
+  if (state.pairs >= state.maxPairs) {
+    state.truncated = true;
+    return;
+  }
+  state.pairs++;
   const ba: Bounds = controlBounds(a);
   const bb: Bounds = controlBounds(b);
   if (!boundsOverlap(ba, bb, tol)) return;
+  if (outsideFatLine(a, b, tol) || outsideFatLine(b, a, tol)) return;
+  if (solveAsGraphs(a0, b0, a, aT0, aT1, b, bT0, bT1, tol, out)) return;
   const flatA = isStraight(a, flatTol);
   const flatB = isStraight(b, flatTol);
-  if ((flatA && flatB) || depth >= 40) {
+  if ((flatA && flatB) || depth >= MAX_DEPTH) {
     // 弦の最近点を出発点に、元の曲線で詰める
     const [sa, sb] = closestOnChords(a.from, a.to, b.from, b.to);
-    // 曲線は弦から平らさ以内にあるので、弦同士がそれより離れていれば交わらない
-    const gap = distance(
-      { x: a.from.x + (a.to.x - a.from.x) * sa, y: a.from.y + (a.to.y - a.from.y) * sa },
-      { x: b.from.x + (b.to.x - b.from.x) * sb, y: b.from.y + (b.to.y - b.from.y) * sb },
-    );
-    if (gap > cubicFlatness(a) + cubicFlatness(b) + tol) return;
     const t = aT0 + (aT1 - aT0) * sa;
     const u = bT0 + (bT1 - bT0) * sb;
     const r = refinePair(a0, b0, t, u, tol);
@@ -521,9 +580,243 @@ function subdivide(
     : [[b, bT0, bT1]];
   for (const [pa, pa0, pa1] of aParts) {
     for (const [pb, pb0, pb1] of bParts) {
-      subdivide(a0, b0, pa, pa0, pa1, pb, pb0, pb1, tol, flatTol, next, out, state);
+      search(a0, b0, pa, pa0, pa1, pb, pb0, pb1, tol, flatTol, next, out, state);
     }
   }
+}
+
+/**
+ * b が a の fat line の外にあるか。a は弦からの符号つきの距離が [min(0, c1, c2), max(0, c1, c2)] の帯の中に
+ * あるので、b の制御点がすべて帯の片側の外 (許容値より遠く) なら交わらない。
+ */
+function outsideFatLine(a: CubicSegment, b: CubicSegment, tol: number): boolean {
+  const dx = a.to.x - a.from.x;
+  const dy = a.to.y - a.from.y;
+  const len = Math.hypot(dx, dy);
+  if (len <= tol) return false;
+  const d = (p: Point) => ((p.y - a.from.y) * dx - (p.x - a.from.x) * dy) / len;
+  const d1 = d(a.c1);
+  const d2 = d(a.c2);
+  const lo = Math.min(0, d1, d2) - tol;
+  const hi = Math.max(0, d1, d2) + tol;
+  const q = [d(b.from), d(b.c1), d(b.c2), d(b.to)];
+  return Math.min(...q) > hi || Math.max(...q) < lo;
+}
+
+/** 曲線をグラフとして扱う、制御点の辺と共通の向きの角度の上限 (度)。 */
+const GRAPH_ANGLE = 30;
+const GRAPH_COS = Math.cos((GRAPH_ANGLE * Math.PI) / 180);
+const GRAPH_SAMPLES = 16;
+
+/** 曲線を向き u の座標 s と法線の座標 n に直したもの (Bernstein 係数)。 */
+interface Graph {
+  s: [number, number, number, number];
+  n: [number, number, number, number];
+  /** s が増える向きなら 1、減る向きなら -1 */
+  sign: number;
+}
+
+/**
+ * 両方の部分が共通の向き u のグラフなら、u に沿った座標 s で h(s) = (b の法線の座標) − (a の法線の座標) の
+ * 根を求めて `out` に足し、true を返す。グラフでなければ何もせず false。
+ * - h の符号が変わる区間は挟み撃ちで詰める (t の精度は 1e-15 程度)
+ * - 標本の |h| が局所的に小さい所は、黄金分割で h の極値を求め、許容値以内なら接する点 (1 点)、
+ *   0 をまたげば 2 つの交点にする (標本の間で 2 回交わる所を落とさない)
+ * - h はその s での 2 点の距離そのものなので、採った点の距離は許容値以下
+ */
+function solveAsGraphs(
+  a0: CubicSegment,
+  b0: CubicSegment,
+  a: CubicSegment,
+  aT0: number,
+  aT1: number,
+  b: CubicSegment,
+  bT0: number,
+  bT1: number,
+  tol: number,
+  out: Candidate[],
+): boolean {
+  const la = distance(a.from, a.to);
+  const lb = distance(b.from, b.to);
+  if (Math.max(la, lb) <= tol) return false;
+  const base = la >= lb ? a : b;
+  const len = Math.max(la, lb);
+  const ux = (base.to.x - base.from.x) / len;
+  const uy = (base.to.y - base.from.y) / len;
+  const ga = toGraph(a, ux, uy, base.from);
+  const gb = toGraph(b, ux, uy, base.from);
+  if (!ga || !gb) return false;
+  const [aLo, aHi] = sRange(ga);
+  const [bLo, bHi] = sRange(gb);
+  let lo = Math.max(aLo, bLo);
+  let hi = Math.min(aHi, bHi);
+  if (hi < lo - tol) return true; // s の範囲が重ならない
+  if (hi < lo) lo = hi = (lo + hi) / 2;
+
+  const h = (s: number) => evalGraphN(gb, s) - evalGraphN(ga, s);
+  const accept = (s: number) => {
+    const ta = invertGraph(ga, s);
+    const tb = invertGraph(gb, s);
+    const t1 = aT0 + (aT1 - aT0) * ta;
+    const t2 = bT0 + (bT1 - bT0) * tb;
+    const residual = distance(pointAt(a0, t1), pointAt(b0, t2));
+    if (residual <= tol) out.push({ t1, t2, residual });
+  };
+
+  const n = hi > lo ? GRAPH_SAMPLES : 0;
+  const ss: number[] = [];
+  const hs: number[] = [];
+  for (let i = 0; i <= n; i++) {
+    const s = n === 0 ? lo : i === n ? hi : lo + ((hi - lo) * i) / n;
+    ss.push(s);
+    hs.push(h(s));
+  }
+  const crossing = (i: number) => i >= 0 && i < n && hs[i]! * hs[i + 1]! < 0;
+  for (let i = 0; i <= n; i++) {
+    const hi0 = hs[i]!;
+    if (hi0 === 0) {
+      accept(ss[i]!);
+      continue;
+    }
+    if (crossing(i)) accept(bisect(h, ss[i]!, ss[i + 1]!, hi0, hs[i + 1]!));
+    // 標本の |h| が局所的に最小で、両隣と符号が同じ: 間で 0 に近づく (接する・2 回交わる) かを調べる
+    if (crossing(i - 1) || crossing(i) || hs[i - 1] === 0 || hs[i + 1] === 0) continue;
+    const absH = Math.abs(hi0);
+    if (i > 0 && Math.abs(hs[i - 1]!) < absH) continue;
+    if (i < n && Math.abs(hs[i + 1]!) < absH) continue;
+    const sign = hi0 > 0 ? 1 : -1;
+    const left = i > 0 ? ss[i - 1]! : ss[i]!;
+    const right = i < n ? ss[i + 1]! : ss[i]!;
+    if (right <= left) {
+      if (absH <= tol) accept(ss[i]!);
+      continue;
+    }
+    const m = goldenMin((s) => sign * h(s), left, right);
+    const v = sign * h(m);
+    if (v > tol) continue;
+    if (v >= 0) {
+      accept(m);
+    } else {
+      // 0 をまたぐ: 2 つの交点
+      if (left < m) accept(bisect(h, left, m, h(left), h(m)));
+      if (m < right) accept(bisect(h, m, right, h(m), h(right)));
+    }
+  }
+  return true;
+}
+
+/** 曲線を向き (ux, uy) のグラフにする。制御点の辺がどれも同じ向きで、角度が `GRAPH_ANGLE` 以内でなければ null。 */
+function toGraph(seg: CubicSegment, ux: number, uy: number, origin: Point): Graph | null {
+  const pts = [seg.from, seg.c1, seg.c2, seg.to];
+  const s = pts.map((p) => (p.x - origin.x) * ux + (p.y - origin.y) * uy) as Graph["s"];
+  const nn = pts.map((p) => (p.y - origin.y) * ux - (p.x - origin.x) * uy) as Graph["n"];
+  let sign = 0;
+  for (let i = 0; i < 3; i++) {
+    const ds = s[i + 1]! - s[i]!;
+    const dn = nn[i + 1]! - nn[i]!;
+    const leg = Math.hypot(ds, dn);
+    if (leg === 0) continue;
+    if (Math.abs(ds) < GRAPH_COS * leg) return null;
+    const legSign = ds > 0 ? 1 : -1;
+    if (sign !== 0 && legSign !== sign) return null;
+    sign = legSign;
+  }
+  if (sign === 0) return null;
+  return { s, n: nn, sign };
+}
+
+function sRange(g: Graph): [number, number] {
+  return g.sign > 0 ? [g.s[0], g.s[3]] : [g.s[3], g.s[0]];
+}
+
+function bernstein(c: readonly [number, number, number, number], t: number): number {
+  const mt = 1 - t;
+  return mt * mt * mt * c[0] + 3 * mt * mt * t * c[1] + 3 * mt * t * t * c[2] + t * t * t * c[3];
+}
+
+/** s(t) = `s` となる t (s(t) は単調)。範囲の外の s は端の t。 */
+function invertGraph(g: Graph, s: number): number {
+  const [lo, hi] = sRange(g);
+  if (s <= lo) return g.sign > 0 ? 0 : 1;
+  if (s >= hi) return g.sign > 0 ? 1 : 0;
+  let a = 0;
+  let b = 1;
+  for (let i = 0; i < 64 && b - a > 1e-16; i++) {
+    const m = (a + b) / 2;
+    if ((bernstein(g.s, m) - s) * g.sign < 0) a = m;
+    else b = m;
+  }
+  return (a + b) / 2;
+}
+
+function evalGraphN(g: Graph, s: number): number {
+  return bernstein(g.n, invertGraph(g, s));
+}
+
+/** 符号が変わる [lo, hi] の根を挟み撃ちで。 */
+function bisect(
+  f: (s: number) => number,
+  lo: number,
+  hi: number,
+  flo: number,
+  fhi: number,
+): number {
+  if (flo === 0) return lo;
+  if (fhi === 0) return hi;
+  let a = lo;
+  let b = hi;
+  let fa = flo;
+  for (let i = 0; i < 80; i++) {
+    const m = (a + b) / 2;
+    if (m <= a || m >= b) break;
+    const fm = f(m);
+    if (fm === 0) return m;
+    if (fa * fm < 0) b = m;
+    else {
+      a = m;
+      fa = fm;
+    }
+  }
+  return (a + b) / 2;
+}
+
+/** [lo, hi] の中で f が最小になる s (黄金分割。単峰を前提)。 */
+function goldenMin(f: (s: number) => number, lo: number, hi: number): number {
+  const r = (Math.sqrt(5) - 1) / 2;
+  let a = lo;
+  let b = hi;
+  let c = b - r * (b - a);
+  let d = a + r * (b - a);
+  let fc = f(c);
+  let fd = f(d);
+  for (let i = 0; i < 80 && b - a > 1e-15 * Math.max(1, Math.abs(a)); i++) {
+    if (fc < fd) {
+      b = d;
+      d = c;
+      fd = fc;
+      c = b - r * (b - a);
+      fc = f(c);
+    } else {
+      a = c;
+      c = d;
+      fc = fd;
+      d = a + r * (b - a);
+      fd = f(d);
+    }
+  }
+  // 端の値の方が小さければ端 (区間の端で最小になる場合)
+  const mid = (a + b) / 2;
+  const candidates = [lo, mid, hi];
+  let best = mid;
+  let bestV = f(mid);
+  for (const s of candidates) {
+    const v = f(s);
+    if (v < bestV) {
+      best = s;
+      bestV = v;
+    }
+  }
+  return best;
 }
 
 /** 線分 p0–p1 と q0–q1 の最も近い点の媒介変数 (それぞれ 0〜1)。 */
@@ -620,18 +913,15 @@ function refinePair(a: Segment, b: Segment, t0: number, u0: number, tol: number)
  * 2 本の 3 次ベジェが同じ曲線の一部で重なっていれば、その区間。端点が相手の上にある組がちょうど 2 つあり、
  * その間の部分同士の制御点がそろい、途中の点も許容値以内で一致すれば重なりとする。
  */
-function curveOverlap(a: CubicSegment, b: CubicSegment, tol: number): SegmentOverlap | null {
+function curveOverlap(
+  a: CubicSegment,
+  b: CubicSegment,
+  tol: number,
+  ends: readonly EndPair[],
+): SegmentOverlap | null {
   const pairs: { ta: number; tb: number }[] = [];
-  const add = (ta: number, tb: number) => {
-    if (!pairs.some((p) => Math.abs(p.ta - ta) <= PARAM_EPSILON)) pairs.push({ ta, tb });
-  };
-  for (const ta of [0, 1]) {
-    const np = nearestPoint(b, pointAt(a, ta));
-    if (np.distance <= tol) add(ta, snapEnd(b, np.t, tol));
-  }
-  for (const tb of [0, 1]) {
-    const np = nearestPoint(a, pointAt(b, tb));
-    if (np.distance <= tol) add(snapEnd(a, np.t, tol), tb);
+  for (const e of ends) {
+    if (!pairs.some((p) => Math.abs(p.ta - e.ta) <= PARAM_EPSILON)) pairs.push(e);
   }
   if (pairs.length !== 2) return null;
   pairs.sort((p, q) => p.ta - q.ta);
@@ -647,7 +937,7 @@ function curveOverlap(a: CubicSegment, b: CubicSegment, tol: number): SegmentOve
   return { t1: [p.ta, q.ta], t2: [p.tb, q.tb] };
 }
 
-/** 交点の候補をまとめる。媒介変数が `PARAM_EPSILON` 以内のもの、接していて 1e-3 以内のものは 1 つにする。 */
+/** 交点の候補をまとめる。媒介変数が `PARAM_EPSILON` 以内のもの、接していて 1e-4 以内のものは 1 つにする。 */
 function mergeCandidates(a: Segment, b: Segment, found: Candidate[]): Candidate[] {
   const sorted = [...found].sort((p, q) => p.t1 - q.t1 || p.t2 - q.t2);
   const out: Candidate[] = [];
@@ -655,8 +945,8 @@ function mergeCandidates(a: Segment, b: Segment, found: Candidate[]): Candidate[
     const same = out.findIndex(
       (o) =>
         (Math.abs(o.t1 - c.t1) <= PARAM_EPSILON && Math.abs(o.t2 - c.t2) <= PARAM_EPSILON) ||
-        (Math.abs(o.t1 - c.t1) <= 1e-3 &&
-          Math.abs(o.t2 - c.t2) <= 1e-3 &&
+        (Math.abs(o.t1 - c.t1) <= 1e-4 &&
+          Math.abs(o.t2 - c.t2) <= 1e-4 &&
           isTangent(a, o.t1, b, o.t2) &&
           isTangent(a, c.t1, b, c.t2)),
     );
@@ -694,7 +984,14 @@ function finish(a: Segment, b: Segment, result: IntersectionResult): Intersectio
       return { t1: x.t1, t2: x.t2, point, tangent: x.tangent || isTangent(a, x.t1, b, x.t2) };
     })
     .sort((p, q) => p.t1 - q.t1 || p.t2 - q.t2);
-  return { intersections, overlaps: result.overlaps };
+  return {
+    intersections,
+    overlaps: result.overlaps.map((o) => ({
+      t1: [o.t1[0], o.t1[1]] as [number, number],
+      t2: [o.t2[0], o.t2[1]] as [number, number],
+    })),
+    complete: result.complete,
+  };
 }
 
 function isTangent(a: Segment, t: number, b: Segment, u: number): boolean {
@@ -716,11 +1013,16 @@ function swap(result: IntersectionResult): IntersectionResult {
   return {
     intersections: result.intersections.map((x) => ({ ...x, t1: x.t2, t2: x.t1 })),
     overlaps,
+    complete: result.complete,
   };
 }
 
 function single(t1: number, t2: number, point: Point, tangent: boolean): IntersectionResult {
-  return { intersections: [{ t1, t2, point: { ...point }, tangent }], overlaps: [] };
+  return {
+    intersections: [{ t1, t2, point: { ...point }, tangent }],
+    overlaps: [],
+    complete: true,
+  };
 }
 
 /** t の点が曲線の端点から許容値以内なら、0 か 1 ちょうどにする。 */

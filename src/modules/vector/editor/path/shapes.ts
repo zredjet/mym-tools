@@ -2,19 +2,21 @@
  * 矩形・楕円・線を、描画と同じ形の点の形 (`Subpath[]`) にする (`docs/canvas-editor-design.md` §8.6、§8.10)。
  *
  * 返すもの (座標はどれも、渡した値の座標系のまま):
- * - `rectSubpaths(width, height, radius)`: 箱の左上を原点とする閉じた輪郭 1 本
+ * - `rectSubpaths(width, height, radius)`: 箱の左上を原点とする閉じた輪郭 1 本。幅か高さが 0 以下なら空の配列
+ *   (SVG の `<rect>` と同じく描かない)
  *   - 角丸は SVG の規則 (今の描画は `rx` だけを付ける): rx = min(角丸, width/2)、ry = min(角丸, height/2) の
  *     楕円の 1/4 を 3 次ベジェ 1 本 (κ = `ELLIPSE_KAPPA`) で。rx か ry が 0 なら角丸なし
  *   - 始点と向きは SVG 2 の `rect` の等価なパスと同じ: (rx, 0) から時計回り。角丸なしは (0, 0) から
- *   - 長さ 0 の辺 (角丸が辺の半分ちょうど、幅や高さが 0) は点を重ねず 1 つにまとめる (ハンドルは両方残す)
+ *   - 長さ 0 の辺 (角丸が辺の半分ちょうど) は点を重ねず 1 つにまとめる (ハンドルは両方残す)
  * - `ellipseSubpaths(width, height)`: 箱の左上を原点とする閉じた輪郭 1 本。4 本の 3 次ベジェ
- *   (κ = 0.5522847498)。SVG 2 の `ellipse` と同じく (cx + rx, cy) から時計回り
+ *   (κ = 0.5522847498)。SVG 2 の `ellipse` と同じく (cx + rx, cy) から時計回り。幅か高さが 0 以下なら空の配列
+ *   (SVG の `<ellipse>` と同じく描かない)
  * - `lineSubpaths(from, to)`: 開いた輪郭 1 本 (始点から終点)
  *
  * 誤差: 円の近似の半径の誤差は 0.027% 以内 (今の描画も `<ellipse>` なので、パスにすると最大でこの差が出る)。
  * 角丸の 1/4 も同じ。
  *
- * 前提: 純関数。width / height / radius は 0 以上 (負の値は 0 とみなす)。
+ * 前提: 純関数。radius の負の値は 0 とみなす。
  */
 import type { HandleMirror, PathPoint, Point, Subpath } from "../model/types";
 import { inferMirror } from "./segments";
@@ -23,8 +25,9 @@ import { inferMirror } from "./segments";
 export const ELLIPSE_KAPPA = 0.5522847498;
 
 export function rectSubpaths(width: number, height: number, radius: number): Subpath[] {
-  const w = Math.max(0, width);
-  const h = Math.max(0, height);
+  if (!(width > 0 && height > 0)) return [];
+  const w = width;
+  const h = height;
   const r = Math.max(0, radius);
   const rx = Math.min(r, w / 2);
   const ry = Math.min(r, h / 2);
@@ -52,8 +55,9 @@ export function rectSubpaths(width: number, height: number, radius: number): Sub
 }
 
 export function ellipseSubpaths(width: number, height: number): Subpath[] {
-  const rx = Math.max(0, width) / 2;
-  const ry = Math.max(0, height) / 2;
+  if (!(width > 0 && height > 0)) return [];
+  const rx = width / 2;
+  const ry = height / 2;
   const kx = ELLIPSE_KAPPA * rx;
   const ky = ELLIPSE_KAPPA * ry;
   return [

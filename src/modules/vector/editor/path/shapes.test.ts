@@ -58,16 +58,14 @@ describe("rectSubpaths", () => {
     expect(signedArea(pill!)).toBeCloseTo(signedArea(ellipse!), 9);
   });
 
-  it("collapses zero-size rectangles without duplicate points", () => {
-    expect(rectSubpaths(0, 50, 0)[0]!.points.map((p) => [p.x, p.y])).toEqual([
-      [0, 0],
-      [0, 50],
-    ]);
-    expect(rectSubpaths(0, 0, 5)[0]!.points).toHaveLength(1);
-    expect(rectSubpaths(-5, 10, -1)[0]!.points.map((p) => [p.x, p.y])).toEqual([
-      [0, 0],
-      [0, 10],
-    ]);
+  it("draws nothing for zero-size rectangles, like SVG", () => {
+    expect(rectSubpaths(0, 50, 0)).toEqual([]);
+    expect(rectSubpaths(50, 0, 5)).toEqual([]);
+    expect(rectSubpaths(0, 0, 5)).toEqual([]);
+    expect(rectSubpaths(-5, 10, 0)).toEqual([]);
+    expect(rectSubpaths(Number.NaN, 10, 0)).toEqual([]);
+    // 負の角丸は 0
+    expect(rectSubpaths(10, 10, -1)[0]!.points).toHaveLength(4);
   });
 
   it("matches a circle for the rounded corner", () => {
@@ -95,6 +93,12 @@ describe("ellipseSubpaths", () => {
     const segs = subpathToSegments(e!);
     expect(segs).toHaveLength(4);
     expect(segs.every((s) => s.kind === "cubic")).toBe(true);
+  });
+
+  it("draws nothing for zero-size ellipses, like SVG", () => {
+    expect(ellipseSubpaths(0, 10)).toEqual([]);
+    expect(ellipseSubpaths(10, 0)).toEqual([]);
+    expect(ellipseSubpaths(-1, -1)).toEqual([]);
   });
 
   it("stays within 0.03% of the true circle", () => {

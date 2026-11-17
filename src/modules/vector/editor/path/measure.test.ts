@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flattenSegment } from "../geometry/bezier";
+import { flattenSegment, pointAt, tangentAt } from "../geometry/bezier";
 import { rotate } from "../geometry/matrix";
 import type { PathPoint, Subpath } from "../model/types";
 import {
@@ -13,6 +13,7 @@ import {
   signedArea,
   windingNumber,
   windingNumberOfSegments,
+  windingsBeside,
 } from "./measure";
 import { polygonSubpath, starSubpath } from "./polygon";
 import { subpathToSegments } from "./segments";
@@ -80,7 +81,6 @@ describe("area and orientation", () => {
   it("measures curved areas", () => {
     const [ellipse] = ellipseSubpaths(100, 50);
     // κ の近似の円は真の円より外へ膨らむので、面積は πab より相対 2.8e-4 ほど大きい
-    // (折れ線にした面積とは 1e-8 以内で一致することを、作るときに確かめた)
     const area = signedArea(ellipse!);
     expect(area / (Math.PI * 50 * 25) - 1).toBeGreaterThan(0);
     expect(area / (Math.PI * 50 * 25) - 1).toBeLessThan(3e-4);
@@ -96,14 +96,15 @@ describe("area and orientation", () => {
         { x: 50, y: 80, in: null, out: null, mirror: "none" as const },
       ],
     };
-    const pts = subpathToSegments(tri).flatMap((seg) => flattenSegment(seg, 1e-6).slice(1));
+    const pts = subpathToSegments(tri).flatMap((seg) => flattenSegment(seg, 1e-4).slice(1));
     let poly = 0;
     for (let i = 0; i < pts.length; i++) {
       const p = pts[i]!;
       const q = pts[(i + 1) % pts.length]!;
       poly += (p.x * q.y - q.x * p.y) / 2;
     }
-    expect(signedArea(tri)).toBeCloseTo(poly, 3);
+    // 折れ線化の許容値の下限は 1e-4 px なので、面積の差は 0.05 以内
+    expect(signedArea(tri)).toBeCloseTo(poly, 1);
   });
 
   it("closes open outlines and gives 0 for degenerate ones", () => {
@@ -227,5 +228,70 @@ describe("nearest point and distance", () => {
   it("returns Infinity or null when nothing is drawn", () => {
     expect(distanceToPath([poly(false, [1, 1])], { x: 0, y: 0 })).toBe(Infinity);
     expect(nearestOnPath([], { x: 0, y: 0 })).toBeNull();
+  });
+});
+
+describe("windingsBeside", () => {
+  const segsOf = (subs: Subpath[]) =>
+    subs.flatMap((s) => subpathToSegments(s, { implicitClose: true }));
+
+  it("gives outside on the left and inside on the right of a clockwise outline", () => {
+    const segs = segsOf(rectSubpaths(100, 100, 0));
+    // 縦の辺 (横の光線) と横の辺 (縦の光線) の両方
+    for (let i = 0; i < 4; i++) {
+      expect(windingsBeside(segs, i, 0.5)).toEqual({ left: 0, right: 1, ambiguous: false });
+    }
+    const ccw = segsOf([reverseSubpath(rectSubpaths(100, 100, 0)[0]!)]);
+    for (let i = 0; i < 4; i++) {
+      expect(windingsBeside(ccw, i, 0.5)).toEqual({ left: -1, right: 0, ambiguous: false });
+    }
+  });
+
+  it("counts other outlines and other parts of the same curve", () => {
+    const outer = rectSubpaths(100, 100, 0);
+    const inner = rectSubpaths(50, 50, 0).map((s) => ({
+      ...s,
+      points: s.points.map((p) => ({ ...p, x: p.x + 25, y: p.y + 25 })),
+    }));
+    // 同じ向きの 2 つ: 内側の輪郭の外は 1、内は 2
+    const same = segsOf([...outer, ...inner]);
+    expect(windingsBeside(same, 4, 0.5)).toEqual({ left: 1, right: 2, ambiguous: false });
+    // 穴: 内側の輪郭の外は 1、中は 0
+    const hole = segsOf([...outer, reverseSubpath(inner[0]!)]);
+    const w = windingsBeside(hole, 4, 0.5);
+    expect([w.left, w.right].sort()).toEqual([0, 1]);
+    expect(w.ambiguous).toBe(false);
+  });
+
+  it("works on curves and agrees with the winding number just off the curve", () => {
+    const ellipse = ellipseSubpaths(100, 60);
+    const star = [starSubpath(5, 0.5, { x: 30, y: 10, width: 60, height: 60 })];
+    const segs = segsOf([...ellipse, ...star]);
+    const all = [...ellipse, ...star];
+    segs.forEach((seg, i) => {
+      for (const t of [0.2, 0.5, 0.77]) {
+        const w = windingsBeside(segs, i, t);
+        const p = pointAt(seg, t);
+        const d = tangentAt(seg, t)!;
+        // 進む向きの左は (d.y, −d.x)
+        const leftP = { x: p.x + d.y * 1e-4, y: p.y - d.x * 1e-4 };
+        const rightP = { x: p.x - d.y * 1e-4, y: p.y + d.x * 1e-4 };
+        expect(w.left).toBe(windingNumber(all, leftP));
+        expect(w.right).toBe(windingNumber(all, rightP));
+      }
+    });
+  });
+
+  it("flags other curves through the same point and the ends of the curve", () => {
+    // 2 つの矩形が辺を共有する
+    const a = rectSubpaths(50, 50, 0);
+    const b = rectSubpaths(50, 50, 0).map((s) => ({
+      ...s,
+      points: s.points.map((p) => ({ ...p, x: p.x + 50 })),
+    }));
+    const segs = segsOf([...a, ...b]);
+    expect(windingsBeside(segs, 1, 0.5).ambiguous).toBe(true);
+    expect(windingsBeside(segs, 0, 0).ambiguous).toBe(true);
+    expect(() => windingsBeside(segs, 99, 0.5)).toThrow(RangeError);
   });
 });
