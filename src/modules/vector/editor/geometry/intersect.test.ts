@@ -752,3 +752,43 @@ describe("three crossings close together", () => {
     expect(trials).toBeGreaterThan(100);
   });
 });
+
+describe("end points on the edge of the other curve's control box", () => {
+  // 端点の最近点は、相手の制御点の範囲 (と許容値) の中にあるときだけ求める (#D の速さの直し)。
+  // 範囲の縁にある端点、許容値だけ外にある端点も落とさない
+  const a = cubicSegment({ x: 0, y: 0 }, { x: 30, y: -40 }, { x: 70, y: -40 }, { x: 100, y: 0 });
+
+  it("finds an end point that touches the other curve's end point at the box corner", () => {
+    const b = cubicSegment(
+      { x: 100, y: 0 },
+      { x: 130, y: 40 },
+      { x: 170, y: 40 },
+      { x: 200, y: 0 },
+    );
+    const r = intersectSegments(a, b);
+    expect(r.intersections).toHaveLength(1);
+    expect(r.intersections[0]).toMatchObject({ t1: 1, t2: 0, point: { x: 100, y: 0 } });
+  });
+
+  it("finds an end point just outside the box but within the tolerance", () => {
+    const tol = 1e-6;
+    const b = cubicSegment(
+      { x: 100 + tol / 2, y: 0 },
+      { x: 130, y: 40 },
+      { x: 170, y: 40 },
+      { x: 200, y: 0 },
+    );
+    const r = intersectSegments(a, b, { tolerance: tol });
+    expect(r.intersections).toHaveLength(1);
+    expect(r.intersections[0]).toMatchObject({ t1: 1, t2: 0 });
+  });
+
+  it("finds an end point on the top of the other curve (inside the box)", () => {
+    const top = pointAt(a, 0.5);
+    const b = cubicSegment(top, { x: 50, y: -60 }, { x: 80, y: -80 }, { x: 120, y: -90 });
+    const r = intersectSegments(a, b);
+    expect(r.intersections).toHaveLength(1);
+    expect(r.intersections[0]!.t2).toBe(0);
+    expect(r.intersections[0]!.t1).toBeCloseTo(0.5, 9);
+  });
+});
