@@ -294,4 +294,50 @@ describe("windingsBeside", () => {
     expect(windingsBeside(segs, 0, 0).ambiguous).toBe(true);
     expect(() => windingsBeside(segs, 99, 0.5)).toThrow(RangeError);
   });
+
+  it("flags curves through the point that run along the ray or touch it at an extreme (d6)", () => {
+    const circle = segsOf(ellipseSubpaths(100, 100));
+    const arc = circle[2]!; // 左 → 上 (左上の 1/4)
+    const tAt = (pick: (p: { x: number; y: number }) => number, value: number) => {
+      let lo = 0;
+      let hi = 1;
+      const up = pick(pointAt(arc, 1)) > pick(pointAt(arc, 0));
+      for (let i = 0; i < 100; i++) {
+        const m = (lo + hi) / 2;
+        if (pick(pointAt(arc, m)) < value === up) lo = m;
+        else hi = m;
+      }
+      return (lo + hi) / 2;
+    };
+    const ty = tAt((p) => p.y, 30); // 点 (4.1604, 30)
+    const tx = tAt((p) => p.x, 30); // 点 (30, 4.1604)
+    const shifted = (subs: Subpath[], dx: number, dy: number) =>
+      subs.map((sub) => ({
+        ...sub,
+        points: sub.points.map((q) => ({ ...q, x: q.x + dx, y: q.y + dy })),
+      }));
+    // 横の光線に沿う辺 (矩形の上の辺 y = 30) が点を通る
+    const flat = [...circle, ...segsOf(shifted(rectSubpaths(140, 50, 0), -20, 30))];
+    expect(windingsBeside(flat, 2, ty).ambiguous).toBe(true);
+    // 縦の辺 x = 30 が点を通る (点では弧が横寄りなので縦の光線)
+    const upright = [...circle, ...segsOf(shifted(rectSubpaths(50, 140, 0), 30, -20))];
+    expect(windingsBeside(upright, 2, tx).ambiguous).toBe(true);
+    // ほかの円の下端・上端 (光線に接する極値) が点に触れる
+    const p = pointAt(arc, ty);
+    const below = [...circle, ...segsOf(shifted(ellipseSubpaths(20, 20), p.x - 10, 10))];
+    expect(windingsBeside(below, 2, ty).ambiguous).toBe(true);
+    const above = [...circle, ...segsOf(shifted(ellipseSubpaths(20, 20), p.x - 10, 30))];
+    expect(windingsBeside(above, 2, ty).ambiguous).toBe(true);
+    // 少しでも離れていれば決まり、値はすぐ脇の点の巻き数と合う
+    const near = [...circle, ...segsOf(shifted(rectSubpaths(140, 50, 0), -20, 30.001))];
+    const w = windingsBeside(near, 2, ty);
+    expect(w.ambiguous).toBe(false);
+    const d = tangentAt(arc, ty)!;
+    expect(w.left).toBe(
+      windingNumberOfSegments(near, { x: p.x + d.y * 1e-5, y: p.y - d.x * 1e-5 }),
+    );
+    expect(w.right).toBe(
+      windingNumberOfSegments(near, { x: p.x - d.y * 1e-5, y: p.y + d.x * 1e-5 }),
+    );
+  });
 });

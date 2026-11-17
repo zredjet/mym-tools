@@ -12,7 +12,9 @@
  *   (`windingNumberOfSegments` は閉じた線分の並びを受け、閉じない)
  * - `containsPoint(subpaths, p, fillRule)`: `nonzero` は巻き数が 0 でない、`evenodd` は奇数
  * - `windingsBeside(segments, index, t)`: 輪郭の上の点のすぐ左右の巻き数 (ブーリアン演算で、分けた曲線の
- *   部分を残すかを決めるのに使う)。自分を除いて数え、曲線が横向きの所では縦の光線に切り替える
+ *   部分を残すかを決めるのに使う)。自分を除いて数え、曲線が横向きの所では縦の光線に切り替える。ほかの曲線
+ *   (同じ曲線の離れた部分も) が点の許容値以内を通れば `ambiguous` (光線に沿う辺や光線に接する極値も、点からの
+ *   距離で見つける)
  * - `nearestOnPath(subpaths, p)` / `distanceToPath(subpaths, p)`: 描かれる輪郭 (閉じた輪郭は閉じる辺を含み、
  *   開いた輪郭は含まない。点が 1 個の輪郭は描かれないので除く) で最も近い点と距離。
  *   `segmentIndex` は `subpathToSegments` の添字 (点 i から点 i + 1 への辺。閉じる辺は n - 1)
@@ -26,6 +28,8 @@
  */
 import {
   type Bounds,
+  controlBounds,
+  derivativeAt,
   type NearestPoint,
   nearestPoint,
   pointAt,
@@ -33,6 +37,7 @@ import {
   segmentBounds,
   segmentExtrema,
   segmentMagnitude,
+  subSegment,
   tangentAt,
   toleranceFor,
   transformSegment,
@@ -202,14 +207,42 @@ function axisCrossings(seg: Segment, axis: "x" | "y", value: number): AxisCrossi
   return out;
 }
 
+/** `segments[index]` の t の点 p を、ほかの曲線 (同じ曲線の t から離れた部分も) が許容値以内で通るか。 */
+function passesThrough(
+  segments: readonly Segment[],
+  index: number,
+  t: number,
+  p: Point,
+  tol: number,
+): boolean {
+  for (let k = 0; k < segments.length; k++) {
+    const other = segments[k]!;
+    const b = controlBounds(other);
+    if (p.x < b.minX - tol || p.x > b.maxX + tol || p.y < b.minY - tol || p.y > b.maxY + tol) {
+      continue;
+    }
+    if (k !== index) {
+      if (nearestPoint(other, p).distance <= tol) return true;
+      continue;
+    }
+    // 自分: t のまわり (点から許容値の 10 倍より近い所) を除いた部分
+    const d = derivativeAt(other, t);
+    const speed = Math.hypot(d.x, d.y);
+    const gap = Math.max(1e-6, speed > 0 ? (10 * tol) / speed : 1e-6);
+    if (t - gap > 0 && nearestPoint(subSegment(other, 0, t - gap), p).distance <= tol) return true;
+    if (t + gap < 1 && nearestPoint(subSegment(other, t + gap, 1), p).distance <= tol) return true;
+  }
+  return false;
+}
+
 export interface SideWindings {
   /** 曲線の進む向きに見て左 (y が下向きの画面で見たとおり) の巻き数 */
   left: number;
   /** 右の巻き数。この曲線だけを見れば right = left + 1 (時計回りの内側は右) */
   right: number;
   /**
-   * ほかの曲線が同じ点 (許容値以内) を通る、または t が端にあり、どちらの側に数えるかが決まらない。
-   * ブーリアン演算では、この曲線の別の t で求め直す
+   * ほかの曲線 (同じ曲線の離れた部分も) が同じ点の許容値以内を通る、または t が端にあり、どちらの側に数えるかが
+   * 決まらない。このとき left / right は信用しない。ブーリアン演算では、この曲線の別の t で求め直す
    */
   ambiguous: boolean;
 }
@@ -245,6 +278,9 @@ export function windingsBeside(
   // (どちらも時計回りの輪郭の内側で +1 になる向き)
   const weight = (c: AxisCrossing) =>
     horizontalRay ? (c.increasing ? 1 : -1) : c.increasing ? -1 : 1;
+  // ほかの曲線 (同じ曲線のほかの t も) が点を通るなら、どちらの側に数えるかが決まらない。光線と同じ向きの辺や、
+  // 光線に接する極値は交わりとして数えないので、交わりの位置ではなく点からの距離で調べる
+  if (!ambiguous) ambiguous = passesThrough(segments, index, t, p, tol);
   let beyond = 0; // 点より光線の先 (+x / +y) にある交わり
   segments.forEach((other, k) => {
     let crossings = axisCrossings(other, axis, value);

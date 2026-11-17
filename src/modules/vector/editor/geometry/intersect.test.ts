@@ -563,3 +563,192 @@ describe("self intersection at the ends", () => {
     expect(c.point).toEqual(only.from);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 端点を共有する曲線と、3 回交わる曲線 (2 回目のレビュー)
+// ---------------------------------------------------------------------------
+
+/** 冪の係数 [c0, c1, c2, c3] の 3 次式を Bernstein 係数に。 */
+function toBernstein(c: readonly number[]): [number, number, number, number] {
+  return [
+    c[0]!,
+    c[0]! + c[1]! / 3,
+    c[0]! + (2 * c[1]!) / 3 + c[2]! / 3,
+    c[0]! + c[1]! + c[2]! + c[3]!,
+  ];
+}
+
+/** a は x が t に比例する山。b = a + (0, h(t)) (h は冪の係数 `c`)。2 本の差はちょうど h(t)。 */
+function bumpPair(c: readonly number[], bend: number, scaleBy = 1) {
+  const by = toBernstein(c);
+  const xs = [0, 100 / 3, 200 / 3, 100];
+  const ay = [0, bend, bend, 0];
+  const make = (dy: readonly number[]) =>
+    cubicSegment(
+      { x: xs[0]! * scaleBy, y: (ay[0]! + dy[0]!) * scaleBy },
+      { x: xs[1]! * scaleBy, y: (ay[1]! + dy[1]!) * scaleBy },
+      { x: xs[2]! * scaleBy, y: (ay[2]! + dy[2]!) * scaleBy },
+      { x: xs[3]! * scaleBy, y: (ay[3]! + dy[3]!) * scaleBy },
+    );
+  return { a: make([0, 0, 0, 0]), b: make(by) };
+}
+
+/** 冪の係数の 3 次式の [0, 1] の符号の変わる所 (細かい標本と挟み撃ち)。 */
+function polyRoots(c: readonly number[]): number[] {
+  const f = (t: number) => c[0]! + t * (c[1]! + t * (c[2]! + t * c[3]!));
+  const out: number[] = [];
+  const n = 20000;
+  let prev = f(0);
+  for (let i = 1; i <= n; i++) {
+    const v = f(i / n);
+    if (v === 0) out.push(i / n);
+    else if (prev * v < 0) {
+      let lo = (i - 1) / n;
+      let hi = i / n;
+      for (let k = 0; k < 60; k++) {
+        const m = (lo + hi) / 2;
+        if (f(m) * prev < 0) hi = m;
+        else lo = m;
+      }
+      out.push((lo + hi) / 2);
+    }
+    prev = v;
+  }
+  return out;
+}
+
+describe("curves sharing an end point", () => {
+  it("finds the crossing right next to a shared start or end (d13)", () => {
+    const a = cubicSegment({ x: 0, y: 0 }, { x: 33, y: 2 }, { x: 67, y: 2 }, { x: 100, y: 0 });
+    const b = cubicSegment(
+      { x: 0, y: 0 },
+      { x: 17.04, y: 2.1687 },
+      { x: 68.149, y: -12.6286 },
+      { x: 100, y: 2.275 },
+    );
+    const points = (r: ReturnType<typeof intersectSegments>) =>
+      r.intersections.map((x) => [
+        Math.round(x.point.x * 1000) / 1000,
+        Math.round(x.point.y * 1e4) / 1e4,
+      ]);
+    const expected = [
+      [0, 0],
+      [3.797, 0.2211],
+      [95.148, 0.2793],
+    ];
+    const shared = intersectSegments(a, b);
+    expect(shared.complete).toBe(true);
+    expect(points(shared)).toEqual(expected);
+    expect(points(intersectSegments(b, a))).toEqual(expected);
+    const reversed = points(intersectSegments(reverseSegment(a), reverseSegment(b)));
+    expect(reversed).toEqual([...expected].reverse());
+  });
+
+  it("finds a second crossing near a shared end for both shared ends (d3)", () => {
+    for (const scaleBy of [1, 10]) {
+      for (const r of [0.02, 0.04, 0.06, 0.1]) {
+        for (const k of [10, 50]) {
+          // h = k t (t − r)(t − 1): 両端を共有し、t = r でもう一度交わる
+          const { a, b } = bumpPair([0, k * r, -k * (1 + r), k], 10, scaleBy);
+          const res = intersectSegments(a, b);
+          expect(res.complete).toBe(true);
+          expect(res.intersections.map((x) => x.t1)).toEqual([0, expect.closeTo(r, 6), 1]);
+        }
+      }
+    }
+  });
+
+  it("finds crossings in the first 1/16 of curves leaving a shared start (d4, random)", () => {
+    const a = cubicSegment({ x: 0, y: 0 }, { x: 33, y: 2 }, { x: 67, y: 2 }, { x: 100, y: 0 });
+    const yAt = (c: CubicSegment, x: number) => {
+      let lo = 0;
+      let hi = 1;
+      for (let i = 0; i < 50; i++) {
+        const m = (lo + hi) / 2;
+        if (pointAt(c, m).x < x) lo = m;
+        else hi = m;
+      }
+      return pointAt(c, (lo + hi) / 2).y;
+    };
+    let seed = 11;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    let checked = 0;
+    for (let k = 0; k < 600; k++) {
+      const ang = ((rnd() * 40 - 20) * Math.PI) / 180;
+      const l1 = 1 + rnd() * 20;
+      const b = cubicSegment(
+        { x: 0, y: 0 },
+        { x: l1 * Math.cos(ang), y: l1 * Math.sin(ang) },
+        { x: 40 + rnd() * 40, y: (rnd() - 0.5) * 30 },
+        { x: 100, y: (rnd() - 0.5) * 20 },
+      );
+      // 最初の 6.25 px の中で横切る所 (総当たり)
+      const xs: number[] = [];
+      let prev = Number.NaN;
+      for (let i = 1; i <= 500; i++) {
+        const x = (6.25 * i) / 500;
+        const d = yAt(b, x) - yAt(a, x);
+        if (i > 1 && d !== 0 && Math.sign(d) !== Math.sign(prev)) xs.push(x);
+        prev = d;
+      }
+      if (xs.length === 0) continue;
+      checked++;
+      const r = intersectSegments(a, b);
+      expect(r.complete).toBe(true);
+      for (const x of xs) {
+        expect(r.intersections.some((q) => Math.abs(q.point.x - x) < 0.05)).toBe(true);
+      }
+    }
+    expect(checked).toBeGreaterThan(50);
+  });
+});
+
+describe("three crossings close together", () => {
+  it("finds all three when an inner sample of h is exactly 0", () => {
+    // h(t) = 100 (t − 0.5)³ − 0.03 (t − 0.5): t = 0.5 が標本にちょうど乗る
+    const m = 0.5;
+    const alpha = 100;
+    const beta = 0.03;
+    const c = [-alpha * m ** 3 + beta * m, 3 * alpha * m * m - beta, -3 * alpha * m, alpha];
+    const { a, b } = bumpPair(c, 5);
+    const r = intersectSegments(a, b);
+    const roots = polyRoots(c);
+    expect(roots).toHaveLength(3);
+    expect(r.intersections.map((x) => x.t1)).toEqual(roots.map((t) => expect.closeTo(t, 6)));
+  });
+
+  it("finds all three crossings of a cubic wiggle (random, d2)", () => {
+    let seed = 3;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    let trials = 0;
+    for (let k = 0; k < 600; k++) {
+      const alpha = 10 ** (rnd() * 4);
+      const w = 0.003 + rnd() * 0.06;
+      const m = 0.1 + rnd() * 0.8;
+      const bend = rnd() * 15;
+      const beta = 3 * alpha * w * w; // 極値は m ± w
+      const amp = 2 * alpha * w ** 3; // 極値での |h|
+      const gamma = (rnd() - 0.5) * 1.6 * amp;
+      const c = [
+        -alpha * m ** 3 + beta * m + gamma,
+        3 * alpha * m * m - beta,
+        -3 * alpha * m,
+        alpha,
+      ];
+      const roots = polyRoots(c);
+      // 極値が許容値の近くまで 0 に寄るものは、接する点 1 つになってよいので除く
+      const extremes = [m - w, m + w].map((t) =>
+        Math.abs(c[0]! + t * (c[1]! + t * (c[2]! + t * c[3]!))),
+      );
+      if (roots.length < 3 || Math.min(...extremes) < 1e-6) continue;
+      trials++;
+      const { a, b } = bumpPair(c, bend);
+      const r = intersectSegments(a, b);
+      expect(r.complete).toBe(true);
+      for (const t of roots) {
+        expect(r.intersections.some((x) => Math.abs(x.t1 - t) < 1e-4)).toBe(true);
+      }
+    }
+    expect(trials).toBeGreaterThan(100);
+  });
+});

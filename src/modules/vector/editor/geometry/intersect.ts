@@ -33,15 +33,14 @@
  * - 曲線と曲線: 端点を調べたうえで、組を次の順に調べる (`search`)
  *   1. 制御点の範囲が重ならない、または片方が相手の fat line (弦からの距離の帯) の外にあれば交わらない
  *   2. 両方が共通の向きのグラフ (制御点の辺がどれもその向きから 30° 以内) なら、その向きの座標 s で
- *      2 本の法線方向の差 h(s) を直接解く: 16 等分の標本で符号が変わる区間を挟み撃ち、|h| が局所的に
- *      小さい所は黄金分割で極値を求めて、許容値以内なら接する点、0 をまたげば 2 つの交点にする。
- *      寄り添う曲線 (1e-5〜1 px 離れたもの) も、ここで深く分けずに解ける
+ *      2 本の法線方向の差 h(s) を直接解く (`solveAsGraphs`): 厳密な h' と h'' で h の極値を求めて h が単調な
+ *      区間に分け、区間ごとに符号の変化を挟み撃ちで詰める。極値の |h| が許容値以内なら接する点 1 つ。
+ *      寄り添う曲線 (1e-5〜1 px 離れたもの) も、端点を共有して端のすぐ近くで交わる曲線も、深く分けずに解ける
  *   3. 両方が十分平ら (弦からのずれが max(許容値, 大きさ × 1e-6)) なら、弦の最近点から Newton 法で詰める
  *      (接して行列が潰れる所は交互の射影)
  *   4. それ以外は大きい方 (または両方) を半分に分ける
- *   1 回の目安 (幅 100 px の曲線): 横切る・接する組は 0.02〜0.05 ms、1〜0.001 px 離れて寄り添う組は 0.09 ms、
- *   1e-5 px で 0.3 ms。2 つの交点がグラフの標本の間隔より近く、h の極値が標本の局所的な最小に現れない形でだけ、
- *   交点を落としうる
+ *   1 回の目安 (幅 100 px の曲線): 横切る・接する組は 0.02〜0.06 ms、1〜1e-5 px 離れて寄り添う組は
+ *   0.02〜0.05 ms。落としうるのは、h の極値が標本の 1 区間 (共通の範囲の 1/16) に 3 つ以上集まる形だけ
  */
 import type { Point } from "../model/types";
 import {
@@ -619,10 +618,15 @@ interface Graph {
 /**
  * 両方の部分が共通の向き u のグラフなら、u に沿った座標 s で h(s) = (b の法線の座標) − (a の法線の座標) の
  * 根を求めて `out` に足し、true を返す。グラフでなければ何もせず false。
- * - h の符号が変わる区間は挟み撃ちで詰める (t の精度は 1e-15 程度)
- * - 標本の |h| が局所的に小さい所は、黄金分割で h の極値を求め、許容値以内なら接する点 (1 点)、
- *   0 をまたげば 2 つの交点にする (標本の間で 2 回交わる所を落とさない)
+ * - h の 1 階・2 階の微分は厳密に求まる (`graphAt`)。16 等分の標本で h' の符号の変化を拾い (標本の間で h'' の
+ *   符号が変われば、h'' の根で区間を分けてから)、h の極値で区間を分ける。各区間で h は単調なので、根は
+ *   両端の符号が変わる区間に 1 つだけあり、挟み撃ちで詰める (t の精度は 1e-15 程度)
+ * - 区切りの点 (両端と極値) の |h| が許容値以内なら、その点を採る (端点を共有する所、接する所)。極値では
+ *   符号を 0 とみなし (接するだけの所は 1 点)、両端では符号をそのまま使う。端点を共有する 2 本の、端点の
+ *   すぐ近くの交差も、隣の単調な区間の符号の変化で見つかる
  * - h はその s での 2 点の距離そのものなので、採った点の距離は許容値以下
+ * - 落としうるのは、標本の 1 区間 (共通の範囲の 1/16) の中で h'' が 2 回以上符号を変え、そのせいで
+ *   h' の根を数え損ねる形だけ (3 次の曲線同士では、極値が 3 つ以上ごく近くに集まる場合)
  */
 function solveAsGraphs(
   a0: CubicSegment,
@@ -653,7 +657,6 @@ function solveAsGraphs(
   if (hi < lo - tol) return true; // s の範囲が重ならない
   if (hi < lo) lo = hi = (lo + hi) / 2;
 
-  const h = (s: number) => evalGraphN(gb, s) - evalGraphN(ga, s);
   const accept = (s: number) => {
     const ta = invertGraph(ga, s);
     const tb = invertGraph(gb, s);
@@ -662,44 +665,60 @@ function solveAsGraphs(
     const residual = distance(pointAt(a0, t1), pointAt(b0, t2));
     if (residual <= tol) out.push({ t1, t2, residual });
   };
-
-  const n = hi > lo ? GRAPH_SAMPLES : 0;
-  const ss: number[] = [];
-  const hs: number[] = [];
-  for (let i = 0; i <= n; i++) {
-    const s = n === 0 ? lo : i === n ? hi : lo + ((hi - lo) * i) / n;
-    ss.push(s);
-    hs.push(h(s));
+  const h = (s: number) => graphAt(gb, s).y - graphAt(ga, s).y;
+  const dh = (s: number) => graphAt(gb, s).dy - graphAt(ga, s).dy;
+  const ddh = (s: number) => graphAt(gb, s).ddy - graphAt(ga, s).ddy;
+  if (hi <= lo) {
+    if (Math.abs(h(lo)) <= tol) accept(lo);
+    return true;
   }
-  const crossing = (i: number) => i >= 0 && i < n && hs[i]! * hs[i + 1]! < 0;
+
+  // 1. h の極値 (h' の根) を集め、h が単調な区間に分ける。標本の間で h' が単調でない所 (h'' の符号が変わる所) は、
+  //    h'' の根で区間をさらに分けてから h' の符号の変化を見る
+  const n = GRAPH_SAMPLES;
+  const ss: number[] = [];
+  const d1: number[] = [];
+  const d2: number[] = [];
   for (let i = 0; i <= n; i++) {
-    const hi0 = hs[i]!;
-    if (hi0 === 0) {
-      accept(ss[i]!);
-      continue;
-    }
-    if (crossing(i)) accept(bisect(h, ss[i]!, ss[i + 1]!, hi0, hs[i + 1]!));
-    // 標本の |h| が局所的に最小で、両隣と符号が同じ: 間で 0 に近づく (接する・2 回交わる) かを調べる
-    if (crossing(i - 1) || crossing(i) || hs[i - 1] === 0 || hs[i + 1] === 0) continue;
-    const absH = Math.abs(hi0);
-    if (i > 0 && Math.abs(hs[i - 1]!) < absH) continue;
-    if (i < n && Math.abs(hs[i + 1]!) < absH) continue;
-    const sign = hi0 > 0 ? 1 : -1;
-    const left = i > 0 ? ss[i - 1]! : ss[i]!;
-    const right = i < n ? ss[i + 1]! : ss[i]!;
-    if (right <= left) {
-      if (absH <= tol) accept(ss[i]!);
-      continue;
-    }
-    const m = goldenMin((s) => sign * h(s), left, right);
-    const v = sign * h(m);
-    if (v > tol) continue;
-    if (v >= 0) {
-      accept(m);
+    const s = i === n ? hi : lo + ((hi - lo) * i) / n;
+    const ea = graphAt(ga, s);
+    const eb = graphAt(gb, s);
+    ss.push(s);
+    d1.push(eb.dy - ea.dy);
+    d2.push(eb.ddy - ea.ddy);
+  }
+  const crit: number[] = [];
+  const addRoot = (p: number, q: number, fp: number, fq: number) => {
+    if (fp * fq < 0) crit.push(bisect(dh, p, q, fp, fq, CRIT_ITERATIONS));
+  };
+  for (let i = 0; i < n; i++) {
+    const p = ss[i]!;
+    const q = ss[i + 1]!;
+    if (i > 0 && d1[i] === 0) crit.push(p);
+    if (d2[i]! * d2[i + 1]! < 0) {
+      const e = bisect(ddh, p, q, d2[i]!, d2[i + 1]!, CRIT_ITERATIONS);
+      const de = dh(e);
+      if (de === 0) crit.push(e);
+      addRoot(p, e, d1[i]!, de);
+      addRoot(e, q, de, d1[i + 1]!);
     } else {
-      // 0 をまたぐ: 2 つの交点
-      if (left < m) accept(bisect(h, left, m, h(left), h(m)));
-      if (m < right) accept(bisect(h, m, right, h(m), h(right)));
+      addRoot(p, q, d1[i]!, d1[i + 1]!);
+    }
+  }
+  const stops = [lo, ...crit.filter((c) => c > lo && c < hi).sort((x, y) => x - y), hi];
+
+  // 2. 区切りの点の h。許容値以内ならその点を採る (端点を共有する所、接する所)。極値では符号を 0 とみなし
+  //    (接するだけの所を 2 つの交点にしない)、両端では符号をそのまま使う (端から許容値の中を寄り添ってから
+  //    横切る所も落とさない)。単調な区間の中の根は、両端の符号が変わる区間に 1 つだけある
+  const values = stops.map((s, i) => {
+    const v = h(s);
+    if (Math.abs(v) > tol) return v;
+    accept(s);
+    return i === 0 || i === stops.length - 1 ? v : 0;
+  });
+  for (let i = 0; i + 1 < stops.length; i++) {
+    if (values[i]! * values[i + 1]! < 0) {
+      accept(bisect(h, stops[i]!, stops[i + 1]!, values[i]!, values[i + 1]!, ROOT_ITERATIONS));
     }
   }
   return true;
@@ -749,9 +768,48 @@ function invertGraph(g: Graph, s: number): number {
   return (a + b) / 2;
 }
 
-function evalGraphN(g: Graph, s: number): number {
-  return bernstein(g.n, invertGraph(g, s));
+interface GraphPoint {
+  /** 法線の座標 n */
+  y: number;
+  /** dn/ds */
+  dy: number;
+  /** d²n/ds² */
+  ddy: number;
 }
+
+/**
+ * グラフの s での値と、s についての 1 階・2 階の微分 (厳密: dn/ds = n'/s'、d²n/ds² = (n''s' − n's'')/s'³)。
+ * s' が 0 になるのは長さ 0 の辺がある端だけなので、そこでは微分を少し内側で求める。
+ */
+function graphAt(g: Graph, s: number): GraphPoint {
+  const t = invertGraph(g, s);
+  const y = bernstein(g.n, t);
+  let u = t;
+  let s1 = bernsteinD1(g.s, u);
+  if (s1 === 0) {
+    u = t < 0.5 ? t + 1e-9 : t - 1e-9;
+    s1 = bernsteinD1(g.s, u);
+  }
+  if (s1 === 0) return { y, dy: 0, ddy: 0 };
+  const n1 = bernsteinD1(g.n, u);
+  const s2 = bernsteinD2(g.s, u);
+  const n2 = bernsteinD2(g.n, u);
+  return { y, dy: n1 / s1, ddy: (n2 * s1 - n1 * s2) / (s1 * s1 * s1) };
+}
+
+function bernsteinD1(c: readonly [number, number, number, number], t: number): number {
+  const mt = 1 - t;
+  return 3 * (mt * mt * (c[1] - c[0]) + 2 * mt * t * (c[2] - c[1]) + t * t * (c[3] - c[2]));
+}
+
+function bernsteinD2(c: readonly [number, number, number, number], t: number): number {
+  return 6 * ((1 - t) * (c[2] - 2 * c[1] + c[0]) + t * (c[3] - 2 * c[2] + c[1]));
+}
+
+/** 根 (交点の s) を詰める回数 (区間の 2^-80 まで)。 */
+const ROOT_ITERATIONS = 80;
+/** 極値 (h' と h'' の根) を詰める回数。区切りに使うだけなので、根ほど細かくなくてよい */
+const CRIT_ITERATIONS = 48;
 
 /** 符号が変わる [lo, hi] の根を挟み撃ちで。 */
 function bisect(
@@ -760,13 +818,14 @@ function bisect(
   hi: number,
   flo: number,
   fhi: number,
+  iterations: number,
 ): number {
   if (flo === 0) return lo;
   if (fhi === 0) return hi;
   let a = lo;
   let b = hi;
   let fa = flo;
-  for (let i = 0; i < 80; i++) {
+  for (let i = 0; i < iterations; i++) {
     const m = (a + b) / 2;
     if (m <= a || m >= b) break;
     const fm = f(m);
@@ -778,45 +837,6 @@ function bisect(
     }
   }
   return (a + b) / 2;
-}
-
-/** [lo, hi] の中で f が最小になる s (黄金分割。単峰を前提)。 */
-function goldenMin(f: (s: number) => number, lo: number, hi: number): number {
-  const r = (Math.sqrt(5) - 1) / 2;
-  let a = lo;
-  let b = hi;
-  let c = b - r * (b - a);
-  let d = a + r * (b - a);
-  let fc = f(c);
-  let fd = f(d);
-  for (let i = 0; i < 80 && b - a > 1e-15 * Math.max(1, Math.abs(a)); i++) {
-    if (fc < fd) {
-      b = d;
-      d = c;
-      fd = fc;
-      c = b - r * (b - a);
-      fc = f(c);
-    } else {
-      a = c;
-      c = d;
-      fc = fd;
-      d = a + r * (b - a);
-      fd = f(d);
-    }
-  }
-  // 端の値の方が小さければ端 (区間の端で最小になる場合)
-  const mid = (a + b) / 2;
-  const candidates = [lo, mid, hi];
-  let best = mid;
-  let bestV = f(mid);
-  for (const s of candidates) {
-    const v = f(s);
-    if (v < bestV) {
-      best = s;
-      bestV = v;
-    }
-  }
-  return best;
 }
 
 /** 線分 p0–p1 と q0–q1 の最も近い点の媒介変数 (それぞれ 0〜1)。 */
