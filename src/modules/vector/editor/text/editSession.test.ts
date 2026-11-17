@@ -8,6 +8,7 @@ import { createEditorStore } from "../state/store";
 import {
   checkText,
   commitTextEdit,
+  emptyTextCreationBase,
   finishTextEditSession,
   getTextEditSession,
   openTextEditSession,
@@ -213,6 +214,29 @@ describe("テキストツールで作ったテキストの編集", () => {
     expect(store.getState()).toMatchObject({ doc, editingTextId: null, gestureActive: false });
     finishTextEditSession(true);
     expect(store.getState()).toMatchObject({ doc, revision: 0, canUndo: false });
+  });
+
+  it("emptyTextCreationBase: 作ったばかりで空の間だけ、作る前の文書を返す", () => {
+    const store = createEditorStore(docWithText());
+    const doc = store.getState().doc;
+    expect(emptyTextCreationBase()).toBeNull();
+    startTextCreation(store, created(), page, measurer);
+    expect(emptyTextCreationBase()).toBe(doc);
+    getTextEditSession()?.setText("a");
+    expect(emptyTextCreationBase()).toBeNull();
+    getTextEditSession()?.setText("");
+    expect(emptyTextCreationBase()).toBe(doc);
+    // 作成がほかの操作で確定されたら、作ったばかりではない (終えれば削除として履歴に残る)
+    store.getState().commitGesture();
+    expect(emptyTextCreationBase()).toBeNull();
+    getTextEditSession()?.finish();
+    expect(emptyTextCreationBase()).toBeNull();
+
+    // 既存のテキストを空にしても対象ではない
+    store.getState().startTextEdit("t1");
+    openTextEditSession(store, "t1", measurer).setText("");
+    expect(emptyTextCreationBase()).toBeNull();
+    getTextEditSession()?.finish();
   });
 
   it("入れられなければ (親がないなど) false を返し、何も変えない", () => {

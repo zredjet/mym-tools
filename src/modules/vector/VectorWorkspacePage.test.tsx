@@ -138,6 +138,30 @@ function typeX(value: string) {
   fireEvent.change(field, { target: { value } });
   expect(document.activeElement).toBe(field);
 }
+const textEditor = () => document.querySelector<HTMLTextAreaElement>("[data-canvas-text-editor]")!;
+/** テキストツールでクリックして空のテキストを作る (本文の編集が始まる)。作ったノードの ID を返す。 */
+function createTextWithTool(): string {
+  act(() => state().setTool("text"));
+  fireEvent.pointerDown(canvas(), pointer(300, 300));
+  fireEvent.pointerUp(canvas(), pointer(300, 300));
+  const id = state().editingTextId;
+  expect(id).not.toBeNull();
+  expect(state().gestureActive).toBe(true);
+  return id!;
+}
+/**
+ * 本文の編集が終わった時点で、確認のモーダルがまだ出ていなかったかを記録する (離れるときは、確かめる前に
+ * `flushEdits("leave")` が編集を終える。モーダルがフォーカスを取って編集欄の blur で終わるのでは遅い)。
+ */
+function watchTextEditEnd() {
+  const record = { ended: false, beforeDialog: false };
+  const unsubscribe = editorStore.subscribe((next, previous) => {
+    if (previous.editingTextId === null || next.editingTextId !== null || record.ended) return;
+    record.ended = true;
+    record.beforeDialog = screen.queryByRole("dialog") === null;
+  });
+  return { record, unsubscribe };
+}
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -480,6 +504,85 @@ describe("保存", () => {
     expect((second.payload as { nodes: object }).nodes).toHaveProperty("g1");
     expect(state().gestureActive).toBe(false);
     expect(screen.getByText("保存済み")).toBeVisible();
+  });
+
+  it("作ったばかりの空のテキストは、⌘S で保存する文書に入れず、編集は続ける", async () => {
+    vi.mocked(items.getItem).mockResolvedValue(item("a1", "既存", fixturePayload("full")));
+    await start("/projects/p1/m/vector/edit/a1");
+    const before = state().doc;
+    const textId = createTextWithTool();
+    expect(screen.getByText("保存済み")).toBeVisible();
+    const editor = textEditor();
+    fireEvent.keyDown(editor, { key: "s", code: "KeyS", metaKey: true, ctrlKey: true });
+    await flush();
+    const first = vi.mocked(items.updateItem).mock.calls[0]![0];
+    expect(first.payload).toEqual(toPayload(before));
+    // 編集は続く。作成のジェスチャーは確定しない (履歴にも revision にも入れない)
+    expect(state()).toMatchObject({
+      editingTextId: textId,
+      gestureActive: true,
+      revision: 0,
+      canUndo: false,
+    });
+    expect(document.activeElement).toBe(editor);
+    expect(screen.getByText("保存済み")).toBeVisible();
+    // Backspace はノードを消さない (編集欄の中のキー)
+    fireEvent.keyDown(editor, { key: "Backspace" });
+    expect(state().editingTextId).toBe(textId);
+    // 打てば次の保存に入る
+    fireEvent.change(editor, { target: { value: "続き" } });
+    expect(screen.getByText("未保存", { exact: true })).toBeVisible();
+    pressMod("s");
+    await flush();
+    const second = vi.mocked(items.updateItem).mock.calls[1]![0];
+    expect((second.payload as { nodes: Record<string, TextNode> }).nodes[textId]!.text).toBe(
+      "続き",
+    );
+    expect(screen.getByText("保存済み")).toBeVisible();
+  });
+
+  it("空のテキストを作って ⌘S で保存した後、空のまま離れても確かめない", async () => {
+    vi.mocked(items.getItem).mockResolvedValue(item("a1", "既存", fixturePayload("full")));
+    await start("/projects/p1/m/vector/edit/a1");
+    const before = state().doc;
+    const textId = createTextWithTool();
+    pressMod("s");
+    await flush();
+    expect(items.updateItem).toHaveBeenCalledOnce();
+    pressMod("n");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(state().doc.nodes).not.toHaveProperty(textId);
+    expect(before.nodes).not.toHaveProperty(textId);
+  });
+
+  it("日本語入力の変換中の ⌘S は受けず、確定した後の ⌘S で保存する", async () => {
+    vi.mocked(items.getItem).mockResolvedValue(item("a1", "既存", fixturePayload("full")));
+    await start("/projects/p1/m/vector/edit/a1");
+    const textId = Object.values(state().doc.nodes).find((node) => node.type === "text")!.id;
+    act(() => {
+      state().setSelection([textId]);
+      state().startTextEdit(textId);
+    });
+    const editor = textEditor();
+    act(() => editor.focus());
+    fireEvent.compositionStart(editor);
+    fireEvent.change(editor, { target: { value: "にほんご" } });
+    const composingKey = { key: "s", code: "KeyS", metaKey: true, ctrlKey: true };
+    // 入力の側に任せる (既定の動作を止めない)
+    expect(fireEvent.keyDown(editor, { ...composingKey, isComposing: true })).toBe(true);
+    expect(fireEvent.keyDown(editor, { ...composingKey, keyCode: 229 })).toBe(true);
+    await flush();
+    expect(items.updateItem).not.toHaveBeenCalled();
+    expect(state().editingTextId).toBe(textId);
+    fireEvent.change(editor, { target: { value: "日本語" } });
+    fireEvent.compositionEnd(editor);
+    expect(screen.getByText("未保存", { exact: true })).toBeVisible();
+    expect(fireEvent.keyDown(editor, composingKey)).toBe(false);
+    await flush();
+    const saved = vi.mocked(items.updateItem).mock.calls[0]![0];
+    expect((saved.payload as { nodes: Record<string, TextNode> }).nodes[textId]!.text).toBe(
+      "日本語",
+    );
   });
 
   it("保存できない文書は保存せず、理由を出す", async () => {
@@ -854,6 +957,71 @@ describe("未保存の確認", () => {
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(state().editingTextId).toBeNull();
     expect((state().doc.nodes[textId] as TextNode).text).toBe("変更");
+  });
+
+  it("⌘N で離れるときは本文の編集を終え、打った本文を文書に入れてから確かめる", async () => {
+    await start();
+    const textId = createTextWithTool();
+    const editor = textEditor();
+    fireEvent.change(editor, { target: { value: "新しい本文" } });
+    const watch = watchTextEditEnd();
+    fireEvent.keyDown(editor, { key: "n", code: "KeyN", metaKey: true, ctrlKey: true });
+    watch.unsubscribe();
+    expect(screen.getByRole("dialog")).toHaveTextContent("未保存の変更を破棄しますか？");
+    expect(watch.record).toEqual({ ended: true, beforeDialog: true });
+    // 編集は終わっている (編集欄が閉じ、作成と本文が履歴 1 件で確定する)
+    expect(state()).toMatchObject({ editingTextId: null, gestureActive: false, revision: 1 });
+    expect(getTextEditSession()).toBeNull();
+    expect(document.querySelector("[data-canvas-text-editor]")).toBeNull();
+    expect((state().doc.nodes[textId] as TextNode).text).toBe("新しい本文");
+    // 戻って保存すれば、打った本文が入る
+    fireEvent.click(screen.getByRole("button", { name: "戻る" }));
+    pressMod("s");
+    await flush();
+    const saved = vi.mocked(items.createItem).mock.calls[0]![0];
+    expect((saved.payload as { nodes: Record<string, TextNode> }).nodes[textId]!.text).toBe(
+      "新しい本文",
+    );
+    expect(screen.getByText("保存済み")).toBeVisible();
+  });
+
+  it("閉じる要求 (閉じるボタン・⌘Q) では本文の編集を終え、打った本文を文書に入れてから止める", async () => {
+    native.enabled = true;
+    const uninstall = installWindowCloseCoordinator();
+    vi.mocked(items.getItem).mockResolvedValue(item("a1", "既存", fixturePayload("full")));
+    await start("/projects/p1/m/vector/edit/a1");
+    const textId = Object.values(state().doc.nodes).find((node) => node.type === "text")!.id;
+    act(() => {
+      state().setSelection([textId]);
+      state().startTextEdit(textId);
+    });
+    const editor = textEditor();
+    act(() => editor.focus());
+    fireEvent.change(editor, { target: { value: "閉じる前に打った" } });
+    expect(state().revision).toBe(0);
+    const handler = native.onCloseRequested.mock.calls[0]![0];
+    const event = { preventDefault: vi.fn() };
+    const watch = watchTextEditEnd();
+    await act(async () => {
+      await handler(event);
+    });
+    watch.unsubscribe();
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(screen.getByRole("dialog")).toHaveTextContent("ウィンドウを閉じますか？");
+    expect(watch.record).toEqual({ ended: true, beforeDialog: true });
+    expect(state()).toMatchObject({ editingTextId: null, gestureActive: false, revision: 1 });
+    expect(getTextEditSession()).toBeNull();
+    expect((state().doc.nodes[textId] as TextNode).text).toBe("閉じる前に打った");
+    // 戻って保存すれば、打った本文が入る
+    fireEvent.click(screen.getByRole("button", { name: "戻る" }));
+    fireEvent.click(saveButton());
+    await flush();
+    const saved = vi.mocked(items.updateItem).mock.calls[0]![0];
+    expect((saved.payload as { nodes: Record<string, TextNode> }).nodes[textId]!.text).toBe(
+      "閉じる前に打った",
+    );
+    expect(native.close).not.toHaveBeenCalled();
+    uninstall();
   });
 
   it("モーダルが開いている間は、キャンバスがキーを取らない", async () => {

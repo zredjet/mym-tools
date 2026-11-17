@@ -33,7 +33,7 @@ import {
 } from "./editor/assets";
 import { notifyImport } from "./editor/assets/importFile";
 import { getImportStatus } from "./editor/assets/status";
-import { isEditableTarget } from "./editor/canvas/input";
+import { isComposing, isEditableTarget } from "./editor/canvas/input";
 import { commitInPlace } from "./editor/panels/fields/commitInPlace";
 import { cancelPointerDrag, isPointerDragActive } from "./editor/canvas/pointerDrag";
 import { getCanvasViewSize, zoomToFit } from "./editor/canvas/viewCommands";
@@ -44,7 +44,7 @@ import type { CanvasDocument } from "./editor/model/types";
 import { canvasTextMeasurer } from "./editor/render/measureText";
 import { editorStore, useEditorStore } from "./editor/state/store";
 import { DEFAULT_VIEW_OPTIONS, type Viewport } from "./editor/state/types";
-import { commitTextEdit } from "./editor/text/editSession";
+import { commitTextEdit, emptyTextCreationBase } from "./editor/text/editSession";
 import { fitTextNodes } from "./editor/text/fit";
 import { resetLastFrameSize } from "./editor/tools/create/frameSize";
 import {
@@ -97,7 +97,9 @@ function readSelection(element: HTMLElement) {
  *    フォーカスと、カーソル・選択の範囲を戻す (確認のモーダルは開いたときのフォーカスを覚えて、閉じたら
  *    そこへ戻す)
  * 3. 本文の編集: 離れるときは `commitTextEdit` で終える。保存では終えず、開いているジェスチャーを
- *    確定するだけにする (セッションは次の入力から新しいジェスチャーにするので、編集とカーソルは残る)
+ *    確定するだけにする (セッションは次の入力から新しいジェスチャーにするので、編集とカーソルは残る)。
+ *    ただし作ったばかりで空のテキストのジェスチャーは確定しない (終えれば何も残らないので、履歴にも
+ *    `revision` にも入れない。保存は作る前の文書を使う、`emptyTextCreationBase`)
  * 4. ほかの進行中のジェスチャー (色の選択など) を確定する。ジェスチャーを開いた側があとで
  *    更新しても、閉じたジェスチャーへの更新は無視される
  */
@@ -118,7 +120,8 @@ function flushEdits(mode: "save" | "leave"): void {
   }
   if (mode === "leave") commitTextEdit();
   const state = editorStore.getState();
-  if (state.gestureActive) state.commitGesture();
+  if (state.gestureActive && (mode === "leave" || emptyTextCreationBase() === null))
+    state.commitGesture();
   if (refocus?.element.isConnected) {
     const { element, selection } = refocus;
     element.focus({ preventScroll: true });
@@ -195,9 +198,13 @@ function VectorWorkspacePage({
   const [phase, setPhase] = useState<Phase>("loading");
   const [busy, setBusy] = useState(false);
   const revision = useEditorStore((state) => state.revision);
-  /** 本文を編集中で、まだ確定していない変更がある (編集を終えると revision が増える) */
+  /**
+   * 本文を編集中で、まだ確定していない変更がある (編集を終えると revision が増える)。作ったばかりで
+   * 空のテキストは、終えれば何も残らないので含めない
+   */
   const pendingText = useEditorStore(
-    (state) => state.editingTextId !== null && state.gestureActive,
+    (state) =>
+      state.editingTextId !== null && state.gestureActive && emptyTextCreationBase() === null,
   );
   const importing = useImportStatus().busy;
   const [currentId, setCurrentId] = useState(itemId);
@@ -435,9 +442,11 @@ function VectorWorkspacePage({
         // 打った値と進行中のジェスチャーを文書に入れてから取り出す。編集は続けられる (§4.2 / §4.7)
         flushEdits("save");
         const state = editorStore.getState();
-        const problem = checkSavable(state.doc);
+        // 作ったばかりで空のテキストは保存する文書に入れない (編集は続ける。空のまま終えたときと同じ)
+        const doc = emptyTextCreationBase() ?? state.doc;
+        const problem = checkSavable(doc);
         if (problem !== null) throw new Error(`保存できません: ${problem}`);
-        const payload = toPayload(state.doc);
+        const payload = toPayload(doc);
         const saved: Baseline = { title, tags, revision: state.revision };
         const input = { moduleId: "vector", title: title.trim(), tags: cleanTags(tags), payload };
         let id = currentId;
@@ -474,10 +483,12 @@ function VectorWorkspacePage({
     });
   }, [guard, openDocument]);
 
-  // ポインターのドラッグの途中は、保存と新規のキーを受けない (§4.4。ドラッグを途中で確定しない)
+  // ポインターのドラッグの途中は、保存と新規のキーを受けない (§4.4。ドラッグを途中で確定しない)。
+  // 日本語入力の変換中の ⌘S も受けない (確定前の文字列を保存しない。キーは入力の側に任せる)
   useHotkeys(
     "mod+s",
     (event) => {
+      if (isComposing(event)) return;
       event.preventDefault();
       if (isPointerDragActive()) return;
       if (confirmation === null && blocker.state !== "blocked") void save();
