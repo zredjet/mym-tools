@@ -48,7 +48,8 @@ ADR-0026 の「v1 の SVG を図形へ分解する変換はしない」は、版
 
 - 各セッションは `canvas-stage2` から切った worktree で作業し、`canvas-stage2` 宛ての PR を下書きで出す。オーケストレーターが検証してマージする
 - CI は `canvas-stage2` 宛ての PR でも動かす
-- `canvas-stage2` では最初から v3 を有効にしてよい。`main` は第 1 段階のままで、いつでもリリースできる
+- `canvas-stage2` では v3 を有効にしてよい。`main` は第 1 段階のままで、いつでもリリースできる
+- `canvas-stage2` のアプリは別の identifier (`com.zredjet.mymtools.stage2`) で動かし、普段使いのデータを v3 に書き換えない。切替の前に書いた v3 の行は捨てる前提にする (途中で v3 の形が変わっても版は上げない)
 - すべてそろったら、`canvas-stage2` から `main` への PR 1 本で切り替える。マージの前に利用者が実アプリで確かめる
 
 ## Alternatives

@@ -114,7 +114,7 @@ D-03 (永劫互換) と各 ADR から導かれるもの。破ると静かにユ�
 - `docs/ui-design.md` には末尾に改訂履歴テーブルがある。非自明な変更を入れたら 1 行追加し、冒頭の「v1.X の主な変更」プレリュードとヘッダのバージョン・最終更新日を同期させる
 - `docs/MyMyTools Prototype.bundle.html` は 1.7MB の自己完結 HTML (Claude Design 出力)。オフライン参照のためにそのまま置いてある — 再生成・編集はしない
 - キャンバス (`vector`) のエディタは `src/modules/vector/editor/`、画面と IPC の接続は `VectorWorkspacePage.tsx` と `canvasIo.ts`。エディタは Tauri の IPC を直接呼ばず、ファイルの読み書きは登録口 (`setImportFileReader` / `setExportWriter`) に渡された関数で行う。SVG ポリシーは `src/modules/vector/policy/` にあり、Rust (`include_str!`) と TypeScript が共有する。開発用の画面は `canvas-harness.html` (配布物に含めない)。`editor/` の契約のファイル (`model/types.ts`、`model/limits.*`、`model/fixtures/`、`state/types.ts`、`render/types.ts`、`tools/types.ts`、`tools/registry.ts`、`EditorRoot.tsx`) は担当の分かれた作業の前提なので、変えるときは `docs/canvas-editor-design.md` §4.1 も同じ変更で更新する
-- キャンバスの第 2 段階 (ADR-0028) は統合ブランチ `canvas-stage2` で進める。このブランチの上の作業は `docs/canvas-editor-design.md` §8 に従い (§3〜§6 と食い違えば §8 が優先)、PR は `canvas-stage2` 宛ての下書きで出す。`main` には切替の PR (§8.15) まで第 2 段階のコードを入れない
+- キャンバスの第 2 段階 (ADR-0028) は統合ブランチ `canvas-stage2` で進める。このブランチの上の作業は `docs/canvas-editor-design.md` §8 に従い (§3〜§6 と食い違えば §8 が優先)、PR は `canvas-stage2` 宛ての下書きで出す。`main` には切替の PR (§8.16) まで第 2 段階のコードを入れない。`canvas-stage2` のアプリは identifier `com.zredjet.mymtools.stage2` で動き、普段使いのデータに触れない (切替の PR で戻す)
 - 同梱エンジン (Mermaid / draw.io / NRBF sidecar) のバージョンは完全固定。更新時は対応 ADR が列挙するもの (submodule commit、定数、資産契約テスト、ライセンス表記、About 表示、実測サイズ) を同じ変更で更新する
 - `src-tauri/src/storage/schema.rs::MIGRATIONS` を変更する PR は、PR 説明に以下を必ず書く (ADR-0011 §2.1 チェックリスト):
   - additive (新カラム+定数 DEFAULT / 新テーブル / 新インデックス / 新トリガ / VIEW) のみで構成されているか
