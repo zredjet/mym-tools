@@ -1,0 +1,3878 @@
+{
+  "description": "vector payload v3 の契約 (docs/canvas-editor-design.md §8.3、v2 からの差分。そのほかは §3)。Rust と TypeScript の両方のテストが読み、同じ合否になること。valid は検証を通り、payload.text が文書から求めた検索用テキストと一致する。valid は payload (文書そのもの) か、base (前にある valid の名前) と patch で書く (大きな配列を使う境界の例だけ)。invalid は base (valid の名前) の文書に patch を順に当てたもので、どちらの実装でも拒否する。各例は reason に書いた規則 1 つだけで落ちるようにしてある (ほかの値は通る値のまま。検索用テキストも合わせてある)。patch の op は set (path の位置へ value を置く) / remove (path の位置を消す) / append (path の配列の末尾へ value を足す) / repeat (path の位置へ value を count 個並べた配列を置く。各要素は value の複製で、互いに参照を共有しない)。path は文字列 (キー) と整数 (添字)。valid の base + patch は invalid と同じ当て方で、base の文書を複製してから patch を順に当てる (base の文書は変えない)。invalid の最初の 33 件は payload-v2.json の invalid と同じ名前・同じ当て方で、§3 の規則 (木、ID、アセット、SVG の文字の規則、検索用テキストなど) を v3 の文書で確かめる (unknown-field は v3 で通る rotation の代わりに skew、orphan-node と bad-id は差し込むノードに rotation 0 を足してある)。upgrade は { name, from, input, v3 }。from (1 か 2) の input を v3 へ変換した結果が v3 と値で等しく (オブジェクトのキーの順は意味を持たない)、その v3 は検証を通る。from が 1 の例は payload-v2.json の upgrade の同じ名前の例を v1 → v2 → v3 と変換したもの。数値は整数か、小数の表記 (指数の表記と -0 は使わない) で書いてある。Rust の serde_json は整数の 0 と小数の 0.0 を別の値として比べるので、変換で足す rotation は整数の 0 で書く。",
+  "valid": [
+    {
+      "name": "empty",
+      "reason": "ページ 1 つだけの空の文書。v2 の empty と同じ",
+      "payload": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": [],
+            "guides": []
+          }
+        ],
+        "nodes": {},
+        "assets": {},
+        "text": ""
+      }
+    },
+    {
+      "name": "full",
+      "reason": "v3 で足したものをすべて含む文書。回転 (frame の子の回転、小数の角度)、線の端・角・破線 (frame・矩形・楕円・線・パス・ブーリアン)、閉じた輪郭と開いた輪郭のパス (曲線のハンドル、片側だけのハンドル、mirror の 3 種、evenodd)、子が rect / ellipse / path / boolean のブーリアン (入れ子)。検索用テキストは v2 の full と同じ (パスとブーリアンは拾わない)。sqlite.rs などのテストが今の版の文書として使う",
+      "payload": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["frame1", "svg1"],
+            "guides": [
+              {
+                "axis": "x",
+                "position": 120
+              },
+              {
+                "axis": "y",
+                "position": -40.5
+              }
+            ]
+          },
+          {
+            "id": "page2",
+            "name": "ページ 2",
+            "children": ["frame2"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "frame1": {
+            "id": "frame1",
+            "name": "ホーム画面",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 393,
+            "height": 852,
+            "rotation": 0,
+            "type": "frame",
+            "children": ["rect1", "ellipse1", "group1", "image1"],
+            "clip": true,
+            "fill": {
+              "type": "solid",
+              "color": "#FFFFFF",
+              "opacity": 1
+            },
+            "stroke": null,
+            "radius": 0,
+            "shadow": null
+          },
+          "rect1": {
+            "id": "rect1",
+            "name": "カード",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 16,
+            "y": 96,
+            "width": 361,
+            "height": 120,
+            "rotation": 30,
+            "type": "rect",
+            "fill": {
+              "type": "linear",
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#2563EB",
+                  "opacity": 1
+                },
+                {
+                  "offset": 1,
+                  "color": "#7C3AED",
+                  "opacity": 0.8
+                }
+              ],
+              "from": {
+                "x": 0,
+                "y": 0
+              },
+              "to": {
+                "x": 1,
+                "y": 1
+              }
+            },
+            "stroke": {
+              "color": "#111827",
+              "opacity": 0.2,
+              "width": 1,
+              "cap": "round",
+              "join": "bevel",
+              "dash": [4, 2]
+            },
+            "radius": 12,
+            "shadow": {
+              "x": 0,
+              "y": 4,
+              "blur": 12,
+              "color": "#000000",
+              "opacity": 0.25
+            }
+          },
+          "ellipse1": {
+            "id": "ellipse1",
+            "name": "アバター",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 24,
+            "y": 24,
+            "width": 48,
+            "height": 48,
+            "rotation": 0,
+            "type": "ellipse",
+            "fill": {
+              "type": "radial",
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff",
+                  "opacity": 1
+                },
+                {
+                  "offset": 0.5,
+                  "color": "#93c5fd",
+                  "opacity": 1
+                },
+                {
+                  "offset": 1,
+                  "color": "#1d4ed8",
+                  "opacity": 1
+                }
+              ],
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "radius": 0.5
+            },
+            "stroke": {
+              "color": "#1D4ED8",
+              "opacity": 1,
+              "width": 1.5,
+              "cap": "round",
+              "join": "round",
+              "dash": [0, 3]
+            },
+            "shadow": null
+          },
+          "group1": {
+            "id": "group1",
+            "name": "見出しのまとまり",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "group",
+            "children": ["line1", "text1"]
+          },
+          "line1": {
+            "id": "line1",
+            "name": "下線",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "line",
+            "x1": 16,
+            "y1": 80,
+            "x2": 377,
+            "y2": 80,
+            "stroke": {
+              "color": "#D1D5DB",
+              "opacity": 1,
+              "width": 2,
+              "cap": "square",
+              "join": "round",
+              "dash": [1]
+            }
+          },
+          "text1": {
+            "id": "text1",
+            "name": "見出し",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 88,
+            "y": 28,
+            "width": 200,
+            "height": 44.8,
+            "rotation": -45.5,
+            "type": "text",
+            "text": "見出し　テキスト\n2 行目",
+            "fontFamily": "Hiragino Sans",
+            "fontSize": 16,
+            "fontWeight": 600,
+            "italic": false,
+            "lineHeight": null,
+            "letterSpacing": 0,
+            "align": "left",
+            "sizing": "auto-width",
+            "fill": {
+              "type": "solid",
+              "color": "#111827",
+              "opacity": 1
+            },
+            "shadow": null
+          },
+          "image1": {
+            "id": "image1",
+            "name": "写真",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 16,
+            "y": 232,
+            "width": 361,
+            "height": 200,
+            "rotation": 0,
+            "type": "image",
+            "assetId": "img1",
+            "radius": 8,
+            "shadow": null
+          },
+          "svg1": {
+            "id": "svg1",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 420,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "rotation": 0,
+            "type": "svg",
+            "assetId": "svgA"
+          },
+          "frame2": {
+            "id": "frame2",
+            "name": "バナー",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 1200,
+            "height": 630,
+            "rotation": 0,
+            "type": "frame",
+            "children": ["path1", "bool1"],
+            "clip": false,
+            "fill": null,
+            "stroke": {
+              "color": "#E5E7EB",
+              "opacity": 1,
+              "width": 1,
+              "cap": "butt",
+              "join": "miter",
+              "dash": [8, 4, 2, 4]
+            },
+            "radius": 0,
+            "shadow": null
+          },
+          "path1": {
+            "id": "path1",
+            "name": "ロゴの形",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 40,
+            "y": 60,
+            "width": 120,
+            "height": 100,
+            "rotation": 15,
+            "subpaths": [
+              {
+                "closed": true,
+                "points": [
+                  {
+                    "x": 60,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  },
+                  {
+                    "x": 120,
+                    "y": 50,
+                    "in": {
+                      "x": 0,
+                      "y": -27.6
+                    },
+                    "out": {
+                      "x": 0,
+                      "y": 27.6
+                    },
+                    "mirror": "angle-length"
+                  },
+                  {
+                    "x": 60,
+                    "y": 100,
+                    "in": {
+                      "x": 33.1,
+                      "y": 0
+                    },
+                    "out": {
+                      "x": -20,
+                      "y": 0
+                    },
+                    "mirror": "angle"
+                  },
+                  {
+                    "x": 0,
+                    "y": 50,
+                    "in": null,
+                    "out": {
+                      "x": 0,
+                      "y": -30
+                    },
+                    "mirror": "none"
+                  }
+                ]
+              },
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 30,
+                    "y": 50,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  },
+                  {
+                    "x": 90,
+                    "y": 50.25,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "evenodd",
+            "fill": {
+              "type": "solid",
+              "color": "#2563EB",
+              "opacity": 1
+            },
+            "stroke": {
+              "color": "#1E3A8A",
+              "opacity": 1,
+              "width": 2,
+              "cap": "square",
+              "join": "round",
+              "dash": []
+            },
+            "shadow": {
+              "x": 0,
+              "y": 2,
+              "blur": 4,
+              "color": "#000000",
+              "opacity": 0.3
+            }
+          },
+          "bool1": {
+            "id": "bool1",
+            "name": "型抜き",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "boolean",
+            "op": "subtract",
+            "children": ["brect", "bellipse", "bpath", "bbool"],
+            "fill": {
+              "type": "solid",
+              "color": "#F59E0B",
+              "opacity": 1
+            },
+            "stroke": {
+              "color": "#000000",
+              "opacity": 1,
+              "width": 1,
+              "cap": "butt",
+              "join": "miter",
+              "dash": [2, 2]
+            },
+            "shadow": null
+          },
+          "brect": {
+            "id": "brect",
+            "name": "土台",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "rect",
+            "x": 200,
+            "y": 100,
+            "width": 200,
+            "height": 200,
+            "rotation": 0,
+            "fill": {
+              "type": "solid",
+              "color": "#FFFFFF",
+              "opacity": 1
+            },
+            "stroke": null,
+            "radius": 24,
+            "shadow": null
+          },
+          "bellipse": {
+            "id": "bellipse",
+            "name": "穴",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "ellipse",
+            "x": 250,
+            "y": 150,
+            "width": 100,
+            "height": 100,
+            "rotation": -90,
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "bpath": {
+            "id": "bpath",
+            "name": "切れ込み",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 300,
+            "y": 100,
+            "width": 40,
+            "height": 40,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": true,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  },
+                  {
+                    "x": 40,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  },
+                  {
+                    "x": 20,
+                    "y": 40,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "bbool": {
+            "id": "bbool",
+            "name": "合体",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "boolean",
+            "op": "union",
+            "children": ["bpath2"],
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "bpath2": {
+            "id": "bpath2",
+            "name": "点",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 210,
+            "y": 110,
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          }
+        },
+        "assets": {
+          "img1": {
+            "kind": "image",
+            "mime": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+            "width": 1,
+            "height": 1
+          },
+          "svgA": {
+            "kind": "svg",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><text x=\"0\" y=\"8\">旧作品</text></svg>",
+            "text": "旧作品",
+            "width": 10,
+            "height": 10
+          }
+        },
+        "text": "ホーム画面 見出し テキスト 2 行目 旧作品 バナー"
+      }
+    },
+    {
+      "name": "boundaries",
+      "reason": "境界ちょうどの値。rotation の -180 と 180 (frame・矩形・楕円・テキスト・パス)、dash の maxDashCount 個・0 と maxDashLength・奇数個・小数、点 1 個だけの輪郭、点とハンドルの座標の ±maxCoordinate、大きさ 0 と maxSize のパス、子 1 個のブーリアン、ブーリアンの中のブーリアン、group の中のブーリアン、回転した frame の子",
+      "payload": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "境界",
+            "children": ["frameR", "groupB"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "frameR": {
+            "id": "frameR",
+            "name": "回転した枠",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "frame",
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 100,
+            "rotation": 180,
+            "children": ["rectMin", "ellipseMax", "textR", "pathEdge"],
+            "clip": true,
+            "fill": null,
+            "stroke": {
+              "color": "#000000",
+              "opacity": 1,
+              "width": 1,
+              "cap": "round",
+              "join": "round",
+              "dash": [5]
+            },
+            "radius": 0,
+            "shadow": null
+          },
+          "rectMin": {
+            "id": "rectMin",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "rect",
+            "x": 0,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "rotation": -180,
+            "fill": null,
+            "stroke": {
+              "color": "#000000",
+              "opacity": 1,
+              "width": 1,
+              "cap": "butt",
+              "join": "bevel",
+              "dash": [0, 10000, 0, 1, 0, 0, 0, 0]
+            },
+            "radius": 0,
+            "shadow": null
+          },
+          "ellipseMax": {
+            "id": "ellipseMax",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "ellipse",
+            "x": 0,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "rotation": 180,
+            "fill": null,
+            "stroke": {
+              "color": "#000000",
+              "opacity": 1,
+              "width": 1,
+              "cap": "square",
+              "join": "miter",
+              "dash": [0, 0.5]
+            },
+            "shadow": null
+          },
+          "textR": {
+            "id": "textR",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "text",
+            "x": 0,
+            "y": 0,
+            "width": 50,
+            "height": 20,
+            "rotation": 90,
+            "text": "回転した文字",
+            "fontFamily": "Hiragino Sans",
+            "fontSize": 16,
+            "fontWeight": 400,
+            "italic": false,
+            "lineHeight": null,
+            "letterSpacing": 0,
+            "align": "left",
+            "sizing": "auto-width",
+            "fill": null,
+            "shadow": null
+          },
+          "pathEdge": {
+            "id": "pathEdge",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": -1000000,
+            "y": 1000000,
+            "width": 0,
+            "height": 0,
+            "rotation": -180,
+            "subpaths": [
+              {
+                "closed": true,
+                "points": [
+                  {
+                    "x": -1000000,
+                    "y": 1000000,
+                    "in": {
+                      "x": 1000000,
+                      "y": -1000000
+                    },
+                    "out": {
+                      "x": -1000000,
+                      "y": 1000000
+                    },
+                    "mirror": "angle"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "groupB": {
+            "id": "groupB",
+            "name": "まとまり",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "group",
+            "children": ["boolOne"]
+          },
+          "boolOne": {
+            "id": "boolOne",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "boolean",
+            "op": "intersect",
+            "children": ["boolNested"],
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "boolNested": {
+            "id": "boolNested",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "boolean",
+            "op": "exclude",
+            "children": ["pathInBool"],
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "pathInBool": {
+            "id": "pathInBool",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 0,
+            "y": 0,
+            "width": 100000,
+            "height": 100000,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  },
+                  {
+                    "x": 100000,
+                    "y": 100000,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          }
+        },
+        "assets": {},
+        "text": "回転した枠 回転した文字"
+      }
+    },
+    {
+      "name": "eleven-paths",
+      "reason": "点 1 個のパス 11 個。点の数の上限の例の土台",
+      "payload": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "",
+            "children": ["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10", "p11"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "p1": {
+            "id": "p1",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "p2": {
+            "id": "p2",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "p3": {
+            "id": "p3",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "p4": {
+            "id": "p4",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "p5": {
+            "id": "p5",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "p6": {
+            "id": "p6",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "p7": {
+            "id": "p7",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "p8": {
+            "id": "p8",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "p9": {
+            "id": "p9",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "p10": {
+            "id": "p10",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          },
+          "p11": {
+            "id": "p11",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "path",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "rotation": 0,
+            "subpaths": [
+              {
+                "closed": false,
+                "points": [
+                  {
+                    "x": 0,
+                    "y": 0,
+                    "in": null,
+                    "out": null,
+                    "mirror": "none"
+                  }
+                ]
+              }
+            ],
+            "fillRule": "nonzero",
+            "fill": null,
+            "stroke": null,
+            "shadow": null
+          }
+        },
+        "assets": {},
+        "text": ""
+      }
+    },
+    {
+      "name": "max-subpaths",
+      "reason": "輪郭がちょうど maxSubpaths 個 (各 1 点) のパス",
+      "base": "eleven-paths",
+      "patch": [
+        {
+          "op": "repeat",
+          "path": ["nodes", "p1", "subpaths"],
+          "value": {
+            "closed": false,
+            "points": [
+              {
+                "x": 0,
+                "y": 0,
+                "in": null,
+                "out": null,
+                "mirror": "none"
+              }
+            ]
+          },
+          "count": 1000
+        }
+      ]
+    },
+    {
+      "name": "max-path-points",
+      "reason": "1 つのパスの点がちょうど maxPathPoints 個 (2 つの輪郭の合計)",
+      "base": "eleven-paths",
+      "patch": [
+        {
+          "op": "repeat",
+          "path": ["nodes", "p1", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 9999
+        },
+        {
+          "op": "append",
+          "path": ["nodes", "p1", "subpaths"],
+          "value": {
+            "closed": false,
+            "points": [
+              {
+                "x": 0,
+                "y": 0,
+                "in": null,
+                "out": null,
+                "mirror": "none"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "max-total-path-points",
+      "reason": "文書の全パスの点の合計がちょうど maxTotalPathPoints 個 (10000 × 9 + 9999 + 1)",
+      "base": "eleven-paths",
+      "patch": [
+        {
+          "op": "repeat",
+          "path": ["nodes", "p1", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p2", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p3", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p4", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p5", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p6", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p7", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p8", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p9", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p10", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 9999
+        }
+      ]
+    }
+  ],
+  "invalid": [
+    {
+      "name": "pages-empty",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): ページが 0 個",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["pages"],
+          "value": []
+        },
+        {
+          "op": "set",
+          "path": ["nodes"],
+          "value": {}
+        },
+        {
+          "op": "set",
+          "path": ["assets"],
+          "value": {}
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": ""
+        }
+      ]
+    },
+    {
+      "name": "page-id-duplicate",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): ページ ID の重複",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["pages", 1, "id"],
+          "value": "page1"
+        }
+      ]
+    },
+    {
+      "name": "child-referenced-twice",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 同じノードが 2 つの親に現れる",
+      "base": "full",
+      "patch": [
+        {
+          "op": "append",
+          "path": ["pages", 1, "children"],
+          "value": "rect1"
+        }
+      ]
+    },
+    {
+      "name": "orphan-node",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): どの親からも参照されないノード",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "stray"],
+          "value": {
+            "id": "stray",
+            "name": "迷子",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "type": "rect",
+            "fill": null,
+            "stroke": null,
+            "radius": 0,
+            "shadow": null,
+            "rotation": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "child-missing",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): children が存在しないノードを指す",
+      "base": "full",
+      "patch": [
+        {
+          "op": "append",
+          "path": ["nodes", "frame1", "children"],
+          "value": "nope"
+        }
+      ]
+    },
+    {
+      "name": "node-key-mismatch",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): nodes のキーと id が一致しない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "id"],
+          "value": "rectX"
+        }
+      ]
+    },
+    {
+      "name": "unknown-node-type",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 未知のノード種別",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "type"],
+          "value": "star"
+        }
+      ]
+    },
+    {
+      "name": "unknown-field",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 未知のフィールド (v3 では rotation は通るので skew)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "skew"],
+          "value": 45
+        }
+      ]
+    },
+    {
+      "name": "missing-field",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 必須フィールドの欠落",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "rect1", "radius"]
+        }
+      ]
+    },
+    {
+      "name": "bad-id",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): ID の書式違反",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "svg1"]
+        },
+        {
+          "op": "set",
+          "path": ["nodes", "bad id"],
+          "value": {
+            "id": "bad id",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 420,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "type": "svg",
+            "assetId": "svgA",
+            "rotation": 0
+          }
+        },
+        {
+          "op": "set",
+          "path": ["pages", 0, "children"],
+          "value": ["frame1", "bad id"]
+        }
+      ]
+    },
+    {
+      "name": "bad-color",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 色の書式違反",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "frame1", "fill", "color"],
+          "value": "#12345"
+        }
+      ]
+    },
+    {
+      "name": "opacity-out-of-range",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 不透明度が 0〜1 の外",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "opacity"],
+          "value": 1.5
+        }
+      ]
+    },
+    {
+      "name": "negative-size",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 大きさが負",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "width"],
+          "value": -1
+        }
+      ]
+    },
+    {
+      "name": "coordinate-out-of-range",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 座標が上限の外",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "x"],
+          "value": 1000001
+        }
+      ]
+    },
+    {
+      "name": "number-as-string",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 数値のフィールドに文字列",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "x"],
+          "value": "16"
+        }
+      ]
+    },
+    {
+      "name": "group-empty",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 子のない group",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "group1", "children"],
+          "value": []
+        },
+        {
+          "op": "set",
+          "path": ["nodes", "frame1", "children"],
+          "value": ["rect1", "ellipse1", "group1", "image1", "line1", "text1"]
+        }
+      ]
+    },
+    {
+      "name": "gradient-one-stop",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): グラデーションの停止点が 1 個",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "fill", "stops"],
+          "value": [
+            {
+              "offset": 0,
+              "color": "#2563EB",
+              "opacity": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "gradient-stops-unsorted",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 停止点が offset の昇順でない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "fill", "stops"],
+          "value": [
+            {
+              "offset": 1,
+              "color": "#7C3AED",
+              "opacity": 0.8
+            },
+            {
+              "offset": 0,
+              "color": "#2563EB",
+              "opacity": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "font-weight-invalid",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): fontWeight が 100 刻みでない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "text1", "fontWeight"],
+          "value": 650
+        }
+      ]
+    },
+    {
+      "name": "text-sizing-invalid",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): sizing が未知の値",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "text1", "sizing"],
+          "value": "shrink"
+        }
+      ]
+    },
+    {
+      "name": "asset-missing",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 参照先のアセットがない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["assets", "img1"]
+        }
+      ]
+    },
+    {
+      "name": "asset-unreferenced",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 参照されないアセット",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "extra"],
+          "value": {
+            "kind": "image",
+            "mime": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "image-asset-size-zero",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 画像アセットの大きさが 0",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "img1", "width"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-size-zero",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): SVG アセットの大きさが 0",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "height"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "asset-kind-mismatch",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): image ノードが svg アセットを指す",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "image1", "assetId"],
+          "value": "svgA"
+        },
+        {
+          "op": "remove",
+          "path": ["assets", "img1"]
+        }
+      ]
+    },
+    {
+      "name": "image-data-mime-mismatch",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): mime と画像の中身が一致しない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "img1", "mime"],
+          "value": "image/jpeg"
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-policy-violation",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): SVG ポリシー違反 (script)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "svg"],
+          "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><script>alert(1)</script></svg>"
+        },
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "text"],
+          "value": ""
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面 見出し テキスト 2 行目 バナー"
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-raw-nel",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 埋め込み SVG に U+0085 をそのまま含む (Rust と TS で抽出が違う)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "svg"],
+          "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><text x=\"0\" y=\"8\">旧作品</text></svg>"
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-control-character-reference",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 埋め込み SVG に XML で使えない文字の参照 (&#x1;)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "svg"],
+          "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><text x=\"0\" y=\"8\">旧作品&#x1;</text></svg>"
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-text-mismatch",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): SVG アセットの text が抽出結果と違う",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "text"],
+          "value": "別の文字"
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面 見出し テキスト 2 行目 別の文字 バナー"
+        }
+      ]
+    },
+    {
+      "name": "text-mismatch",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 検索用テキストが文書と一致しない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面"
+        }
+      ]
+    },
+    {
+      "name": "guide-axis-invalid",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): ガイド線の向きが未知の値",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["pages", 0, "guides", 0, "axis"],
+          "value": "z"
+        }
+      ]
+    },
+    {
+      "name": "top-level-unknown-field",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): トップレベルの未知のフィールド",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["version"],
+          "value": 2
+        }
+      ]
+    },
+    {
+      "name": "rotation-above-max",
+      "reason": "rotation が 180 より大きい",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "rotation"],
+          "value": 180.5
+        }
+      ]
+    },
+    {
+      "name": "rotation-below-min",
+      "reason": "rotation が -180 より小さい",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "text1", "rotation"],
+          "value": -181
+        }
+      ]
+    },
+    {
+      "name": "rotation-not-number",
+      "reason": "rotation が文字列",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "rotation"],
+          "value": "30"
+        }
+      ]
+    },
+    {
+      "name": "rotation-missing",
+      "reason": "箱を持つノード (frame) に rotation がない (v2 の形のまま)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "frame1", "rotation"]
+        }
+      ]
+    },
+    {
+      "name": "rotation-missing-on-path",
+      "reason": "パスに rotation がない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "path1", "rotation"]
+        }
+      ]
+    },
+    {
+      "name": "rotation-on-line",
+      "reason": "線のノードに rotation (未知のフィールド)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "line1", "rotation"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "rotation-on-group",
+      "reason": "group に rotation (未知のフィールド)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "group1", "rotation"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "rotation-on-boolean",
+      "reason": "ブーリアンに rotation (未知のフィールド)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "bool1", "rotation"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "stroke-v2-shape",
+      "reason": "線が v2 の形 (cap / join / dash がない)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "stroke"],
+          "value": {
+            "color": "#111827",
+            "opacity": 0.2,
+            "width": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "stroke-dash-missing",
+      "reason": "線の dash がない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "line1", "stroke", "dash"]
+        }
+      ]
+    },
+    {
+      "name": "stroke-cap-invalid",
+      "reason": "線の cap が列挙の外 (join の値)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "stroke", "cap"],
+          "value": "miter"
+        }
+      ]
+    },
+    {
+      "name": "stroke-join-invalid",
+      "reason": "線の join が列挙の外 (cap の値)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "stroke", "join"],
+          "value": "square"
+        }
+      ]
+    },
+    {
+      "name": "dash-too-many",
+      "reason": "dash が maxDashCount + 1 個",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "stroke", "dash"],
+          "value": [1, 1, 1, 1, 1, 1, 1, 1, 1]
+        }
+      ]
+    },
+    {
+      "name": "dash-negative",
+      "reason": "dash に負の値",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "stroke", "dash"],
+          "value": [4, -1]
+        }
+      ]
+    },
+    {
+      "name": "dash-too-long",
+      "reason": "dash の値が maxDashLength より大きい",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "line1", "stroke", "dash"],
+          "value": [10000.5]
+        }
+      ]
+    },
+    {
+      "name": "dash-all-zero",
+      "reason": "空でない dash の合計が 0",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "stroke", "dash"],
+          "value": [0, 0]
+        }
+      ]
+    },
+    {
+      "name": "dash-not-number",
+      "reason": "dash に文字列",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "stroke", "dash"],
+          "value": ["4", 2]
+        }
+      ]
+    },
+    {
+      "name": "dash-null",
+      "reason": "dash が null (配列でない)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "stroke", "dash"],
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "stroke-unknown-field",
+      "reason": "線に未知のフィールド (miterLimit)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "bool1", "stroke", "miterLimit"],
+          "value": 4
+        }
+      ]
+    },
+    {
+      "name": "path-subpaths-empty",
+      "reason": "パスの subpaths が空",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths"],
+          "value": []
+        }
+      ]
+    },
+    {
+      "name": "path-subpaths-too-many",
+      "reason": "パスの輪郭が maxSubpaths + 1 個",
+      "base": "eleven-paths",
+      "patch": [
+        {
+          "op": "repeat",
+          "path": ["nodes", "p1", "subpaths"],
+          "value": {
+            "closed": false,
+            "points": [
+              {
+                "x": 0,
+                "y": 0,
+                "in": null,
+                "out": null,
+                "mirror": "none"
+              }
+            ]
+          },
+          "count": 1001
+        }
+      ]
+    },
+    {
+      "name": "path-points-empty",
+      "reason": "輪郭の points が空",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 1, "points"],
+          "value": []
+        }
+      ]
+    },
+    {
+      "name": "path-points-too-many",
+      "reason": "1 つのパスの点が maxPathPoints + 1 個 (2 つの輪郭の合計)",
+      "base": "eleven-paths",
+      "patch": [
+        {
+          "op": "repeat",
+          "path": ["nodes", "p1", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "append",
+          "path": ["nodes", "p1", "subpaths"],
+          "value": {
+            "closed": false,
+            "points": [
+              {
+                "x": 0,
+                "y": 0,
+                "in": null,
+                "out": null,
+                "mirror": "none"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "path-total-points-too-many",
+      "reason": "文書の全パスの点の合計が maxTotalPathPoints + 1 個 (10000 × 10 + 1。どのパスも maxPathPoints 以下)",
+      "base": "eleven-paths",
+      "patch": [
+        {
+          "op": "repeat",
+          "path": ["nodes", "p1", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p2", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p3", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p4", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p5", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p6", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p7", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p8", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p9", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        },
+        {
+          "op": "repeat",
+          "path": ["nodes", "p10", "subpaths", 0, "points"],
+          "value": {
+            "x": 0,
+            "y": 0,
+            "in": null,
+            "out": null,
+            "mirror": "none"
+          },
+          "count": 10000
+        }
+      ]
+    },
+    {
+      "name": "path-point-coordinate",
+      "reason": "点の x の絶対値が maxCoordinate より大きい",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 0, "x"],
+          "value": 1000000.5
+        }
+      ]
+    },
+    {
+      "name": "path-handle-coordinate",
+      "reason": "ハンドルの y の絶対値が maxCoordinate より大きい",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 1, "in", "y"],
+          "value": -1000001
+        }
+      ]
+    },
+    {
+      "name": "path-handle-missing-component",
+      "reason": "ハンドルに y がない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 1, "out"],
+          "value": {
+            "x": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "path-handle-not-object",
+      "reason": "ハンドルが数値 (null でもオブジェクトでもない)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 0, "in"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "path-point-missing-handle",
+      "reason": "点に in がない (null の代わりに省略)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 0, "in"]
+        }
+      ]
+    },
+    {
+      "name": "path-point-unknown-field",
+      "reason": "点に未知のフィールド",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 0, "corner"],
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "path-mirror-invalid",
+      "reason": "点の mirror が列挙の外",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 0, "mirror"],
+          "value": "symmetric"
+        }
+      ]
+    },
+    {
+      "name": "path-closed-not-boolean",
+      "reason": "輪郭の closed が文字列",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "closed"],
+          "value": "true"
+        }
+      ]
+    },
+    {
+      "name": "path-fill-rule-invalid",
+      "reason": "パスの fillRule が列挙の外",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "fillRule"],
+          "value": "winding"
+        }
+      ]
+    },
+    {
+      "name": "path-width-negative",
+      "reason": "パスの width が負",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "width"],
+          "value": -1
+        }
+      ]
+    },
+    {
+      "name": "path-height-too-large",
+      "reason": "パスの height が maxSize より大きい",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "height"],
+          "value": 100001
+        }
+      ]
+    },
+    {
+      "name": "path-radius-unknown",
+      "reason": "パスに radius (未知のフィールド)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "radius"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "boolean-op-invalid",
+      "reason": "ブーリアンの op が列挙の外",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "bool1", "op"],
+          "value": "difference"
+        }
+      ]
+    },
+    {
+      "name": "boolean-op-missing",
+      "reason": "ブーリアンに op がない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "bool1", "op"]
+        }
+      ]
+    },
+    {
+      "name": "boolean-children-empty",
+      "reason": "子のないブーリアン (子は frame2 へ移す)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "bool1", "children"],
+          "value": []
+        },
+        {
+          "op": "set",
+          "path": ["nodes", "frame2", "children"],
+          "value": ["path1", "bool1", "brect", "bellipse", "bpath", "bbool"]
+        }
+      ]
+    },
+    {
+      "name": "boolean-child-line",
+      "reason": "ブーリアンの子に線 (group1 から移す)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "group1", "children"],
+          "value": ["text1"]
+        },
+        {
+          "op": "append",
+          "path": ["nodes", "bool1", "children"],
+          "value": "line1"
+        }
+      ]
+    },
+    {
+      "name": "boolean-child-text",
+      "reason": "ブーリアンの子にテキスト (group1 から移す。検索用テキストは移した後の順に直す)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "group1", "children"],
+          "value": ["line1"]
+        },
+        {
+          "op": "append",
+          "path": ["nodes", "bool1", "children"],
+          "value": "text1"
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面 旧作品 バナー 見出し テキスト 2 行目"
+        }
+      ]
+    },
+    {
+      "name": "boolean-child-group",
+      "reason": "ブーリアンの子に group (frame1 から移す。検索用テキストは移した後の順に直す)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "frame1", "children"],
+          "value": ["rect1", "ellipse1", "image1"]
+        },
+        {
+          "op": "append",
+          "path": ["nodes", "bool1", "children"],
+          "value": "group1"
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面 旧作品 バナー 見出し テキスト 2 行目"
+        }
+      ]
+    },
+    {
+      "name": "boolean-child-frame",
+      "reason": "ブーリアンの子に frame (brect を同じ ID の空の frame に置き換える。名前は空なので検索用テキストは変わらない)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "brect"],
+          "value": {
+            "id": "brect",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "frame",
+            "x": 0,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "rotation": 0,
+            "children": [],
+            "clip": false,
+            "fill": null,
+            "stroke": null,
+            "radius": 0,
+            "shadow": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "boolean-child-referenced-twice",
+      "reason": "ブーリアンの子が 2 か所に現れる",
+      "base": "full",
+      "patch": [
+        {
+          "op": "append",
+          "path": ["nodes", "bool1", "children"],
+          "value": "brect"
+        }
+      ]
+    },
+    {
+      "name": "boolean-box-unknown",
+      "reason": "ブーリアンに x (未知のフィールド。ブーリアンは箱を持たない)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "bool1", "x"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "unknown-node-type-star",
+      "reason": "未知のノード種別 (v3 でも star は無い。ブーリアンの外のパスで確かめる)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "type"],
+          "value": "star"
+        }
+      ]
+    },
+    {
+      "name": "subpath-closed-missing",
+      "reason": "輪郭に closed がない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "path1", "subpaths", 0, "closed"]
+        }
+      ]
+    },
+    {
+      "name": "subpath-unknown-field",
+      "reason": "輪郭に未知のフィールド",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "fill"],
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "path-handle-unknown-field",
+      "reason": "ハンドルに未知のフィールド (z)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 1, "in"],
+          "value": {
+            "x": 0,
+            "y": -27.6,
+            "z": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "path-point-y-out-of-range",
+      "reason": "点の y の絶対値が maxCoordinate より大きい",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 0, "y"],
+          "value": -1000000.5
+        }
+      ]
+    },
+    {
+      "name": "path-point-not-number",
+      "reason": "点の x が文字列",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 0, "x"],
+          "value": "60"
+        }
+      ]
+    },
+    {
+      "name": "path-subpaths-not-array",
+      "reason": "パスの subpaths がオブジェクト (配列でない)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths"],
+          "value": {}
+        }
+      ]
+    },
+    {
+      "name": "path-stroke-missing",
+      "reason": "パスに stroke がない (null の代わりに省略)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "path1", "stroke"]
+        }
+      ]
+    },
+    {
+      "name": "boolean-shadow-missing",
+      "reason": "ブーリアンに shadow がない (null の代わりに省略)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "bool1", "shadow"]
+        }
+      ]
+    },
+    {
+      "name": "boolean-child-image",
+      "reason": "ブーリアンの子に画像 (frame1 から移す)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "frame1", "children"],
+          "value": ["rect1", "ellipse1", "group1"]
+        },
+        {
+          "op": "append",
+          "path": ["nodes", "bool1", "children"],
+          "value": "image1"
+        }
+      ]
+    },
+    {
+      "name": "boolean-child-svg",
+      "reason": "ブーリアンの子に埋め込み SVG (ページ 1 から移す。検索用テキストは移した後の順に直す)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["pages", 0, "children"],
+          "value": ["frame1"]
+        },
+        {
+          "op": "append",
+          "path": ["nodes", "bool1", "children"],
+          "value": "svg1"
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面 見出し テキスト 2 行目 バナー 旧作品"
+        }
+      ]
+    }
+  ],
+  "upgrade": [
+    {
+      "name": "svgedit-document",
+      "reason": "v1 → v2 → v3。v2 の契約データの同じ名前の例の v2 に、埋め込み SVG の rotation 0 を足したもの",
+      "from": 1,
+      "input": {
+        "svg": "<svg width=\"640\" height=\"480\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:svg=\"http://www.w3.org/2000/svg\"><g class=\"layer\"><title>レイヤー 1</title><text fill=\"#000000\" font-size=\"24\" id=\"svg_1\" x=\"40\" y=\"60\">こんにちは</text></g></svg>",
+        "text": "レイヤー 1 こんにちは"
+      },
+      "v3": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["legacy"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "legacy": {
+            "id": "legacy",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 640,
+            "height": 480,
+            "rotation": 0,
+            "type": "svg",
+            "assetId": "legacy"
+          }
+        },
+        "assets": {
+          "legacy": {
+            "kind": "svg",
+            "svg": "<svg width=\"640\" height=\"480\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:svg=\"http://www.w3.org/2000/svg\"><g class=\"layer\"><title>レイヤー 1</title><text fill=\"#000000\" font-size=\"24\" id=\"svg_1\" x=\"40\" y=\"60\">こんにちは</text></g></svg>",
+            "text": "レイヤー 1 こんにちは",
+            "width": 640,
+            "height": 480
+          }
+        },
+        "text": "レイヤー 1 こんにちは"
+      }
+    },
+    {
+      "name": "size-from-viewbox",
+      "reason": "v1 → v2 → v3。v2 の契約データの同じ名前の例の v2 に、埋め込み SVG の rotation 0 を足したもの",
+      "from": 1,
+      "input": {
+        "svg": "<svg viewBox=\"0 0 300 150\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"300\" height=\"150\" fill=\"#ff0000\"/></svg>",
+        "text": ""
+      },
+      "v3": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["legacy"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "legacy": {
+            "id": "legacy",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 300,
+            "height": 150,
+            "rotation": 0,
+            "type": "svg",
+            "assetId": "legacy"
+          }
+        },
+        "assets": {
+          "legacy": {
+            "kind": "svg",
+            "svg": "<svg viewBox=\"0 0 300 150\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"300\" height=\"150\" fill=\"#ff0000\"/></svg>",
+            "text": "",
+            "width": 300,
+            "height": 150
+          }
+        },
+        "text": ""
+      }
+    },
+    {
+      "name": "size-fallback",
+      "reason": "v1 → v2 → v3。v2 の契約データの同じ名前の例の v2 に、埋め込み SVG の rotation 0 を足したもの",
+      "from": 1,
+      "input": {
+        "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"5\" height=\"5\"/></svg>",
+        "text": ""
+      },
+      "v3": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["legacy"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "legacy": {
+            "id": "legacy",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 640,
+            "height": 480,
+            "rotation": 0,
+            "type": "svg",
+            "assetId": "legacy"
+          }
+        },
+        "assets": {
+          "legacy": {
+            "kind": "svg",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"5\" height=\"5\"/></svg>",
+            "text": "",
+            "width": 640,
+            "height": 480
+          }
+        },
+        "text": ""
+      }
+    },
+    {
+      "name": "text-renormalized",
+      "reason": "v1 → v2 → v3。v2 の契約データの同じ名前の例の v2 に、埋め込み SVG の rotation 0 を足したもの",
+      "from": 1,
+      "input": {
+        "svg": "<svg width=\"20\" height=\"10\" xmlns=\"http://www.w3.org/2000/svg\"><text>a&#x85;b</text></svg>",
+        "text": "ab"
+      },
+      "v3": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["legacy"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "legacy": {
+            "id": "legacy",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 20,
+            "height": 10,
+            "rotation": 0,
+            "type": "svg",
+            "assetId": "legacy"
+          }
+        },
+        "assets": {
+          "legacy": {
+            "kind": "svg",
+            "svg": "<svg width=\"20\" height=\"10\" xmlns=\"http://www.w3.org/2000/svg\"><text>a&#x85;b</text></svg>",
+            "text": "ab",
+            "width": 20,
+            "height": 10
+          }
+        },
+        "text": "a b"
+      }
+    },
+    {
+      "name": "stale-v1-text",
+      "reason": "v1 → v2 → v3。v2 の契約データの同じ名前の例の v2 に、埋め込み SVG の rotation 0 を足したもの",
+      "from": 1,
+      "input": {
+        "svg": "<svg width=\"20\" height=\"10\" xmlns=\"http://www.w3.org/2000/svg\"><text>a  b</text></svg>",
+        "text": "a  b"
+      },
+      "v3": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["legacy"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "legacy": {
+            "id": "legacy",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 20,
+            "height": 10,
+            "rotation": 0,
+            "type": "svg",
+            "assetId": "legacy"
+          }
+        },
+        "assets": {
+          "legacy": {
+            "kind": "svg",
+            "svg": "<svg width=\"20\" height=\"10\" xmlns=\"http://www.w3.org/2000/svg\"><text>a  b</text></svg>",
+            "text": "a b",
+            "width": 20,
+            "height": 10
+          }
+        },
+        "text": "a b"
+      }
+    },
+    {
+      "name": "v2-empty",
+      "reason": "足すものがない v2 はそのまま",
+      "from": 2,
+      "input": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": [],
+            "guides": []
+          }
+        ],
+        "nodes": {},
+        "assets": {},
+        "text": ""
+      },
+      "v3": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": [],
+            "guides": []
+          }
+        ],
+        "nodes": {},
+        "assets": {},
+        "text": ""
+      }
+    },
+    {
+      "name": "v2-full",
+      "reason": "v2 の full。frame・矩形・楕円・テキスト・画像・埋め込み SVG に rotation 0、null でない線 (rect1、line1) に既定の端・角・破線。group と null の線は変えない",
+      "from": 2,
+      "input": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["frame1", "svg1"],
+            "guides": [
+              {
+                "axis": "x",
+                "position": 120
+              },
+              {
+                "axis": "y",
+                "position": -40.5
+              }
+            ]
+          },
+          {
+            "id": "page2",
+            "name": "ページ 2",
+            "children": ["frame2"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "frame1": {
+            "id": "frame1",
+            "name": "ホーム画面",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 393,
+            "height": 852,
+            "type": "frame",
+            "children": ["rect1", "ellipse1", "group1", "image1"],
+            "clip": true,
+            "fill": {
+              "type": "solid",
+              "color": "#FFFFFF",
+              "opacity": 1
+            },
+            "stroke": null,
+            "radius": 0,
+            "shadow": null
+          },
+          "rect1": {
+            "id": "rect1",
+            "name": "カード",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 16,
+            "y": 96,
+            "width": 361,
+            "height": 120,
+            "type": "rect",
+            "fill": {
+              "type": "linear",
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#2563EB",
+                  "opacity": 1
+                },
+                {
+                  "offset": 1,
+                  "color": "#7C3AED",
+                  "opacity": 0.8
+                }
+              ],
+              "from": {
+                "x": 0,
+                "y": 0
+              },
+              "to": {
+                "x": 1,
+                "y": 1
+              }
+            },
+            "stroke": {
+              "color": "#111827",
+              "opacity": 0.2,
+              "width": 1
+            },
+            "radius": 12,
+            "shadow": {
+              "x": 0,
+              "y": 4,
+              "blur": 12,
+              "color": "#000000",
+              "opacity": 0.25
+            }
+          },
+          "ellipse1": {
+            "id": "ellipse1",
+            "name": "アバター",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 24,
+            "y": 24,
+            "width": 48,
+            "height": 48,
+            "type": "ellipse",
+            "fill": {
+              "type": "radial",
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff",
+                  "opacity": 1
+                },
+                {
+                  "offset": 0.5,
+                  "color": "#93c5fd",
+                  "opacity": 1
+                },
+                {
+                  "offset": 1,
+                  "color": "#1d4ed8",
+                  "opacity": 1
+                }
+              ],
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "radius": 0.5
+            },
+            "stroke": null,
+            "shadow": null
+          },
+          "group1": {
+            "id": "group1",
+            "name": "見出しのまとまり",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "group",
+            "children": ["line1", "text1"]
+          },
+          "line1": {
+            "id": "line1",
+            "name": "下線",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "line",
+            "x1": 16,
+            "y1": 80,
+            "x2": 377,
+            "y2": 80,
+            "stroke": {
+              "color": "#D1D5DB",
+              "opacity": 1,
+              "width": 2
+            }
+          },
+          "text1": {
+            "id": "text1",
+            "name": "見出し",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 88,
+            "y": 28,
+            "width": 200,
+            "height": 44.8,
+            "type": "text",
+            "text": "見出し　テキスト\n2 行目",
+            "fontFamily": "Hiragino Sans",
+            "fontSize": 16,
+            "fontWeight": 600,
+            "italic": false,
+            "lineHeight": null,
+            "letterSpacing": 0,
+            "align": "left",
+            "sizing": "auto-width",
+            "fill": {
+              "type": "solid",
+              "color": "#111827",
+              "opacity": 1
+            },
+            "shadow": null
+          },
+          "image1": {
+            "id": "image1",
+            "name": "写真",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 16,
+            "y": 232,
+            "width": 361,
+            "height": 200,
+            "type": "image",
+            "assetId": "img1",
+            "radius": 8,
+            "shadow": null
+          },
+          "svg1": {
+            "id": "svg1",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 420,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "type": "svg",
+            "assetId": "svgA"
+          },
+          "frame2": {
+            "id": "frame2",
+            "name": "バナー",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 1200,
+            "height": 630,
+            "type": "frame",
+            "children": [],
+            "clip": false,
+            "fill": null,
+            "stroke": null,
+            "radius": 0,
+            "shadow": null
+          }
+        },
+        "assets": {
+          "img1": {
+            "kind": "image",
+            "mime": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+            "width": 1,
+            "height": 1
+          },
+          "svgA": {
+            "kind": "svg",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><text x=\"0\" y=\"8\">旧作品</text></svg>",
+            "text": "旧作品",
+            "width": 10,
+            "height": 10
+          }
+        },
+        "text": "ホーム画面 見出し テキスト 2 行目 旧作品 バナー"
+      },
+      "v3": {
+        "pages": [
+          {
+            "id": "page1",
+            "name": "ページ 1",
+            "children": ["frame1", "svg1"],
+            "guides": [
+              {
+                "axis": "x",
+                "position": 120
+              },
+              {
+                "axis": "y",
+                "position": -40.5
+              }
+            ]
+          },
+          {
+            "id": "page2",
+            "name": "ページ 2",
+            "children": ["frame2"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "frame1": {
+            "id": "frame1",
+            "name": "ホーム画面",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 393,
+            "height": 852,
+            "rotation": 0,
+            "type": "frame",
+            "children": ["rect1", "ellipse1", "group1", "image1"],
+            "clip": true,
+            "fill": {
+              "type": "solid",
+              "color": "#FFFFFF",
+              "opacity": 1
+            },
+            "stroke": null,
+            "radius": 0,
+            "shadow": null
+          },
+          "rect1": {
+            "id": "rect1",
+            "name": "カード",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 16,
+            "y": 96,
+            "width": 361,
+            "height": 120,
+            "rotation": 0,
+            "type": "rect",
+            "fill": {
+              "type": "linear",
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#2563EB",
+                  "opacity": 1
+                },
+                {
+                  "offset": 1,
+                  "color": "#7C3AED",
+                  "opacity": 0.8
+                }
+              ],
+              "from": {
+                "x": 0,
+                "y": 0
+              },
+              "to": {
+                "x": 1,
+                "y": 1
+              }
+            },
+            "stroke": {
+              "color": "#111827",
+              "opacity": 0.2,
+              "width": 1,
+              "cap": "butt",
+              "join": "miter",
+              "dash": []
+            },
+            "radius": 12,
+            "shadow": {
+              "x": 0,
+              "y": 4,
+              "blur": 12,
+              "color": "#000000",
+              "opacity": 0.25
+            }
+          },
+          "ellipse1": {
+            "id": "ellipse1",
+            "name": "アバター",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 24,
+            "y": 24,
+            "width": 48,
+            "height": 48,
+            "rotation": 0,
+            "type": "ellipse",
+            "fill": {
+              "type": "radial",
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff",
+                  "opacity": 1
+                },
+                {
+                  "offset": 0.5,
+                  "color": "#93c5fd",
+                  "opacity": 1
+                },
+                {
+                  "offset": 1,
+                  "color": "#1d4ed8",
+                  "opacity": 1
+                }
+              ],
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "radius": 0.5
+            },
+            "stroke": null,
+            "shadow": null
+          },
+          "group1": {
+            "id": "group1",
+            "name": "見出しのまとまり",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "group",
+            "children": ["line1", "text1"]
+          },
+          "line1": {
+            "id": "line1",
+            "name": "下線",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "line",
+            "x1": 16,
+            "y1": 80,
+            "x2": 377,
+            "y2": 80,
+            "stroke": {
+              "color": "#D1D5DB",
+              "opacity": 1,
+              "width": 2,
+              "cap": "butt",
+              "join": "miter",
+              "dash": []
+            }
+          },
+          "text1": {
+            "id": "text1",
+            "name": "見出し",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 88,
+            "y": 28,
+            "width": 200,
+            "height": 44.8,
+            "rotation": 0,
+            "type": "text",
+            "text": "見出し　テキスト\n2 行目",
+            "fontFamily": "Hiragino Sans",
+            "fontSize": 16,
+            "fontWeight": 600,
+            "italic": false,
+            "lineHeight": null,
+            "letterSpacing": 0,
+            "align": "left",
+            "sizing": "auto-width",
+            "fill": {
+              "type": "solid",
+              "color": "#111827",
+              "opacity": 1
+            },
+            "shadow": null
+          },
+          "image1": {
+            "id": "image1",
+            "name": "写真",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 16,
+            "y": 232,
+            "width": 361,
+            "height": 200,
+            "rotation": 0,
+            "type": "image",
+            "assetId": "img1",
+            "radius": 8,
+            "shadow": null
+          },
+          "svg1": {
+            "id": "svg1",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 420,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "rotation": 0,
+            "type": "svg",
+            "assetId": "svgA"
+          },
+          "frame2": {
+            "id": "frame2",
+            "name": "バナー",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 1200,
+            "height": 630,
+            "rotation": 0,
+            "type": "frame",
+            "children": [],
+            "clip": false,
+            "fill": null,
+            "stroke": null,
+            "radius": 0,
+            "shadow": null
+          }
+        },
+        "assets": {
+          "img1": {
+            "kind": "image",
+            "mime": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+            "width": 1,
+            "height": 1
+          },
+          "svgA": {
+            "kind": "svg",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><text x=\"0\" y=\"8\">旧作品</text></svg>",
+            "text": "旧作品",
+            "width": 10,
+            "height": 10
+          }
+        },
+        "text": "ホーム画面 見出し テキスト 2 行目 旧作品 バナー"
+      }
+    },
+    {
+      "name": "v2-strokes-and-order",
+      "reason": "線を持てる 4 種 (frame・矩形・楕円・線) の、null の線と null でない線。配列の順 (pages、children、guides、stops) が辞書順でなくても変えない。group には rotation を足さない",
+      "from": 2,
+      "input": {
+        "pages": [
+          {
+            "id": "pB",
+            "name": "後",
+            "children": ["fz", "la"],
+            "guides": [
+              {
+                "axis": "y",
+                "position": 5
+              },
+              {
+                "axis": "x",
+                "position": -3
+              },
+              {
+                "axis": "y",
+                "position": 1
+              }
+            ]
+          },
+          {
+            "id": "pA",
+            "name": "前",
+            "children": ["gq"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "fz": {
+            "id": "fz",
+            "name": "枠",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "frame",
+            "x": 1,
+            "y": 2,
+            "width": 3,
+            "height": 4,
+            "children": ["rb", "ea"],
+            "clip": false,
+            "fill": null,
+            "stroke": {
+              "color": "#FF0000",
+              "opacity": 0.5,
+              "width": 3
+            },
+            "radius": 2,
+            "shadow": null
+          },
+          "rb": {
+            "id": "rb",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "rect",
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "fill": {
+              "type": "linear",
+              "stops": [
+                {
+                  "offset": 0.25,
+                  "color": "#00FF00",
+                  "opacity": 1
+                },
+                {
+                  "offset": 0.5,
+                  "color": "#FFFFFF",
+                  "opacity": 1
+                },
+                {
+                  "offset": 0.5,
+                  "color": "#000000",
+                  "opacity": 1
+                }
+              ],
+              "from": {
+                "x": 0,
+                "y": 0
+              },
+              "to": {
+                "x": 1,
+                "y": 0
+              }
+            },
+            "stroke": null,
+            "radius": 0,
+            "shadow": null
+          },
+          "ea": {
+            "id": "ea",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "ellipse",
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "fill": null,
+            "stroke": {
+              "color": "#00FF00",
+              "opacity": 1,
+              "width": 0.5
+            },
+            "shadow": null
+          },
+          "la": {
+            "id": "la",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "line",
+            "x1": 0,
+            "y1": 0,
+            "x2": 1,
+            "y2": 1,
+            "stroke": {
+              "color": "#0000FF",
+              "opacity": 1,
+              "width": 1000
+            }
+          },
+          "gq": {
+            "id": "gq",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "group",
+            "children": ["tz", "lb"]
+          },
+          "tz": {
+            "id": "tz",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "text",
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "text": "後の文字",
+            "fontFamily": "Hiragino Sans",
+            "fontSize": 12,
+            "fontWeight": 400,
+            "italic": true,
+            "lineHeight": 1.5,
+            "letterSpacing": -0.5,
+            "align": "right",
+            "sizing": "fixed",
+            "fill": null,
+            "shadow": null
+          },
+          "lb": {
+            "id": "lb",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "line",
+            "x1": 0,
+            "y1": 0,
+            "x2": 0,
+            "y2": 0,
+            "stroke": {
+              "color": "#0000FF",
+              "opacity": 0,
+              "width": 1
+            }
+          }
+        },
+        "assets": {},
+        "text": "枠 後の文字"
+      },
+      "v3": {
+        "pages": [
+          {
+            "id": "pB",
+            "name": "後",
+            "children": ["fz", "la"],
+            "guides": [
+              {
+                "axis": "y",
+                "position": 5
+              },
+              {
+                "axis": "x",
+                "position": -3
+              },
+              {
+                "axis": "y",
+                "position": 1
+              }
+            ]
+          },
+          {
+            "id": "pA",
+            "name": "前",
+            "children": ["gq"],
+            "guides": []
+          }
+        ],
+        "nodes": {
+          "fz": {
+            "id": "fz",
+            "name": "枠",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "frame",
+            "x": 1,
+            "y": 2,
+            "width": 3,
+            "height": 4,
+            "rotation": 0,
+            "children": ["rb", "ea"],
+            "clip": false,
+            "fill": null,
+            "stroke": {
+              "color": "#FF0000",
+              "opacity": 0.5,
+              "width": 3,
+              "cap": "butt",
+              "join": "miter",
+              "dash": []
+            },
+            "radius": 2,
+            "shadow": null
+          },
+          "rb": {
+            "id": "rb",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "rect",
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rotation": 0,
+            "fill": {
+              "type": "linear",
+              "stops": [
+                {
+                  "offset": 0.25,
+                  "color": "#00FF00",
+                  "opacity": 1
+                },
+                {
+                  "offset": 0.5,
+                  "color": "#FFFFFF",
+                  "opacity": 1
+                },
+                {
+                  "offset": 0.5,
+                  "color": "#000000",
+                  "opacity": 1
+                }
+              ],
+              "from": {
+                "x": 0,
+                "y": 0
+              },
+              "to": {
+                "x": 1,
+                "y": 0
+              }
+            },
+            "stroke": null,
+            "radius": 0,
+            "shadow": null
+          },
+          "ea": {
+            "id": "ea",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "ellipse",
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rotation": 0,
+            "fill": null,
+            "stroke": {
+              "color": "#00FF00",
+              "opacity": 1,
+              "width": 0.5,
+              "cap": "butt",
+              "join": "miter",
+              "dash": []
+            },
+            "shadow": null
+          },
+          "la": {
+            "id": "la",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "line",
+            "x1": 0,
+            "y1": 0,
+            "x2": 1,
+            "y2": 1,
+            "stroke": {
+              "color": "#0000FF",
+              "opacity": 1,
+              "width": 1000,
+              "cap": "butt",
+              "join": "miter",
+              "dash": []
+            }
+          },
+          "gq": {
+            "id": "gq",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "group",
+            "children": ["tz", "lb"]
+          },
+          "tz": {
+            "id": "tz",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "text",
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rotation": 0,
+            "text": "後の文字",
+            "fontFamily": "Hiragino Sans",
+            "fontSize": 12,
+            "fontWeight": 400,
+            "italic": true,
+            "lineHeight": 1.5,
+            "letterSpacing": -0.5,
+            "align": "right",
+            "sizing": "fixed",
+            "fill": null,
+            "shadow": null
+          },
+          "lb": {
+            "id": "lb",
+            "name": "",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "type": "line",
+            "x1": 0,
+            "y1": 0,
+            "x2": 0,
+            "y2": 0,
+            "stroke": {
+              "color": "#0000FF",
+              "opacity": 0,
+              "width": 1,
+              "cap": "butt",
+              "join": "miter",
+              "dash": []
+            }
+          }
+        },
+        "assets": {},
+        "text": "枠 後の文字"
+      }
+    }
+  ]
+}

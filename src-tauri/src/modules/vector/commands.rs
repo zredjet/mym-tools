@@ -408,14 +408,14 @@ mod tests {
 
     #[test]
     fn original_svg_is_only_for_v1_items() {
+        use super::super::testing::{valid_payload, CURRENT};
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("作品.svg");
-        let v2: Value = serde_json::from_str(include_str!(
-            "../../../../src/modules/vector/editor/model/fixtures/payload-v2.json"
-        ))
-        .unwrap();
-        let (storage, id) = storage_with_vector(2, v2["valid"][0]["payload"].clone());
-        assert!(export_original_svg(storage.as_ref(), &id, &path).is_err());
+        // 今の版の行と、v2 から今の版までの間の古い版の行 (版が 3 なら v2)。どちらも元の SVG を持たない
+        for version in 2..=CURRENT {
+            let (storage, id) = storage_with_vector(version, valid_payload(version, "empty"));
+            assert!(export_original_svg(storage.as_ref(), &id, &path).is_err());
+        }
         let (storage, id) = storage_with_vector(1, serde_json::json!({ "text": "" }));
         assert!(export_original_svg(storage.as_ref(), &id, &path).is_err());
         assert!(!path.exists());

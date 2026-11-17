@@ -1,9 +1,12 @@
-//! payload v2 (キャンバスのシーン形式) の検証と検索用テキスト (ADR-0026)。
+//! payload v2 / v3 (キャンバスのシーン形式) の検証と検索用テキスト (ADR-0026、ADR-0028)。
 //!
-//! 仕様の正典は `docs/canvas-editor-design.md` §3.3〜3.6、型は
+//! 仕様の正典は `docs/canvas-editor-design.md` §3.3〜3.6 (v2) と §8.3 (v3 の差分)、型は
 //! `src/modules/vector/editor/model/types.ts`、上限と書式は `model/limits.json`。
 //! 上限の値は Rust に書き写さず、`limits.json` を `include_str!` で読む。
-//! `VectorModule::validate_payload` がこの `validate` を呼ぶ。
+//!
+//! v2 の検証 (`validate`) は凍結し、v1 → v2 の段の結果を確かめるためだけに使う (§8.3.3)。
+//! v3 の検証 (`validate_v3`) は別の入口で、`VectorModule::validate_payload` (版が 3 のとき) と
+//! v2 → v3 の段の結果に使う。v3 で足した規則は、どれも `Schema::V3` のときだけ当てる。
 
 use super::validation::{validate_image, validate_svg};
 use crate::error::AppError;
@@ -54,6 +57,12 @@ pub(crate) struct Limits {
     /// 手書きの判定 (`is_color`) と同じ意味であることをテストで確かめる。
     #[cfg_attr(not(test), allow(dead_code))]
     pub color_pattern: String,
+    // 下の 5 つは v3 で足した上限 (§8.3.2)。
+    pub max_subpaths: usize,
+    pub max_path_points: usize,
+    pub max_total_path_points: usize,
+    pub max_dash_count: usize,
+    pub max_dash_length: f64,
 }
 
 pub(crate) static LIMITS: LazyLock<Limits> = LazyLock::new(|| {
@@ -176,7 +185,9 @@ pub fn search_text(payload: &Value) -> String {
                     pick(node.get("name"));
                     stack.extend(child_ids(node).rev());
                 }
-                Some("group") => stack.extend(child_ids(node).rev()),
+                // ブーリアン (v3) は group と同じく拾わずに子へ進む (§8.3.2)。v2 の文書には
+                // ブーリアンが無い (検証が拒否する) ので、v2 の結果は変わらない
+                Some("group" | "boolean") => stack.extend(child_ids(node).rev()),
                 Some("text") => pick(node.get("text")),
                 Some("svg") => pick(
                     node.get("assetId")
@@ -318,6 +329,13 @@ fn clip(value: &str) -> String {
     }
 }
 
+/// どの版の規則で確かめるか。v3 の規則は v2 の規則に足すだけ (§8.3.1)。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Schema {
+    V2,
+    V3,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AssetKind {
     Image,
@@ -326,17 +344,21 @@ enum AssetKind {
 
 /// 木と参照の検査に使う、ノードから取り出した情報。
 struct NodeInfo<'a> {
-    /// frame / group だけが持つ
+    kind: &'a str,
+    /// frame / group / boolean だけが持つ
     children: Option<Vec<&'a str>>,
     asset: Option<(&'a str, AssetKind)>,
     /// text ノードの本文の UTF-8 のバイト数 (ほかは 0)
     text_bytes: usize,
+    /// path ノードの点の数 (ほかは 0)
+    path_points: usize,
 }
 
 const COMMON: [&str; 6] = ["id", "name", "visible", "locked", "opacity", "type"];
 const BOX: [&str; 4] = ["x", "y", "width", "height"];
 
-fn node_keys(kind: &str) -> Option<Vec<&'static str>> {
+/// ノードの種類ごとのフィールド。v3 は箱を持つノードに `rotation` を足し、path と boolean を足す (§8.3.1)。
+fn node_keys(kind: &str, schema: Schema) -> Option<Vec<&'static str>> {
     let (with_box, extra): (bool, &[&str]) = match kind {
         "frame" => (
             true,
@@ -364,11 +386,20 @@ fn node_keys(kind: &str) -> Option<Vec<&'static str>> {
         ),
         "image" => (true, &["assetId", "radius", "shadow"]),
         "svg" => (true, &["assetId"]),
+        "path" if schema == Schema::V3 => {
+            (true, &["subpaths", "fillRule", "fill", "stroke", "shadow"])
+        }
+        "boolean" if schema == Schema::V3 => {
+            (false, &["op", "children", "fill", "stroke", "shadow"])
+        }
         _ => return None,
     };
     let mut keys = COMMON.to_vec();
     if with_box {
         keys.extend(BOX);
+        if schema == Schema::V3 {
+            keys.push("rotation");
+        }
     }
     keys.extend(extra);
     Some(keys)
@@ -388,6 +419,93 @@ fn validate_stroke(value: &Value, at: String, l: &Limits) -> Result<()> {
     f.opacity()?;
     f.positive("width", l.max_stroke_width)?;
     Ok(())
+}
+
+/// v3 の線。v2 の線に端・角・破線を足す (§8.3.2)。
+fn validate_stroke_v3(value: &Value, at: String, l: &Limits) -> Result<()> {
+    let f = Fields::new(
+        value,
+        at,
+        &["color", "opacity", "width", "cap", "join", "dash"],
+    )?;
+    f.color("color")?;
+    f.opacity()?;
+    f.positive("width", l.max_stroke_width)?;
+    f.one_of("cap", &["butt", "round", "square"])?;
+    f.one_of("join", &["miter", "round", "bevel"])?;
+    let dash = f.array("dash")?;
+    if dash.len() > l.max_dash_count {
+        return Err(f.fail("dash", format!(" {} 個以下", l.max_dash_count)));
+    }
+    let mut total = 0.0;
+    for value in dash {
+        let length = value
+            .as_f64()
+            .filter(|n| n.is_finite() && (0.0..=l.max_dash_length).contains(n))
+            .ok_or_else(|| {
+                f.fail(
+                    "dash",
+                    format!(" 0 以上 {} 以下の数値の配列", l.max_dash_length),
+                )
+            })?;
+        total += length;
+    }
+    if !dash.is_empty() && total <= 0.0 {
+        return Err(f.fail("dash", "空か、合計が 0 より大きい配列"));
+    }
+    Ok(())
+}
+
+/// パスの点のハンドル (点からの相対)。null か、各成分の絶対値が `maxCoordinate` 以下 (§8.3.2)。
+fn validate_handle(f: &Fields<'_>, key: &str, l: &Limits) -> Result<()> {
+    let Some(value) = f.nullable(key) else {
+        return Ok(());
+    };
+    let h = Fields::new(value, f.sub(key), &["x", "y"])?;
+    h.magnitude("x", l.max_coordinate)?;
+    h.magnitude("y", l.max_coordinate)?;
+    Ok(())
+}
+
+/// パスの `subpaths` を確かめ、点の数を返す (§8.3.2)。
+fn validate_subpaths(f: &Fields<'_>, l: &Limits) -> Result<usize> {
+    let subpaths = f.array("subpaths")?;
+    if subpaths.is_empty() || subpaths.len() > l.max_subpaths {
+        return Err(f.fail("subpaths", format!(" 1〜{} 個", l.max_subpaths)));
+    }
+    let mut count: usize = 0;
+    for (index, subpath) in subpaths.iter().enumerate() {
+        let s = Fields::new(
+            subpath,
+            format!("{}の輪郭 {}", f.at, index + 1),
+            &["closed", "points"],
+        )?;
+        s.boolean("closed")?;
+        let points = s.array("points")?;
+        if points.is_empty() {
+            return Err(s.fail("points", " 1 個以上"));
+        }
+        count = count.saturating_add(points.len());
+        if count > l.max_path_points {
+            return Err(invalid(format!(
+                "{}の点は合計 {} 個以下にしてください。",
+                f.at, l.max_path_points
+            )));
+        }
+        for (point_index, point) in points.iter().enumerate() {
+            let p = Fields::new(
+                point,
+                format!("{}の点 {}", s.at, point_index + 1),
+                &["x", "y", "in", "out", "mirror"],
+            )?;
+            p.magnitude("x", l.max_coordinate)?;
+            p.magnitude("y", l.max_coordinate)?;
+            validate_handle(&p, "in", l)?;
+            validate_handle(&p, "out", l)?;
+            p.one_of("mirror", &["none", "angle", "angle-length"])?;
+        }
+    }
+    Ok(count)
 }
 
 fn validate_shadow(value: &Value, at: String, l: &Limits) -> Result<()> {
@@ -472,15 +590,30 @@ fn optional<'a>(
     }
 }
 
-fn validate_node<'a>(id: &str, value: &'a Value, l: &Limits) -> Result<NodeInfo<'a>> {
+fn validate_node<'a>(
+    id: &str,
+    value: &'a Value,
+    l: &Limits,
+    schema: Schema,
+) -> Result<NodeInfo<'a>> {
     let at = format!("ノード「{id}」");
     let kind = value.get("type").and_then(Value::as_str);
-    let keys = kind.and_then(node_keys).ok_or_else(|| {
-        invalid(format!(
-            "{at}の type は frame / group / rect / ellipse / line / text / image / svg のいずれかにしてください。"
-        ))
-    })?;
+    let keys = kind
+        .and_then(|kind| node_keys(kind, schema))
+        .ok_or_else(|| {
+            let kinds = match schema {
+                Schema::V2 => "frame / group / rect / ellipse / line / text / image / svg",
+                Schema::V3 => {
+                    "frame / group / rect / ellipse / line / text / image / svg / path / boolean"
+                }
+            };
+            invalid(format!("{at}の type は {kinds} のいずれかにしてください。"))
+        })?;
     let kind = kind.unwrap_or_default();
+    let stroke: fn(&Value, String, &Limits) -> Result<()> = match schema {
+        Schema::V2 => validate_stroke,
+        Schema::V3 => validate_stroke_v3,
+    };
     let f = Fields::new(value, at, &keys)?;
     if f.string("id")? != id {
         return Err(invalid(format!(
@@ -495,6 +628,9 @@ fn validate_node<'a>(id: &str, value: &'a Value, l: &Limits) -> Result<NodeInfo<
     if keys.contains(&"x") {
         validate_box(&f, l)?;
     }
+    if keys.contains(&"rotation") {
+        f.range("rotation", -180.0, 180.0)?;
+    }
     if keys.contains(&"fill") {
         optional(&f, "fill", l, validate_paint)?;
     }
@@ -504,21 +640,26 @@ fn validate_node<'a>(id: &str, value: &'a Value, l: &Limits) -> Result<NodeInfo<
     if keys.contains(&"radius") {
         f.range("radius", 0.0, l.max_radius)?;
     }
-    if matches!(kind, "frame" | "rect" | "ellipse") {
-        optional(&f, "stroke", l, validate_stroke)?;
+    if matches!(kind, "frame" | "rect" | "ellipse" | "path" | "boolean") {
+        optional(&f, "stroke", l, stroke)?;
     }
     let mut info = NodeInfo {
+        kind,
         children: None,
         asset: None,
         text_bytes: 0,
+        path_points: 0,
     };
     match kind {
-        "frame" | "group" => {
+        "frame" | "group" | "boolean" => {
             if kind == "frame" {
                 f.boolean("clip")?;
             }
+            if kind == "boolean" {
+                f.one_of("op", &["union", "subtract", "intersect", "exclude"])?;
+            }
             let children = f.ids("children")?;
-            if kind == "group" && children.is_empty() {
+            if kind != "frame" && children.is_empty() {
                 return Err(invalid(format!(
                     "{}の children は 1 個以上にしてください。",
                     f.at
@@ -530,7 +671,11 @@ fn validate_node<'a>(id: &str, value: &'a Value, l: &Limits) -> Result<NodeInfo<
             for key in ["x1", "y1", "x2", "y2"] {
                 f.magnitude(key, l.max_coordinate)?;
             }
-            validate_stroke(f.get("stroke"), f.sub("stroke"), l)?;
+            stroke(f.get("stroke"), f.sub("stroke"), l)?;
+        }
+        "path" => {
+            info.path_points = validate_subpaths(&f, l)?;
+            f.one_of("fillRule", &["nonzero", "evenodd"])?;
         }
         "text" => {
             info.text_bytes = f.chars("text", l.max_text_length)?.len();
@@ -627,8 +772,19 @@ fn validate_asset_content(id: &str, value: &Value) -> Result<()> {
     Ok(())
 }
 
-/// payload v2 を検証する (§3.3〜3.6)。`VectorModule::validate_payload` から呼ぶ形。
+/// payload v2 を検証する (§3.3〜3.6)。凍結した v2 の規則で、v1 → v2 の段 (`upgrade_v1`) の結果と、
+/// 版が 2 のときの `VectorModule::validate_payload` に使う。
 pub fn validate(payload: &Value) -> Result<()> {
+    validate_with(payload, Schema::V2)
+}
+
+/// payload v3 を検証する (§3.3〜3.6 と §8.3.2)。版が 3 のときの `VectorModule::validate_payload` と、
+/// v2 → v3 の段 (`upgrade_v2`) の結果に使う。
+pub fn validate_v3(payload: &Value) -> Result<()> {
+    validate_with(payload, Schema::V3)
+}
+
+fn validate_with(payload: &Value, schema: Schema) -> Result<()> {
     let l = &*LIMITS;
     let top = Fields::new(payload, "文書", &["pages", "nodes", "assets", "text"])?;
     let text = top.string("text")?;
@@ -695,13 +851,20 @@ pub fn validate(payload: &Value) -> Result<()> {
                 clip(id)
             )));
         }
-        infos.insert(id.as_str(), validate_node(id, node, l)?);
+        infos.insert(id.as_str(), validate_node(id, node, l, schema)?);
     }
     let total_text: usize = infos.values().map(|info| info.text_bytes).sum();
     if total_text > l.max_total_text_bytes {
         return Err(invalid(format!(
             "テキストの本文の合計は UTF-8 で {} バイト以下にしてください。",
             l.max_total_text_bytes
+        )));
+    }
+    let total_points: usize = infos.values().map(|info| info.path_points).sum();
+    if total_points > l.max_total_path_points {
+        return Err(invalid(format!(
+            "文書のパスの点は合計 {} 個以下にしてください。",
+            l.max_total_path_points
         )));
     }
 
@@ -760,6 +923,19 @@ pub fn validate(payload: &Value) -> Result<()> {
         return Err(invalid(format!(
             "ノード「{orphan}」がどのページ・frame・group からも参照されていません。"
         )));
+    }
+    // ブーリアンの子の種類 (§8.3.2)。木をたどった後なので、子はどれも nodes にある
+    for (id, info) in &infos {
+        if info.kind != "boolean" {
+            continue;
+        }
+        for child in info.children.iter().flatten() {
+            if !matches!(infos[child].kind, "rect" | "ellipse" | "path" | "boolean") {
+                return Err(invalid(format!(
+                    "ブーリアン「{id}」の子「{child}」は rect / ellipse / path / boolean のいずれかにしてください。"
+                )));
+            }
+        }
     }
 
     // アセットの参照 (§3.4 / §3.5)
