@@ -225,29 +225,32 @@ export function createSvg(assetId: string, init: Init<SvgNode> = {}): SvgNode {
 }
 
 /**
- * パス。点は自分の座標系 (箱の左上が原点、回転の前) で渡す。`width` / `height` を省くと、曲線の範囲
- * (`pathBounds`) の大きさにする。範囲の左上が (0, 0) でなければ、`fitPathNodes` (§8.6) が箱を合わせ直す。
+ * パス。箱を形にぴったり合わせる (§8.6): 点を曲線の範囲 (`pathBounds`、ハンドルの先は含めない) の左上が
+ * (0, 0) になるよう動かし、動かした分を `x` / `y` に足す。`width` / `height` は範囲の大きさ。
+ * `init.x` / `init.y` は点の座標系の原点の位置 (省くと 0) なので、渡した点はその分だけずらした位置に来る。
  * 既定はペンと同じ (塗りなし、線は `createStroke()`、名前は「パス」)。多角形・星は塗りと線を上書きする。
  */
 export function createPath(subpaths: readonly Subpath[], init: Init<PathNode> = {}): PathNode {
   const bounds = pathBounds(subpaths);
+  const minX = bounds?.minX ?? 0;
+  const minY = bounds?.minY ?? 0;
   return {
     ...common(init, DEFAULT_NODE_NAMES.path),
-    x: 0,
-    y: 0,
-    width: bounds ? bounds.maxX - bounds.minX : 0,
-    height: bounds ? bounds.maxY - bounds.minY : 0,
     rotation: 0,
     fillRule: "nonzero",
     fill: null,
     stroke: createStroke(),
     shadow: null,
     ...init,
+    x: (init.x ?? 0) + minX,
+    y: (init.y ?? 0) + minY,
+    width: bounds ? bounds.maxX - bounds.minX : 0,
+    height: bounds ? bounds.maxY - bounds.minY : 0,
     subpaths: subpaths.map((sub) => ({
       closed: sub.closed,
       points: sub.points.map((p) => ({
-        x: p.x,
-        y: p.y,
+        x: p.x - minX,
+        y: p.y - minY,
         in: p.in && { x: p.in.x, y: p.in.y },
         out: p.out && { x: p.out.x, y: p.out.y },
         mirror: p.mirror,

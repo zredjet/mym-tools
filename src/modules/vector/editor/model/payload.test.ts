@@ -15,6 +15,7 @@ import {
   createText,
   FIRST_PAGE_ID,
 } from "./create";
+import { pathBounds } from "../path/measure";
 import { createId, ID_LENGTH } from "./ids";
 import { CANVAS_LIMITS, NODE_ID_PATTERN } from "./limits";
 import { checkSavable, fromPayload, PAYLOAD_VERSION, parsePayload, toPayload } from "./payload";
@@ -107,12 +108,45 @@ describe("v3 の作成の既定値 (§8.3)", () => {
 
   it("パスの箱は曲線の範囲 (ハンドルの先は含めない)。既定はペンと同じ見た目", () => {
     const path = createPath(curve);
-    expect(path).toMatchObject({ x: 0, y: 0, width: 40, rotation: 0, fillRule: "nonzero" });
+    // 曲線の上端は y = 10 - 15 = -5。点をその分下げ、箱の y に足す
+    expect(path).toMatchObject({ x: 0, width: 40, rotation: 0, fillRule: "nonzero" });
+    expect(path.y).toBeCloseTo(-5, 10);
     expect(path.height).toBeCloseTo(15, 10);
     expect(path).toMatchObject({ fill: null, stroke: createStroke(), shadow: null, name: "パス" });
-    // 渡した点の形を共有しない
+    expect(path.subpaths[0]?.points.map((p) => p.y)).toEqual([
+      expect.closeTo(15, 10),
+      expect.closeTo(15, 10),
+    ]);
+    // ハンドルは点からの相対なので変えない。渡した点の形を共有しない
+    expect(path.subpaths[0]?.points[0]?.out).toEqual({ x: 10, y: -20 });
     expect(path.subpaths[0]).not.toBe(curve[0]);
-    expect(path.subpaths).toEqual(curve);
+  });
+
+  it("パスの点は範囲の左上が (0, 0) になるよう動かし、その分を x / y に足す (§8.6)", () => {
+    const corner = (x: number, y: number) => ({
+      x,
+      y,
+      in: null,
+      out: null,
+      mirror: "none" as const,
+    });
+    const square = [
+      {
+        closed: true,
+        points: [corner(50, 50), corner(150, 50), corner(150, 150), corner(50, 150)],
+      },
+    ];
+    const path = createPath(square);
+    expect(path).toMatchObject({ x: 50, y: 50, width: 100, height: 100 });
+    expect(path.subpaths[0]?.points.map((p) => [p.x, p.y])).toEqual([
+      [0, 0],
+      [100, 0],
+      [100, 100],
+      [0, 100],
+    ]);
+    // init の x / y は点の座標系の原点の位置
+    expect(createPath(square, { x: 10, y: -20 })).toMatchObject({ x: 60, y: 30 });
+    expect(pathBounds(path.subpaths)).toEqual({ minX: 0, minY: 0, maxX: 100, maxY: 100 });
   });
 
   it("ブーリアンの名前は演算の名前", () => {

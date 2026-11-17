@@ -109,6 +109,28 @@ describe("描く範囲", () => {
     expect(bounds?.height).toBeGreaterThanOrEqual(140);
   });
 
+  it("四角の端の斜めの線は、角が届く所 (太さの半分の √2 倍) まで広げる", () => {
+    const line = (cap: "butt" | "round" | "square") =>
+      createLine({
+        id: "l",
+        x1: 0,
+        y1: 0,
+        x2: 100,
+        y2: 100,
+        stroke: { ...createStroke("#000000", 20), cap },
+      });
+    const square = renderBounds(docOf([line("square")], ["l"]), "l", measurer);
+    expect(square?.x).toBeCloseTo(-10 * Math.SQRT2, 10);
+    expect(square?.y).toBeCloseTo(-10 * Math.SQRT2, 10);
+    expect(square?.width).toBeCloseTo(100 + 20 * Math.SQRT2, 10);
+    expect(renderBounds(docOf([line("round")], ["l"]), "l", measurer)).toEqual({
+      x: -10,
+      y: -10,
+      width: 120,
+      height: 120,
+    });
+  });
+
   it("水平な線も幅 0 にならない", () => {
     const doc = docOf([createLine({ id: "l", x1: 0, y1: 5, x2: 10, y2: 5 })], ["l"]);
     expect(renderBounds(doc, "l", measurer)).toEqual({ x: -0.5, y: 4.5, width: 11, height: 1 });

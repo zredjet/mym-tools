@@ -45,7 +45,9 @@ function leafBounds(node: CanvasNode, measurer: TextMeasurer): Rect | null {
         width: Math.abs(node.x2 - node.x1),
         height: Math.abs(node.y2 - node.y1),
       };
-      result = expand(rect, node.stroke.width / 2);
+      // 四角の端は、角が端点から太さの半分の √2 倍まで届く (斜めの線で縦横に最も広がる)
+      const half = node.stroke.width / 2;
+      result = expand(rect, node.stroke.cap === "square" ? half * Math.SQRT2 : half);
       break;
     }
     case "rect":

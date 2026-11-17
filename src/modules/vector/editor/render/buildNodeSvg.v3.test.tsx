@@ -215,8 +215,33 @@ describe("パス (§8.4、§8.6)", () => {
     const path = createPath([curve], { id: "p", x: 1, y: 2, rotation: 45 });
     const attrs = build(docOf([path], ["p"]), "p").attrs;
     expect(attrs["d"]).toBe("M1 12 C6 2 16 2 21 12");
-    expect(attrs["transform"]).toBe(`rotate(45 ${1 + path.width / 2} ${2 + path.height / 2})`);
+    // 箱は曲線の範囲に合わせて作るので、描く位置は渡した点の座標 + (1, 2) のまま
+    expect(path.y).toBeCloseTo(4.5, 10);
+    expect(attrs["transform"]).toBe(
+      `rotate(45 ${path.x + path.width / 2} ${path.y + path.height / 2})`,
+    );
     expect(attrs).toMatchObject({ fill: "none", stroke: "#000000", "fill-rule": "nonzero" });
+  });
+
+  it("箱の外に点を渡しても、点は箱に収まり、影のフィルタの範囲が形を囲む", () => {
+    const far: Subpath = {
+      closed: true,
+      points: [corner(50, 50), corner(150, 50), corner(150, 150), corner(50, 150)],
+    };
+    const path = createPath([far], {
+      id: "p",
+      stroke: null,
+      fill: solidPaint("#000000"),
+      shadow: { x: 0, y: 0, blur: 0, color: "#000000", opacity: 1 },
+    });
+    const tree = build(docOf([path], ["p"]), "p");
+    expect(findAll(tree, "path")[0]?.attrs["d"]).toBe("M50 50 L150 50 L150 150 L50 150 L50 50 Z");
+    expect(findAll(tree, "filter")[0]?.attrs).toMatchObject({
+      x: 49,
+      y: 49,
+      width: 102,
+      height: 102,
+    });
   });
 
   it("点が 1 個だけの輪郭は描かない。描く輪郭がなければ空の <g>", () => {

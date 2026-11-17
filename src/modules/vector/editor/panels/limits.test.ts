@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { alignNodes, distributeNodes } from "../model/align";
-import { createFrame, createRect } from "../model/create";
+import { createBoolean, createFrame, createRect } from "../model/create";
+import { translateNodes } from "../model/transform";
 import type { CanvasDocument } from "../model/types";
 import { geometryWithinLimits, withinLimitsOrSame } from "./limits";
 
@@ -37,5 +38,24 @@ describe("withinLimitsOrSame", () => {
     const doc = farDocument();
     const aligned = alignNodes(doc, ["B", "C"], "top");
     expect(withinLimitsOrSame(doc, ["B", "C"], aligned)).toBe(aligned);
+  });
+});
+
+describe("geometryWithinLimits (ブーリアン)", () => {
+  it("ブーリアンの子も確かめる", () => {
+    const nodes = [
+      createBoolean("union", ["near", "edge"], { id: "u" }),
+      createRect({ id: "near", x: 0, y: 0, width: 10, height: 10 }),
+      createRect({ id: "edge", x: 999990, y: 0, width: 10, height: 10 }),
+    ];
+    const doc: CanvasDocument = {
+      pages: [{ id: "p1", name: "ページ 1", children: ["u"], guides: [] }],
+      nodes: Object.fromEntries(nodes.map((node) => [node.id, node])),
+      assets: {},
+    };
+    expect(geometryWithinLimits(doc, ["u"])).toBe(true);
+    const moved = translateNodes(doc, ["u"], 100, 0);
+    expect(moved.nodes["edge"]).toMatchObject({ x: 1000090 });
+    expect(geometryWithinLimits(moved, ["u"])).toBe(false);
   });
 });
