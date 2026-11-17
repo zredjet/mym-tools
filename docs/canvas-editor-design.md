@@ -559,7 +559,10 @@ ADR-0028 の決定を実装するための設計。統合ブランチ `canvas-st
 普段のデータを守る:
 
 - `canvas-stage2` では、`src-tauri/tauri.conf.json` の `identifier` を `com.zredjet.mymtools.stage2` にしてある。`tauri:dev` と CI のビルドは、データを `~/Library/Application Support/com.zredjet.mymtools.stage2/` (Windows は `%APPDATA%\com.zredjet.mymtools.stage2\`) に置き、普段使いのデータ (v2) を v3 に書き換えない。切替の PR で元に戻す
-- 確かめるのに作品が要るときは、普段のアプリで取ったバックアップや JSON エクスポートを、この identifier のアプリに取り込んで使う
+- 確かめるのに作品が要るときは、普段のアプリの JSON エクスポートを、この identifier のアプリに取り込んで使う。バックアップのリストアは、自分のバックアップのフォルダのファイルしか受けないので、使うなら stage2 のデータフォルダの `backups/` へ複製してから戻す
+- stage2 のデータフォルダは、どのセッションのブランチでも共有される。あるブランチの途中の v3 で書いた行が、別のブランチでは開けないことがある。PR を検証するときは、データフォルダを空にするか、JSON から入れ直す
+- CI は、`main` 宛ての PR と `main` への push で `identifier` が `com.zredjet.mymtools` であることを確かめる (戻し忘れたまま `main` に入らないように)
+- `tauri.conf.json` の `identifier` の行は `version` の行の隣にあるので、リリースの後に `main` を取り込むと衝突する。取り込むオーケストレーターが解く
 - 切替の前に書いた v3 の行は、捨てる前提にする。v3 の形が途中で変わっても版は 3 のままで、途中の形で書いた行を変換する道は作らない
 
 ### 8.3 保存形式 v3
@@ -648,7 +651,7 @@ export interface BooleanNode extends NodeCommon {
 
 #### 8.3.3 v2 から v3 へ
 
-`upgrade_payload(2, …)` は、次だけを足した文書を返す。ほかの値と、ノード・ページ・アセットの並び (JSON のキーの順を含む) は変えない。
+`upgrade_payload(2, …)` は、次だけを足した文書を返す。ほかの値と、配列の順 (`pages`、`children`、`guides`、`stops`) は変えない。オブジェクトのキーの順は意味を持たない (Rust の JSON は読み書きでキーを並べ替える)。比べるときは値で比べる
 
 - frame、矩形、楕円、テキスト、画像、埋め込み SVG に `rotation: 0`
 - すべての線 (frame、矩形、楕円、線の `stroke` のうち null でないもの) に `cap: "butt"`、`join: "miter"`、`dash: []`
@@ -665,7 +668,7 @@ v2 の検証を通る行は、足すだけなので v3 への変換で失敗し�
 
 契約データ:
 
-- `payload-v2.json` は凍結し、Rust の v1 → v2 のテストにだけ使う
+- `payload-v2.json` は凍結し、Rust の v1 → v2 のテストに使う。版が 2 の間は、今の版の文書として `payload-v2.json` を使うテスト (`sqlite.rs`、`backup.rs`、`commands.rs` ほか) もあるので、版の定数で v2 と v3 の契約データを選ぶ形にする (A)
 - `payload-v3.json` は `payload-v2.json` と同じ形 (`valid` / `invalid` は土台の文書と差分、`upgrade` は `{ name, from, input, v3 }`。`from` は 1 か 2) にする。v1 → v3 の結果も入れる
 - TypeScript のテスト、`model/testing.ts`、開発用の画面の文書、`VectorWorkspacePage.test.tsx` は `payload-v3.json` に移す (C1)
 
@@ -719,7 +722,7 @@ v2 の検証を通る行は、足すだけなので v3 への変換で失敗し�
 
 - 回転した 1 個のノードは、回転した箱の向きでリサイズする。動かさない側の辺・角 (Alt なら中心) が、親の座標系で動かないように `x` `y` を決める。丸めるのは `width` `height` だけで、`x` `y` は丸めない (中心まわりの回転なので、整数にそろえると動かさない側がずれる)
 - 複数選択と group のリサイズ (§4.6 の比例) で、回転した子は、中心を比例させ、大きさを自分の向きに沿った倍率で変える。幅の倍率は √((sx·cos φ)² + (sy·sin φ)²)、高さは √((sx·sin φ)² + (sy·cos φ)²)。sx, sy は選択の外接矩形 (ページ座標) の横と縦の倍率、φ はノードのページ上の角度。角度は変えない。縦横の倍率が違うと厳密な拡大にはならない (ADR-0028)
-- パスは点を変換するので厳密に変わる。中心を A + S·(中心 − A) (A は動かさない点) に置き、ノードの座標系の点とハンドルに R(φ)⁻¹ · S · R(φ) を掛けて (1 個だけを自分の向きでリサイズするときは S をそのまま)、§8.6 の箱を直す。線は端点を変換する
+- パスは点を変換するので厳密に変わる。複数選択と group では、点とハンドルの先をページ座標で P′ = A + S·(P − A) (A は動かさない点、S は外接矩形の倍率) に写してから、角度を変えずに自分の座標系へ戻し、§8.6 の箱を直す。1 個だけを自分の向きでリサイズするときは、自分の座標系で p′ = a + S·(p − a) (a は動かさない点、S は自分の向きの倍率) にする。線は端点を変換する
 - テキストの大きさの決め方 (§4.6 の「横に引くと `auto-height`、縦にも引くと `fixed`」) は、テキスト自身の向きでの倍率で判定する
 
 #### 8.5.5 パネルの位置と大きさ
@@ -737,7 +740,7 @@ Shift+H で左右、Shift+V で上下に、選択の外接矩形の中心を通�
 - 位置は、中心を軸で映す
 - パス: 点とハンドルを自分の座標系で映す (箱は変わらない)
 - 矩形・楕円: 形は対称なので点はない。塗りのグラデーションの `from` `to` `center` を、映す軸の成分だけ 1 − 値にする。影のずれ (`x` か `y`) の符号を変える (パスとブーリアンも同じ)
-- 線: 端点を映す。group とブーリアン: 子に同じことをする (ブーリアンの塗りのグラデーションと影も映す)
+- 線: 端点を映す。group とブーリアン: 子に同じことをする。ブーリアンの塗りのグラデーションと影も映すが、これらは親の座標系の向きなので、祖先の frame の角度が 90° の倍数でなければ近似になる
 - テキスト、画像、埋め込み SVG、frame は鏡像を表せないので、これらを (子孫に) 含む選択では反転できない (ボタンとショートカットが効かない)
 
 #### 8.5.7 テキスト
@@ -800,7 +803,7 @@ Shift+H で左右、Shift+V で上下に、選択の外接矩形の中心を通�
 - 描き始めの点をクリックすると輪郭を閉じ、描くのを終える。Enter と Esc で開いたまま終える。描いている間の Backspace は最後の点を消す
 - 点の編集の中でペンを使うと、同じパスに輪郭を足す。開いた輪郭の端の点から始めると、その輪郭を続ける。線分をクリックすると点を足す
 - 何も編集していないときのペンは、新しいパスを作る。親は作成ツールと同じ決め方 (§4.6 のドロップ先、スコープ、§8.5.2、ブーリアンのスコープでは §8.9.1)。塗りなし、線は `createStroke()` の既定 (黒、太さ 1)、名前は「パス」
-- 描き終えたら、選択ツールに戻って作ったパスを選ぶ (§4.4 の作成ツールと同じ)。点を 1 個しか置かずに終えたパスは残さない (作成ごと取り消す)
+- 描き終えたら、選択ツールに戻って作ったパスを選ぶ (§4.4 の作成ツールと同じ)。点の編集の中からペンを使ったときは、`pathEdit` に戻って点の編集を続ける。点を 1 個しか置かずに終えたパスは残さない (作成ごと取り消す)
 - 描いている間は、最後の点からポインターまでの予定の線を重ね描きする
 
 ### 8.8 多角形・星・鉛筆
@@ -856,7 +859,7 @@ Shift+H で左右、Shift+V で上下に、選択の外接矩形の中心を通�
 
 - 矩形、楕円、線、パス、ブーリアンを、同じ見た目のパスにする。テキスト、画像、埋め込み SVG、frame、group を含む選択では効かない
 - 1 個なら、名前・表示・ロック・不透明度・塗り・線・影と、箱を持つノードなら回転を引き継ぐ。形は §8.6 の点の形 (始点と向きも同じなので、破線の位置も変わらない)。線は塗りなしの開いた輪郭 1 本。ブーリアンは結果の形 (回転 0)。パスは何もしない
-- 複数なら、1 つのパスにまとめる (Figma と同じ)。最背面のノードの名前と見た目を引き継ぎ、回転は点に焼き込んで回転 0 にする。輪郭は重なり順に並べる。塗りのある形は、それぞれ `booleanOperation("union", [その形])` で向きをそろえた輪郭にしてから並べ、`nonzero` で塗る (重なった所が穴にならない)。塗りのない形は輪郭をそのまま並べる。重なった形の線は、それぞれの輪郭に沿って残る
+- 複数なら、同じ親の中で選んでいるときだけ、1 つのパスにまとめる (Figma と同じ)。結果は、選択の中で最も前面のものの位置に置く。最背面のノードの名前と見た目を引き継ぎ、回転は点に焼き込んで回転 0 にする。輪郭は重なり順に並べる。塗りのある形は、それぞれ `booleanOperation("union", [その形])` で向きをそろえた輪郭にしてから並べ、`nonzero` で塗る (重なった所が穴にならない)。塗りのない形は輪郭をそのまま並べる。そのため、塗りのある形の線の見た目 (破線の位置、開いた輪郭の閉じる辺、自己交差の内側の線) は変わりうる。合体が求められない形があれば当てない
 - 結果が上限を超えるとき、ブーリアンの結果が求められないときは当てない
 
 線のアウトライン化 (Shift+Cmd/Ctrl+O):
@@ -904,7 +907,7 @@ Shift+H で左右、Shift+V で上下に、選択の外接矩形の中心を通�
 | 変換 | 対象があるとき | パスに変換、ブーリアン演算の 4 つ (2 個以上の選択)、線のアウトライン化 (I)、編集できる形に変換 (J) |
 | ツールの設定 | 多角形・星のツール | 頂点の数、凹み (星) (H) |
 
-「変換」の節は、操作を登録する口 (`panels/sections/convertActions.ts`) を G が置き、I と J は自分のファイルから登録する。
+「変換」の節は、操作を登録する口 (`panels/sections/convertActions.ts`) を G が置く。G は I と J の登録ファイル (`outline/convertAction.ts`、`svgconvert/convertAction.ts`) を空の中身で置いて読み込みまで済ませ、I と J はその中身だけを書く (並行で同じファイルを変えないため)。
 
 レイヤーパネル: パスとブーリアン (演算ごと) のアイコン。ブーリアンは group と同じく開閉でき、子を並べ替えられる (子にできない種類のノードは入れられない)。結果を求められなかったブーリアンの行に注意を出す。
 
@@ -930,15 +933,15 @@ Shift+H で左右、Shift+V で上下に、選択の外接矩形の中心を通�
 |---|---|
 | A | `src-tauri/src/modules/vector/`、`model/limits.json`、`model/fixtures/payload-v3.json`。版を 3 にしたときに通るよう、vector の版に依存するテスト (`src-tauri/src/storage/sqlite.rs`、`src-tauri/src/commands/backup.rs` ほか) を、版の定数から決まる形にする |
 | B | `geometry/` (新規)、`path/` のうち幾何の純関数 (新規) |
-| C1 | `model/types.ts` (v3 にする)、`model/` の作成・検証・payload・テスト用の文書、`state/`、`tools/types.ts` と `tools/registry.ts` (新しいツールの ID と空のツール)、`toolbar/`、`render/`、`boolean/result.ts`、`dev/`、Rust の `current_payload_version` (A が用意した 1 行) |
-| C2 | `model/geometry.ts`、`model/structure.ts`、`model/fragment.ts`、`model/transform.ts`、`model/tree.ts`、`model/align.ts`、`path/fit.ts`、`text/fit.ts`、`hit/` (`handles.ts` を除く)、`canvas/culling.ts` と `canvas/frameLabels.ts`、`export/plan.ts` と `export/svg.ts`、`tools/select/move.ts`、`tools/create/`、`text/creation.ts`、回転と反転のモデルの関数 (`model/rotate.ts`)、パネルの位置と大きさの読み書きの関数 (`panels/sections/propertyOps.ts` の該当部分) |
+| C1 | `model/types.ts` (v3 にする)、`model/` の作成・検証・payload・テスト用の文書、`state/` (`commands.ts` の C2 の部分を除く)、`tools/types.ts` と `tools/registry.ts` (新しいツールの ID と空のツール)、`toolbar/`、`render/`、`boolean/result.ts`、`dev/`、Rust の `current_payload_version` (A が用意した 1 行)。エディタの外では、payload の版に関わる所 (`src/lib/types.ts` の `VectorPayloadV2`、`VectorWorkspacePage.tsx`・`canvasIo.ts` とそのテスト) |
+| C2 | `model/geometry.ts`、`model/structure.ts`、`model/fragment.ts`、`model/transform.ts`、`model/tree.ts`、`model/align.ts`、`path/fit.ts`、`text/fit.ts`、`hit/` (`handles.ts` を除く)、`canvas/culling.ts` と `canvas/frameLabels.ts`、`export/plan.ts` と `export/svg.ts`、`tools/select/move.ts`、`tools/create/`、`text/creation.ts`、回転と反転のモデルの関数 (`model/rotate.ts`)、パネルの位置と大きさの読み書きの関数 (`panels/sections/propertyOps.ts` の該当部分)、ブーリアンの木の規則に関わる `state/commands.ts` の関数 (貼り付け先、作成の親、解除の後の選択) と `tools/select/actions.ts` の中に入る判定 |
 | D | `boolean/` (`result.ts` を除く) |
 | E | `tools/selectTool.ts`、`tools/select/` (`move.ts` を除く)、`snap/`、`text/TextEditOverlay.tsx`、`hit/handles.ts` |
 | F | `tools/pathEditTool.ts`、`tools/penTool.ts`、`path/editSession.ts`、`panels/sections/PathPointSection.tsx` |
 | G | `panels/` (下の F・H・I・J のファイルを除く)、`canvas/shortcuts.ts`、ブーリアンの作成と解除・演算の切替のモデルの関数 (`model/booleanOps.ts`)、パスに変換 (`path/flatten.ts`) |
 | H | `tools/polygonTool.ts`、`tools/starTool.ts`、`tools/pencilTool.ts`、`pencil/`、`panels/sections/ToolSettingsSection.tsx` |
-| I | `outline/`、`panels/sections/` の自分の操作の登録 |
-| J | `svgconvert/`、`panels/sections/` の自分の操作の登録と確認のダイアログ |
+| I | `outline/` (G が置いた `outline/convertAction.ts` の中身を含む) |
+| J | `svgconvert/` (G が置いた `svgconvert/convertAction.ts` の中身を含む) と確認のダイアログ |
 
 担当の外で、最小限の変更を許すもの:
 
@@ -963,18 +966,18 @@ Shift+H で左右、Shift+V で上下に、選択の外接矩形の中心を通�
 | D | ブーリアン演算 | `booleanOperation` (§8.9.3) | B | xhigh |
 | E | 回転と変形 | 回転のハンドルと操作、回転した選択枠、回転したノードのリサイズ、複数選択のリサイズ、反転のショートカット、回転したテキストの編集欄 (C2 のモデルの関数を使う) | C2 | xhigh |
 | F | ペンと点の編集 | ペン、点の編集 (§8.7)、点の節 | C2 | xhigh |
-| G | パネルと変換の操作 | 回転と反転の欄、線の端・角・破線、パスとブーリアンの節、「変換」の節と登録口、ブーリアンの作成と解除、パスに変換、レイヤーパネルのアイコンと注意、ショートカット (Cmd/Ctrl+E、Alt+Shift+U/S/I/E) | C2 | high |
+| G | パネルと変換の操作 | 回転と反転の欄、線の端・角・破線、パスとブーリアンの節、「変換」の節と登録口 (I と J の空の登録ファイルと読み込みまで)、ブーリアンの作成と解除、パスに変換、レイヤーパネルのアイコンと注意、ショートカット (Cmd/Ctrl+E、Alt+Shift+U/S/I/E) | C2、D | high |
 | H | 多角形・星・鉛筆 | 3 つのツール、`fitCurve`、ツールの設定の節 (§8.8) | C2 | high |
 | I | 線のアウトライン化 | `outlineStroke` と操作 (§8.10) | D、G | xhigh |
 | J | SVG の変換 | `svgconvert/` と操作・確認のダイアログ (§8.12) | G | high |
 | K | 切替 | §8.16 | A〜J | xhigh |
 
-並行は 3 本まで。目安の順は、A と B → C1 と D → C2 (D が続いていれば並行) → E・F・G → H・I・J → K。
+並行は 3 本まで。目安の順は、A と B → C1 と D → C2 (D が続いていれば並行) → E・F と G (G は D の後) → H・I・J → K。
 
 ### 8.16 切替 (`canvas-stage2` から `main` へ)
 
 - `canvas-stage2` を `main` へマージする PR 1 本。その前に `main` を取り込み、CI を通す
-- 統合ブランチのための設定を戻す: `tauri.conf.json` の `identifier` を `com.zredjet.mymtools` に、`ci.yml` から `canvas-stage2` を外す
+- 統合ブランチのための設定を戻す: `tauri.conf.json` の `identifier` を `com.zredjet.mymtools` に (戻さないと CI の identifier の確認で止まる)、`ci.yml` の `pull_request` と `push` から `canvas-stage2` を外す (identifier の確認の手順は残す)
 - ドキュメント: この節を §2〜§7 へ書き戻し、§3 を v3 にする。`requirements.md`、`ui-design.md` (§6.23、§8、改訂履歴)、`data-model.md`、`module-contract.md`、`vector-editor-verification.md`、README、CLAUDE.md (ADR の一覧と規約。統合ブランチの規則を外す)
 - 実アプリ (macOS) で確かめること: 回転したノードの選択・リサイズ・テキストの編集、トラックパッドでのペンと点の編集、ブーリアンの子をドラッグしたときの重さ、線のアウトライン化の見た目、v1 の作品の埋め込み SVG の変換、日本語入力、PNG と SVG の書き出し
 - 普段のデータでの確認は、切替の PR の CI の成果物 (identifier を戻したもの) で 1 回だけ行う: v2 の作品が見た目を変えずに開けること、`pre-payload-vector-v3` のバックアップが 1 回取られること。v2 → v3 の変換は戻せないため、確認の前に今の版でバックアップと JSON エクスポートを取る (#180 と同じ手順)
@@ -997,4 +1000,4 @@ ADR-0028 の Acceptance に従う。自動テストでの確認、開発用の�
 | 2026-11-15 | 0.6 | 選択と変形・テキスト・作成ツールと画像の PR (#174、#175、#177) が足した規則を版に反映する: §4.4 ドラッグの途中のキー、§4.5 Shift のクリック、§4.6 ドロップ先の決め方、§4.7 計測と折り返しの規則・既知の制限、§4.8 取込の待ち、§5.6 フレームのクリックの大きさ。あわせて §6.2 開発用の画面を残す、§7 切替でつなぐ登録口 (取込、本文の編集の終了、フレームの大きさ) と実アプリで確かめる項目を足す |
 | 2026-11-15 | 0.7 | 切替 (#9) を反映する。§1 と §7 を切替が済んだ形に直し、§7 につないだもの (読めない作品の扱い、ドロップ、エクスポートの失敗した item)・実アプリで確かめること・受入を分ける。§3.4 の SVG ポリシーの場所、§4.9 の保存先の関数と Rust の SVG の検証、§5.1 作品バー (書き出しはプロパティパネルの節に任せる)、§6 と §6.2 の切替までの記述。レビューを受けて、§3.7 v1 の `text` を求め直す・変換できない作品の扱い、§4.9 書き出す SVG の整形式の確認、§5.1 開けない作品の画面、§7.1 ADR-0027 の守り、§7.3 残っていること (README の画面イメージ) を足し、§1 と §4.9 §5.4 の言い回しを直す。画面の接続のレビューを受けて、§4.4 ドラッグの途中の保存・新規のキーと `pointerDrag.ts`、§7.1 `flushEdits` (入力欄の blur、ドラッグの取消)・閉じるのに失敗したとき・ドロップの位置の単位・モーダルの間のドロップ・途中で失敗した書き出しを足す。照合のレビューを受けて、§4.7 保存は本文の編集を終えない (ジェスチャーだけを確定する)、§7.1 `flushEdits` を保存と離れる前に分ける、§3.7 文字の規則がコメントや CDATA の中にも当たることを足す |
 | 2026-11-17 | 0.8 | 切替のレビューで残した保存まわりを直す。§4.7 作ったばかりの空のテキストは ⌘S で保存する文書に入れない (前の版の「空のまま保存してよい」を改める)、日本語入力の変換中の ⌘S を受けない。§7.1 保存の項に同じことを足す |
-| 2026-11-17 | 0.9 | 第 2 段階の設計 (§8、ADR-0028) を足す。保存形式 v3 (回転、線の端・角・破線、パス、ブーリアン)、座標と回転、パスの形、ペンと点の編集、多角形・星・鉛筆、ブーリアン演算、パスに変換と線のアウトライン化、埋め込み SVG の変換、画面の追加、統合ブランチ `canvas-stage2` での担当のファイル・分担・切替。レビューを受けて、統合ブランチのアプリを別の identifier で動かす、点の編集を専用のツールで受ける、ブーリアンの木の規則と結果の使い回し、回転した frame の中、パネルの位置と大きさ、反転の式、角丸と始点を描画に合わせる、v2 と v3 の検証の使い分け、「v3 の基盤」を 2 つに分ける。改訂履歴を §9 にする |
+| 2026-11-17 | 0.9 | 第 2 段階の設計 (§8、ADR-0028) を足す。保存形式 v3 (回転、線の端・角・破線、パス、ブーリアン)、座標と回転、パスの形、ペンと点の編集、多角形・星・鉛筆、ブーリアン演算、パスに変換と線のアウトライン化、埋め込み SVG の変換、画面の追加、統合ブランチ `canvas-stage2` での担当のファイル・分担・切替。レビューを受けて、統合ブランチのアプリを別の identifier で動かす、点の編集を専用のツールで受ける、ブーリアンの木の規則と結果の使い回し、回転した frame の中、パネルの位置と大きさ、反転の式、角丸と始点を描画に合わせる、v2 と v3 の検証の使い分け、「v3 の基盤」を 2 つに分ける、`main` での identifier を CI で確かめる。改訂履歴を §9 にする |

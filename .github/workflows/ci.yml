@@ -133,6 +133,13 @@ jobs:
         if: always()
       - run: npx prettier --check .
         if: always()
+      # 配布するアプリの identifier を確かめる。キャンバスの統合ブランチ canvas-stage2 は普段のデータに
+      # 触れないよう別の identifier で動かす (ADR-0028)。戻し忘れたまま main に入ると、利用者のアプリが
+      # 別のデータフォルダを開き、作品が消えたように見えるので、main 宛ての PR と main への push で止める
+      - name: identifier が配布用か確かめる (ADR-0028)
+        if: always() && (github.base_ref == 'main' || github.ref == 'refs/heads/main')
+        run: |
+          node -e "const id = require('./src-tauri/tauri.conf.json').identifier; if (id !== 'com.zredjet.mymtools') { console.error('tauri.conf.json の identifier が ' + id + ' です。main では com.zredjet.mymtools にする (ADR-0028)'); process.exit(1); }"
 
   test-frontend:
     runs-on: ubuntu-latest
