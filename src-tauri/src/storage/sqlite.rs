@@ -1841,19 +1841,16 @@ mod tests {
 
     // キャンバスの版に依存するテストは、版の定数 (`vector::testing::CURRENT`) から期待する版と契約データ
     // (`model/fixtures/payload-v<版>.json`) を選ぶ。定数が 2 でも 3 でも通る (§8.3.3)。v1 の作品のテストは、
-    // 版が 3 のときの経路 (v1 → v2 → v3) も `VectorModuleAt(3)` で確かめる。
+    // 版が 3 のときの経路 (v1 → v2 → v3) も確かめる。今の版は本物の `VectorModule`、ほかの版は
+    // `VectorModuleAt` を使う (`vector_backend_at` / `module_backends_at`)。
     use crate::modules::vector::testing::{
-        module_backends_at, upgrade_to_current, v1_upgrade_case, valid_payload, versions,
-        VectorModuleAt, CURRENT, V1_UPGRADE_CASES,
+        module_backends_at, upgrade_to_current, v1_upgrade_case, valid_payload, vector_backend_at,
+        versions, CURRENT, V1_UPGRADE_CASES,
     };
     use std::collections::HashMap;
 
     fn vector_backend() -> Arc<dyn ModuleBackend> {
         Arc::new(crate::modules::vector::VectorModule)
-    }
-
-    fn vector_backend_at(version: u32) -> Arc<dyn ModuleBackend> {
-        Arc::new(VectorModuleAt(version))
     }
 
     fn registry_at(version: u32) -> HashMap<String, Arc<dyn ModuleBackend>> {
@@ -2520,6 +2517,16 @@ mod tests {
         assert_eq!(build.not_upgraded.len(), 1);
         assert_eq!(build.not_upgraded[0].payload_schema_version, 2);
         assert_eq!(storage.data_revision().unwrap(), revision);
+        // 書き出した JSON を取り込む側でも変換に失敗し、失敗として数える (黙って捨てない)
+        let parsed = crate::exchange::import::parse_export_json(
+            &serde_json::to_string(&build.data).unwrap(),
+        )
+        .unwrap();
+        let target: Arc<dyn StorageService> = Arc::new(in_memory_storage());
+        let result = crate::exchange::import::apply_import(&target, &registry_at(3), &parsed);
+        assert_eq!(result.items_inserted, 0);
+        assert_eq!(result.items_failed, 1);
+        assert_eq!(result.failures[0].id, id.as_str());
     }
 
     /// 版が 3 のとき、v2 の作品を含む JSON (今の main のアプリが書き出したもの) を取り込むと v3 で入る。

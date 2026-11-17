@@ -261,7 +261,7 @@ fn try_take_auto_backup(backup: &dyn BackupService) {
 mod startup_data_migration_tests {
     use super::*;
     use crate::modules::vector::testing::{
-        module_backends_at, pre_payload_prefix, valid_payload, versions, VectorModuleAt, CURRENT,
+        module_backends_at, pre_payload_prefix, valid_payload, vector_backend_at, versions, CURRENT,
     };
     use serde_json::json;
 
@@ -511,14 +511,14 @@ mod startup_data_migration_tests {
         }
     }
 
-    /// 起動時のバックアップの接頭辞は、モジュールの版の定数から決まる (`VectorModuleAt` も同じ)。
+    /// 起動時のバックアップの接頭辞は、モジュールの版の定数から決まる (今の版は本物の `VectorModule`、v3 は
+    /// 版が 2 の間は `VectorModuleAt(3)`)。
     #[test]
     fn payload_backup_prefix_follows_the_version_constant() {
         for version in versions() {
             let storage = SqliteStorage::open(":memory:").unwrap();
             insert(&storage, "vector", version - 1);
-            let modules: Vec<Arc<dyn module::ModuleBackend>> =
-                vec![Arc::new(VectorModuleAt(version))];
+            let modules: Vec<Arc<dyn module::ModuleBackend>> = vec![vector_backend_at(version)];
             let taken = take_payload_upgrade_backups(&storage, &modules, |_| Ok(())).unwrap();
             assert_eq!(taken, vec![pre_payload_prefix(version)]);
         }

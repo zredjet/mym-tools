@@ -2,7 +2,9 @@
 //! 版が 3 のときの `upgrade_payload` / `validate_payload` の経路 (`docs/canvas-editor-design.md` §8.3)。
 
 use super::scene::{search_text, validate, validate_v3, LIMITS};
-use super::testing::{contract, resolve, valid_payload, VectorModuleAt, CURRENT};
+use super::testing::{
+    contract, resolve, valid_payload, vector_backend_at, VectorModuleAt, CURRENT,
+};
 use super::upgrade::{upgrade_v1, upgrade_v2};
 use super::{validate_as, VectorModule};
 use crate::module::{ModuleBackend, ModuleError};
@@ -91,6 +93,44 @@ fn contract_valid_large_cases_reach_the_limits() {
 #[test]
 fn contract_invalid_cases_fail_for_the_documented_reason() {
     let expected = [
+        // §3 の規則 (payload-v2.json の invalid と同じ例。理由も v2 の検証と同じ)
+        ("pages-empty", "ページは"),
+        ("page-id-duplicate", "重複"),
+        ("child-referenced-twice", "2 か所以上"),
+        ("orphan-node", "参照されていません"),
+        ("child-missing", "存在しないノード"),
+        ("node-key-mismatch", "キーと一致しません"),
+        ("unknown-node-type", "の type は"),
+        ("unknown-field", "未知のフィールド skew"),
+        ("missing-field", "radius がありません"),
+        ("bad-id", "ノードの ID"),
+        ("bad-color", "#RRGGBB"),
+        ("opacity-out-of-range", "opacity"),
+        ("negative-size", "width"),
+        ("coordinate-out-of-range", " x は"),
+        ("number-as-string", "数値"),
+        ("group-empty", "1 個以上"),
+        ("gradient-one-stop", "stops"),
+        ("gradient-stops-unsorted", "昇順"),
+        ("font-weight-invalid", "fontWeight"),
+        ("text-sizing-invalid", "sizing"),
+        ("asset-missing", "存在しないアセット"),
+        ("asset-unreferenced", "参照されていません"),
+        ("image-asset-size-zero", "width は 0 より大きく"),
+        ("svg-asset-size-zero", "height は 0 より大きく"),
+        ("asset-kind-mismatch", "別の種類"),
+        ("image-data-mime-mismatch", "画像の形式と内容"),
+        ("svg-asset-policy-violation", "未対応のSVG要素"),
+        ("svg-asset-raw-nel", "U+0085"),
+        (
+            "svg-asset-control-character-reference",
+            "使えない文字の参照",
+        ),
+        ("svg-asset-text-mismatch", "SVGと一致しません"),
+        ("text-mismatch", "文書と一致しません"),
+        ("guide-axis-invalid", "axis"),
+        ("top-level-unknown-field", "未知のフィールド version"),
+        // §8.3.2 の規則
         (
             "rotation-above-max",
             "rect1」の rotation は -180 以上 180 以下",
@@ -130,7 +170,7 @@ fn contract_invalid_cases_fail_for_the_documented_reason() {
         ),
         ("path-subpaths-empty", "path1」の subpaths は 1〜1000 個"),
         ("path-subpaths-too-many", "p1」の subpaths は 1〜1000 個"),
-        ("path-points-empty", "path1」の輪郭 2の points は1 個以上"),
+        ("path-points-empty", "path1」の輪郭 2の points は 1 個以上"),
         ("path-points-too-many", "p1」の点は合計 10000 個以下"),
         (
             "path-total-points-too-many",
@@ -187,7 +227,26 @@ fn contract_invalid_cases_fail_for_the_documented_reason() {
         ),
         ("boolean-child-referenced-twice", "brect」が 2 か所以上"),
         ("boolean-box-unknown", "bool1」に未知のフィールド x"),
-        ("unknown-node-type-star", "bpath」の type は"),
+        ("unknown-node-type-star", "path1」の type は"),
+        ("subpath-closed-missing", "輪郭 1に closed がありません"),
+        ("subpath-unknown-field", "輪郭 1に未知のフィールド fill"),
+        (
+            "path-handle-unknown-field",
+            "輪郭 1の点 2の in に未知のフィールド z",
+        ),
+        ("path-point-y-out-of-range", "輪郭 1の点 1の y は"),
+        ("path-point-not-number", "輪郭 1の点 1の x は数値"),
+        ("path-subpaths-not-array", "path1」の subpaths は配列"),
+        ("path-stroke-missing", "path1」に stroke がありません"),
+        ("boolean-shadow-missing", "bool1」に shadow がありません"),
+        (
+            "boolean-child-image",
+            "の子「image1」は rect / ellipse / path / boolean",
+        ),
+        (
+            "boolean-child-svg",
+            "の子「svg1」は rect / ellipse / path / boolean",
+        ),
     ];
     let invalid = cases("invalid");
     assert_eq!(
@@ -208,7 +267,8 @@ fn contract_invalid_cases_fail_for_the_documented_reason() {
 fn contract_upgrade_cases() {
     let upgrade = cases("upgrade");
     assert_eq!(upgrade.len(), 8, "契約データの upgrade が変わった");
-    let module = VectorModuleAt(3);
+    // 版が 3 なら本物の VectorModule、2 の間は VectorModuleAt(3)
+    let module = vector_backend_at(3);
     for case in upgrade {
         let name = &case["name"];
         assert!(case["reason"].is_string(), "{name}");
@@ -365,7 +425,7 @@ fn version_routes() {
     assert!(at2.validate_payload(&valid_payload(3, "full")).is_err());
 
     // 版が 3: v1 → v2 (v2 の検証) → v3 (v3 の検証)
-    let at3 = VectorModuleAt(3);
+    let at3 = vector_backend_at(3);
     let v1 = &cases("upgrade")[0]["input"];
     let v2 = at3.upgrade_payload(1, v1.clone()).unwrap();
     validate(&v2).unwrap();

@@ -1,5 +1,5 @@
 {
-  "description": "vector payload v3 の契約 (docs/canvas-editor-design.md §8.3、v2 からの差分。そのほかは §3)。Rust と TypeScript の両方のテストが読み、同じ合否になること。valid は検証を通り、payload.text が文書から求めた検索用テキストと一致する。valid は payload (文書そのもの) か、base (前にある valid の名前) と patch で書く (大きな配列を使う境界の例だけ)。invalid は base (valid の名前) の文書に patch を順に当てたもので、どちらの実装でも拒否する。各例は reason に書いた規則 1 つだけで落ちるようにしてある (ほかの値は通る値のまま。検索用テキストも合わせてある)。patch の op は set (path の位置へ value を置く) / remove (path の位置を消す) / append (path の配列の末尾へ value を足す) / repeat (path の位置へ value を count 個並べた配列を置く)。path は文字列 (キー) と整数 (添字)。upgrade は { name, from, input, v3 }。from (1 か 2) の input を v3 へ変換した結果が v3 と値で等しく (オブジェクトのキーの順は意味を持たない)、その v3 は検証を通る。from が 1 の例は payload-v2.json の upgrade の同じ名前の例を v1 → v2 → v3 と変換したもの。数値は整数か、小数の表記 (指数の表記と -0 は使わない) で書いてある。Rust の serde_json は整数の 0 と小数の 0.0 を別の値として比べるので、変換で足す rotation は整数の 0 で書く。",
+  "description": "vector payload v3 の契約 (docs/canvas-editor-design.md §8.3、v2 からの差分。そのほかは §3)。Rust と TypeScript の両方のテストが読み、同じ合否になること。valid は検証を通り、payload.text が文書から求めた検索用テキストと一致する。valid は payload (文書そのもの) か、base (前にある valid の名前) と patch で書く (大きな配列を使う境界の例だけ)。invalid は base (valid の名前) の文書に patch を順に当てたもので、どちらの実装でも拒否する。各例は reason に書いた規則 1 つだけで落ちるようにしてある (ほかの値は通る値のまま。検索用テキストも合わせてある)。patch の op は set (path の位置へ value を置く) / remove (path の位置を消す) / append (path の配列の末尾へ value を足す) / repeat (path の位置へ value を count 個並べた配列を置く。各要素は value の複製で、互いに参照を共有しない)。path は文字列 (キー) と整数 (添字)。valid の base + patch は invalid と同じ当て方で、base の文書を複製してから patch を順に当てる (base の文書は変えない)。invalid の最初の 33 件は payload-v2.json の invalid と同じ名前・同じ当て方で、§3 の規則 (木、ID、アセット、SVG の文字の規則、検索用テキストなど) を v3 の文書で確かめる (unknown-field は v3 で通る rotation の代わりに skew、orphan-node と bad-id は差し込むノードに rotation 0 を足してある)。upgrade は { name, from, input, v3 }。from (1 か 2) の input を v3 へ変換した結果が v3 と値で等しく (オブジェクトのキーの順は意味を持たない)、その v3 は検証を通る。from が 1 の例は payload-v2.json の upgrade の同じ名前の例を v1 → v2 → v3 と変換したもの。数値は整数か、小数の表記 (指数の表記と -0 は使わない) で書いてある。Rust の serde_json は整数の 0 と小数の 0.0 を別の値として比べるので、変換で足す rotation は整数の 0 で書く。",
   "valid": [
     {
       "name": "empty",
@@ -158,7 +158,14 @@
               },
               "radius": 0.5
             },
-            "stroke": null,
+            "stroke": {
+              "color": "#1D4ED8",
+              "opacity": 1,
+              "width": 1.5,
+              "cap": "round",
+              "join": "round",
+              "dash": [0, 3]
+            },
             "shadow": null
           },
           "group1": {
@@ -263,7 +270,14 @@
             "children": ["path1", "bool1"],
             "clip": false,
             "fill": null,
-            "stroke": null,
+            "stroke": {
+              "color": "#E5E7EB",
+              "opacity": 1,
+              "width": 1,
+              "cap": "butt",
+              "join": "miter",
+              "dash": [8, 4, 2, 4]
+            },
             "radius": 0,
             "shadow": null
           },
@@ -1313,6 +1327,500 @@
   ],
   "invalid": [
     {
+      "name": "pages-empty",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): ページが 0 個",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["pages"],
+          "value": []
+        },
+        {
+          "op": "set",
+          "path": ["nodes"],
+          "value": {}
+        },
+        {
+          "op": "set",
+          "path": ["assets"],
+          "value": {}
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": ""
+        }
+      ]
+    },
+    {
+      "name": "page-id-duplicate",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): ページ ID の重複",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["pages", 1, "id"],
+          "value": "page1"
+        }
+      ]
+    },
+    {
+      "name": "child-referenced-twice",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 同じノードが 2 つの親に現れる",
+      "base": "full",
+      "patch": [
+        {
+          "op": "append",
+          "path": ["pages", 1, "children"],
+          "value": "rect1"
+        }
+      ]
+    },
+    {
+      "name": "orphan-node",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): どの親からも参照されないノード",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "stray"],
+          "value": {
+            "id": "stray",
+            "name": "迷子",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 0,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "type": "rect",
+            "fill": null,
+            "stroke": null,
+            "radius": 0,
+            "shadow": null,
+            "rotation": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "child-missing",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): children が存在しないノードを指す",
+      "base": "full",
+      "patch": [
+        {
+          "op": "append",
+          "path": ["nodes", "frame1", "children"],
+          "value": "nope"
+        }
+      ]
+    },
+    {
+      "name": "node-key-mismatch",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): nodes のキーと id が一致しない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "id"],
+          "value": "rectX"
+        }
+      ]
+    },
+    {
+      "name": "unknown-node-type",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 未知のノード種別",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "type"],
+          "value": "star"
+        }
+      ]
+    },
+    {
+      "name": "unknown-field",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 未知のフィールド (v3 では rotation は通るので skew)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "skew"],
+          "value": 45
+        }
+      ]
+    },
+    {
+      "name": "missing-field",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 必須フィールドの欠落",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "rect1", "radius"]
+        }
+      ]
+    },
+    {
+      "name": "bad-id",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): ID の書式違反",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "svg1"]
+        },
+        {
+          "op": "set",
+          "path": ["nodes", "bad id"],
+          "value": {
+            "id": "bad id",
+            "name": "SVG",
+            "visible": true,
+            "locked": false,
+            "opacity": 1,
+            "x": 420,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+            "type": "svg",
+            "assetId": "svgA",
+            "rotation": 0
+          }
+        },
+        {
+          "op": "set",
+          "path": ["pages", 0, "children"],
+          "value": ["frame1", "bad id"]
+        }
+      ]
+    },
+    {
+      "name": "bad-color",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 色の書式違反",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "frame1", "fill", "color"],
+          "value": "#12345"
+        }
+      ]
+    },
+    {
+      "name": "opacity-out-of-range",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 不透明度が 0〜1 の外",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "opacity"],
+          "value": 1.5
+        }
+      ]
+    },
+    {
+      "name": "negative-size",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 大きさが負",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "width"],
+          "value": -1
+        }
+      ]
+    },
+    {
+      "name": "coordinate-out-of-range",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 座標が上限の外",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "x"],
+          "value": 1000001
+        }
+      ]
+    },
+    {
+      "name": "number-as-string",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 数値のフィールドに文字列",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "x"],
+          "value": "16"
+        }
+      ]
+    },
+    {
+      "name": "group-empty",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 子のない group",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "group1", "children"],
+          "value": []
+        },
+        {
+          "op": "set",
+          "path": ["nodes", "frame1", "children"],
+          "value": ["rect1", "ellipse1", "group1", "image1", "line1", "text1"]
+        }
+      ]
+    },
+    {
+      "name": "gradient-one-stop",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): グラデーションの停止点が 1 個",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "fill", "stops"],
+          "value": [
+            {
+              "offset": 0,
+              "color": "#2563EB",
+              "opacity": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "gradient-stops-unsorted",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 停止点が offset の昇順でない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "rect1", "fill", "stops"],
+          "value": [
+            {
+              "offset": 1,
+              "color": "#7C3AED",
+              "opacity": 0.8
+            },
+            {
+              "offset": 0,
+              "color": "#2563EB",
+              "opacity": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "font-weight-invalid",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): fontWeight が 100 刻みでない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "text1", "fontWeight"],
+          "value": 650
+        }
+      ]
+    },
+    {
+      "name": "text-sizing-invalid",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): sizing が未知の値",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "text1", "sizing"],
+          "value": "shrink"
+        }
+      ]
+    },
+    {
+      "name": "asset-missing",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 参照先のアセットがない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["assets", "img1"]
+        }
+      ]
+    },
+    {
+      "name": "asset-unreferenced",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 参照されないアセット",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "extra"],
+          "value": {
+            "kind": "image",
+            "mime": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+            "width": 1,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "image-asset-size-zero",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 画像アセットの大きさが 0",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "img1", "width"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-size-zero",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): SVG アセットの大きさが 0",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "height"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "asset-kind-mismatch",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): image ノードが svg アセットを指す",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "image1", "assetId"],
+          "value": "svgA"
+        },
+        {
+          "op": "remove",
+          "path": ["assets", "img1"]
+        }
+      ]
+    },
+    {
+      "name": "image-data-mime-mismatch",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): mime と画像の中身が一致しない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "img1", "mime"],
+          "value": "image/jpeg"
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-policy-violation",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): SVG ポリシー違反 (script)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "svg"],
+          "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><script>alert(1)</script></svg>"
+        },
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "text"],
+          "value": ""
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面 見出し テキスト 2 行目 バナー"
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-raw-nel",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 埋め込み SVG に U+0085 をそのまま含む (Rust と TS で抽出が違う)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "svg"],
+          "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><text x=\"0\" y=\"8\">旧作品</text></svg>"
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-control-character-reference",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 埋め込み SVG に XML で使えない文字の参照 (&#x1;)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "svg"],
+          "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><text x=\"0\" y=\"8\">旧作品&#x1;</text></svg>"
+        }
+      ]
+    },
+    {
+      "name": "svg-asset-text-mismatch",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): SVG アセットの text が抽出結果と違う",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["assets", "svgA", "text"],
+          "value": "別の文字"
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面 見出し テキスト 2 行目 別の文字 バナー"
+        }
+      ]
+    },
+    {
+      "name": "text-mismatch",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): 検索用テキストが文書と一致しない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面"
+        }
+      ]
+    },
+    {
+      "name": "guide-axis-invalid",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): ガイド線の向きが未知の値",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["pages", 0, "guides", 0, "axis"],
+          "value": "z"
+        }
+      ]
+    },
+    {
+      "name": "top-level-unknown-field",
+      "reason": "§3 の規則 (payload-v2.json と同じ例): トップレベルの未知のフィールド",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["version"],
+          "value": 2
+        }
+      ]
+    },
+    {
       "name": "rotation-above-max",
       "reason": "rotation が 180 より大きい",
       "base": "full",
@@ -2053,13 +2561,149 @@
     },
     {
       "name": "unknown-node-type-star",
-      "reason": "未知のノード種別 (v3 でも star は無い)",
+      "reason": "未知のノード種別 (v3 でも star は無い。ブーリアンの外のパスで確かめる)",
       "base": "full",
       "patch": [
         {
           "op": "set",
-          "path": ["nodes", "bpath", "type"],
+          "path": ["nodes", "path1", "type"],
           "value": "star"
+        }
+      ]
+    },
+    {
+      "name": "subpath-closed-missing",
+      "reason": "輪郭に closed がない",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "path1", "subpaths", 0, "closed"]
+        }
+      ]
+    },
+    {
+      "name": "subpath-unknown-field",
+      "reason": "輪郭に未知のフィールド",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "fill"],
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "path-handle-unknown-field",
+      "reason": "ハンドルに未知のフィールド (z)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 1, "in"],
+          "value": {
+            "x": 0,
+            "y": -27.6,
+            "z": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "path-point-y-out-of-range",
+      "reason": "点の y の絶対値が maxCoordinate より大きい",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 0, "y"],
+          "value": -1000000.5
+        }
+      ]
+    },
+    {
+      "name": "path-point-not-number",
+      "reason": "点の x が文字列",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths", 0, "points", 0, "x"],
+          "value": "60"
+        }
+      ]
+    },
+    {
+      "name": "path-subpaths-not-array",
+      "reason": "パスの subpaths がオブジェクト (配列でない)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "path1", "subpaths"],
+          "value": {}
+        }
+      ]
+    },
+    {
+      "name": "path-stroke-missing",
+      "reason": "パスに stroke がない (null の代わりに省略)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "path1", "stroke"]
+        }
+      ]
+    },
+    {
+      "name": "boolean-shadow-missing",
+      "reason": "ブーリアンに shadow がない (null の代わりに省略)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "remove",
+          "path": ["nodes", "bool1", "shadow"]
+        }
+      ]
+    },
+    {
+      "name": "boolean-child-image",
+      "reason": "ブーリアンの子に画像 (frame1 から移す)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["nodes", "frame1", "children"],
+          "value": ["rect1", "ellipse1", "group1"]
+        },
+        {
+          "op": "append",
+          "path": ["nodes", "bool1", "children"],
+          "value": "image1"
+        }
+      ]
+    },
+    {
+      "name": "boolean-child-svg",
+      "reason": "ブーリアンの子に埋め込み SVG (ページ 1 から移す。検索用テキストは移した後の順に直す)",
+      "base": "full",
+      "patch": [
+        {
+          "op": "set",
+          "path": ["pages", 0, "children"],
+          "value": ["frame1"]
+        },
+        {
+          "op": "append",
+          "path": ["nodes", "bool1", "children"],
+          "value": "svg1"
+        },
+        {
+          "op": "set",
+          "path": ["text"],
+          "value": "ホーム画面 見出し テキスト 2 行目 バナー 旧作品"
         }
       ]
     }

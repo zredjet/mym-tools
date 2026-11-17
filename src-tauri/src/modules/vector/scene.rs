@@ -483,7 +483,7 @@ fn validate_subpaths(f: &Fields<'_>, l: &Limits) -> Result<usize> {
         s.boolean("closed")?;
         let points = s.array("points")?;
         if points.is_empty() {
-            return Err(s.fail("points", "1 個以上"));
+            return Err(s.fail("points", " 1 個以上"));
         }
         count = count.saturating_add(points.len());
         if count > l.max_path_points {

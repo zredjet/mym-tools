@@ -43,13 +43,28 @@ impl ModuleBackend for VectorModuleAt {
     }
 }
 
-/// `registry::module_backends()` の vector だけを `VectorModuleAt(version)` に差し替えたもの。
+/// 版 `version` の vector のモジュール。今の版なら本物の `VectorModule`、ほかの版なら `VectorModuleAt`。
+/// 今の版のテストが写しではなく本物を通るようにする。
+pub(crate) fn vector_backend_at(version: u32) -> Arc<dyn ModuleBackend> {
+    if version == CURRENT {
+        Arc::new(super::VectorModule)
+    } else {
+        Arc::new(VectorModuleAt(version))
+    }
+}
+
+/// 版 `version` のモジュールの一覧。今の版なら `registry::module_backends()` そのもの、ほかの版なら
+/// vector だけを `VectorModuleAt(version)` に差し替えたもの。
 pub(crate) fn module_backends_at(version: u32) -> Vec<Arc<dyn ModuleBackend>> {
-    crate::modules::registry::module_backends()
+    let modules = crate::modules::registry::module_backends();
+    if version == CURRENT {
+        return modules;
+    }
+    modules
         .into_iter()
         .map(|module| {
             if module.id() == "vector" {
-                Arc::new(VectorModuleAt(version)) as Arc<dyn ModuleBackend>
+                vector_backend_at(version)
             } else {
                 module
             }
