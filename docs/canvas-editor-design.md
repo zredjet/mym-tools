@@ -659,7 +659,7 @@ export interface BooleanNode extends NodeCommon {
 検証の使い分け (Rust):
 
 - v2 の検証 (今の `scene::validate`) は凍結し、v1 → v2 の段の結果を確かめるためだけに使う
-- v3 の検証は別の関数にし、`validate_payload` と、`upgrade_payload(2)` の結果に使う。v1 は v1 → v2 (v2 の検証) → v3 (v3 の検証) の順に変換する。ストレージは段ごとに `upgrade_payload` を呼ぶだけなので、各段の中で自分の結果を検証する
+- v3 の検証は別の関数にし、`validate_payload` と、`upgrade_payload(2)` の結果に使う。`upgrade_payload(2)` は入力も v2 の検証で確かめる (v3 だけのフィールドを持つ壊れた v2 の行を、黙って直さないため)。v1 は v1 → v2 (v2 の検証) → v3 (v3 の検証) の順に変換する。ストレージは段ごとに `upgrade_payload` を呼ぶだけなので、各段の中で自分の結果を検証する
 - 結果は v3 の検証 (Rust と TypeScript の両方) を通ること (ADR-0027 §2.1)
 
 v2 の検証を通る行は、足すだけなので v3 への変換で失敗しない。壊れた v2 の行 (検証を通らないもの) は開けず、ADR-0027 の規則 2 で上書きを拒否する。中身を取り出す専用の口は作らない (JSON エクスポートでは古い版のまま書き出される)。
@@ -669,7 +669,8 @@ v2 の検証を通る行は、足すだけなので v3 への変換で失敗し�
 契約データ:
 
 - `payload-v2.json` は凍結し、Rust の v1 → v2 のテストに使う。版が 2 の間は、今の版の文書として `payload-v2.json` を使うテスト (`sqlite.rs`、`backup.rs`、`commands.rs` ほか) もあるので、版の定数で v2 と v3 の契約データを選ぶ形にする (A)
-- `payload-v3.json` は `payload-v2.json` と同じ形 (`valid` / `invalid` は土台の文書と差分、`upgrade` は `{ name, from, input, v3 }`。`from` は 1 か 2) にする。v1 → v3 の結果も入れる
+- `payload-v3.json` は `payload-v2.json` と同じ形 (`valid` / `invalid` は土台の文書と差分、`upgrade` は `{ name, from, input, v3 }`。`from` は 1 か 2) にする。v1 → v3 の結果も入れる。§3 の規則の例 (`payload-v2.json` の invalid に当たるもの) も v3 の土台で持つ
+- 大きな境界の例のために、形を 2 つ広げてある: 差分の `repeat` (`{ op, path, value, count }`。各要素は `value` の複製で、参照を共有しない) と、`valid` を土台 + 差分で書くもの。TypeScript のテストもこれを読む
 - TypeScript のテスト、`model/testing.ts`、開発用の画面の文書、`VectorWorkspacePage.test.tsx` は `payload-v3.json` に移す (C1)
 
 ### 8.4 描画の追加
