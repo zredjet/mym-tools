@@ -129,7 +129,7 @@ export const BOOLEAN_OP_ICONS: Readonly<Record<BooleanOp, LucideIcon>> = {
   exclude: SquaresExclude,
 };
 
-/** ショートカットの文字 (Alt+Shift+この文字。§5.3)。 */
+/** ショートカットの文字 (Alt+Shift+この文字。§5.4)。 */
 export const BOOLEAN_OP_KEYS: Readonly<Record<BooleanOp, string>> = {
   union: "U",
   subtract: "S",

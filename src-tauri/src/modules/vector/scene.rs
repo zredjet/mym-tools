@@ -778,7 +778,7 @@ pub fn validate(payload: &Value) -> Result<()> {
     validate_with(payload, Schema::V2)
 }
 
-/// payload v3 を検証する (§3.3〜3.6 と §3.5)。版が 3 のときの `VectorModule::validate_payload` と、
+/// payload v3 を検証する (§3.3〜3.6、§3.5 の v3 の行を含む)。版が 3 のときの `VectorModule::validate_payload` と、
 /// v2 → v3 の段 (`upgrade_v2`) の結果に使う。
 pub fn validate_v3(payload: &Value) -> Result<()> {
     validate_with(payload, Schema::V3)

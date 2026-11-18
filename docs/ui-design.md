@@ -1061,7 +1061,7 @@ Linear 同様、マウスを離さずに完結できるよう全画面で一貫�
 | `Cmd/Ctrl + N` | 新しい作品を開く (未保存差分があれば確認) |
 | キャンバスの操作 | `canvas-editor-design.md` §5.4 (ツール、ズーム、Undo/Redo、コピー、整列など)。フォーカスがエディタの外 (作品バーなど) にある間と、モーダルが開いている間は効かない |
 | `P` / `Shift + P` | ペン / 鉛筆 (`Cmd/Ctrl + Shift + P` はプロジェクト切替なので、鉛筆は Cmd/Ctrl なし) |
-| `Enter` (パスを選んで) / `Esc` | 点の編集に入る / 出る。点の編集中の Delete・矢印・`Cmd/Ctrl + A` は点に効く |
+| `Enter` / `Esc` | Enter はテキストなら本文の編集、パスなら点の編集に入る、frame・group・ブーリアンなら中に入る。点の編集中なら Enter も Esc も編集を終える。点の編集中の Delete・矢印・`Cmd/Ctrl + A` は点に効く。順番の詳細は `canvas-editor-design.md` §5.4 |
 | `Shift + H` / `Shift + V` | 左右反転 / 上下反転 |
 | `Cmd/Ctrl + E` | パスに変換 |
 | `Shift + Cmd/Ctrl + O` | 線のアウトライン化 |
