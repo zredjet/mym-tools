@@ -60,7 +60,7 @@ describe("節の出し分け", () => {
   it("矩形は種別に合う節を出す。ページ直下の 1 個は整列を出さない", () => {
     render(<PropertiesPanel />);
     select("r0");
-    expect(sectionNames()).toEqual(["位置と大きさ", "見た目", "塗り", "線", "影"]);
+    expect(sectionNames()).toEqual(["位置と大きさ", "見た目", "塗り", "線", "影", "変換"]);
     expect(within(section("見た目")).getByRole("textbox", { name: "角丸" })).toBeInTheDocument();
   });
 
@@ -75,7 +75,7 @@ describe("節の出し分け", () => {
   it("線は始点と終点を出し、塗りと影と「線なし」を出さない", () => {
     render(<PropertiesPanel />);
     select("l1"); // frame f の中 (group grp の子) なので整列も出る
-    expect(sectionNames()).toEqual(["整列", "位置と大きさ", "見た目", "線"]);
+    expect(sectionNames()).toEqual(["整列", "位置と大きさ", "見た目", "線", "変換"]);
     expect(field("始点の X 座標")).toHaveValue("40");
     expect(within(section("線")).queryByRole("button", { name: "線なし" })).toBeNull();
     expect(within(section("見た目")).queryByRole("textbox", { name: "角丸" })).toBeNull();

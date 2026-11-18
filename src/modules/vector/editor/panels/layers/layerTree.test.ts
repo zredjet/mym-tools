@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { createBoolean, createEllipse, createRect, createText } from "../../model/create";
 import { CANVAS_LIMITS } from "../../model/limits";
 import { getNode, getParent } from "../../model/tree";
 import { deepFreeze, fixtureDocument, sampleDocument } from "../../model/testing";
@@ -227,5 +228,54 @@ describe("rangeBetween / expandForSelection", () => {
     const next = expandForSelection(doc, ["r3"], collapsed);
     expect([...next]).toEqual(["grp"]);
     expect(expandForSelection(doc, ["r0"], collapsed)).toBe(collapsed);
+  });
+});
+
+describe("ブーリアンの行 (§8.9.1、§8.13)", () => {
+  /** ページ直下は [t, u]。u (合体) の子は [a, b]。t はテキスト、e は楕円 (ページ直下の最前面)。 */
+  const boolDoc = deepFreeze({
+    pages: [{ id: "p1", name: "ページ 1", children: ["t", "u", "e"], guides: [] }],
+    nodes: {
+      t: createText({ id: "t" }),
+      u: createBoolean("union", ["a", "b"], { id: "u" }),
+      a: createRect({ id: "a", width: 10, height: 10 }),
+      b: createRect({ id: "b", x: 5, width: 10, height: 10 }),
+      e: createEllipse({ id: "e", width: 10, height: 10 }),
+    },
+    assets: {},
+  });
+
+  it("ブーリアンは開閉でき、子が並ぶ", () => {
+    const rows = buildLayerRows(boolDoc, "p1", none);
+    expect(rows.map((r) => [r.id, r.depth])).toEqual([
+      ["e", 0],
+      ["u", 0],
+      ["b", 1],
+      ["a", 1],
+      ["t", 0],
+    ]);
+    expect(rows.find((r) => r.id === "u")).toMatchObject({ container: true, expanded: true });
+    expect(buildLayerRows(boolDoc, "p1", new Set(["u"])).map((r) => r.id)).toEqual(["e", "u", "t"]);
+  });
+
+  it("子にできる種類は中へ落とせ、子を並べ替えられる", () => {
+    const into = resolveLayerDrop(boolDoc, ["e"], "u", "inside", true);
+    expect(into?.target).toEqual({ kind: "node", id: "u" });
+    const moved = applyLayerDrop(boolDoc, ["e"], into!);
+    expect((moved.nodes["u"] as { children: string[] }).children).toEqual(["a", "b", "e"]);
+    const reorder = resolveLayerDrop(boolDoc, ["a"], "b", "before", false)!;
+    const reordered = applyLayerDrop(boolDoc, ["a"], reorder);
+    expect((reordered.nodes["u"] as { children: string[] }).children).toEqual(["b", "a"]);
+  });
+
+  it("子にできない種類はブーリアンの中へも、子の間へも落とせない", () => {
+    expect(resolveLayerDrop(boolDoc, ["t"], "u", "inside", true)).toBeNull();
+    expect(resolveLayerDrop(boolDoc, ["t"], "a", "before", false)).toBeNull();
+    expect(resolveLayerDrop(boolDoc, ["t", "e"], "u", "inside", true)).toBeNull();
+    // ブーリアンの横 (ページ直下) へは落とせる
+    expect(resolveLayerDrop(boolDoc, ["t"], "u", "before", true)?.target).toEqual({
+      kind: "page",
+      id: "p1",
+    });
   });
 });

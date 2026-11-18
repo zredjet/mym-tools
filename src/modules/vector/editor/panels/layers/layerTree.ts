@@ -4,6 +4,7 @@
  */
 import { moveNodes } from "../../model/structure";
 import {
+  canHaveChildOfType,
   getIndexInParent,
   getNode,
   getPage,
@@ -130,7 +131,7 @@ export interface LayerDrop {
 
 /**
  * ドラッグしたノードを、行 `overId` の `zone` に落としたときの親と位置。
- * 落とせないとき (自分自身や子孫の上、中に入れられないノードの中) は null。
+ * 落とせないとき (自分自身や子孫の上、中に入れられないノードの中、子にできない種類をブーリアンの中へ。§8.9.1) は null。
  *
  * - `before` (行の上): その行のノードのすぐ前面 → 親の `children` の `index + 1`
  * - `after` (行の下): すぐ背面 → `index`。ただし開いていて子のある frame / group の下は、
@@ -160,7 +161,9 @@ export function resolveLayerDrop(
       over.children.length > 0);
   if (intoContainer) {
     if (!isContainer(over)) return null;
-    return { target: { kind: "node", id: overId }, index: undefined, zone: "inside" };
+    const target: ParentRef = { kind: "node", id: overId };
+    if (!acceptsAll(doc, target, draggedIds)) return null;
+    return { target, index: undefined, zone: "inside" };
   }
   let anchor = overId;
   if (zone === "after")
@@ -170,9 +173,17 @@ export function resolveLayerDrop(
       anchor = parent.id;
     }
   const parent = getParent(doc, anchor);
-  if (!parent) return null;
+  if (!parent || !acceptsAll(doc, parent, draggedIds)) return null;
   const index = getIndexInParent(doc, anchor);
   return { target: parent, index: zone === "before" ? index + 1 : index, zone };
+}
+
+/** 親が、ドラッグしたノードをすべて子にできるか (ブーリアンは rect / ellipse / path / boolean だけ)。 */
+function acceptsAll(doc: CanvasDocument, parent: ParentRef, ids: readonly NodeId[]): boolean {
+  return ids.every((id) => {
+    const node = getNode(doc, id);
+    return node !== undefined && canHaveChildOfType(doc, parent, node.type);
+  });
 }
 
 /** 字下げ 1 段の幅と、行の左の余白 (px)。`LayerRow` の描き方と合わせる。 */

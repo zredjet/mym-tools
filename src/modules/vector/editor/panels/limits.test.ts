@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { alignNodes, distributeNodes } from "../model/align";
-import { createBoolean, createFrame, createRect } from "../model/create";
+import { createBoolean, createFrame, createPath, createRect } from "../model/create";
+import { CANVAS_LIMITS } from "../model/limits";
+import { checkSavable } from "../model/payload";
 import { translateNodes } from "../model/transform";
 import type { CanvasDocument } from "../model/types";
-import { geometryWithinLimits, withinLimitsOrSame } from "./limits";
+import { geometryWithinLimits, pathPointsWithinLimits, withinLimitsOrSame } from "./limits";
 
 /** frame F (x=900000) の子 A (x=100) と、ページ直下の B (x=-900000)。 */
 function farDocument(): CanvasDocument {
@@ -57,5 +59,78 @@ describe("geometryWithinLimits (ブーリアン)", () => {
     const moved = translateNodes(doc, ["u"], 100, 0);
     expect(moved.nodes["edge"]).toMatchObject({ x: 1000090 });
     expect(geometryWithinLimits(moved, ["u"])).toBe(false);
+  });
+});
+
+describe("geometryWithinLimits (パスの点とハンドル)", () => {
+  const max = CANVAS_LIMITS.maxCoordinate;
+  const pathDoc = (handle: { x: number; y: number }): CanvasDocument => {
+    const path = createPath(
+      [
+        {
+          closed: false,
+          points: [
+            { x: 0, y: 0, in: null, out: null, mirror: "none" },
+            // 開いた輪郭の最後の点の out は形に効かないので、箱を大きくせずに大きなハンドルを持てる
+            { x: 100, y: 0, in: null, out: handle, mirror: "none" },
+          ],
+        },
+      ],
+      { id: "p" },
+    );
+    return {
+      pages: [{ id: "p1", name: "ページ 1", children: ["p"], guides: [] }],
+      nodes: { p: path },
+      assets: {},
+    };
+  };
+
+  it("点とハンドルの相対値をそれぞれ確かめる (保存の検証と同じ。ハンドルの先は見ない)", () => {
+    expect(geometryWithinLimits(pathDoc({ x: 10, y: 10 }), ["p"])).toBe(true);
+    expect(geometryWithinLimits(pathDoc({ x: 0, y: max + 1 }), ["p"])).toBe(false);
+    // 点もハンドルの相対値も範囲の中なら、ハンドルの先 (点 + ハンドル) が外でも通す (保存できる文書)
+    const doc = pathDoc({ x: 0, y: max });
+    const node = doc.nodes["p"];
+    if (node?.type !== "path") throw new Error("path");
+    const shifted: CanvasDocument = {
+      ...doc,
+      nodes: {
+        p: {
+          ...node,
+          subpaths: node.subpaths.map((sub) => ({
+            ...sub,
+            points: sub.points.map((p) => ({ ...p, y: p.y + 10 })),
+          })),
+        },
+      },
+    };
+    expect(geometryWithinLimits(shifted, ["p"])).toBe(true);
+    expect(checkSavable(shifted)).toBeNull();
+  });
+});
+
+describe("pathPointsWithinLimits", () => {
+  it("1 つのパスの点の数と、文書の合計", () => {
+    const points = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        x: i,
+        y: 0,
+        in: null,
+        out: null,
+        mirror: "none" as const,
+      }));
+    const path = (id: string, n: number) =>
+      createPath([{ closed: false, points: points(n) }], { id });
+    const doc = (paths: ReturnType<typeof path>[]): CanvasDocument => ({
+      pages: [{ id: "p1", name: "ページ 1", children: paths.map((p) => p.id), guides: [] }],
+      nodes: Object.fromEntries(paths.map((p) => [p.id, p])),
+      assets: {},
+    });
+    expect(pathPointsWithinLimits(doc([path("a", 10)]), ["a"])).toBe(true);
+    expect(pathPointsWithinLimits(doc([path("a", CANVAS_LIMITS.maxPathPoints + 1)]), ["a"])).toBe(
+      false,
+    );
+    const many = Array.from({ length: 11 }, (_, i) => path(`p${i}`, CANVAS_LIMITS.maxPathPoints));
+    expect(pathPointsWithinLimits(doc(many), ["p0"])).toBe(false);
   });
 });
