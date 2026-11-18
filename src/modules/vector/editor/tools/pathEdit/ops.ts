@@ -293,20 +293,19 @@ export function mapPoints(
 
 /**
  * 点を動かす (ハンドルは点からの相対なので一緒に動く)。`delta` はページ座標のずれ。
- * `round` が "position" なら動かした後の位置を、"delta" ならずれを、親の座標系で小数第 2 位に丸める
- * (ポインターで動かすときは位置、矢印キーはずれ)。ずれが 0 なら同じ並びを返す。
+ * `round` が "position" なら動かした後の位置を親の座標系で小数第 2 位に丸める (ポインターで動かすとき。§8.6)。
+ * "none" は丸めない (矢印キー。ずれはポインターから来ないので、回転した frame の中でもページの 1 px を
+ * ちょうど 1 px 動かす)。ずれが 0 なら同じ並びを返す。
  */
 export function movePoints(
   subpaths: readonly Subpath[],
   refs: readonly PointRef[],
   space: PathSpace,
   delta: Point,
-  round: "position" | "delta",
+  round: "position" | "none",
 ): readonly Subpath[] {
   if (delta.x === 0 && delta.y === 0) return subpaths;
-  const d = applyToVector(space.pageToParent, delta);
-  const shift = round === "delta" ? { x: round2(d.x), y: round2(d.y) } : d;
-  if (shift.x === 0 && shift.y === 0) return subpaths;
+  const shift = applyToVector(space.pageToParent, delta);
   return mapPoints(subpaths, refs, (point) => {
     const parent = localToParent(space, point);
     const moved = { x: parent.x + shift.x, y: parent.y + shift.y };

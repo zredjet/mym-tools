@@ -114,7 +114,10 @@ export function PathEditOverlay() {
   );
   const session = usePathEditSnapshot();
   const pen = session.pen;
-  const target = useMemo(() => (pen ? resolvePen(doc, pen) : null), [doc, pen]);
+  const target = useMemo(
+    () => (pen ? resolvePen(doc, pen, editingPathId) : null),
+    [doc, pen, editingPathId],
+  );
   const pathId = editingPathId ?? (target?.kind === "drawing" ? target.node.id : null);
   const geometry = useMemo(
     () => (pathId === null ? null : pageGeometry(doc, pathId)),

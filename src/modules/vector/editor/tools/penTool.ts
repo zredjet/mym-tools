@@ -71,6 +71,8 @@ type Press =
       kind: "add" | "close";
       screen: Point;
       at: Point;
+      /** 押す前の文書 (確定した点の記録に使う) */
+      base: CanvasDocument;
       recipe: (base: CanvasDocument, out: Point | null) => CanvasDocument | null;
     }
   /** 何もしない */
@@ -92,20 +94,18 @@ function ownGestureOpen(store: Store): boolean {
   return ownsGesture && store.getState().gestureActive;
 }
 
-/** 今の描きかけと、それが指す所。描きかけが今の文書で続けられなければ片付ける。 */
+/**
+ * 今の描きかけと、それが指す所。描きかけが今の文書で続けられなければ片付ける。作ったパスが Undo で消えたときは
+ * 最初の点だけの状態として返し、パスの ID は残す (Redo で戻ればまたそのパスを続ける)。
+ */
 function currentDrawing(store: Store): { pen: PenDrawing; target: PenTarget } | null {
   const pen = getPathEditSnapshot().pen;
   if (!pen) return null;
-  const target = resolvePen(store.getState().doc, pen);
+  const state = store.getState();
+  const target = resolvePen(state.doc, pen, state.editingPathId);
   if (!target) {
     setPenDrawing(null);
     return null;
-  }
-  // 作ったパスが Undo で消えたら、最初の点だけの状態に戻す
-  if (target.kind === "pending" && pen.created === "path" && pen.pathId !== null) {
-    const next = { ...pen, pathId: null, subpath: 0, end: "end" as const };
-    setPenDrawing(next);
-    return { pen: next, target };
   }
   return { pen, target };
 }
@@ -227,7 +227,7 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
         after.setScope(scopeForParent(after.doc, pen.parent));
         after.setSelection([id]);
       }
-      press = { kind: "add", screen, at, recipe };
+      press = { kind: "add", screen, at, base: state.doc, recipe };
       return;
     }
 
@@ -248,14 +248,14 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
       const at = pagePointOf(geometry, startRef)?.at ?? event.page;
       const recipe = (base: CanvasDocument, out: Point | null) => penClose(base, target, out);
       if (!beginAdd(store, recipe)) return;
-      press = { kind: "close", screen, at, recipe };
+      press = { kind: "close", screen, at, base: state.doc, recipe };
       return;
     }
     const from = pagePointOf(geometry, endRef)?.at ?? event.page;
     const at = event.shift ? constrainPoint45(from, event.page) : event.page;
     const recipe = (base: CanvasDocument, out: Point | null) => penAddPoint(base, target, at, out);
     if (!beginAdd(store, recipe)) return;
-    press = { kind: "add", screen, at, recipe };
+    press = { kind: "add", screen, at, base: state.doc, recipe };
     return;
   }
 
@@ -281,6 +281,8 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
           origin: { x: at.x, y: at.y, out: null },
           created: null,
           baseCount: n,
+          subpathCount: geometry.node.subpaths.length,
+          commits: [],
           fromEdit: true,
           pointer: null,
         });
@@ -309,6 +311,8 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
       origin: { x: event.page.x, y: event.page.y, out: null },
       created: "subpath",
       baseCount: 0,
+      subpathCount: geometry.node.subpaths.length,
+      commits: [],
       fromEdit: true,
       pointer: null,
     });
@@ -339,6 +343,8 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
     origin: { x: event.page.x, y: event.page.y, out: null },
     created: "path",
     baseCount: 0,
+    subpathCount: 0,
+    commits: [],
     fromEdit: false,
     pointer: null,
   });
@@ -434,6 +440,7 @@ function onPointerUp(event: CanvasPointerEvent, ctx: ToolContext): void {
     finishDrawing(ctx, true);
     return;
   }
+  recordCommit(current.base, store.getState().doc);
   // 点の編集の中なら、描いている端の点を選んでおく (パネルで値が見える)
   const drawing = currentDrawing(store);
   const state = store.getState();
@@ -446,23 +453,60 @@ function onPointerUp(event: CanvasPointerEvent, ctx: ToolContext): void {
   }
 }
 
+/**
+ * ツールの切替では描くのを終える。ウィンドウからのフォーカス喪失、ポインターの取消、キャンバスが画面から外れる
+ * とき (ツールはペンのまま) は、押している途中の操作だけを取り消して描きかけを続ける (最初の点を置いた押下なら
+ * その点も取り消す)。取り消すジェスチャーは自分の押下が開いたものだけ (§4.4)。
+ */
 function onCancel(ctx: ToolContext): void {
   const current = press;
   press = null;
   dragging = false;
   const store = ctx.store;
-  // 取り消すのは自分の押下が開いたジェスチャーだけ
   if (current && (current.kind === "add" || current.kind === "close") && ownGestureOpen(store))
     store.getState().cancelGesture();
   ownsGesture = false;
-  setPenDrawing(null);
   setPathEditHover(null);
   resetSelectOverlay();
+  if (store.getState().toolId !== "pen" || current?.kind === "pending") setPenDrawing(null);
+  else patchPenDrawing({ pointer: null });
 }
 
 // ---------------------------------------------------------------------------
 // キー
 // ---------------------------------------------------------------------------
+
+/**
+ * 点を確定した後の文書を覚える。押す前の文書が覚えた中にあれば、それより後 (Undo で取り消されたもの) を捨ててから
+ * 足す。なければ (ほかの操作の後) 新しく始める。
+ */
+function recordCommit(before: CanvasDocument, after: CanvasDocument): void {
+  if (after === before) return;
+  const pen = getPathEditSnapshot().pen;
+  if (!pen) return;
+  const index = pen.commits.lastIndexOf(before);
+  patchPenDrawing({ commits: [...(index >= 0 ? pen.commits.slice(0, index + 1) : []), after] });
+}
+
+/**
+ * 描いている間の Backspace: 最後の点を消す。今の文書がこの描画で点を確定した後の文書のままなら、Undo で取り消す
+ * (作ったパスの 2 点目なら作成ごと取り消し、履歴に何も残さない。§8.7.4)。ほかの操作の後なら、点を消す変更を当てる。
+ */
+function removeLastPoint(store: Store, drawing: { pen: PenDrawing; target: PenTarget }): void {
+  const state = store.getState();
+  const { pen, target } = drawing;
+  const index = target.kind === "drawing" ? pen.commits.lastIndexOf(state.doc) : -1;
+  if (index >= 0 && state.canUndo && !state.gestureActive) {
+    patchPenDrawing({ commits: pen.commits.slice(0, index) });
+    state.undo();
+    // 描きかけが続けられなくなった (Undo で輪郭が閉じた前に戻ったなど) ら片付ける
+    currentDrawing(store);
+    return;
+  }
+  const result = penRemoveLast(state.doc, pen, target);
+  if (result.doc !== state.doc) state.apply(() => result.doc);
+  setPenDrawing(result.pen ? { ...result.pen, pointer: pen.pointer, commits: [] } : null);
+}
 
 const ARROW_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
 
@@ -487,16 +531,15 @@ function onKeyDown(event: CanvasKeyEvent, ctx: ToolContext): boolean {
   }
 
   if (drawing && (key === "Backspace" || key === "Delete") && !event.mod && !event.alt) {
-    const state = store.getState();
-    const result = penRemoveLast(state.doc, drawing.pen, drawing.target);
-    if (result.doc !== state.doc) state.apply(() => result.doc);
-    setPenDrawing(result.pen ? { ...result.pen, pointer: drawing.pen.pointer } : null);
+    // 押しっぱなしの繰り返しは受けて何もしない (§5.4 の Delete と同じ)
+    if (!event.repeat) removeLastPoint(store, drawing);
     return true;
   }
 
   if (event.mod && !event.alt && key.toLowerCase() === "z") {
-    // 最初の点だけ (文書にない) なら、その点を取り消す。文書の Undo には回さない
-    if (drawing?.target.kind === "pending") {
+    // 最初の点だけ (文書にない) のときの Undo は、その点を取り消す。文書の Undo には回さない。
+    // Redo (Shift) は store へ回す (Undo で消えた作ったパスが戻れば、またそれを続ける)
+    if (!event.shift && drawing?.target.kind === "pending") {
       if (!event.repeat) setPenDrawing(null);
       return true;
     }

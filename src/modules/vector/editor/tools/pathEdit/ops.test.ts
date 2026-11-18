@@ -147,11 +147,11 @@ describe("形の変更", () => {
     close(moved, { x: 410, y: 200 });
   });
 
-  it("矢印 (ずれを丸める) は、丸めていない位置の点もずれの分だけ動かす", () => {
+  it("矢印 (丸めない) は、丸めていない位置の点もずれの分だけ動かす", () => {
     const doc = pathEditDocument();
     const space = pageGeometry(doc, "sq")!.space;
     const subpaths: Subpath[] = [{ closed: false, points: [corner(0.123, 0), corner(50, 50)] }];
-    const next = movePoints(subpaths, [{ subpath: 0, index: 0 }], space, { x: 1, y: 0 }, "delta");
+    const next = movePoints(subpaths, [{ subpath: 0, index: 0 }], space, { x: 1, y: 0 }, "none");
     expect(next[0]!.points[0]!.x).toBeCloseTo(1.123, 9);
   });
 

@@ -552,10 +552,14 @@ const ARROWS: Record<string, Point> = {
   ArrowDown: { x: 0, y: 1 },
 };
 
+/** 修飾キーそのものの keydown (止めるショートカットではない)。 */
+const MODIFIER_KEYS = new Set(["Shift", "Alt", "Meta", "Control"]);
+
 /**
  * 点の編集の中で効かせないノードの編集のショートカット (§8.7.3)。コピー、切り取り、貼り付け、複製、
  * グループ化と解除、重なり順、反転 (Shift+H / V)、パスに変換 (Cmd/Ctrl+E)、線のアウトライン化
- * (Shift+Cmd/Ctrl+O)、ブーリアン (Alt+Shift+文字。macOS では Alt で文字が変わるので Alt+Shift をすべて)。
+ * (Shift+Cmd/Ctrl+O)、ブーリアン (Alt+Shift+文字)。Cmd/Ctrl なしの Alt+Shift は、キーの文字に関係なくすべて止める
+ * (macOS では Alt で文字が変わり、配列によってはデッドキー (`Dead`) になる。ブーリアンは `code` で判定されるため)。
  */
 export function isBlockedInPathEdit(event: CanvasKeyEvent): boolean {
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
@@ -564,7 +568,7 @@ export function isBlockedInPathEdit(event: CanvasKeyEvent): boolean {
   if (event.mod && event.shift && !event.alt && key === "o") return true;
   if (!event.mod && !event.alt && (key === "[" || key === "]")) return true;
   if (!event.mod && !event.alt && event.shift && (key === "h" || key === "v")) return true;
-  return !event.mod && event.alt && event.shift && key.length === 1;
+  return !event.mod && event.alt && event.shift && !MODIFIER_KEYS.has(key);
 }
 
 /**
@@ -608,7 +612,7 @@ export function pathEditKey(event: CanvasKeyEvent, store: Store): boolean {
         return withSubpaths(
           doc,
           id,
-          movePoints(node.subpaths, refs, geometry.space, delta, "delta"),
+          movePoints(node.subpaths, refs, geometry.space, delta, "none"),
         );
       },
       refs,

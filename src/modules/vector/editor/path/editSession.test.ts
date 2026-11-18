@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createEditorStore } from "../state/store";
+import { createEmptyDocument } from "../model/create";
+import { createEditorStore, editorStore } from "../state/store";
 import { corner, pathEditDocument } from "../tools/pathEdit/testing";
 import { withSubpaths } from "../tools/pathEdit/ops";
 import { updateNode } from "../model/transform";
@@ -80,6 +81,28 @@ describe("選んでいる点", () => {
   });
 });
 
+describe("ツールの切替", () => {
+  it("エディタの store でペンから別のツールになったら、描きかけを捨てる (キャンバスが無いときの load も)", () => {
+    editorStore.getState().load(pathEditDocument());
+    editorStore.getState().setTool("pen");
+    setPenDrawing({
+      pathId: null,
+      parent: { kind: "page", id: editorStore.getState().pageId },
+      subpath: 0,
+      end: "end",
+      origin: { x: 0, y: 0, out: null },
+      created: "path",
+      baseCount: 0,
+      subpathCount: 0,
+      commits: [],
+      fromEdit: false,
+      pointer: null,
+    });
+    editorStore.getState().load(createEmptyDocument());
+    expect(getPathEditSnapshot().pen).toBeNull();
+  });
+});
+
 describe("beginPathEdit", () => {
   it("前の点の選択とペンの描きかけを捨ててから点の編集に入る。パスでなければ何もしない", () => {
     const store = createEditorStore(pathEditDocument());
@@ -92,6 +115,8 @@ describe("beginPathEdit", () => {
       origin: { x: 0, y: 0, out: null },
       created: "path",
       baseCount: 0,
+      subpathCount: 0,
+      commits: [],
       fromEdit: false,
       pointer: null,
     });

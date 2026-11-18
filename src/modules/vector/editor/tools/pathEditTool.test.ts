@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createPath } from "../model/create";
+import { createFrame, createPath } from "../model/create";
 import { CANVAS_LIMITS } from "../model/limits";
 import { checkSavable } from "../model/payload";
 import { insertNode } from "../model/structure";
@@ -18,7 +18,7 @@ import { getSelectOverlay } from "./select/overlayState";
 import { resetSelectTool, selectTool } from "./selectTool";
 import { pathEditTool, pathEditToolPhase, resetPathEditTool } from "./pathEditTool";
 import { pageGeometry } from "./pathEdit/ops";
-import { corner, PAGE_ID, pathEditDocument } from "./pathEdit/testing";
+import { corner, PAGE_ID, pathEditDocument, square } from "./pathEdit/testing";
 import type { CanvasKeyEvent, CanvasPointerEvent, Tool, ToolContext } from "./types";
 
 type Mods = Partial<Pick<CanvasPointerEvent, "shift" | "alt" | "mod" | "clickCount" | "button">>;
@@ -345,6 +345,37 @@ describe("キー", () => {
     expect(t.points()).toEqual([{ subpath: 0, index: 0 }]);
   });
 
+  it("回転した frame の中でも、矢印はページの 1 px をちょうど 1 px 動かす (丸めない)", () => {
+    for (const [frameRotation, pathRotation] of [
+      [45, 0],
+      [-60, 25],
+    ] as const) {
+      const doc = insertNode(
+        insertNode(
+          pathEditDocument(),
+          createFrame({
+            id: "tilt",
+            x: 1000,
+            y: 0,
+            width: 400,
+            height: 400,
+            rotation: frameRotation,
+          }),
+          { kind: "page", id: PAGE_ID },
+        ),
+        createPath([square()], { id: "tp", x: 100, y: 100, rotation: pathRotation }),
+        { kind: "node", id: "tilt" },
+      );
+      const t = setup(doc, "tp");
+      const start = t.pageOf("tp", 0, 0);
+      t.click(start.x, start.y);
+      for (let i = 0; i < 30; i++) t.key("ArrowLeft", { shift: true });
+      const end = t.pageOf("tp", 0, 0);
+      expect(end.x - start.x).toBeCloseTo(-300, 9);
+      expect(end.y - start.y).toBeCloseTo(0, 9);
+    }
+  });
+
   it("ノードの編集のショートカットは受けて何もしない。Undo は点の選択を外して store へ回す", () => {
     const t = setup();
     for (const [k, mods] of [
@@ -356,8 +387,11 @@ describe("キー", () => {
       ["e", { mod: true }],
       ["o", { mod: true, shift: true }],
       ["Ú", { alt: true, shift: true }],
+      // 配列によっては Option+Shift+文字がデッドキーになる
+      ["Dead", { alt: true, shift: true }],
     ] as const)
       expect(t.key(k, mods)).toBe(true);
+    expect(t.key("Shift", { alt: true, shift: true })).toBe(false);
     expect(t.key("s", { mod: true })).toBe(false);
     t.drag([200, 200], [220, 200]);
     expect(t.points()).toHaveLength(1);

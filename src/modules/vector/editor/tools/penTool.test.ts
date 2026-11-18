@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createBoolean, createRect } from "../model/create";
+import { createBoolean, createPath, createRect } from "../model/create";
 import { CANVAS_LIMITS } from "../model/limits";
 import { checkSavable } from "../model/payload";
+import { insertNode } from "../model/structure";
+import { updateNode } from "../model/transform";
 import { getNode, getParent } from "../model/tree";
 import type { CanvasDocument, PathNode } from "../model/types";
 import { getPathEditSnapshot, resetPathEditSession, selectedPoints } from "../path/editSession";
 import { fixedWidthMeasurer } from "../render/testing";
 import { createEditorStore } from "../state/store";
-import { pageGeometry } from "./pathEdit/ops";
-import { PAGE_ID, pathEditDocument } from "./pathEdit/testing";
+import { pageGeometry, withSubpaths } from "./pathEdit/ops";
+import { corner, PAGE_ID, pathEditDocument } from "./pathEdit/testing";
 import { pathEditTool, resetPathEditTool } from "./pathEditTool";
 import { penTool, resetPenTool } from "./penTool";
 import type { CanvasKeyEvent, CanvasPointerEvent, ToolContext } from "./types";
@@ -201,22 +203,80 @@ describe("新しいパス", () => {
     expect(getPathEditSnapshot().pen?.pointer).toEqual({ x: 790, y: 100 });
   });
 
-  it("Backspace は最後の点を消す。2 点のパスは消して最初の点だけに戻る", () => {
+  it("Backspace は最後の点を Undo で取り消す。作ったパスの 2 点目なら作成ごと取り消し、履歴を残さない", () => {
     const t = setup();
     t.click(700, 100);
     t.click(800, 100);
     t.click(800, 200);
     expect(t.key("Backspace")).toBe(true);
     expect(t.paths()[0]!.subpaths[0]!.points).toHaveLength(2);
+    // 押しっぱなしの繰り返しは無視する
+    expect(t.key("Backspace", { repeat: true })).toBe(true);
+    expect(t.paths()[0]!.subpaths[0]!.points).toHaveLength(2);
     expect(t.key("Backspace")).toBe(true);
     expect(t.paths()).toHaveLength(0);
-    expect(getPathEditSnapshot().pen).toMatchObject({ pathId: null, origin: { x: 700, y: 100 } });
+    expect(t.s().canUndo).toBe(false);
+    expect(getPathEditSnapshot().pen).toMatchObject({
+      created: "path",
+      origin: { x: 700, y: 100 },
+    });
     // 最初の点から描き直せる
     t.click(700, 200);
     expect(t.paths()).toHaveLength(1);
     expect(t.key("Backspace")).toBe(true);
+    expect(t.paths()).toHaveLength(0);
     expect(t.key("Backspace")).toBe(true);
     expect(getPathEditSnapshot().pen).toBeNull();
+    expect(t.s().canUndo).toBe(false);
+  });
+
+  it("2 点のパスで Backspace → Esc は、差し引きで何も変えず履歴も残さない", () => {
+    const t = setup();
+    t.click(800, 100);
+    t.click(900, 100);
+    t.key("Backspace");
+    t.key("Escape");
+    expect(t.paths()).toHaveLength(0);
+    expect(t.s()).toMatchObject({ canUndo: false, toolId: "select" });
+  });
+
+  it("点を確定した後にほかの操作があれば、Backspace は点を消す変更を当てる (ほかの操作を Undo しない)", () => {
+    const t = setup();
+    t.click(700, 100);
+    t.click(800, 100);
+    t.click(800, 200);
+    t.s().apply((doc) => updateNode(doc, "r", { opacity: 0.5 }));
+    t.key("Backspace");
+    expect(t.paths()[0]!.subpaths[0]!.points).toHaveLength(2);
+    expect(getNode(t.s().doc, "r")).toMatchObject({ opacity: 0.5 });
+    expect(t.s().revision).toBe(4);
+    t.key("Backspace");
+    expect(t.paths()).toHaveLength(0);
+    expect(getNode(t.s().doc, "r")).toMatchObject({ opacity: 0.5 });
+    // 消したパスを Undo で戻すと、またそのパスを続ける
+    t.s().undo();
+    t.click(750, 250);
+    expect(t.paths()).toHaveLength(1);
+    expect(t.paths()[0]!.subpaths[0]!.points).toHaveLength(3);
+  });
+
+  it("最初の点だけに戻った後の Redo は store へ回し、戻ったパスを続ける (重なった 2 本目を作らない)", () => {
+    const t = setup();
+    t.click(800, 300);
+    t.click(900, 300);
+    t.click(900, 400);
+    expect(t.key("z", { mod: true })).toBe(false);
+    t.s().undo();
+    expect(t.key("z", { mod: true })).toBe(false);
+    t.s().undo();
+    expect(t.paths()).toHaveLength(0);
+    expect(t.key("z", { mod: true, shift: true })).toBe(false);
+    expect(getPathEditSnapshot().pen).not.toBeNull();
+    t.s().redo();
+    expect(t.paths()).toHaveLength(1);
+    t.click(950, 450);
+    expect(t.paths()).toHaveLength(1);
+    expect(t.paths()[0]!.subpaths[0]!.points).toHaveLength(3);
   });
 
   it("Undo で消えた点は描きかけから外れ、作ったパスが消えたら最初の点に戻る", () => {
@@ -238,7 +298,7 @@ describe("新しいパス", () => {
     expect(t.s().canUndo).toBe(false);
   });
 
-  it("ドラッグの途中の取消 (onCancel) は今の点だけを取り消して描くのを終える", () => {
+  it("フォーカスの喪失など (ツールはペンのまま) では描きかけを続け、押している途中の点だけを取り消す", () => {
     const t = setup();
     t.click(700, 100);
     t.click(800, 100);
@@ -246,8 +306,26 @@ describe("新しいパス", () => {
     t.move(820, 220);
     penTool.onCancel?.(t.ctx);
     expect(t.paths()[0]!.subpaths[0]!.points).toHaveLength(2);
-    expect(t.s()).toMatchObject({ gestureActive: false, revision: 1 });
+    expect(t.s()).toMatchObject({ gestureActive: false, revision: 1, toolId: "pen" });
+    expect(getPathEditSnapshot().pen).toMatchObject({ pointer: null });
+    t.click(750, 250);
+    expect(t.paths()).toHaveLength(1);
+    expect(t.paths()[0]!.subpaths[0]!.points).toHaveLength(3);
+    // 押していなければ何も変えない
+    penTool.onCancel?.(t.ctx);
+    expect(getPathEditSnapshot().pen).not.toBeNull();
+    // ツールの切替では終える
+    t.s().setTool("select");
     expect(getPathEditSnapshot().pen).toBeNull();
+  });
+
+  it("最初の点を置いた押下の途中で取り消すと、その点も取り消す", () => {
+    const t = setup();
+    t.down(700, 100);
+    t.move(720, 120);
+    penTool.onCancel?.(t.ctx);
+    expect(getPathEditSnapshot().pen).toBeNull();
+    expect(t.s().revision).toBe(0);
   });
 
   it("回転した frame の中では frame の子になり、点は frame の座標系で丸める", () => {
@@ -361,6 +439,47 @@ describe("点の編集の中のペン", () => {
     expect((getNode(t.s().doc, "open") as PathNode).subpaths[0]!.points).toHaveLength(3);
     expect(getPathEditSnapshot().pen).toBeNull();
     expect(t.s().toolId).toBe("pen");
+  });
+
+  it("選択の変更で点の編集が終わったら、元のパスに描き続けない。Enter で選択を書き換えない", () => {
+    const t = setup(pathEditDocument(), "sq");
+    t.click(150, 300);
+    t.click(250, 300);
+    expect((getNode(t.s().doc, "sq") as PathNode).subpaths).toHaveLength(2);
+    t.s().setSelection(["r"]);
+    expect(t.s()).toMatchObject({ editingPathId: null, toolId: "pen" });
+    t.click(250, 400);
+    const sq = getNode(t.s().doc, "sq") as PathNode;
+    expect(sq.subpaths).toHaveLength(2);
+    expect(sq.subpaths[1]!.points).toHaveLength(2);
+    expect(t.key("Enter")).toBe(true);
+    expect(t.s().selection).toEqual(["r"]);
+  });
+
+  it("Undo で描き始めより前に戻り、添字がほかの輪郭を指すようになったら続けない", () => {
+    const base = insertNode(
+      pathEditDocument(),
+      createPath(
+        [
+          { closed: false, points: [corner(0, 0), corner(50, 0)] },
+          { closed: false, points: [corner(0, 100), corner(50, 100)] },
+        ],
+        { id: "two", x: 500, y: 400 },
+      ),
+      { kind: "page", id: PAGE_ID },
+    );
+    const t = setup(base, "two");
+    const two = () => getNode(t.s().doc, "two") as PathNode;
+    // 上の輪郭を消してから、下の輪郭 (添字 0 になる) を続ける
+    t.s().apply((doc) => withSubpaths(doc, "two", [two().subpaths[1]!])!);
+    t.click(550, 500);
+    t.click(600, 500);
+    expect(two().subpaths[0]!.points).toHaveLength(3);
+    t.s().undo();
+    t.s().undo();
+    expect(two().subpaths).toHaveLength(2);
+    t.click(700, 700);
+    expect(two().subpaths.map((sub) => sub.points.length)).toEqual([2, 2]);
   });
 
   it("線分をクリックすると点を足す", () => {

@@ -19,6 +19,7 @@ import { useSyncExternalStore } from "react";
 import type { StoreApi } from "zustand";
 import { getNode, type ParentRef } from "../model/tree";
 import type { CanvasDocument, NodeId, PathNode, Point, Subpath } from "../model/types";
+import { editorStore } from "../state/store";
 import type { EditorStore } from "../state/types";
 
 /** 輪郭 `subpath` の `index` 番目の点。 */
@@ -50,7 +51,8 @@ export interface PenPoint {
 /**
  * ペンの描きかけ (§8.7.4)。
  * - `pathId` が null: 新しいパスの最初の点だけ (`origin`)。まだ文書にない
- * - `created` が "path" / "subpath": この描画で作ったパス / 輪郭。Undo で消えたら最初の点だけの状態に戻る
+ * - `created` が "path" / "subpath": この描画で作ったパス / 輪郭。Undo で消えたら最初の点だけの状態に戻り、
+ *   Redo で戻ればまたそれを続ける (`pathId` と輪郭の添字は消えても残す)
  * - `created` が null: 既にある開いた輪郭の端から続けている
  */
 export interface PenDrawing {
@@ -66,6 +68,16 @@ export interface PenDrawing {
   created: "path" | "subpath" | null;
   /** 続けた輪郭の、描き始めたときの点の数 (Backspace で消せるのはそれより後に足した点) */
   baseCount: number;
+  /**
+   * 描き始めたときのパスの輪郭の数 (点の編集の中で輪郭を足す・続けるとき)。輪郭の数がこれと合わなければ
+   * (Undo で描き始めより前に戻ったなど) 添字がほかの輪郭を指しうるので、描くのを終える
+   */
+  subpathCount: number;
+  /**
+   * この描画で 1 点ずつ確定した後の文書 (古い順)。今の文書がこのどれかなら、それより後にほかの操作はないので、
+   * Backspace は最後の点を消す代わりに Undo で取り消す (作ったパスの 2 点目なら作成ごと取り消す、§8.7.4)
+   */
+  commits: readonly CanvasDocument[];
   /** 点の編集の中から描き始めたか (終えたら点の編集に戻る) */
   fromEdit: boolean;
   /** 予定の線のためのポインターの位置 (ページ座標)。キャンバスの外なら null */
@@ -115,6 +127,12 @@ export function subscribePathEdit(listener: () => void): () => void {
 export function usePathEditSnapshot(): PathEditSnapshot {
   return useSyncExternalStore(subscribePathEdit, getPathEditSnapshot, getPathEditSnapshot);
 }
+
+// ツールがペンから変わったら描きかけを捨てる。キャンバスが画面から外れていてペンの `onCancel` が呼ばれない
+// とき (画面を離れた後の `load` など) にも、古い描きかけが残らないように
+editorStore.subscribe((state, previous) => {
+  if (previous.toolId === "pen" && state.toolId !== "pen" && current.pen) update({ pen: null });
+});
 
 /** テスト用: すべて捨てる。 */
 export function resetPathEditSession(): void {

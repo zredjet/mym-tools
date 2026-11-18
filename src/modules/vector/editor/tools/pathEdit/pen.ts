@@ -39,24 +39,33 @@ export type PenTarget =
   | { kind: "drawing"; node: PathNode; subpath: number; end: "start" | "end" };
 
 /**
- * 描きかけの状態が今の文書のどこを指すか。Undo などで作ったパスや輪郭が消えたら、最初の点だけの状態に戻る。
- * 続けていた輪郭や編集中のパスが消えたか閉じたら null (描くのを終える)。
+ * 描きかけの状態が今の文書のどこを指すか。
+ * - Undo などで作ったパスや輪郭が消えたら、最初の点だけの状態に戻る (Redo で戻ればまたそれを続ける)
+ * - 点の編集の中から描いていたのに、編集が終わったかほかのパスに移った (選択の変更など) ら null
+ * - 続けていた輪郭や編集中のパスが消えた・閉じた、輪郭の数が描き始めと合わない (Undo で描き始めより前に戻り、
+ *   添字がほかの輪郭を指しうる)、続けた輪郭の点が描き始めより減ったら null (描くのを終える)
  */
-export function resolvePen(doc: CanvasDocument, pen: PenDrawing): PenTarget | null {
-  if (pen.pathId === null) {
-    return pen.created === "path" && parentExists(doc, pen.parent)
-      ? { kind: "pending", origin: pen.origin }
-      : null;
-  }
-  const node = getNode(doc, pen.pathId);
+export function resolvePen(
+  doc: CanvasDocument,
+  pen: PenDrawing,
+  editingPathId: NodeId | null,
+): PenTarget | null {
+  if (pen.fromEdit && editingPathId !== pen.pathId) return null;
+  const pending: PenTarget = { kind: "pending", origin: pen.origin };
+  const node = pen.pathId === null ? undefined : getNode(doc, pen.pathId);
   if (node?.type !== "path") {
-    return pen.created === "path" && parentExists(doc, pen.parent)
-      ? { kind: "pending", origin: pen.origin }
-      : null;
+    return pen.created === "path" && parentExists(doc, pen.parent) ? pending : null;
+  }
+  const count = node.subpaths.length;
+  if (pen.created === "subpath") {
+    if (count === pen.subpathCount) return pending;
+    if (count !== pen.subpathCount + 1) return null;
+  } else if (pen.created === null) {
+    if (count !== pen.subpathCount) return null;
   }
   const sub = node.subpaths[pen.subpath];
-  if (!sub) return pen.created !== null ? { kind: "pending", origin: pen.origin } : null;
-  if (sub.closed || sub.points.length === 0) return null;
+  if (!sub || sub.closed || sub.points.length === 0) return null;
+  if (pen.created === null && sub.points.length < pen.baseCount) return null;
   return { kind: "drawing", node, subpath: pen.subpath, end: pen.end };
 }
 
@@ -222,7 +231,8 @@ export interface PenRemoval {
 }
 
 /**
- * 描いている間の Backspace (§8.7.4): 最後に足した点を消す。
+ * 描いている間の Backspace (§8.7.4) のうち、Undo で取り消せないとき (この描画の点を確定した後にほかの操作が
+ * あったとき) の消し方: 最後に足した点を消す。
  * - この描画で作ったパス・輪郭が 2 点なら、パス (輪郭) を消し、残る点を最初の点だけの状態に戻す
  * - 続けている輪郭は、描き始めたときより後に足した点だけを消す。なければ描くのを終える (文書は変えない)
  * - 最初の点だけなら描くのを終える
@@ -256,7 +266,7 @@ export function penRemoveLast(doc: CanvasDocument, pen: PenDrawing, target: PenT
       doc: next,
       pen: {
         ...pen,
-        pathId: pen.created === "path" ? null : pen.pathId,
+        // パスの ID は残す (この削除を Undo で戻したら、またそのパスを続ける)
         subpath: pen.created === "path" ? 0 : node.subpaths.length - 1,
         end: "end",
         origin,
