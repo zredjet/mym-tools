@@ -1,9 +1,10 @@
 /**
  * ページ直下の frame の名前のラベル (純関数)。frame の左上の外側に、倍率に関係なく同じ大きさで出す。
  * 「選択と変形」のセッションは `frameLabelRect` でラベルの矩形を得て、クリックで frame を選ぶ (§4.5)。
+ * 回転した frame のラベルは回さず、回転した箱の外接矩形の左上に置く (§8.5.2)。
  */
 import { DEFAULT_NODE_NAMES } from "../model/create";
-import type { Rect } from "../model/geometry";
+import { getPageBounds, type Rect } from "../model/geometry";
 import { getNode, getPage, getParent } from "../model/tree";
 import type { CanvasDocument, FrameNode, NodeId, PageId } from "../model/types";
 import type { FontSpec, TextMeasurer } from "../render/types";
@@ -76,16 +77,21 @@ export function frameLabel(
   const frame = getNode(doc, frameId);
   if (!frame || frame.type !== "frame" || !frame.visible) return null;
   if (getParent(doc, frameId)?.kind !== "page") return null;
+  // 回転していなければ frame の箱、回転していれば外接矩形 (ページ直下なので親の座標系はページ座標)
+  const box =
+    frame.rotation === 0
+      ? { x: frame.x, y: frame.y, width: frame.width }
+      : (getPageBounds(doc, frameId) ?? frame);
   const full = frameLabelText(frame);
-  const maxWidth = Math.max(MIN_LABEL_WIDTH, frame.width * zoom);
+  const maxWidth = Math.max(MIN_LABEL_WIDTH, box.width * zoom);
   const text = truncateLabel(full, maxWidth, measurer);
   const width = Math.min(measurer.measure(text, FRAME_LABEL_FONT), maxWidth);
   return {
     id: frame.id,
     text,
     rect: {
-      x: frame.x,
-      y: frame.y - (FRAME_LABEL_HEIGHT + FRAME_LABEL_GAP) / zoom,
+      x: box.x,
+      y: box.y - (FRAME_LABEL_HEIGHT + FRAME_LABEL_GAP) / zoom,
       width: Math.max(width, MIN_LABEL_WIDTH) / zoom,
       height: FRAME_LABEL_HEIGHT / zoom,
     },

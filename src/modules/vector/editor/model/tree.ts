@@ -1,19 +1,40 @@
 /**
  * 木の参照。文書は平たい `nodes` と `children` で木を表す (§3.1) ので、親は索引を作って引く。
  * 索引は文書のオブジェクトをキーに WeakMap で使い回す (文書は書き換えない前提なので安全)。
+ *
+ * 子を持つノードは frame・group・ブーリアン (`isContainer`)。そのうち座標系を作るのは frame だけで、
+ * group とブーリアンは「座標系を作らない入れ物」(`isGroupLike`。子は自分の親の座標系で持つ、§8.3.1、§8.9.1)。
+ * group だけを見ていた判定 (中に入れるか、移動、範囲選択、画面外の判定、コマンドなど) は `isGroupLike` を使う。
+ *
+ * E・F・G が使うもの:
+ * - `isContainer(node)`: 子を持つノード (frame / group / ブーリアン) か
+ * - `isGroupLike(node)`: 座標系を作らない入れ物 (group / ブーリアン) か
+ * - `canBeBooleanChild(type)` / `BOOLEAN_CHILD_TYPES`: ブーリアンの子にできる種類か (rect / ellipse / path / boolean)
+ * - `canHaveChildOfType(doc, parent, type)`: 親 (ページ / frame / group / ブーリアン) がその種類の子を持てるか
+ * - `insertionParent(doc, parent, types)`: 親がブーリアンで、子にできない種類が混ざるなら、ブーリアンの外の
+ *   最も近い親 (§8.9.1 の「ブーリアンの親に置く」)
+ * - `outsideBooleans(doc, parent)`: ブーリアンの外の最も近い親 (作成ツール・ペン・取込の親)
  */
 import { hasOwn } from "./ids";
 import type {
+  BooleanNode,
   CanvasDocument,
   CanvasNode,
-  ContainerNode,
   FrameNode,
+  GroupNode,
   NodeId,
+  NodeType,
   Page,
   PageId,
 } from "./types";
 
-/** ノードの親。ページ直下ならページ、そうでなければ frame か group。 */
+/** 子を持つノード (frame / group / ブーリアン)。 */
+export type ParentNode = FrameNode | GroupNode | BooleanNode;
+
+/** 座標系を作らない入れ物 (group / ブーリアン)。子は自分の親の座標系で持つ。 */
+export type GroupLikeNode = GroupNode | BooleanNode;
+
+/** ノードの親。ページ直下ならページ、そうでなければ frame か group かブーリアン。 */
 export type ParentRef = { kind: "page"; id: PageId } | { kind: "node"; id: NodeId };
 
 interface ParentEntry {
@@ -52,8 +73,73 @@ function entryOf(doc: CanvasDocument, id: NodeId): ParentEntry | undefined {
   return index.get(id);
 }
 
-export function isContainer(node: CanvasNode): node is ContainerNode {
-  return node.type === "frame" || node.type === "group";
+/** 子を持つノード (frame / group / ブーリアン) か。 */
+export function isContainer(node: CanvasNode): node is ParentNode {
+  return node.type === "frame" || node.type === "group" || node.type === "boolean";
+}
+
+/** 座標系を作らない入れ物 (group / ブーリアン) か。 */
+export function isGroupLike(node: CanvasNode): node is GroupLikeNode {
+  return node.type === "group" || node.type === "boolean";
+}
+
+/** ブーリアンの子にできる種類 (§8.3.2、§8.9.1)。 */
+export const BOOLEAN_CHILD_TYPES: readonly NodeType[] = ["rect", "ellipse", "path", "boolean"];
+
+/** ブーリアンの子にできる種類か。 */
+export function canBeBooleanChild(type: NodeType): boolean {
+  return BOOLEAN_CHILD_TYPES.includes(type);
+}
+
+/**
+ * 親がその種類の子を持てるか。ページ・frame・group は何でも、ブーリアンは `canBeBooleanChild` の種類だけ。
+ * 子を持たないノードや見つからない親は false。
+ */
+export function canHaveChildOfType(
+  doc: CanvasDocument,
+  parent: ParentRef,
+  type: NodeType,
+): boolean {
+  if (parent.kind === "page") return true;
+  const node = getNode(doc, parent.id);
+  if (!node || !isContainer(node)) return false;
+  return node.type !== "boolean" || canBeBooleanChild(type);
+}
+
+/**
+ * ブーリアンの外の最も近い親。`parent` がブーリアン (の中) なら、祖先のブーリアンも越えて出る。
+ * 作成ツール・ペン・取込の親に使う (§8.9.1)。
+ */
+export function outsideBooleans(doc: CanvasDocument, parent: ParentRef): ParentRef {
+  let current = parent;
+  for (let guard = 0; guard < 1000 && current.kind === "node"; guard++) {
+    if (getNode(doc, current.id)?.type !== "boolean") return current;
+    const up = getParent(doc, current.id);
+    if (!up) return current;
+    current = up;
+  }
+  return current;
+}
+
+/**
+ * `types` の種類のノードを入れる親。`parent` がブーリアンで、子にできない種類が混ざるなら、
+ * ブーリアンの外の最も近い親 (祖先のブーリアンも越える) にする。そうでなければ `parent` のまま。
+ */
+export function insertionParent(
+  doc: CanvasDocument,
+  parent: ParentRef,
+  types: Iterable<NodeType>,
+): ParentRef {
+  const list = [...types];
+  let current = parent;
+  for (let guard = 0; guard < 1000 && current.kind === "node"; guard++) {
+    const node = getNode(doc, current.id);
+    if (node?.type !== "boolean" || list.every(canBeBooleanChild)) return current;
+    const up = getParent(doc, current.id);
+    if (!up) return current;
+    current = up;
+  }
+  return current;
 }
 
 /** ノードを引く。`toString` のような ID で `Object.prototype` のものを拾わない。 */
@@ -70,8 +156,8 @@ export function getParent(doc: CanvasDocument, id: NodeId): ParentRef | null {
   return entryOf(doc, id)?.parent ?? null;
 }
 
-/** 親が frame / group ならそのノード、ページ直下か木に入っていなければ null。 */
-export function getParentNode(doc: CanvasDocument, id: NodeId): ContainerNode | null {
+/** 親が frame / group / ブーリアンならそのノード、ページ直下か木に入っていなければ null。 */
+export function getParentNode(doc: CanvasDocument, id: NodeId): ParentNode | null {
   const parent = getParent(doc, id);
   if (parent?.kind !== "node") return null;
   const node = getNode(doc, parent.id);
@@ -105,9 +191,9 @@ export function sameParent(a: ParentRef | null, b: ParentRef | null): boolean {
   return a !== null && b !== null && a.kind === b.kind && a.id === b.id;
 }
 
-/** 祖先の frame / group を近い順に返す (ページは含まない)。 */
-export function getAncestors(doc: CanvasDocument, id: NodeId): ContainerNode[] {
-  const result: ContainerNode[] = [];
+/** 祖先の frame / group / ブーリアンを近い順に返す (ページは含まない)。 */
+export function getAncestors(doc: CanvasDocument, id: NodeId): ParentNode[] {
+  const result: ParentNode[] = [];
   let current = getParentNode(doc, id);
   while (current) {
     result.push(current);
@@ -122,7 +208,7 @@ export function isAncestorOf(doc: CanvasDocument, ancestorId: NodeId, id: NodeId
 }
 
 /**
- * 座標系を作る最も近い祖先の frame。group は座標系を作らない (§3.2) ので飛ばす。
+ * 座標系を作る最も近い祖先の frame。group とブーリアンは座標系を作らない (§3.2、§8.3.1) ので飛ばす。
  * null ならページ座標。
  */
 export function getCoordinateFrame(doc: CanvasDocument, id: NodeId): FrameNode | null {

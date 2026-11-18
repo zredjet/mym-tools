@@ -1,11 +1,45 @@
 /**
- * 変形とプロパティの更新 (§4.6)。すべて純関数で、変わらなければ引数の文書をそのまま返す。
+ * 変形とプロパティの更新 (§4.6、§8.5)。すべて純関数で、変わらなければ引数の文書をそのまま返す。
+ *
+ * E・F・G が使うもの:
+ * - `translateInDraft` / `translateNodes`: 親の座標系での平行移動 (丸めない)
+ * - `transformInDraft(draft, id, m)`: 回転と平行移動の行列 `m` (新しい座標系 ← 元の座標系) でノードを写す。
+ *   箱を持つノードは中心を写して `rotation` に `m` の角度を足し、線は端点、group とブーリアンは子に同じことをする。
+ *   frame の子とパスの点は変えない (§8.5.2 の親の付け替え、§8.5.3 の回転)
+ * - `resizeNodes(doc, ids, from, to, options)`: 外接矩形 (ページ座標) の比例のリサイズ (§4.6、§8.5.4)。
+ *   回転したノード (祖先の frame の回転を含む) は中心を比例させ、大きさを自分の向きに沿った倍率で変える。
+ *   パスは点とハンドルの先をページ座標で写してから箱を合わせる (厳密)
+ * - `resizeNodeInOwnFrame(doc, id, rect)`: 1 個のノードを自分の向きでリサイズする (§8.5.4)。`rect` は今の
+ *   ノードの座標系 (回転の前の箱の左上が原点) での新しい箱。動かさない辺・角 (Alt なら中心) を `rect` の側で
+ *   決めて渡すと、その辺は親の座標系で動かない。`width` `height` は呼び出し側が丸めて渡す。`x` `y` は丸めない
+ * - `ownScaleFactors(sx, sy, phi)`: ページの倍率 (sx, sy) を、ページ上の角度 φ のノードの向きの倍率にする
+ * - `cleanRotation(r)`: 回転を (-180, 180] にそろえ、小数の誤差 (2 桁より下の 1e-6 以内のずれ) を落とす
  */
+import { applyToPoint, invert, type Matrix, multiply, normalizeRotation } from "../geometry/matrix";
+import { fitPathNode } from "../path/fit";
 import { DocDraft } from "./draft";
-import { nodeOrigin, type Rect } from "./geometry";
+import {
+  boxCenter,
+  coordinateMatrix,
+  isBoxNode,
+  isTranslation,
+  nodeOrigin,
+  nodeTransform,
+  pageRotation,
+  type Rect,
+} from "./geometry";
 import { hasOwn } from "./ids";
 import { topLevelIds } from "./tree";
-import type { CanvasDocument, CanvasNode, Guide, NodeId, Page, PageId, Point } from "./types";
+import type {
+  CanvasDocument,
+  CanvasNode,
+  Guide,
+  NodeId,
+  Page,
+  PageId,
+  PathPoint,
+  Point,
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // 平行移動
@@ -35,9 +69,64 @@ export function translateInDraft(draft: DocDraft, id: NodeId, dx: number, dy: nu
   }
 }
 
+/** 行列の回転の角度 (度)。 */
+function matrixAngle(m: Matrix): number {
+  return (Math.atan2(m.b, m.a) * 180) / Math.PI;
+}
+
+/**
+ * 回転を (-180, 180] にそろえる。足し引きで出た小数の誤差 (小数第 2 位の値から 1e-6 以内のずれ) は落とす
+ * (画面の操作で書く回転は小数第 2 位までなので、和を元の桁に戻す)。
+ */
+export function cleanRotation(r: number): number {
+  const n = normalizeRotation(r);
+  const hundredths = Math.round(n * 100);
+  const cleaned = Math.abs(n * 100 - hundredths) < 1e-6 ? hundredths / 100 : n;
+  const result = cleaned <= -180 ? cleaned + 360 : cleaned;
+  return result === 0 ? 0 : result;
+}
+
+/**
+ * 下書きの中でノードを、回転と平行移動の行列 `m` (新しい座標系 ← 元の座標系) で写す (§8.5.2、§8.5.3)。
+ * - 平行移動だけなら `translateInDraft` と同じ (第 1 段階と同じ値)
+ * - 箱を持つノード (frame・パスを含む) は中心を写し、`rotation` に `m` の角度を足す。frame の子とパスの点は変えない
+ * - 線は端点を写す。group とブーリアンは子に同じことをする
+ * 位置は丸めない。`m` に反転や拡大を含めてはいけない (反転は `model/rotate.ts` の `flipNodes`)。
+ */
+export function transformInDraft(draft: DocDraft, id: NodeId, m: Matrix): void {
+  if (isTranslation(m)) {
+    translateInDraft(draft, id, m.e, m.f);
+    return;
+  }
+  const node = draft.get(id);
+  if (!node) return;
+  switch (node.type) {
+    case "group":
+    case "boolean":
+      for (const child of node.children) transformInDraft(draft, child, m);
+      return;
+    case "line": {
+      const a = applyToPoint(m, { x: node.x1, y: node.y1 });
+      const b = applyToPoint(m, { x: node.x2, y: node.y2 });
+      draft.set({ ...node, x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+      return;
+    }
+    default: {
+      const c = applyToPoint(m, boxCenter(node));
+      draft.set({
+        ...node,
+        x: noNegativeZero(c.x - node.width / 2),
+        y: noNegativeZero(c.y - node.height / 2),
+        rotation: cleanRotation(node.rotation + matrixAngle(m)),
+      });
+    }
+  }
+}
+
 /**
  * ノードを (dx, dy) だけ動かす。祖先も選ばれているノードは祖先と一緒に動くので重ねて動かさない。
- * 丸めはしない (呼び出し側が整数の移動量を渡す)。
+ * (dx, dy) は親の座標系のずれ (回転した frame の中のノードを、ページの向きに動かすときは
+ * `pageVectorToLocal` で直してから渡す)。丸めはしない (呼び出し側が整数の移動量を渡す)。
  */
 export function translateNodes(
   doc: CanvasDocument,
@@ -73,7 +162,7 @@ function normalizeRect(r: Rect): Rect {
 const noNegativeZero = (v: number) => (v === 0 ? 0 : v);
 
 /**
- * ページ座標の外接矩形 `from` を `to` へ写すように、ノードを拡大縮小する (§4.6)。
+ * ページ座標の外接矩形 `from` を `to` へ写すように、ノードを拡大縮小する (§4.6、§8.5.4)。
  *
  * - 複数のノードと group は、子孫の位置と大きさを `from` に対する割合のまま比例させる
  * - frame は自分の矩形だけを変え、子は動かさない (group や複数選択の中の frame も同じ)
@@ -84,6 +173,12 @@ const noNegativeZero = (v: number) => (v === 0 ? 0 : v);
  * - `from` の幅 (高さ) が 0 の向きは拡大縮小せず、`to` との差だけ動かす
  * - 反転 (負の幅) は扱わない。`from` と `to` は正規化 (負の幅なら左右を入れ替える) してから使う
  * - 中身が変わらなければ引数の文書をそのまま返す
+ *
+ * 回転 (§8.5.4): ページ上の角度 φ が 0 でないノード (祖先の frame の回転を含む) は、中心を比例させ、
+ * 大きさを自分の向きに沿った倍率 (`ownScaleFactors`) で変える。角度は変えない。`round` は `width` `height` だけを
+ * 丸める (`x` `y` は中心から決める)。テキストの大きさの決め方は、自分の向きでの倍率で判定する。
+ * パスは点とハンドルの先をページ座標で P′ = A + S·(P − A) に写してから、角度を変えずに自分の座標系へ戻し、
+ * 箱を合わせる (`fitPathNode`。厳密)。線は端点をページ座標で写す。
  */
 export function resizeNodes(
   doc: CanvasDocument,
@@ -100,10 +195,14 @@ export function resizeNodes(
   const sy = src.height === 0 ? 1 : dst.height / src.height;
   const round = options.round ? Math.round : (v: number) => v;
   const draft = new DocDraft(doc);
+  /** ページ座標の点を写す。 */
+  const mapPage = (p: Point): Point => ({
+    x: dst.x + (p.x - src.x) * sx,
+    y: dst.y + (p.y - src.y) * sy,
+  });
 
-  const visit = (id: NodeId, origin: Point) => {
-    const node = draft.get(id);
-    if (!node) return;
+  /** 回転していない座標系の回転していないノード (第 1 段階と同じ計算)。 */
+  const visitPlain = (node: CanvasNode, origin: Point) => {
     const mapX = (lx: number) =>
       noNegativeZero(round(dst.x + (origin.x + lx - src.x) * sx) - origin.x);
     const mapY = (ly: number) =>
@@ -112,7 +211,6 @@ export function resizeNodes(
     switch (node.type) {
       case "group":
       case "boolean":
-        for (const child of node.children) visit(child, origin);
         return;
       case "line":
         next = {
@@ -142,8 +240,171 @@ export function resizeNodes(
     if (!shallowEqual(next, node)) draft.set(next);
   };
 
-  for (const id of topLevelIds(doc, ids)) visit(id, nodeOrigin(doc, id));
+  /** 回転したノードか、回転した frame の中のノードか、パス。`space` はページ ← 親の座標系。 */
+  const visitRotated = (node: CanvasNode, space: Matrix) => {
+    const back = invert(space);
+    if (!back) return;
+    const toParent = (p: Point) => applyToPoint(back, mapPage(applyToPoint(space, p)));
+    let next: CanvasNode;
+    switch (node.type) {
+      case "group":
+      case "boolean":
+        return;
+      case "line": {
+        const a = toParent({ x: node.x1, y: node.y1 });
+        const b = toParent({ x: node.x2, y: node.y2 });
+        next = { ...node, x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+        break;
+      }
+      case "path": {
+        // 点とハンドルの先をページ座標で写し、角度を変えずに自分の座標系へ戻す (箱はあとで合わせる)
+        const own = multiply(space, nodeTransform(node));
+        const ownBack = invert(own);
+        if (!ownBack) return;
+        const mapLocal = (p: Point) => applyToPoint(ownBack, mapPage(applyToPoint(own, p)));
+        next = fitPathNode({
+          ...node,
+          subpaths: node.subpaths.map((sub) => ({
+            ...sub,
+            points: sub.points.map((pt) => mapPathPoint(pt, mapLocal)),
+          })),
+        });
+        break;
+      }
+      default: {
+        const phi = pageRotation(doc, node.id);
+        const f = ownScaleFactors(sx, sy, phi);
+        const width = Math.max(0, round(node.width * f.x));
+        let height = Math.max(0, round(node.height * f.y));
+        let sizing = node.type === "text" ? node.sizing : null;
+        if (node.type === "text") {
+          if (!nearlyOne(f.y)) sizing = "fixed";
+          else {
+            height = node.height; // 自分の向きで縦に引いていなければ、高さを変えない
+            if (!nearlyOne(f.x) && sizing === "auto-width") sizing = "auto-height";
+          }
+        }
+        const c = toParent(boxCenter(node));
+        const box = {
+          x: noNegativeZero(c.x - width / 2),
+          y: noNegativeZero(c.y - height / 2),
+          width,
+          height,
+        };
+        next =
+          node.type === "text" && sizing !== null
+            ? { ...node, ...box, sizing }
+            : { ...node, ...box };
+      }
+    }
+    if (!shallowEqual(next, node)) draft.set(next);
+  };
+
+  const visit = (id: NodeId) => {
+    const node = draft.get(id);
+    if (!node) return;
+    if (node.type === "group" || node.type === "boolean") {
+      for (const child of node.children) visit(child);
+      return;
+    }
+    const space = coordinateMatrix(doc, id);
+    // パスは回転していなくても点を写す (箱だけを変えない。§8.5.4)
+    const rotated =
+      node.type === "path" || !isTranslation(space) || (isBoxNode(node) && node.rotation !== 0);
+    if (rotated) visitRotated(node, space);
+    else visitPlain(node, nodeOrigin(doc, id));
+  };
+
+  for (const id of topLevelIds(doc, ids)) visit(id);
   return draft.finish();
+}
+
+/** 1 に十分近いか (自分の向きの倍率の判定。√ の誤差を見ない)。 */
+function nearlyOne(v: number): boolean {
+  return Math.abs(v - 1) <= 1e-9;
+}
+
+/**
+ * ページの倍率 (sx, sy) を、ページ上の角度 φ のノードの向きの倍率にする (§8.5.4)。
+ * 幅は √((sx·cos φ)² + (sy·sin φ)²)、高さは √((sx·sin φ)² + (sy·cos φ)²)。φ が 90° の倍数なら厳密。
+ */
+export function ownScaleFactors(sx: number, sy: number, phi: number): Point {
+  const r = ((((phi % 360) + 360) % 360) * Math.PI) / 180;
+  const quarter = ((phi % 90) + 90) % 90 === 0;
+  const cos = quarter ? Math.round(Math.cos(r)) : Math.cos(r);
+  const sin = quarter ? Math.round(Math.sin(r)) : Math.sin(r);
+  return {
+    x: Math.hypot(sx * cos, sy * sin),
+    y: Math.hypot(sx * sin, sy * cos),
+  };
+}
+
+/** 点とハンドルの先を `map` で写した点 (ハンドルは点からの相対に戻す)。 */
+function mapPathPoint(pt: PathPoint, map: (p: Point) => Point): PathPoint {
+  const p = map(pt);
+  const handle = (h: Point | null) => {
+    if (!h) return null;
+    const tip = map({ x: pt.x + h.x, y: pt.y + h.y });
+    return { x: tip.x - p.x, y: tip.y - p.y };
+  };
+  return { ...pt, x: p.x, y: p.y, in: handle(pt.in), out: handle(pt.out) };
+}
+
+/**
+ * 1 個のノードを自分の向きでリサイズする (§8.5.4、§8.5.5)。`rect` は今のノードの座標系 (回転の前の箱の左上が
+ * 原点) での新しい箱 (`width` `height` は 0 以上で、呼び出し側が丸める)。新しい箱が `rect` の位置にそのまま
+ * 描かれるよう `x` `y` を決める (丸めない)。動かさない辺 (Alt なら中心) を `rect` の側でそろえれば、その辺は
+ * 親の座標系で動かない。
+ *
+ * - テキストは `resizeNodes` と同じ規則 (自分の向きで縦に引いたら `fixed`、横だけなら `auto-width` を
+ *   `auto-height` に。縦に引いていなければ `height` を変えない)
+ * - パスは点とハンドルを自分の座標系で p′ = a + S·(p − a) に写す (a は動かさない点) ので、厳密に変わる
+ * - frame の子は変えない
+ * - 箱を持たないノード (線・group・ブーリアン) は何もしない
+ */
+export function resizeNodeInOwnFrame(doc: CanvasDocument, id: NodeId, rect: Rect): CanvasDocument {
+  const node = doc.nodes[id];
+  if (!node || !hasOwn(doc.nodes, id) || !isBoxNode(node)) return doc;
+  const width = Math.max(0, rect.width);
+  const height = Math.max(0, rect.height);
+  const center = applyToPoint(nodeTransform(node), {
+    x: rect.x + width / 2,
+    y: rect.y + height / 2,
+  });
+  let next: CanvasNode = {
+    ...node,
+    x: noNegativeZero(center.x - width / 2),
+    y: noNegativeZero(center.y - height / 2),
+    width,
+    height,
+  };
+  if (node.type === "text" && next.type === "text") {
+    let sizing = node.sizing;
+    if (height !== node.height) sizing = "fixed";
+    else if (width !== node.width && sizing === "auto-width") sizing = "auto-height";
+    next = { ...next, sizing };
+  }
+  if (node.type === "path" && next.type === "path") {
+    const kx = node.width === 0 ? 1 : width / node.width;
+    const ky = node.height === 0 ? 1 : height / node.height;
+    next = fitPathNode({
+      ...next,
+      subpaths: node.subpaths.map((sub) => ({
+        ...sub,
+        points: sub.points.map((pt) => scalePathPoint(pt, kx, ky)),
+      })),
+    });
+  }
+  if (shallowEqual(next, node)) return doc;
+  const draft = new DocDraft(doc);
+  draft.set(next);
+  return draft.finish();
+}
+
+/** 点とハンドルを原点からの倍率で写す。 */
+function scalePathPoint(pt: PathPoint, kx: number, ky: number): PathPoint {
+  const scale = (h: Point | null) => (h ? { x: h.x * kx, y: h.y * ky } : null);
+  return { ...pt, x: pt.x * kx, y: pt.y * ky, in: scale(pt.in), out: scale(pt.out) };
 }
 
 // ---------------------------------------------------------------------------

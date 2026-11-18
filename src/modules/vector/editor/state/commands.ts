@@ -5,7 +5,7 @@
  */
 import type { StoreApi } from "zustand";
 import { alignNodes, distributeNodes, type AlignKind, type DistributeAxis } from "../model/align";
-import { createId } from "../model/ids";
+import { createId, getOwn } from "../model/ids";
 import {
   deleteNodes,
   duplicateNodes,
@@ -17,7 +17,15 @@ import {
   type ReorderDirection,
 } from "../model/structure";
 import { translateNodes } from "../model/transform";
-import { getChildren, getNode, getPageOf, topLevelIds, type ParentRef } from "../model/tree";
+import {
+  getChildren,
+  getNode,
+  getPageOf,
+  insertionParent,
+  isGroupLike,
+  topLevelIds,
+  type ParentRef,
+} from "../model/tree";
 import type { CanvasDocument } from "../model/types";
 import { editorClipboard, PASTE_OFFSET, type EditorClipboard } from "./clipboard";
 import type { EditorState, EditorStore } from "./types";
@@ -73,13 +81,13 @@ export function groupSelection(store: Store): void {
   });
 }
 
-/** 選択の中の group を解除し、元の子を選ぶ (Shift+Cmd/Ctrl+G)。 */
+/** 選択の中の group とブーリアンを解除し、元の子を選ぶ (Shift+Cmd/Ctrl+G。§8.9.4)。 */
 export function ungroupSelection(store: Store): void {
   const { selection } = store.getState();
   applyChange(store, (doc) => {
     const ids = selection.flatMap((id) => {
       const node = getNode(doc, id);
-      return node?.type === "group" ? node.children : [id];
+      return node && isGroupLike(node) ? node.children : [id];
     });
     return { doc: ungroupNodes(doc, selection), ids };
   });
@@ -136,6 +144,9 @@ function parentOnPage(state: EditorState, parent: ParentRef): boolean {
  *    (同じ内容を前に貼り付けたノードも「コピーしたノード自身」と見る。続けて貼ると入れ子になるのを防ぐ)
  * 2. コピー元の親が今の文書の表示中のページにあれば、その親
  * 3. スコープがあればその中、なければページの直下
+ *
+ * 決めた親がブーリアンで、コピーした根に子にできない種類 (rect / ellipse / path / boolean 以外) が混ざるなら、
+ * ブーリアンの外の最も近い親にする (§8.9.1)。
  */
 export function pasteTarget(
   state: EditorState,
@@ -143,15 +154,23 @@ export function pasteTarget(
 ): ParentRef {
   const source = clipboard.source;
   const [only, ...rest] = topLevelIds(state.doc, state.selection);
+  let target: ParentRef;
   if (
     only !== undefined &&
     rest.length === 0 &&
     getNode(state.doc, only)?.type === "frame" &&
     !source?.rootIds.has(only)
   )
-    return { kind: "node", id: only };
-  if (source?.parent && parentOnPage(state, source.parent)) return source.parent;
-  return currentParent(state);
+    target = { kind: "node", id: only };
+  else if (source?.parent && parentOnPage(state, source.parent)) target = source.parent;
+  else target = currentParent(state);
+  const content = clipboard.content;
+  if (!content) return target;
+  const types = content.roots.flatMap((id) => {
+    const node = getOwn(content.nodes, id);
+    return node ? [node.type] : [];
+  });
+  return insertionParent(state.doc, target, types);
 }
 
 /** 貼り付けて、貼り付けたノードを選ぶ (Cmd/Ctrl+V)。 */

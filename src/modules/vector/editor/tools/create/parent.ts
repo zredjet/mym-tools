@@ -7,10 +7,21 @@
  * 3. どちらでもなければページ直下
  *
  * 非表示・ロック中の frame (祖先が非表示・ロック中のものを含む) は親にしない。
- * frame の中かどうかは、祖先の frame が切り抜く分を除いた見えている範囲で決める。
+ * frame の中かどうかは、祖先の frame が切り抜く分を除いた見えている範囲で決める。回転した frame は、点を frame の
+ * 座標系に直してから箱で判定する (§8.5.2、`dropFrameContains`)。
+ *
+ * ブーリアン (§8.9.1): 作成ツール・ペン・取込は、ブーリアンのスコープの中でもブーリアンの親に置く
+ * (ブーリアンの外の最も近い親。`outsideBooleans`)。ブーリアンのスコープは group と同じく外接矩形の中がスコープの中。
  */
 import { isInteractive, isTopLevelFrame } from "../../hit/hitTest";
-import { dropFrames, dropTargetAt, intersectRects, type DropFrame } from "../../hit/marquee";
+import {
+  dropFrameContains,
+  dropFrameContainsRect,
+  dropFrames,
+  dropTargetAt,
+  intersectRects,
+  type DropFrame,
+} from "../../hit/marquee";
 import { getPageBounds, rectContains, rectContainsPoint, type Rect } from "../../model/geometry";
 import {
   getAncestors,
@@ -18,6 +29,8 @@ import {
   getNode,
   getPageOf,
   isAncestorOf,
+  isGroupLike,
+  outsideBooleans,
   type ParentRef,
 } from "../../model/tree";
 import type { CanvasDocument, NodeId, PageId, Point } from "../../model/types";
@@ -29,15 +42,20 @@ export function creationFrames(doc: CanvasDocument, pageId: PageId): DropFrame[]
   return dropFrames(doc, pageId, NO_EXCLUDE);
 }
 
+/** 点か矩形が範囲の中かの判定。`rect` は軸に平行な矩形、`frame` は frame の見えている範囲 (回転を含む)。 */
+interface Inside {
+  rect: (rect: Rect) => boolean;
+  frame: (frame: DropFrame) => boolean;
+}
+
 /**
- * スコープが点 (または矩形) を含むか。frame は見えている範囲、group は外接矩形 (§4.5 と同じ扱い)。
- * `inside(rect)` は、スコープの範囲 `rect` の中かを返す。
+ * スコープが点 (または矩形) を含むか。frame は見えている範囲、group とブーリアンは外接矩形 (§4.5 と同じ扱い)。
  */
 function scopeContains(
   doc: CanvasDocument,
   pageId: PageId,
   scopeId: NodeId,
-  inside: (rect: Rect) => boolean,
+  inside: Inside,
   frames: readonly DropFrame[],
 ): boolean {
   const scope = getNode(doc, scopeId);
@@ -45,15 +63,16 @@ function scopeContains(
     return false;
   if (scope.type === "frame") {
     const visible = frames.find((frame) => frame.id === scopeId);
-    return visible !== undefined && inside(visible.rect);
+    return visible !== undefined && inside.frame(visible);
   }
-  if (scope.type !== "group") return false;
+  if (!isGroupLike(scope)) return false;
   const bounds = getPageBounds(doc, scopeId);
-  if (!bounds || !inside(bounds)) return false;
+  if (!bounds || !inside.rect(bounds)) return false;
   // 祖先の切り抜く frame (`clip: true`) が切り抜いて見えない所は、スコープの外とする。
-  // 切り抜かない frame の矩形では弾かない (group がその外へはみ出していても、はみ出した所はスコープの中)
+  // 切り抜かない frame の矩形では弾かない (group がその外へはみ出していても、はみ出した所はスコープの中)。
+  // 回転した切り抜く frame は外接矩形で近似する
   const clip = clipRegion(doc, scopeId);
-  return clip === undefined || (clip !== null && inside(clip));
+  return clip === undefined || (clip !== null && inside.rect(clip));
 }
 
 /**
@@ -73,7 +92,7 @@ function clipRegion(doc: CanvasDocument, id: NodeId): Rect | null | undefined {
   return region;
 }
 
-/** 押した点 (ページ座標) に作るノードの親。 */
+/** 押した点 (ページ座標) に作るノードの親。ブーリアンのスコープの中なら、ブーリアンの外の最も近い親。 */
 export function creationParent(
   doc: CanvasDocument,
   pageId: PageId,
@@ -82,11 +101,14 @@ export function creationParent(
   frames: readonly DropFrame[] = creationFrames(doc, pageId),
 ): ParentRef {
   const under = dropTargetAt(frames, point);
-  const inside = (rect: Rect) => rectContainsPoint(rect, point);
+  const inside: Inside = {
+    rect: (rect) => rectContainsPoint(rect, point),
+    frame: (frame) => dropFrameContains(frame, point),
+  };
   if (scopeId !== null && scopeContains(doc, pageId, scopeId, inside, frames)) {
     if (under !== null && (under === scopeId || isAncestorOf(doc, scopeId, under)))
       return { kind: "node", id: under };
-    return { kind: "node", id: scopeId };
+    return outsideBooleans(doc, { kind: "node", id: scopeId });
   }
   return under === null ? { kind: "page", id: pageId } : { kind: "node", id: under };
 }
@@ -95,7 +117,7 @@ export function creationParent(
  * 矩形 (ページ座標) を丸ごと入れられる親。表示範囲の中央に画像を置くときに使う
  * (点の下の frame に入れると、frame より大きな画像が切り抜かれて見えるため)。
  * スコープが矩形を含むならスコープの中、そうでなければ矩形を丸ごと含む最も前面の frame、
- * どちらでもなければページ直下。
+ * どちらでもなければページ直下。ブーリアンのスコープの中なら、ブーリアンの外の最も近い親。
  */
 export function containingParent(
   doc: CanvasDocument,
@@ -104,15 +126,20 @@ export function containingParent(
   rect: Rect,
   frames: readonly DropFrame[] = creationFrames(doc, pageId),
 ): ParentRef {
-  const inside = (outer: Rect) => rectContains(outer, rect);
-  const fits = frames.filter((frame) => inside(frame.rect));
+  const inside: Inside = {
+    rect: (outer) => rectContains(outer, rect),
+    frame: (frame) => dropFrameContainsRect(frame, rect),
+  };
+  const fits = frames.filter((frame) => inside.frame(frame));
   const frontmost = (candidates: readonly DropFrame[]) =>
     candidates.length === 0 ? null : (candidates[candidates.length - 1] as DropFrame).id;
   if (scopeId !== null && scopeContains(doc, pageId, scopeId, inside, frames)) {
     const within = frontmost(
       fits.filter((frame) => frame.id === scopeId || isAncestorOf(doc, scopeId, frame.id)),
     );
-    return { kind: "node", id: within ?? scopeId };
+    return within !== null
+      ? { kind: "node", id: within }
+      : outsideBooleans(doc, { kind: "node", id: scopeId });
   }
   const front = frontmost(fits);
   return front === null ? { kind: "page", id: pageId } : { kind: "node", id: front };
