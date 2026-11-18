@@ -117,6 +117,17 @@ export const CONVERT_SHORTCUTS: Shortcut[] = [
   },
 ];
 
+// ---- 鉛筆 (H。§8.13) ----
+// Cmd/Ctrl+Shift+P はアプリ全体の割当 (プロジェクト切替) なので、Cmd/Ctrl なしの Shift+P だけ。
+// 多角形と星にはキーを割り当てない
+export const PENCIL_SHORTCUTS: Shortcut[] = [
+  {
+    id: "tool.pencil",
+    keys: [{ key: ["p"], shift: true }],
+    run: ({ store }) => store.getState().setTool("pencil"),
+  },
+];
+
 /** 割当表。上から順に調べ、最初に合って処理したものだけを実行する。 */
 export const CANVAS_SHORTCUTS: Shortcut[] = [
   // ---- ツール ----
@@ -342,6 +353,7 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
 
   // ---- 第 2 段階の節 (担当ごと) ----
   ...CONVERT_SHORTCUTS,
+  ...PENCIL_SHORTCUTS,
 ];
 
 /** 合うショートカットを上から順に実行し、処理したものを返す。なければ null。 */

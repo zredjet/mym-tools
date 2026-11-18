@@ -18,6 +18,7 @@ import { hasFill, hasShadow, hasStroke } from "./sections/propertyOps";
 import { ShadowSection } from "./sections/ShadowSection";
 import { StrokeSection } from "./sections/StrokeSection";
 import { TextSection } from "./sections/TextSection";
+import { ToolSettingsSection } from "./sections/ToolSettingsSection";
 
 /** パネルの幅 (§5.1)。 */
 export const PROPERTIES_PANEL_WIDTH = 240;
@@ -59,6 +60,7 @@ export function PropertiesPanel() {
         </h2>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <ToolSettingsSection />
         {nodes.length === 0 ? (
           <PageSection />
         ) : (

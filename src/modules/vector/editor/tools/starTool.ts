@@ -1,12 +1,4 @@
-import type { Tool } from "./types";
+import { createRegularShapeTool } from "./polygonTool";
 
-/**
- * 星 (`docs/canvas-editor-design.md` §8.8)。
- *
- * v3 の基盤 (C1) が ID と登録だけを置いた空のツール。中身 (ドラッグした矩形に収まる星のパスを作る) は
- * 「多角形・星・鉛筆」のセッション (H) がこのファイルに書く。
- */
-export const starTool: Tool = {
-  id: "star",
-  cursor: "crosshair",
-};
+/** 星 (`docs/canvas-editor-design.md` §8.8)。動きは `polygonTool.ts` を参照。 */
+export const starTool = createRegularShapeTool("star");
