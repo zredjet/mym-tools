@@ -4,7 +4,8 @@
  *
  * - ホバーの枠 (選択していないノード。選択ツールのときだけ)
  * - 選択したノードの枠と、動かせる選択の枠・リサイズハンドル (選択ツールのとき)。
- *   線を 1 本だけ選んだときのハンドルは始点と終点の 2 個。本文の編集中のノードにはハンドルを出さない
+ *   線を 1 本だけ選んだときのハンドルは始点と終点の 2 個。本文の編集中のノードにはハンドルを出さない。
+ *   点の編集中のパス (`editingPathId`) は、枠もハンドルも出さない (輪郭と点はツールの重ね描きが描く。§8.7)
  * - 範囲選択の矩形とスマートガイド (`overlayState.ts`)
  *
  * 回転 (§8.5.3): 1 個だけ選んだ、ページ上の角度が 0 でない箱を持つノードは、回転した箱に沿った枠とハンドル
@@ -178,20 +179,27 @@ function HoverOutline() {
 
 function SelectionFrame() {
   const unit = useScreenUnit();
-  const { doc, selection, editingTextId, toolId } = useEditorStore(
+  const { doc, selection, editingTextId, editingPathId, toolId } = useEditorStore(
     useShallow((state) => ({
       doc: state.doc,
       selection: state.selection,
       editingTextId: state.editingTextId,
+      editingPathId: state.editingPathId,
       toolId: state.toolId,
     })),
   );
 
   const view = useMemo(() => {
-    const outlines = selection
-      .map((id) => outlineOf(doc, id))
-      .filter((outline): outline is Outline => outline !== null);
-    const movable = transformableIds(doc, selection);
+    // 点の編集中のパスは選択から外して描く (Figma と同じく、編集中は外接矩形の枠を出さない)
+    const shown =
+      editingPathId !== null && selection.includes(editingPathId)
+        ? selection.filter((id) => id !== editingPathId)
+        : selection;
+    const outlines = shown.flatMap((id) => {
+      const outline = outlineOf(doc, id);
+      return outline ? [{ id, outline }] : [];
+    });
+    const movable = transformableIds(doc, shown);
     const editing = editingTextId !== null && movable.includes(editingTextId);
     if (movable.length === 0 || editing)
       return { outlines, box: null, handles: [] as Point[] | null };
@@ -202,7 +210,7 @@ function SelectionFrame() {
       return { outlines, box: null, handles: ends ? [ends[0], ends[1]] : [] };
     }
     return { outlines, box: selectionBoxOf(doc, movable), handles: null };
-  }, [doc, selection, editingTextId]);
+  }, [doc, selection, editingTextId, editingPathId]);
 
   if (view.outlines.length === 0) return null;
   const showHandles = toolId === "select";
@@ -223,8 +231,8 @@ function SelectionFrame() {
   }
   return (
     <g data-canvas-selection="">
-      {view.outlines.map((outline, i) => (
-        <OutlineShape key={selection[i] ?? i} outline={outline} width={1} />
+      {view.outlines.map(({ id, outline }) => (
+        <OutlineShape key={id} outline={outline} width={1} />
       ))}
       {selectionBox?.kind === "rect" && (
         <rect

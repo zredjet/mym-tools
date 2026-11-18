@@ -150,6 +150,20 @@ describe("回転した選択枠", () => {
   });
 });
 
+describe("点の編集中のパス", () => {
+  it("枠もハンドルも出さない (輪郭と点はツールの重ね描き)。終えたら戻る", () => {
+    const { container } = renderOverlay();
+    act(() => editorStore.getState().setSelection(["p"]));
+    expect(container.querySelector("[data-canvas-selection-box]")).not.toBeNull();
+    act(() => editorStore.getState().startPathEdit("p"));
+    expect(editorStore.getState().editingPathId).toBe("p");
+    expect(container.querySelector("[data-canvas-selection]")).toBeNull();
+    expect(handles(container)).toHaveLength(0);
+    act(() => editorStore.getState().endPathEdit());
+    expect(container.querySelector("[data-canvas-selection-box]")).not.toBeNull();
+  });
+});
+
 describe("回転の角度の表示", () => {
   it("ドラッグの間だけ、ポインターの右下に画面座標で出す", () => {
     const viewport = { x: 50, y: 20, zoom: 2 };

@@ -255,4 +255,46 @@ describe("回転した frame へ置く (§8.5.2)", () => {
     );
     expect(node).toMatchObject({ x: 180, y: 140 });
   });
+
+  /** 90° 回した細長い frame (ページ上で x 190–220、y 10–220) */
+  const tallFrameDoc = () =>
+    insertNode(
+      createEmptyDocument(),
+      createFrame({ id: "f", x: 100, y: 100, width: 210, height: 30, rotation: 90 }),
+      { kind: "page", id: FIRST_PAGE_ID },
+    );
+
+  it("contain: frame の向きで置いた箱が収まらなければ、その frame の子にしない", () => {
+    // 25×200 は frame の向きではページ上で 200×25 になり、frame からはみ出す
+    const { parent, node } = placed(tallFrameDoc(), {
+      pageId: FIRST_PAGE_ID,
+      center: { x: 205, y: 115 },
+      asset: imageAsset(25, 200),
+      parentRule: "contain",
+    });
+    expect(parent).toEqual({ kind: "page", id: FIRST_PAGE_ID });
+    expect(node).toMatchObject({ x: 193, y: 15, width: 25, height: 200 });
+  });
+
+  it("contain: ページの軸の矩形ははみ出しても、frame の向きで置けば収まるなら frame の子にする", () => {
+    // 200×25 は frame の向きではページ上で 25×200 になり、frame に収まる
+    const { parent, node, id, doc } = placed(tallFrameDoc(), {
+      pageId: FIRST_PAGE_ID,
+      center: { x: 205, y: 115 },
+      asset: imageAsset(200, 25),
+      parentRule: "contain",
+    });
+    expect(parent).toEqual({ kind: "node", id: "f" });
+    expect(node).toMatchObject({ width: 200, height: 25, rotation: 0 });
+    const corners = [
+      { x: 0, y: 0 },
+      { x: 200, y: 25 },
+    ].map((p) => applyToPoint(nodePageMatrix(doc, id), p));
+    for (const c of corners) {
+      expect(c.x).toBeGreaterThanOrEqual(190);
+      expect(c.x).toBeLessThanOrEqual(220);
+      expect(c.y).toBeGreaterThanOrEqual(10);
+      expect(c.y).toBeLessThanOrEqual(220);
+    }
+  });
 });

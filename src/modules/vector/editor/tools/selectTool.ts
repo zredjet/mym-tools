@@ -196,6 +196,8 @@ interface LineEndDrag {
   back: Matrix | null;
   from: Point;
   other: Point;
+  /** 動かさない端点の、開始時の親の座標系の値 (Alt でなければ丸めずにそのまま書く) */
+  otherLocal: Point;
   offset: Point;
   targets: SnapTargets;
 }
@@ -596,8 +598,9 @@ function startDrag(
     case "rotate":
       return startRotate(state, start.page);
     case "lineEnd": {
+      const line = getNode(state.doc, intent.id);
       const ends = lineEndsOnPage(state.doc, intent.id);
-      if (!ends) return null;
+      if (!ends || line?.type !== "line") return null;
       const space = coordinateMatrix(state.doc, intent.id);
       const back = isTranslation(space) ? null : invert(space);
       if (!isTranslation(space) && !back) return null;
@@ -613,6 +616,8 @@ function startDrag(
         back,
         from,
         other: intent.end === "start" ? p2 : p1,
+        otherLocal:
+          intent.end === "start" ? { x: line.x2, y: line.y2 } : { x: line.x1, y: line.y1 },
         offset: { x: from.x - start.page.x, y: from.y - start.page.y },
         targets: ownSnapTargets(state, [intent.id]),
       };
@@ -881,14 +886,15 @@ function updateDrag(drag: Drag, start: Press, event: CanvasPointerEvent, ctx: To
         fromCenter: event.alt,
         snap,
       });
-      // 親の座標系の整数にする (回転した frame の中では frame の座標系に直してから)
+      // 動かした端点を親の座標系の整数にする (回転した frame の中では frame の座標系に直してから)。
+      // 動かさない端点は開始時の値のまま (回転や反転で端数になっていても丸めない)。Alt では両方を動かすので両方
       const back = drag.back;
       const local = (p: Point) => {
         const q = back ? applyToPoint(back, p) : { x: p.x - drag.space.e, y: p.y - drag.space.f };
         return { x: Math.round(q.x) || 0, y: Math.round(q.y) || 0 };
       };
       const a = local(moved);
-      const b = local(opposite);
+      const b = event.alt ? local(opposite) : drag.otherLocal;
       const patch =
         drag.end === "start"
           ? { x1: a.x, y1: a.y, x2: b.x, y2: b.y }

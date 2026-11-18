@@ -357,6 +357,21 @@ describe("回転した選択の移動と当たり", () => {
     expect(t.s().doc.nodes.ln).toMatchObject({ x1: 10, y1: 150, x2: 100, y2: 150 });
   });
 
+  it("線の端点を動かしても、動かさない端点は丸めない (Alt なら両方を動かして丸める)", () => {
+    const lineDoc = () =>
+      docOf([createLine({ id: "l", x1: 35.298, y1: -19.165, x2: 135.4, y2: 40.6 })], ["l"]);
+    const t = setup(lineDoc());
+    t.s().setSelection(["l"]);
+    t.drag({ x: 135.4, y: 40.6 }, { x: 155.4, y: 40.6 }, { mod: true });
+    expect(t.s().doc.nodes.l).toMatchObject({ x1: 35.298, y1: -19.165, x2: 155, y2: 41 });
+
+    const u = setup(lineDoc());
+    u.s().setSelection(["l"]);
+    u.drag({ x: 135.4, y: 40.6 }, { x: 155.4, y: 40.6 }, { mod: true, alt: true });
+    // 中点 (85.349, 10.7175) を保って反対の端点も動かし、両方を丸める
+    expect(u.s().doc.nodes.l).toMatchObject({ x1: 15, y1: -19, x2: 155, y2: 41 });
+  });
+
   it("ブーリアンの中 (スコープ) では、結果の形の外にある子もクリックで選べる", () => {
     const doc = docOf(
       [
