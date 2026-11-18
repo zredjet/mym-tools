@@ -1,19 +1,27 @@
 /**
  * 鉛筆でなぞった点から、パスの輪郭を作る (`docs/canvas-editor-design.md` §8.8)。純関数。
  *
- * - 点 (親の座標系) を `fitCurve` で 3 次ベジェに当てはめ、つなぎ目を滑らかな点 (`angle`) にした輪郭にする
- * - 終点が始点から `closeDistance` 以内なら閉じる (終点を始点に置き換えて当てはめ、重なった最後の点を落とす。
- *   始点は角の点 `none`)。閉じるのは、まとめた後の点が 3 個以上のときだけ
+ * - 点 (親の座標系) を `fitCurve` で 3 次ベジェに当てはめた輪郭にする。つなぎ目は、前後の向きがそろっていれば
+ *   滑らかな点 (`angle`)、`fitCurve` が見つけた角なら角の点 (`none`)
+ * - 終点が始点から `closeDistance` 以内なら閉じる (終点を始点に置き換えて当てはめ、重なった最後の点を落とす)。
+ *   閉じるのは、まとめた後の点が 3 個以上で、なぞりの途中で始点から `closeDistance` の `CLOSE_LEAVE_FACTOR` 倍
+ *   以上離れたときだけ (短いなぞりが、高さ 0 の閉じた細い形にならないように)
+ * - 誤差: 点とハンドルの先を丸めると曲線が最大 0.005√2 動くので、その分 (`ROUNDING_MARGIN`) を誤差から引いて
+ *   当てはめる (誤差の半分までは引く)。丸めた後も、なぞった点から `tolerance` 以内に収まる
  * - 点の数が `maxPoints` を超えるなら、誤差を 2 倍ずつ広げて当てはめ直す (最大 `MAX_WIDEN` 回)。それでも
  *   超えるなら null (作らない)
  * - 点とハンドルの先は、親の座標系で小数第 2 位に丸める (§8.6 のツールの入力の丸め)。長さ 0 のハンドルは null
  * - 点が 1 個 (まとめた後) なら null
  */
 import type { PathPoint, Point, Subpath } from "../model/types";
-import { dedupePoints, fitCurve, type CubicCurve } from "./fit";
+import { dedupePoints, fitCurve, isSmoothJoin, type CubicCurve } from "./fit";
 
 /** 誤差を広げる回数の上限 (2 倍ずつ。最後は最初の 2^10 = 1024 倍)。 */
 export const MAX_WIDEN = 10;
+/** 丸め (小数第 2 位) で曲線が動く距離の上限 (0.005√2 ≈ 0.0071) より大きい余裕。 */
+export const ROUNDING_MARGIN = 0.01;
+/** 閉じるには、なぞりの途中で始点から閉じる距離のこの倍以上離れていること。 */
+export const CLOSE_LEAVE_FACTOR = 2;
 
 export interface PencilOptions {
   /** 当てはめの誤差 (親の座標系の長さ) */
@@ -58,13 +66,17 @@ export function curvesToSubpath(curves: readonly CubicCurve[], closed: boolean):
       ...at,
       in: before ? handle(at, before[2]) : null,
       out: after ? handle(at, after[1]) : null,
-      mirror: before && after ? "angle" : "none",
+      mirror: before && after && isSmoothJoin(before, after) ? "angle" : "none",
     });
   }
   if (!closed) return { closed: false, points };
   points.pop();
   const first = points[0] as PathPoint;
-  points[0] = { ...first, in: handle(first, lastCurve[2]), mirror: "none" };
+  points[0] = {
+    ...first,
+    in: handle(first, lastCurve[2]),
+    mirror: isSmoothJoin(lastCurve, firstCurve) ? "angle" : "none",
+  };
   return { closed: true, points };
 }
 
@@ -89,14 +101,17 @@ export function pencilSubpath(raw: readonly Point[], options: PencilOptions): Pe
   if (points.length < 2) return null;
   const start = points[0] as Point;
   const end = points[points.length - 1] as Point;
+  const away = (p: Point) => Math.hypot(p.x - start.x, p.y - start.y);
   const closed =
-    points.length >= 3 && Math.hypot(end.x - start.x, end.y - start.y) <= options.closeDistance;
+    points.length >= 3 &&
+    away(end) <= options.closeDistance &&
+    points.some((p) => away(p) >= options.closeDistance * CLOSE_LEAVE_FACTOR);
   if (closed) points = dedupePoints([...points.slice(0, -1), start]);
   // 閉じたら最後の点は始点と重なって落ちる
   const count = (curves: readonly CubicCurve[]) => curves.length + (closed ? 0 : 1);
   let tolerance = options.tolerance;
   for (let attempt = 0; attempt <= MAX_WIDEN; attempt++) {
-    let curves = fitCurve(points, tolerance);
+    let curves = fitCurve(points, Math.max(tolerance - ROUNDING_MARGIN, tolerance / 2));
     if (curves.length === 0) return null;
     // 閉じた輪郭が 1 本の曲線になったら、点が 1 個の輪郭 (描かれない) にならないよう半分で分ける
     if (closed && curves.length === 1) curves = splitHalf(curves[0] as CubicCurve);

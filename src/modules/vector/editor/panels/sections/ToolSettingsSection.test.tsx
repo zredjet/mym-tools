@@ -64,3 +64,18 @@ describe("ツールの設定の節", () => {
     expect(getShapeToolSettings()).toEqual(DEFAULT_SHAPE_TOOL_SETTINGS);
   });
 });
+
+describe("打ちかけの値", () => {
+  it("多角形で打ちかけたままツールバーで星にしたら、多角形に確定し、星の欄は星の値を出す", () => {
+    render(<PropertiesPanel />);
+    act(() => state().setTool("polygon"));
+    const input = field("頂点の数");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "9" } });
+    act(() => state().setTool("star"));
+    expect((field("頂点の数") as HTMLInputElement).value).toBe("5");
+    expect(getShapeToolSettings()).toMatchObject({ polygonSides: 9, starPoints: 5 });
+    fireEvent.keyDown(field("頂点の数"), { key: "Enter" });
+    expect(getShapeToolSettings()).toMatchObject({ polygonSides: 9, starPoints: 5 });
+  });
+});

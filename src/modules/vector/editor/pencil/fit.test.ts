@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Point } from "../model/types";
-import { bezierPoint, dedupePoints, fitCurve, type CubicCurve } from "./fit";
+import {
+  bezierPoint,
+  dedupePoints,
+  findCorners,
+  fitCurve,
+  isSmoothJoin,
+  type CubicCurve,
+} from "./fit";
 
 /** 点から曲線の列までの距離 (曲線を細かく刻んだ折れ線までの距離で近似。刻みは十分細かい)。 */
 function distanceToCurves(p: Point, curves: readonly CubicCurve[]): number {
@@ -171,5 +178,117 @@ describe("fitCurve", () => {
       { x: 1, y: 0 },
       { x: 0, y: 0 },
     ]);
+  });
+});
+
+/** 折れ線を 1 単位ごとに刻んだ点 (角を含む)。 */
+function densePolyline(corners: readonly Point[]): Point[] {
+  const out: Point[] = [];
+  for (let i = 1; i < corners.length; i++) {
+    const a = corners[i - 1]!;
+    const b = corners[i]!;
+    const n = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y));
+    for (let k = 0; k < n; k++)
+      out.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n });
+  }
+  out.push(corners[corners.length - 1]!);
+  return out;
+}
+
+/** 折れ線の各辺を、間隔 `step` ほどの等間隔で取った点 (速いなぞり。角の点は入る)。 */
+function sparsePolyline(corners: readonly Point[], step: number): Point[] {
+  const out: Point[] = [corners[0]!];
+  for (let i = 1; i < corners.length; i++) {
+    const a = corners[i - 1]!;
+    const b = corners[i]!;
+    const n = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y) / step));
+    for (let k = 1; k <= n; k++)
+      out.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n });
+  }
+  return out;
+}
+
+/** 点の列を結んだ折れ線を、1 単位ごとに刻んだ点 (予定の線として描いた形)。 */
+function denseThrough(points: readonly Point[]): Point[] {
+  return densePolyline(points);
+}
+
+describe("角", () => {
+  const V = [
+    { x: 0, y: 0 },
+    { x: 100, y: 100 },
+    { x: 200, y: 0 },
+  ];
+  const W = [
+    { x: 0, y: 0 },
+    { x: 50, y: 100 },
+    { x: 100, y: 10 },
+    { x: 150, y: 100 },
+    { x: 200, y: 0 },
+  ];
+
+  it("速いなぞり (間隔 25) の V と W: 角で分け、なぞった折れ線のどこからも誤差以内", () => {
+    for (const shape of [V, W]) {
+      const pts = sparsePolyline(shape, 25);
+      const curves = fitCurve(pts, 2);
+      // 角の数だけつなぎ目が角になる
+      const corners = curves.slice(1).filter((c, i) => !isSmoothJoin(curves[i]!, c));
+      expect(corners).toHaveLength(shape.length - 2);
+      for (const p of denseThrough(pts))
+        expect(distanceToCurves(p, curves)).toBeLessThanOrEqual(2 + 1e-9);
+    }
+  });
+
+  it("角の点がなぞりの点にない (角を挟んで点が飛ぶ) ときも、なぞった折れ線から誤差以内", () => {
+    for (const shape of [V, W]) {
+      // 角の点を落とし、間隔 25 で取る
+      const pts = densePolyline(shape).filter((_, i, all) => i % 25 === 0 || i === all.length - 1);
+      const curves = fitCurve(pts, 2);
+      let worst = 0;
+      for (const p of denseThrough(pts)) worst = Math.max(worst, distanceToCurves(p, curves));
+      expect(worst).toBeLessThanOrEqual(2 + 1e-9);
+    }
+  });
+
+  it("折り返すなぞりで行き過ぎない", () => {
+    const pts = sparsePolyline(
+      [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 0, y: 4 },
+      ],
+      10,
+    );
+    const curves = fitCurve(pts, 2);
+    let maxX = -Infinity;
+    for (const c of curves)
+      for (let i = 0; i <= 100; i++) maxX = Math.max(maxX, bezierPoint(c, i / 100).x);
+    expect(maxX).toBeLessThanOrEqual(100 + 1e-6);
+  });
+
+  it("滑らかな曲線と手ぶれは角にしない", () => {
+    expect(findCorners(circle(200), 6)).toEqual([]);
+    const rnd = random(5);
+    const wobble = Array.from({ length: 400 }, (_, i) => ({
+      x: i * 0.8 + (rnd() - 0.5) * 1.5,
+      y: 40 * Math.sin(i / 25) + (rnd() - 0.5) * 1.5,
+    }));
+    expect(findCorners(wobble, 6)).toEqual([]);
+    const curves = fitCurve(wobble, 2);
+    for (let i = 1; i < curves.length; i++)
+      expect(isSmoothJoin(curves[i - 1]!, curves[i]!)).toBe(true);
+  });
+
+  it("点の間の中点でも誤差を確かめる (間隔の広い点の間で曲線が離れない)", () => {
+    // 間隔 30 で取った円: 点の上だけ合わせると、点の間で円から離れうる
+    const pts = circle(16, 100);
+    const curves = fitCurve(pts, 1);
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1]!;
+      const b = pts[i]!;
+      expect(
+        distanceToCurves({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, curves),
+      ).toBeLessThanOrEqual(1 + 1e-9);
+    }
   });
 });

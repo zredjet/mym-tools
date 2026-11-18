@@ -36,7 +36,10 @@ export function ToolSettingsSection() {
   return (
     <Section title="ツールの設定">
       <FieldGrid>
+        {/* ツールごとに別の欄にする。ツールバーのボタンは押しても欄からフォーカスを外さないので、同じ欄のままだと
+            打ちかけの値と確定先 (多角形の設定) が星の欄に持ち越される。外れる欄は打ちかけの値を自分の設定に確定する */}
         <NumberField
+          key={toolId}
           label="頂点"
           ariaLabel="頂点の数"
           value={star ? settings.starPoints : settings.polygonSides}
