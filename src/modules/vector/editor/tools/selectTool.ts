@@ -1,5 +1,5 @@
 /**
- * 選択ツール (§4.4〜§4.6)。クリックでの選択、範囲選択、移動、リサイズ、線の端点、ガイド線の移動。
+ * 選択ツール (§4.4〜§4.6、§8.5)。クリックでの選択、範囲選択、移動、リサイズ、回転、線の端点、ガイド線の移動。
  *
  * 押してから `DRAG_THRESHOLD` 画面 px 動くまではクリックとして扱い、動かないクリックは文書を変えない
  * (履歴も revision も増えない)。しきい値を越えたらドラッグを始める。文書を変えるドラッグは
@@ -11,17 +11,33 @@
  * 今のポインター位置で `onPointerMove` を呼ぶので、そのまま追従する。
  *
  * 状態はモジュールの変数に持つ (ツールは 1 つだけで、同時に追うポインターも 1 本だけ)。
+ *
+ * 回転 (§8.5.3、§8.5.4):
+ * - 選択枠は `select/selectionBox.ts`。1 個だけ選んだ、ページ上の角度が 0 でない箱を持つノードは回転した枠、
+ *   それ以外は軸に平行な外接矩形
+ * - 回転のハンドルは枠の 4 隅のすぐ外。ドラッグで回し (Shift で 15° 刻み)、角度を重ね描きする。
+ *   スナップはしない。1 回のドラッグが履歴 1 件
+ * - 回転した枠のリサイズは、ノードの座標系で行う (`resizeNodeInOwnFrame`)。動かさない側の辺・角 (Alt なら
+ *   中心) は親の座標系で動かない。丸めるのは幅と高さだけ。スナップはしない
+ * - 回転した frame の中の線の端点は、frame の座標系に直して動かす
  */
+import { applyToPoint, invert, type Matrix, normalizeRotation } from "../geometry/matrix";
 import { canEnter, hitFrameLabel, hitTestPath, pickTarget } from "../hit/hitTest";
 import {
+  boxHandleAt,
+  boxHandleCursor,
+  cornerDirection,
   guideAt,
   guideCursor,
-  handleAt,
-  handleCursor,
+  handleBoxAngle,
   lineEndAt,
   LINE_END_CURSOR,
+  rotateCursor,
+  rotationCornerAt,
+  type HandleBox,
   type LineEnd,
   type ResizeHandle,
+  type RotateCorner,
 } from "../hit/handles";
 import {
   dropFrames,
@@ -32,14 +48,22 @@ import {
   type MarqueeCandidate,
 } from "../hit/marquee";
 import {
+  coordinateMatrix,
   getSelectionBounds,
-  nodeOrigin,
-  rectContainsPoint,
+  isBoxNode,
+  isTranslation,
   rectFromPoints,
   type Rect,
 } from "../model/geometry";
+import {
+  roundRotation,
+  rotateNodes,
+  rotationCenter,
+  snapRotationDelta,
+  snapRotationTo,
+} from "../model/rotate";
 import { duplicateNodes } from "../model/structure";
-import { resizeNodes, updateNode } from "../model/transform";
+import { resizeNodeInOwnFrame, resizeNodes, updateNode } from "../model/transform";
 import { getNode, getPage, getParent, isAncestorOf, type ParentRef } from "../model/tree";
 import type { CanvasDocument, NodeId, Point } from "../model/types";
 import { geometryWithinLimits } from "../panels/limits";
@@ -66,7 +90,13 @@ import {
 } from "./select/guideDrag";
 import { constrainAxis, coordinateFrameId, moveDocument } from "./select/move";
 import { resetSelectOverlay, setSelectOverlay } from "./select/overlayState";
-import { grabOffset, moveLineEnd, resizeRect } from "./select/resize";
+import { grabOffset, moveLineEnd, resizeRect, roundOwnRect } from "./select/resize";
+import {
+  lineEndsOnPage,
+  selectionBoxContains,
+  selectionBoxOf,
+  type SelectionBox,
+} from "./select/selectionBox";
 import type { CanvasPointerEvent, Tool, ToolContext } from "./types";
 
 /** クリックとドラッグを分ける距離 (画面 px)。押してからこれ以上動いたらドラッグ。 */
@@ -97,6 +127,7 @@ const onNode = (id: NodeId): Grab => ({ kind: "node", id });
 type DragIntent =
   | { kind: "move"; grab: Grab }
   | { kind: "resize"; handle: ResizeHandle }
+  | { kind: "rotate"; corner: RotateCorner }
   | { kind: "lineEnd"; id: NodeId; end: LineEnd }
   | { kind: "marquee"; scopeId: NodeId | null; base: readonly NodeId[] }
   | { kind: "guide"; index: number };
@@ -126,19 +157,43 @@ interface ResizeDrag {
   kind: "resize";
   handle: ResizeHandle;
   ids: readonly NodeId[];
+  /** 開始時の枠。`own` があればノードの座標系 (原点が回転の前の箱の左上)、なければページ座標の外接矩形 */
   start: Rect;
+  /** 押した位置とハンドルの辺の差 (`start` と同じ座標系) */
   offset: Point;
   /** 画像と埋め込み SVG だけなら、既定で縦横比を固定する */
   lockAspect: boolean;
   hasText: boolean;
   targets: SnapTargets;
+  /**
+   * 1 個の回転したノードを自分の向きでリサイズする (§8.5.4)。`back` は開始時の ノードの座標系 ← ページ。
+   * null なら外接矩形の比例 (§4.6)
+   */
+  own: { id: NodeId; back: Matrix } | null;
+}
+
+interface RotateDrag {
+  kind: "rotate";
+  ids: readonly NodeId[];
+  /** 回転の中心 (ページ座標) */
+  center: Point;
+  /** 押した位置の、中心から見た向き (度) */
+  startAngle: number;
+  /**
+   * 1 個の箱を持つノードなら、開始時の自分の `rotation` (Shift で結果をそろえ、角度の表示にも使う)。
+   * それ以外は null (Shift で回した量をそろえ、回した量を表示する)
+   */
+  rotation: number | null;
 }
 
 interface LineEndDrag {
   kind: "lineEnd";
   id: NodeId;
   end: LineEnd;
-  origin: Point;
+  /** ページ ← 線の親の座標系 */
+  space: Matrix;
+  /** 線の親の座標系 ← ページ (`space` が平行移動だけなら null。引き算で求める) */
+  back: Matrix | null;
   from: Point;
   other: Point;
   offset: Point;
@@ -158,7 +213,7 @@ interface GuideDragState {
   offset: number;
 }
 
-type Drag = MoveDrag | ResizeDrag | LineEndDrag | MarqueeDrag | GuideDragState;
+type Drag = MoveDrag | ResizeDrag | RotateDrag | LineEndDrag | MarqueeDrag | GuideDragState;
 
 type Phase =
   | { kind: "idle" }
@@ -218,30 +273,55 @@ function handleTargets(state: EditorStore): readonly NodeId[] {
   return ids;
 }
 
-/** 点の下のハンドル (線の端点を含む)。 */
-function hitHandle(
-  state: EditorStore,
-  point: Point,
-): { kind: "resize"; handle: ResizeHandle } | { kind: "lineEnd"; id: NodeId; end: LineEnd } | null {
+type HandleHit =
+  | { kind: "resize"; handle: ResizeHandle; box: HandleBox }
+  | { kind: "lineEnd"; id: NodeId; end: LineEnd };
+
+/** 点の下のハンドル (線の端点かリサイズ)。回転のハンドルは `hitRotation`。 */
+function hitHandle(state: EditorStore, point: Point): HandleHit | null {
   const ids = handleTargets(state);
   if (ids.length === 0) return null;
   const zoom = state.viewport.zoom;
   if (isSingleLine(state.doc, ids)) {
     const id = ids[0] as NodeId;
-    const line = getNode(state.doc, id);
-    if (line?.type !== "line") return null;
-    const origin = nodeOrigin(state.doc, id);
-    const end = lineEndAt(
-      { x: origin.x + line.x1, y: origin.y + line.y1 },
-      { x: origin.x + line.x2, y: origin.y + line.y2 },
-      point,
-      zoom,
-    );
+    const ends = lineEndsOnPage(state.doc, id);
+    const end = ends ? lineEndAt(ends[0], ends[1], point, zoom) : null;
     return end ? { kind: "lineEnd", id, end } : null;
   }
-  const bounds = getSelectionBounds(state.doc, ids);
-  const handle = bounds ? handleAt(bounds, point, zoom) : null;
-  return handle ? { kind: "resize", handle } : null;
+  const selection = selectionBoxOf(state.doc, ids);
+  const handle = selection ? boxHandleAt(selection.box, point, zoom) : null;
+  return handle && selection ? { kind: "resize", handle, box: selection.box } : null;
+}
+
+/**
+ * 点の下の回転のハンドル (枠の 4 隅のすぐ外。§8.5.3)。線を 1 本だけ選んだときは出さない (端点を動かす)。
+ * リサイズのハンドル・ガイド線・frame の名前のラベルの方を先に調べること (ラベルは frame の左上の角の外にある)。
+ */
+function hitRotation(
+  state: EditorStore,
+  point: Point,
+): { corner: RotateCorner; box: HandleBox } | null {
+  const ids = handleTargets(state);
+  if (ids.length === 0 || isSingleLine(state.doc, ids)) return null;
+  const selection = selectionBoxOf(state.doc, ids);
+  if (!selection) return null;
+  const corner = rotationCornerAt(selection.box, point, state.viewport.zoom);
+  return corner ? { corner, box: selection.box } : null;
+}
+
+/** ハンドルの上のカーソル。 */
+function handleHitCursor(hit: HandleHit): string {
+  return hit.kind === "resize" ? boxHandleCursor(hit.box, hit.handle) : LINE_END_CURSOR;
+}
+
+/** 回転のハンドルの上のカーソル (角の外向きに枠の角度を足した向き)。 */
+function rotationCursor(hit: { corner: RotateCorner; box: HandleBox }): string {
+  return rotateCursor(cornerDirection(hit.corner) + handleBoxAngle(hit.box));
+}
+
+/** `from` から `to` への向き (度、ページ座標。時計回りが正)。 */
+function directionOf(from: Point, to: Point): number {
+  return (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI;
 }
 
 function hitGuide(state: EditorStore, point: Point): number | null {
@@ -258,7 +338,7 @@ function pickAt(
 ) {
   const label = hitFrameLabel(state.doc, state.pageId, point, state.viewport.zoom, measurer);
   if (label !== null) return { id: label, scopeId: null, label: true };
-  const path = hitTestPath(state.doc, state.pageId, point, state.viewport.zoom);
+  const path = hitTestPath(state.doc, state.pageId, point, state.viewport.zoom, state.scopeId);
   return { ...pickTarget(state.doc, path, state.scopeId, { deep, point }), label: false };
 }
 
@@ -284,7 +364,7 @@ function updateHover(event: CanvasPointerEvent, ctx: ToolContext): void {
   const state = ctx.store.getState();
   const handle = hitHandle(state, event.page);
   if (handle) {
-    setCursor(ctx, handle.kind === "resize" ? handleCursor(handle.handle) : LINE_END_CURSOR);
+    setCursor(ctx, handleHitCursor(handle));
     state.setHovered(null);
     return;
   }
@@ -295,8 +375,15 @@ function updateHover(event: CanvasPointerEvent, ctx: ToolContext): void {
     state.setHovered(null);
     return;
   }
+  const picked = pickAt(state, event.page, event.mod, ctx.measurer);
+  const rotation = picked.label ? null : hitRotation(state, event.page);
+  if (rotation) {
+    setCursor(ctx, rotationCursor(rotation));
+    state.setHovered(null);
+    return;
+  }
   setCursor(ctx, null);
-  state.setHovered(pickAt(state, event.page, event.mod, ctx.measurer).id);
+  state.setHovered(picked.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -330,7 +417,9 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
   // 1. ハンドル (線の端点)。動かさずに離したら、下にあるものをクリックしたことにする
   const handle = double ? null : hitHandle(state, event.page);
   if (handle) {
-    pending(handle, () => clickThrough(event, ctx));
+    const intent: DragIntent =
+      handle.kind === "resize" ? { kind: "resize", handle: handle.handle } : handle;
+    pending(intent, () => clickThrough(event, ctx));
     return;
   }
 
@@ -370,9 +459,16 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
     return;
   }
 
-  // 4. ノード
+  // 4. 回転のハンドル (枠の 4 隅のすぐ外)。動かさずに離したら、下にあるものをクリックしたことにする
+  const rotation = double ? null : hitRotation(state, event.page);
+  if (rotation) {
+    pending({ kind: "rotate", corner: rotation.corner }, () => clickThrough(event, ctx));
+    return;
+  }
+
+  // 5. ノード
   const point = event.page;
-  const path = hitTestPath(state.doc, state.pageId, point, state.viewport.zoom);
+  const path = hitTestPath(state.doc, state.pageId, point, state.viewport.zoom, state.scopeId);
   const pick = pickTarget(state.doc, path, state.scopeId, {
     deep: event.mod,
     selection: selected,
@@ -420,11 +516,11 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
     return;
   }
 
-  // 5. 何もない場所。選択の外接矩形の中なら選択を動かす (クリックだけなら選択を解除する)。
-  //    このときスコープは変えない
+  // 6. 何もない場所。選択の枠 (回転した枠なら回転した箱) の中なら選択を動かす
+  //    (クリックだけなら選択を解除する)。このときスコープは変えない
   const movable = transformableIds(state.doc, selection);
-  const bounds = movable.length > 0 ? getSelectionBounds(state.doc, movable) : null;
-  if (!event.shift && bounds && rectContainsPoint(bounds, point)) {
+  const box = movable.length > 0 ? selectionBoxOf(state.doc, movable) : null;
+  if (!event.shift && box && selectionBoxContains(box, point)) {
     pending({ kind: "move", grab: SPACE }, () => store.getState().setSelection([]));
     return;
   }
@@ -495,38 +591,26 @@ function startDrag(
   switch (intent.kind) {
     case "move":
       return startMove(state, event.alt, start.page, intent.grab);
-    case "resize": {
-      const ids = handleTargets(state);
-      const bounds = getSelectionBounds(state.doc, ids);
-      if (!bounds) return null;
-      state.beginGesture();
-      ownsGesture = true;
-      const nodes = ids.map((id) => getNode(state.doc, id));
-      return {
-        kind: "resize",
-        handle: intent.handle,
-        ids,
-        start: bounds,
-        offset: grabOffset(bounds, intent.handle, start.page),
-        lockAspect: nodes.every((node) => node?.type === "image" || node?.type === "svg"),
-        hasText: ids.some((id) => containsText(state.doc, id)),
-        targets: ownSnapTargets(state, ids),
-      };
-    }
+    case "resize":
+      return startResize(state, intent.handle, start.page);
+    case "rotate":
+      return startRotate(state, start.page);
     case "lineEnd": {
-      const line = getNode(state.doc, intent.id);
-      if (line?.type !== "line") return null;
+      const ends = lineEndsOnPage(state.doc, intent.id);
+      if (!ends) return null;
+      const space = coordinateMatrix(state.doc, intent.id);
+      const back = isTranslation(space) ? null : invert(space);
+      if (!isTranslation(space) && !back) return null;
       state.beginGesture();
       ownsGesture = true;
-      const origin = nodeOrigin(state.doc, intent.id);
-      const p1 = { x: origin.x + line.x1, y: origin.y + line.y1 };
-      const p2 = { x: origin.x + line.x2, y: origin.y + line.y2 };
+      const [p1, p2] = ends;
       const from = intent.end === "start" ? p1 : p2;
       return {
         kind: "lineEnd",
         id: intent.id,
         end: intent.end,
-        origin,
+        space,
+        back,
         from,
         other: intent.end === "start" ? p2 : p1,
         offset: { x: from.x - start.page.x, y: from.y - start.page.y },
@@ -548,6 +632,70 @@ function startDrag(
       return { kind: "guide", drag, offset: guide.position - pressed };
     }
   }
+}
+
+/**
+ * リサイズの開始。回転した枠 (1 個の回転したノード) はノードの座標系で、それ以外は外接矩形 (ページ座標) で
+ * 計算する (§8.5.4)。
+ */
+function startResize(state: EditorStore, handle: ResizeHandle, pressed: Point): ResizeDrag | null {
+  const ids = handleTargets(state);
+  const selection: SelectionBox | null = selectionBoxOf(state.doc, ids);
+  if (!selection) return null;
+  const nodes = ids.map((id) => getNode(state.doc, id));
+  const lockAspect = nodes.every((node) => node?.type === "image" || node?.type === "svg");
+  const hasText = ids.some((id) => containsText(state.doc, id));
+  if (selection.kind === "oriented") {
+    const back = invert(selection.box.matrix);
+    if (!back) return null;
+    state.beginGesture();
+    ownsGesture = true;
+    const local = applyToPoint(back, pressed);
+    const rect = { x: 0, y: 0, width: selection.box.width, height: selection.box.height };
+    return {
+      kind: "resize",
+      handle,
+      ids,
+      start: rect,
+      offset: grabOffset(rect, handle, local),
+      lockAspect,
+      hasText,
+      // 自分の向きのリサイズはスナップしない (ページの軸にそろわないため)
+      targets: EMPTY_SNAP_TARGETS,
+      own: { id: selection.id, back },
+    };
+  }
+  const bounds = selection.rect;
+  state.beginGesture();
+  ownsGesture = true;
+  return {
+    kind: "resize",
+    handle,
+    ids,
+    start: bounds,
+    offset: grabOffset(bounds, handle, pressed),
+    lockAspect,
+    hasText,
+    targets: ownSnapTargets(state, ids),
+    own: null,
+  };
+}
+
+/** 回転の開始 (§8.5.3)。中心は 1 個の箱を持つノードなら箱の中心、それ以外は選択の外接矩形の中心。 */
+function startRotate(state: EditorStore, pressed: Point): RotateDrag | null {
+  const ids = handleTargets(state);
+  const center = ids.length > 0 ? rotationCenter(state.doc, ids) : null;
+  if (!center) return null;
+  state.beginGesture();
+  ownsGesture = true;
+  const only = ids.length === 1 ? getNode(state.doc, ids[0] as NodeId) : undefined;
+  return {
+    kind: "rotate",
+    ids,
+    center,
+    startAngle: directionOf(center, pressed),
+    rotation: only && isBoxNode(only) ? only.rotation : null,
+  };
 }
 
 function containsText(doc: CanvasDocument, id: NodeId): boolean {
@@ -693,6 +841,10 @@ function updateDrag(drag: Drag, start: Press, event: CanvasPointerEvent, ctx: To
       return;
     }
     case "resize": {
+      if (drag.own) {
+        updateOwnResize(drag, drag.own, event, ctx);
+        return;
+      }
       const pointer = { x: event.page.x + drag.offset.x, y: event.page.y + drag.offset.y };
       const snap = event.mod ? null : { targets: drag.targets, options: snapOptions(state) };
       const rect = resizeRect({
@@ -729,10 +881,12 @@ function updateDrag(drag: Drag, start: Press, event: CanvasPointerEvent, ctx: To
         fromCenter: event.alt,
         snap,
       });
-      const local = (p: Point) => ({
-        x: Math.round(p.x - drag.origin.x) || 0,
-        y: Math.round(p.y - drag.origin.y) || 0,
-      });
+      // 親の座標系の整数にする (回転した frame の中では frame の座標系に直してから)
+      const back = drag.back;
+      const local = (p: Point) => {
+        const q = back ? applyToPoint(back, p) : { x: p.x - drag.space.e, y: p.y - drag.space.f };
+        return { x: Math.round(q.x) || 0, y: Math.round(q.y) || 0 };
+      };
       const a = local(moved);
       const b = local(opposite);
       const patch =
@@ -743,7 +897,10 @@ function updateDrag(drag: Drag, start: Press, event: CanvasPointerEvent, ctx: To
         const next = updateNode(doc, drag.id, patch);
         return geometryWithinLimits(next, [drag.id]) ? next : store.getState().doc;
       });
-      const point = { x: a.x + drag.origin.x, y: a.y + drag.origin.y, width: 0, height: 0 };
+      const onPage = back
+        ? applyToPoint(drag.space, a)
+        : { x: a.x + drag.space.e, y: a.y + drag.space.f };
+      const point = { ...onPage, width: 0, height: 0 };
       setSelectOverlay({
         guides:
           snap && !event.shift
@@ -755,6 +912,9 @@ function updateDrag(drag: Drag, start: Press, event: CanvasPointerEvent, ctx: To
       });
       return;
     }
+    case "rotate":
+      updateRotate(drag, event, ctx);
+      return;
     case "marquee": {
       const rect = rectFromPoints(start.page, event.page);
       const hits = marqueeSelect(drag.candidates, rect);
@@ -773,6 +933,64 @@ function updateDrag(drag: Drag, start: Press, event: CanvasPointerEvent, ctx: To
       );
       return;
   }
+}
+
+/**
+ * 1 個の回転したノードのリサイズ (§8.5.4)。ポインターをノードの座標系に直し、第 1 段階と同じ規則
+ * (`resizeRect`) で箱を求め、幅と高さだけを丸めて `resizeNodeInOwnFrame` で当てる。
+ */
+function updateOwnResize(
+  drag: ResizeDrag,
+  own: NonNullable<ResizeDrag["own"]>,
+  event: CanvasPointerEvent,
+  ctx: ToolContext,
+): void {
+  const store = ctx.store;
+  const local = applyToPoint(own.back, event.page);
+  const pointer = { x: local.x + drag.offset.x, y: local.y + drag.offset.y };
+  const rect = resizeRect({
+    start: drag.start,
+    handle: drag.handle,
+    pointer,
+    keepAspect: drag.lockAspect ? !event.shift : event.shift,
+    fromCenter: event.alt,
+    snap: null,
+  });
+  const box = roundOwnRect(rect, drag.start, drag.handle, event.alt);
+  const measurer = ctx.measurer;
+  const ids = [own.id];
+  store.getState().updateGesture((doc) => {
+    let next = resizeNodeInOwnFrame(doc, own.id, box);
+    if (drag.hasText) next = fitTextNodes(next, ids, measurer);
+    // 範囲を超えるなら当てない (前の結果を残す)
+    return next === doc || geometryWithinLimits(next, ids) ? next : store.getState().doc;
+  });
+  setSelectOverlay({ guides: [] });
+}
+
+/**
+ * 回転のドラッグ (§8.5.3)。開始時の文書に毎回当て直す。Shift なら、1 個の箱を持つノードは結果の角度を、
+ * それ以外は回した量を 15° の倍数にする。スナップはしない。
+ */
+function updateRotate(drag: RotateDrag, event: CanvasPointerEvent, ctx: ToolContext): void {
+  const store = ctx.store;
+  const direction = directionOf(drag.center, event.page);
+  let delta = normalizeRotation(direction - drag.startAngle);
+  if (event.shift)
+    delta =
+      drag.rotation === null ? snapRotationDelta(delta) : snapRotationTo(drag.rotation, delta);
+  const { ids, center } = drag;
+  store.getState().updateGesture((doc) => {
+    const next = rotateNodes(doc, ids, delta, center);
+    return next === doc || geometryWithinLimits(next, ids) ? next : store.getState().doc;
+  });
+  setCursor(ctx, rotateCursor(direction));
+  setSelectOverlay({
+    angle: {
+      value: roundRotation(drag.rotation === null ? delta : drag.rotation + delta),
+      at: event.page,
+    },
+  });
 }
 
 /** ガイド線を動かす先 (押した位置との差を保つ)。 */

@@ -4,13 +4,14 @@
  * - 置く位置は、表示範囲の中央か、指定した点 (OS からのドロップ)。その点を中心にする
  * - 大きすぎる画像は表示範囲に収まる大きさに縮める (アセットは元のまま)。縦横比は保つ。結果は整数
  * - 親は作成ツールと同じ規則 (点の下の最も前面の frame、スコープの中ならスコープ)。表示範囲の中央に置くときは、
- *   置く矩形を丸ごと含む frame だけを親にする (`parentRule`)。座標は親の座標系に直す
+ *   置く矩形を丸ごと含む frame だけを親にする (`parentRule`)。座標は親の座標系に直す。回転した frame の中では、
+ *   中心を frame の座標系に直してから箱を作る (frame の向きにそろい、中心が指定の点に来る。§8.5.2)
  * - 同じ中身のアセットがあれば、それを使い回す (`addAsset`)
  * - アセットの上限、ノード数と深さ、§3.5 の範囲、ペイロード全体 (`checkSavable`) を超えるなら置かない
  */
 import { addAsset, pruneAssets, totalAssetBytes } from "../model/assets";
 import { createImage, createSvg } from "../model/create";
-import { pageToLocal, type Rect } from "../model/geometry";
+import { isTranslation, parentMatrix, pageToLocal, type Rect } from "../model/geometry";
 import { createId } from "../model/ids";
 import { CANVAS_LIMITS } from "../model/limits";
 import { checkSavable } from "../model/payload";
@@ -57,21 +58,26 @@ export function fitSize(natural: Size, available: Size | null): Size {
   return { width: round(natural.width * scale), height: round(natural.height * scale) };
 }
 
-/** `center` (ページ座標) を中心にした矩形を、親の座標系の整数にする。 */
+/**
+ * `center` (ページ座標) を中心にした矩形を、親の座標系の整数にする。親が回転した frame の中なら、中心を
+ * 親の座標系に直してから大きさの半分を引く (箱は親の向きにそろう)。
+ */
 export function centeredBox(
   doc: CanvasDocument,
   parent: ParentRef,
   center: Point,
   size: Size,
 ): Rect {
-  const local = pageToLocal(doc, parent, {
-    x: center.x - size.width / 2,
-    y: center.y - size.height / 2,
-  });
   const round = (v: number) => {
     const r = Math.round(v);
     return r === 0 ? 0 : r;
   };
+  const local = isTranslation(parentMatrix(doc, parent))
+    ? pageToLocal(doc, parent, { x: center.x - size.width / 2, y: center.y - size.height / 2 })
+    : (() => {
+        const c = pageToLocal(doc, parent, center);
+        return { x: c.x - size.width / 2, y: c.y - size.height / 2 };
+      })();
   return { x: round(local.x), y: round(local.y), width: size.width, height: size.height };
 }
 

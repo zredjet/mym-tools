@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { createEmptyDocument, createFrame } from "../model/create";
+import { applyToPoint } from "../geometry/matrix";
+import { createEmptyDocument, createFrame, FIRST_PAGE_ID } from "../model/create";
+import { nodePageMatrix } from "../model/geometry";
 import { CANVAS_LIMITS } from "../model/limits";
 import { checkSavable } from "../model/payload";
 import { insertNode } from "../model/structure";
@@ -223,5 +225,34 @@ describe("placeAsset", () => {
     const broken = updateNode(sampleDocument(), "r0", { opacity: 2 });
     expect(checkSavable(broken)).not.toBeNull();
     expect(placeAsset(broken, input()).ok).toBe(true);
+  });
+});
+
+describe("回転した frame へ置く (§8.5.2)", () => {
+  it("frame の向きにそろえ、中心を指定の点に置く", () => {
+    const doc = insertNode(
+      createEmptyDocument(),
+      createFrame({ id: "f", x: 100, y: 100, width: 400, height: 300, rotation: 30 }),
+      { kind: "page", id: FIRST_PAGE_ID },
+    );
+    const center = { x: 300, y: 250 }; // frame の中心
+    const {
+      node,
+      parent,
+      id,
+      doc: next,
+    } = placed(doc, {
+      pageId: FIRST_PAGE_ID,
+      center,
+      asset: imageAsset(40, 20),
+    });
+    expect(parent).toEqual({ kind: "node", id: "f" });
+    expect(node).toMatchObject({ width: 40, height: 20, rotation: 0 });
+    // 置いた箱の中心は、整数に丸めた分 (0.5 以内) を除いて指定の点
+    const placedCenter = applyToPoint(nodePageMatrix(next, id), { x: 20, y: 10 });
+    expect(Math.hypot(placedCenter.x - center.x, placedCenter.y - center.y)).toBeLessThanOrEqual(
+      Math.SQRT1_2,
+    );
+    expect(node).toMatchObject({ x: 180, y: 140 });
   });
 });
