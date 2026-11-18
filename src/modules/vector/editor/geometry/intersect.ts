@@ -475,22 +475,27 @@ function intersectCurves(
   tol: number,
   maxPairs: number,
 ): IntersectionResult {
-  // 端点が相手の上にある組 (重なりの判定と端点の交点の両方に使う)
+  // 端点が相手の上にある組 (重なりの判定と端点の交点の両方に使う)。曲線は制御点の範囲の中にあるので、
+  // 範囲 (と許容値) の外の端点は相手から許容値より遠い (最近点を求めずに済む)
+  const ba = controlBounds(a);
+  const bb = controlBounds(b);
   const ends: EndPair[] = [];
   for (const ta of [0, 1]) {
-    const np = nearestPoint(b, pointAt(a, ta));
+    const p = pointAt(a, ta);
+    if (!inBounds(p, bb, tol)) continue;
+    const np = nearestPoint(b, p);
     if (np.distance <= tol) ends.push({ ta, tb: snapEnd(b, np.t, tol), residual: np.distance });
   }
   for (const tb of [0, 1]) {
-    const np = nearestPoint(a, pointAt(b, tb));
+    const p = pointAt(b, tb);
+    if (!inBounds(p, ba, tol)) continue;
+    const np = nearestPoint(a, p);
     if (np.distance <= tol) ends.push({ ta: snapEnd(a, np.t, tol), tb, residual: np.distance });
   }
   const overlap = curveOverlap(a, b, tol, ends);
   if (overlap) return { intersections: [], overlaps: [overlap], complete: true };
 
   const found: Candidate[] = ends.map((e) => ({ t1: e.ta, t2: e.tb, residual: e.residual }));
-  const ba = controlBounds(a);
-  const bb = controlBounds(b);
   const extent = Math.max(
     ba.maxX - ba.minX,
     ba.maxY - ba.minY,
@@ -753,17 +758,37 @@ function bernstein(c: readonly [number, number, number, number], t: number): num
   return mt * mt * mt * c[0] + 3 * mt * mt * t * c[1] + 3 * mt * t * t * c[2] + t * t * t * c[3];
 }
 
-/** s(t) = `s` となる t (s(t) は単調)。範囲の外の s は端の t。 */
+/**
+ * s(t) = `s` となる t (s(t) は単調)。範囲の外の s は端の t。
+ * 挟み撃ちの区間 [a, b] を保ちながら Newton 法で詰める (区間の外へ出る歩みは二分に替える)。歩みが 1e-16 以下に
+ * なるか、区間が 1e-16 以下になれば終わる (二分だけで詰めるより 10 倍ほど速く、精度は同じ)。
+ */
 function invertGraph(g: Graph, s: number): number {
   const [lo, hi] = sRange(g);
   if (s <= lo) return g.sign > 0 ? 0 : 1;
   if (s >= hi) return g.sign > 0 ? 1 : 0;
+  // 区間の端の符号: (s(a) − s) × sign < 0 ≤ (s(b) − s) × sign
   let a = 0;
   let b = 1;
-  for (let i = 0; i < 64 && b - a > 1e-16; i++) {
-    const m = (a + b) / 2;
-    if ((bernstein(g.s, m) - s) * g.sign < 0) a = m;
-    else b = m;
+  let t = (s - g.s[0]) / (g.s[3] - g.s[0]);
+  if (!(t > 0 && t < 1)) t = 0.5;
+  for (let i = 0; i < 100; i++) {
+    const f = (bernstein(g.s, t) - s) * g.sign;
+    if (f === 0) return t;
+    if (f < 0) a = t;
+    else b = t;
+    if (b - a <= 1e-16) break;
+    const d = bernsteinD1(g.s, t) * g.sign;
+    if (d > 0) {
+      const step = f / d;
+      const next = t - step;
+      if (next > a && next < b) {
+        if (Math.abs(step) <= 1e-16) return next;
+        t = next;
+        continue;
+      }
+    }
+    t = (a + b) / 2;
   }
   return (a + b) / 2;
 }
@@ -1057,6 +1082,16 @@ function snapEnd(seg: Segment, t: number, tol: number): number {
 
 function exactness(c: { t1: number; t2: number }): number {
   return (c.t1 === 0 || c.t1 === 1 ? 1 : 0) + (c.t2 === 0 || c.t2 === 1 ? 1 : 0);
+}
+
+/** 点が範囲を `margin` だけ広げた中にあるか。 */
+function inBounds(p: Point, b: Bounds, margin: number): boolean {
+  return (
+    p.x >= b.minX - margin &&
+    p.x <= b.maxX + margin &&
+    p.y >= b.minY - margin &&
+    p.y <= b.maxY + margin
+  );
 }
 
 function clamp01(t: number): number {

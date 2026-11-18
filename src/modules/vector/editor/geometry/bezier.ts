@@ -16,9 +16,10 @@
  * - `splitSegment` / `subSegment` は端の点をちょうど元の値にする (0 と 1 は元の端点そのもの)。
  *   切り出しは blossom (極形式) で直接求めるので、続けて分けても誤差が積み重ならない
  * - `segmentExtrema` の極値は 2 次方程式を解いて求め、端 (t = 0, 1) は含めない。範囲は端と極値の値の min / max
- * - `nearestPoint` は 32 等分の標本で、距離の局所的な最小と、距離の微分 (B - p)·B' が負から正へ変わる区間を
- *   拾い、それぞれ Newton 法 (後退つき) で t を 1e-12 程度まで詰めて最も近いものを選ぶ (端点も候補)。
- *   1/32 より細かい間隔に最小が 2 つある場合だけ、浅い方を見落とすことがある
+ * - `nearestPoint` は 32 等分の標本 (接線の向きが 60° より大きく変わる区間は、4 等分を 4 段まで繰り返して
+ *   細かくする) で、距離の局所的な最小と、距離の微分 (B - p)·B' が負から正へ変わる区間を拾い、それぞれ
+ *   Newton 法 (後退つき) で t を 1e-12 程度まで詰めて最も近いものを選ぶ (端点も候補)。向きがあまり変わらない
+ *   標本の 1 区間に最小が 2 つある場合だけ、浅い方を見落とすことがある
  * - `segmentLength` は 8 点の Gauss–Legendre を区間を分けながら当て、相対誤差 1e-10 以内
  * - `tAtLength` は長さの誤差が (1 + 全長) × 1e-9 以内の t
  * - `flattenSegment` の誤差は「制御点から弦までの距離の最大」で判定する (曲線は制御点の凸包の中にあるので、
@@ -353,13 +354,15 @@ export function nearestPoint(seg: Segment, p: Point): NearestPoint {
     const point = pointAt(seg, t);
     return { t, point, distance: Math.hypot(point.x - p.x, point.y - p.y) };
   }
-  const n = NEAREST_SAMPLES;
+  // 標本の t: 32 等分。向きが急に変わる区間 (急に折り返す曲線の先など) は、さらに細かく分ける
+  const ts = nearestSampleParams(seg);
+  const n = ts.length - 1;
   const d2: number[] = [];
   // g(t) = (B(t) - p)·B'(t)。距離の 2 乗の微分の半分で、局所的な最小では負から正へ変わる
   const g: number[] = [];
   for (let i = 0; i <= n; i++) {
-    const b = pointAt(seg, i / n);
-    const d = derivativeAt(seg, i / n);
+    const b = pointAt(seg, ts[i]!);
+    const d = derivativeAt(seg, ts[i]!);
     d2.push(dist2(b, p));
     g.push((b.x - p.x) * d.x + (b.y - p.y) * d.y);
   }
@@ -378,17 +381,61 @@ export function nearestPoint(seg: Segment, p: Point): NearestPoint {
     const left = i > 0 ? d2[i - 1]! : Infinity;
     const right = i < n ? d2[i + 1]! : Infinity;
     if (v <= left && v <= right) {
-      consider(refineNearest(seg, p, i / n, Math.max(0, (i - 1) / n), Math.min(1, (i + 1) / n)));
+      consider(refineNearest(seg, p, ts[i]!, ts[Math.max(0, i - 1)]!, ts[Math.min(n, i + 1)]!));
     }
     // g が負から正へ変わる区間 (標本の間に隠れた最小も拾う)
     if (i < n && g[i]! < 0 && g[i + 1]! >= 0) {
-      const t0 = i / n;
-      const t1 = (i + 1) / n;
+      const t0 = ts[i]!;
+      const t1 = ts[i + 1]!;
       const guess = t0 + ((t1 - t0) * -g[i]!) / (g[i + 1]! - g[i]!);
       consider(refineNearest(seg, p, guess, t0, t1));
     }
   }
   return best;
+}
+
+/** 向きの変わり方がこれより大きい区間 (cos で 60°) は細かく分ける。 */
+const NEAREST_TURN_COS = 0.5;
+/** 細かく分ける深さ (1 段で 4 等分。32 等分の 1 区間を最も細かくて 1/256 に) */
+const NEAREST_REFINE_DEPTH = 4;
+
+/**
+ * 最近点を探す標本の t (0 と 1 を含む昇順)。32 等分し、両端の接線の向きが 60° より大きく変わる区間
+ * (微分が 0 の所を含む) は 4 等分を `NEAREST_REFINE_DEPTH` 段まで繰り返す。急に折り返す曲線では、
+ * 1 区間の中で点から遠ざかってまた近づくので、距離の最小が区間の中に 2 つ隠れて見落とされうるため。
+ */
+function nearestSampleParams(seg: Segment): number[] {
+  const out = [0];
+  const visit = (t0: number, t1: number, d0: Point, d1: Point, depth: number) => {
+    if (depth < NEAREST_REFINE_DEPTH && turnsSharply(d0, d1)) {
+      let prevT = t0;
+      let prevD = d0;
+      for (let k = 1; k <= 4; k++) {
+        const t = k === 4 ? t1 : t0 + ((t1 - t0) * k) / 4;
+        const d = k === 4 ? d1 : derivativeAt(seg, t);
+        visit(prevT, t, prevD, d, depth + 1);
+        prevT = t;
+        prevD = d;
+      }
+      return;
+    }
+    out.push(t1);
+  };
+  let prev = derivativeAt(seg, 0);
+  for (let i = 1; i <= NEAREST_SAMPLES; i++) {
+    const t = i / NEAREST_SAMPLES;
+    const d = derivativeAt(seg, t);
+    visit((i - 1) / NEAREST_SAMPLES, t, prev, d, 0);
+    prev = d;
+  }
+  return out;
+}
+
+function turnsSharply(d0: Point, d1: Point): boolean {
+  const l0 = Math.hypot(d0.x, d0.y);
+  const l1 = Math.hypot(d1.x, d1.y);
+  if (l0 === 0 || l1 === 0) return true;
+  return d0.x * d1.x + d0.y * d1.y < NEAREST_TURN_COS * l0 * l1;
 }
 
 /** [lo, hi] の中で |B(t) - p|² を最小にする t を Newton 法 (後退つき) で求める。 */
