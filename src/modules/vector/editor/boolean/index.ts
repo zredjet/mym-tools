@@ -21,7 +21,14 @@
 import { toleranceFor } from "../geometry/bezier";
 import type { BooleanOp, FillRule, Subpath } from "../model/types";
 import { buildResult } from "./graph";
-import { buildContours, collectContours, splitOperands, tolerancesFor } from "./split";
+import {
+  buildContours,
+  collectContours,
+  contourWidth,
+  type RawContour,
+  splitOperands,
+  tolerancesFor,
+} from "./split";
 
 /** 演算の入力 1 個。座標は呼び出し側がそろえる (ブーリアンのノードの親の座標系)。 */
 export interface BooleanOperand {
@@ -61,7 +68,9 @@ export const MAX_MAGNITUDE = 1e15;
  * 輪郭の大きさ (制御点の範囲の幅と高さの大きい方) の下限の、同じ点にまとめる距離 (`Tolerances.spread`)
  * に対する倍率。これより小さい輪郭は、頂点をまとめたり細い輪を落としたりすると形が崩れうるので、
  * 面がないと誤って言わないよう null にする。ふつうの座標 (1000 以下) では 1.28e-3 px、座標が 1e6 の
- * 近くでは 1.28 px。長さ 0 の線分の許容値以下の輪郭は点として除く (面積はその 2 乗以下)
+ * 近くでは 1.28 px。ただし幅のない輪郭 (制御点が、最も離れた 2 点を結ぶ直線から交点の許容値の 2 倍以内。
+ * 開いた 2 点の線、潰れた三角形、点) は面を持たないので、大きさによらず除く。長さ 0 の線分の許容値以下の
+ * 輪郭も点として除く (面積はその 2 乗以下)
  */
 export const MIN_EXTENT_FACTOR = 100;
 
@@ -75,10 +84,16 @@ function compute(op: BooleanOp, operands: readonly BooleanOperand[]): Subpath[] 
   const { raw, magnitude } = collectContours(operands);
   if (magnitude > MAX_MAGNITUDE) return null;
   const tol = tolerancesFor(toleranceFor(magnitude));
+  // 小さすぎる輪郭: 幅のないもの (線、点) は面を持たないので除く。面を持つものは求められない (null)
+  const kept: RawContour[] = [];
   for (const c of raw) {
-    if (c.extent > tol.intersect && c.extent < MIN_EXTENT_FACTOR * tol.spread) return null;
+    if (c.extent > tol.intersect && c.extent < MIN_EXTENT_FACTOR * tol.spread) {
+      if (contourWidth(c.segs) > 2 * tol.intersect) return null;
+      continue;
+    }
+    kept.push(c);
   }
-  const { segments, contours } = buildContours(raw, tol.intersect);
+  const { segments, contours } = buildContours(kept, tol.intersect);
   // 面のない入力: 交差は空、型抜きは引かれる側がなければ空
   const present = operands.map((_, k) => contours.some((c) => c.operand === k));
   if (op === "intersect" && present.some((p) => !p)) return [];

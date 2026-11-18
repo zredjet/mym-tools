@@ -392,6 +392,55 @@ describe("booleanOperation の座標の範囲", () => {
     }
   });
 
+  it("幅のない小さな輪郭 (線、潰れた三角形、点) は大きさによらず除く (null にしない)", () => {
+    // レビューの再現: 正方形の入力に、開いた 2 点の短い線 (0.0001 px) が 1 本混ざっている
+    const withLine = [
+      operand([
+        ...rect(0, 0, 50, 50),
+        { closed: false, points: [point(30, 30), point(30.0001, 30)] },
+      ]),
+      operand(ellipse(50, 50, 20)),
+    ];
+    for (const op of OPS4) {
+      const r = run(op, withLine);
+      expect(compareOnGrid(op, withLine, r, { steps: 32 }).mismatches).toEqual([]);
+    }
+    // 座標 1e6 の近く (小さすぎる輪郭の境目は 1.28 px) の 1 px の線と、1 px に並んだ 3 点 (点のような輪郭)
+    const far = [
+      operand([
+        ...rect(1e6, 0, 100, 100),
+        { closed: false, points: [point(1e6 + 20, 20), point(1e6 + 21, 20)] },
+        { closed: true, points: [point(1e6 + 40, 40), point(1e6 + 40.5, 40), point(1e6 + 41, 40)] },
+      ]),
+      operand(rect(1e6 + 50, 50, 100, 100)),
+    ];
+    for (const op of OPS4) {
+      const r = run(op, far);
+      expect(compareOnGrid(op, far, r, { steps: 32 }).mismatches).toEqual([]);
+    }
+    // 極小の潰れた三角形 (3 点がほぼ一直線)
+    const flat = operand([
+      { closed: true, points: [point(10, 10), point(10.0005, 10), point(10.001, 10 + 1e-9)] },
+    ]);
+    expect(run("union", [operand(rect(0, 0, 100, 100)), flat])).toHaveLength(1);
+    expect(run("intersect", [flat, operand(rect(0, 0, 100, 100))])).toEqual([]);
+  });
+
+  it("面を持つ小さな輪郭は null のまま (三角形、8 の字)", () => {
+    const triangle = operand([
+      { closed: true, points: [point(10, 10), point(10.0005, 10), point(10.0002, 10.0005)] },
+    ]);
+    expect(booleanOperation("union", [operand(rect(0, 0, 100, 100)), triangle])).toBeNull();
+    // 符号つきの面積は 0 でも面を持つ
+    const eight = operand([
+      {
+        closed: true,
+        points: [point(10, 10), point(10.0005, 10.0005), point(10.0005, 10), point(10, 10.0005)],
+      },
+    ]);
+    expect(booleanOperation("union", [operand(rect(0, 0, 100, 100)), eight])).toBeNull();
+  });
+
   it("長さ 0 の許容値以下の輪郭は点として除く (null にしない)", () => {
     const dot = operand([
       { closed: true, points: [point(50, 50), point(50 + 1e-9, 50), point(50, 50 + 1e-9)] },

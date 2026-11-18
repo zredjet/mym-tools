@@ -126,6 +126,32 @@ export function collectContours(operands: readonly BooleanOperand[]): {
   return { raw, magnitude };
 }
 
+/**
+ * 輪郭の幅: 制御点の、最も離れた 2 点 (の近似) を結ぶ直線からの距離の最大。曲線は制御点の凸包の中に
+ * あるので、輪郭の面はこの幅の帯の中にある (幅が 0 なら面積 0)。8 の字のように符号つきの面積が 0 でも
+ * 面を持つ輪郭は、幅があるので 0 にならない。
+ */
+export function contourWidth(segs: readonly Segment[]): number {
+  const pts = segs.flatMap((s) => controlPoints(s));
+  if (pts.length < 2) return 0;
+  // 先頭から最も遠い点 a、a から最も遠い点 b (直径の近似)
+  const farthest = (from: Point) =>
+    pts.reduce((best, q) =>
+      Math.hypot(q.x - from.x, q.y - from.y) > Math.hypot(best.x - from.x, best.y - from.y)
+        ? q
+        : best,
+    );
+  const a = farthest(pts[0]!);
+  const b = farthest(a);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len === 0) return 0;
+  let width = 0;
+  for (const q of pts) width = Math.max(width, Math.abs((q.x - a.x) * dy - (q.y - a.y) * dx) / len);
+  return width;
+}
+
 /** 長さ 0 (`tol` 以下) の線分を除き、輪郭と線分の表にする。線分が残らない輪郭は除く。 */
 export function buildContours(
   raw: readonly RawContour[],
