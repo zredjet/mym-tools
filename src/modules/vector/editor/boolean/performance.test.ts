@@ -1,8 +1,9 @@
 /**
  * ブーリアン演算の速さ (§8.9.3: アイコンの大きさ (曲線 200 本ほど) で 1 回 5 ms 以内)。
  *
- * 手元 (Apple Silicon、Node 24) の実測は PR の説明に書く。CI の機械は遅く揺れるので、ここでは目安の 4 倍
- * (20 ms) を中央値の上限にし、桁が変わるような遅れだけを捕まえる。
+ * 手元 (Apple Silicon、Node 24) の実測は PR の説明に書く。ここでは目安の 4 倍 (20 ms) を中央値の上限にし、
+ * 桁が変わるような遅れだけを捕まえる。CI の機械は遅く、ほかのテストのファイルと並んで動くので 20 ms を少し
+ * 超えることがある (実測 25 ms)。CI では目安の 12 倍 (60 ms) にする。
  */
 import { describe, expect, it } from "vitest";
 import { rotate } from "../geometry/matrix";
@@ -13,7 +14,7 @@ import { type BooleanOperand, booleanOperation } from "./index";
 import { compareOnGrid, ellipse, operand, rect, star } from "./testing";
 
 const OPS: BooleanOp[] = ["union", "subtract", "intersect", "exclude"];
-const BUDGET_MS = 20;
+const BUDGET_MS = process.env["CI"] ? 60 : 20;
 
 function curveCount(operands: readonly BooleanOperand[]): number {
   let n = 0;
