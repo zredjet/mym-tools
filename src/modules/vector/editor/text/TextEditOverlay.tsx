@@ -8,6 +8,8 @@
  * - 見た目は描画 (`buildNodeShell`) と同じフォント・行の高さ・字間・揃え。編集中のテキストは文書の層では
  *   描かない (`DocumentLayer`)。入力欄の文字をそのまま見せる
  * - 表示位置や倍率、ノードの位置・大きさが変わったら追従する
+ * - 回転したテキストと回転した frame の中のテキストは、入力欄も同じ角度 (ページ上の角度 φ) で回し、
+ *   回転した箱の左上の角に合わせる (§8.5.7。CSS の `transform` に `rotate` を足す)。回転していなければ第 1 段階と同じ
  * - 終了は Esc と、入力欄からフォーカスが外れたとき。日本語入力の変換中の Enter と Esc は変換の操作として扱う。
  *   ウィンドウのフォーカスが外れただけ (アプリの切替) なら終えない。Chromium は入力欄に focusout も送るので
  *   `document.hasFocus()` で見分ける。WebKit (Safari 15〜17.5 相当) は blur だけで focusout を送らないので、
@@ -26,10 +28,14 @@ import {
   type FocusEvent,
   type KeyboardEvent,
 } from "react";
+import type { CSSProperties } from "react";
 import { isComposing } from "../canvas/input";
-import { nodeOrigin } from "../model/geometry";
+import { pageToScreen } from "../canvas/viewport";
+import { applyToPoint, cosSinDeg } from "../geometry/matrix";
+import { coordinateMatrix, isTranslation, nodePageMatrix, pageRotation } from "../model/geometry";
 import { getNode } from "../model/tree";
-import type { NodeId } from "../model/types";
+import type { CanvasDocument, NodeId, Point, TextNode } from "../model/types";
+import type { Viewport } from "../state/types";
 import { canvasTextMeasurer } from "../render/measureText";
 import { editorStore, useEditorStore } from "../state/store";
 import {
@@ -42,6 +48,56 @@ import { documentZoom, editorStyle } from "./editorStyle";
 
 /** 変換を確定した直後の Esc を変換の操作とみなす時間 (ms)。Safari は compositionend の後に keydown を送る。 */
 const COMPOSITION_GRACE_MS = 50;
+
+/**
+ * 入力欄の置き方。`rotation` が null なら回転していない (`origin` は親の座標系の原点のページ座標。第 1 段階と同じ)。
+ * 回転していれば `origin` は回転した箱の左上の角 (ページ座標)、`rotation` はページ上の角度 (度)。
+ */
+interface Placement {
+  originX: number;
+  originY: number;
+  rotation: number | null;
+}
+
+function placementOf(doc: CanvasDocument, id: NodeId): Placement {
+  const node = getNode(doc, id);
+  const space = coordinateMatrix(doc, id);
+  if (!node || node.type !== "text" || (node.rotation === 0 && isTranslation(space)))
+    return { originX: space.e, originY: space.f, rotation: null };
+  const corner = applyToPoint(nodePageMatrix(doc, id), { x: 0, y: 0 });
+  return { originX: corner.x, originY: corner.y, rotation: pageRotation(doc, id) };
+}
+
+/**
+ * 回転したテキストの入力欄の見た目。`editorStyle` を回転した箱の左上の角に置いて求め、入力欄の左上からその角
+ * までのずれ (余白と揃えのずらし) を同じ角度で回して置き直し、`transform` に `rotate` を足す
+ * (`transform-origin` は入力欄の左上のまま)。
+ */
+function rotatedEditorStyle(
+  node: TextNode,
+  corner: Point,
+  rotation: number,
+  viewport: Viewport,
+  uiZoom: number,
+): CSSProperties {
+  const ui = Number.isFinite(uiZoom) && uiZoom > 0 ? uiZoom : 1;
+  // `editorStyle` はノードの左上を origin + (x, y) に置くので、角がそこに来る origin を渡す
+  const style = editorStyle(node, { x: corner.x - node.x, y: corner.y - node.y }, viewport, ui);
+  if (rotation === 0) return style;
+  const screen = pageToScreen(viewport, corner);
+  const left = typeof style.left === "number" ? style.left : 0;
+  const top = typeof style.top === "number" ? style.top : 0;
+  // 入力欄の左上から角へのずれ (画面 px)。回していない欄では左上 = 角 + ずれ
+  const offset = { x: left / ui - screen.x, y: top / ui - screen.y };
+  const { cos, sin } = cosSinDeg(rotation);
+  const turned = { x: offset.x * cos - offset.y * sin, y: offset.x * sin + offset.y * cos };
+  return {
+    ...style,
+    left: (screen.x + turned.x) * ui,
+    top: (screen.y + turned.y) * ui,
+    transform: `rotate(${rotation}deg) ${String(style.transform ?? "")}`.trim(),
+  };
+}
 
 /** 入力欄の中身を `text` に戻す。カーソルは入力が始まった位置のあたりに置く。 */
 function revertValue(element: HTMLTextAreaElement, text: string): void {
@@ -56,8 +112,9 @@ function TextEditor({ id }: { id: NodeId }) {
     const found = getNode(state.doc, id);
     return found?.type === "text" ? found : undefined;
   });
-  const originX = useEditorStore((state) => nodeOrigin(state.doc, id).x);
-  const originY = useEditorStore((state) => nodeOrigin(state.doc, id).y);
+  const originX = useEditorStore((state) => placementOf(state.doc, id).originX);
+  const originY = useEditorStore((state) => placementOf(state.doc, id).originY);
+  const rotation = useEditorStore((state) => placementOf(state.doc, id).rotation);
   const viewport = useEditorStore((state) => state.viewport);
   const ref = useRef<HTMLTextAreaElement>(null);
   const [initialText] = useState(() => node?.text ?? "");
@@ -187,7 +244,11 @@ function TextEditor({ id }: { id: NodeId }) {
       autoComplete="off"
       autoCorrect="off"
       autoCapitalize="off"
-      style={editorStyle(node, { x: originX, y: originY }, viewport, documentZoom())}
+      style={
+        rotation === null
+          ? editorStyle(node, { x: originX, y: originY }, viewport, documentZoom())
+          : rotatedEditorStyle(node, { x: originX, y: originY }, rotation, viewport, documentZoom())
+      }
       onChange={onChange}
       onCompositionStart={onCompositionStart}
       onCompositionEnd={onCompositionEnd}

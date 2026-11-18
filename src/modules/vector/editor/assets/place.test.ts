@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { createEmptyDocument, createFrame } from "../model/create";
+import { applyToPoint } from "../geometry/matrix";
+import { createEmptyDocument, createFrame, FIRST_PAGE_ID } from "../model/create";
+import { nodePageMatrix } from "../model/geometry";
 import { CANVAS_LIMITS } from "../model/limits";
 import { checkSavable } from "../model/payload";
 import { insertNode } from "../model/structure";
@@ -223,5 +225,76 @@ describe("placeAsset", () => {
     const broken = updateNode(sampleDocument(), "r0", { opacity: 2 });
     expect(checkSavable(broken)).not.toBeNull();
     expect(placeAsset(broken, input()).ok).toBe(true);
+  });
+});
+
+describe("回転した frame へ置く (§8.5.2)", () => {
+  it("frame の向きにそろえ、中心を指定の点に置く", () => {
+    const doc = insertNode(
+      createEmptyDocument(),
+      createFrame({ id: "f", x: 100, y: 100, width: 400, height: 300, rotation: 30 }),
+      { kind: "page", id: FIRST_PAGE_ID },
+    );
+    const center = { x: 300, y: 250 }; // frame の中心
+    const {
+      node,
+      parent,
+      id,
+      doc: next,
+    } = placed(doc, {
+      pageId: FIRST_PAGE_ID,
+      center,
+      asset: imageAsset(40, 20),
+    });
+    expect(parent).toEqual({ kind: "node", id: "f" });
+    expect(node).toMatchObject({ width: 40, height: 20, rotation: 0 });
+    // 置いた箱の中心は、整数に丸めた分 (0.5 以内) を除いて指定の点
+    const placedCenter = applyToPoint(nodePageMatrix(next, id), { x: 20, y: 10 });
+    expect(Math.hypot(placedCenter.x - center.x, placedCenter.y - center.y)).toBeLessThanOrEqual(
+      Math.SQRT1_2,
+    );
+    expect(node).toMatchObject({ x: 180, y: 140 });
+  });
+
+  /** 90° 回した細長い frame (ページ上で x 190–220、y 10–220) */
+  const tallFrameDoc = () =>
+    insertNode(
+      createEmptyDocument(),
+      createFrame({ id: "f", x: 100, y: 100, width: 210, height: 30, rotation: 90 }),
+      { kind: "page", id: FIRST_PAGE_ID },
+    );
+
+  it("contain: frame の向きで置いた箱が収まらなければ、その frame の子にしない", () => {
+    // 25×200 は frame の向きではページ上で 200×25 になり、frame からはみ出す
+    const { parent, node } = placed(tallFrameDoc(), {
+      pageId: FIRST_PAGE_ID,
+      center: { x: 205, y: 115 },
+      asset: imageAsset(25, 200),
+      parentRule: "contain",
+    });
+    expect(parent).toEqual({ kind: "page", id: FIRST_PAGE_ID });
+    expect(node).toMatchObject({ x: 193, y: 15, width: 25, height: 200 });
+  });
+
+  it("contain: ページの軸の矩形ははみ出しても、frame の向きで置けば収まるなら frame の子にする", () => {
+    // 200×25 は frame の向きではページ上で 25×200 になり、frame に収まる
+    const { parent, node, id, doc } = placed(tallFrameDoc(), {
+      pageId: FIRST_PAGE_ID,
+      center: { x: 205, y: 115 },
+      asset: imageAsset(200, 25),
+      parentRule: "contain",
+    });
+    expect(parent).toEqual({ kind: "node", id: "f" });
+    expect(node).toMatchObject({ width: 200, height: 25, rotation: 0 });
+    const corners = [
+      { x: 0, y: 0 },
+      { x: 200, y: 25 },
+    ].map((p) => applyToPoint(nodePageMatrix(doc, id), p));
+    for (const c of corners) {
+      expect(c.x).toBeGreaterThanOrEqual(190);
+      expect(c.x).toBeLessThanOrEqual(220);
+      expect(c.y).toBeGreaterThanOrEqual(10);
+      expect(c.y).toBeLessThanOrEqual(220);
+    }
   });
 });

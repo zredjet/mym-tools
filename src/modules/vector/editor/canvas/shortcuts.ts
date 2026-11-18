@@ -29,6 +29,7 @@ import {
   duplicateWithinLimits,
   enterSelection,
   escapeSelection,
+  flipSelection,
   nudgeSelection,
   pasteWithinLimits,
 } from "../tools/select/actions";
@@ -198,6 +199,20 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
       const state = store.getState();
       state.setView({ layersPanel: !state.view.layersPanel });
     },
+  },
+
+  // ---- 回転と反転 (§8.5.6、§8.13) ----
+  // Shift+H / Shift+V は左右反転 / 上下反転。反転できない選択 (テキスト・画像・埋め込み SVG・frame を含む) では
+  // 何もしない。Shift なしの H (手のひら) と V (選択) は上のツールの割当
+  {
+    id: "edit.flipHorizontal",
+    keys: [{ key: ["h"], shift: true, repeat: false }],
+    run: ({ store }) => flipSelection(store, "horizontal"),
+  },
+  {
+    id: "edit.flipVertical",
+    keys: [{ key: ["v"], shift: true, repeat: false }],
+    run: ({ store }) => flipSelection(store, "vertical"),
   },
 
   // ---- 編集 ----

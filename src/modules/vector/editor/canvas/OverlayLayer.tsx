@@ -1,7 +1,7 @@
 /**
  * 重ね描き用の SVG。文書の SVG とは別の層で、書き出しには含まれない (§4.3)。
  *
- * - 画面座標: ページのガイド線、ページ直下の frame の名前のラベル
+ * - 画面座標: ページのガイド線、ページ直下の frame の名前のラベル、回転のドラッグの角度 (`SelectionScreenLabels`)
  * - ページ座標の `<g>`: `SelectionOverlay` (どのツールでも) と現在のツールの `Overlay`。
  *   線の太さは `overlayKit.ts` の `OVERLAY_LINE` で倍率に関係なく一定にする
  */
@@ -11,7 +11,7 @@ import { getPage } from "../model/tree";
 import type { Guide } from "../model/types";
 import { useEditorStore } from "../state/store";
 import type { Viewport } from "../state/types";
-import { SelectionOverlay } from "../tools/select/SelectionOverlay";
+import { SelectionOverlay, SelectionScreenLabels } from "../tools/select/SelectionOverlay";
 import { TOOLS } from "../tools/registry";
 import { FRAME_LABEL_FONT, FRAME_LABEL_GAP } from "./frameLabels";
 import { OVERLAY_COLORS } from "./overlayKit";
@@ -86,6 +86,7 @@ export function OverlayLayer({ size }: { size: Size }) {
         <SelectionOverlay />
         <ToolOverlay />
       </g>
+      <SelectionScreenLabels viewport={viewport} />
     </svg>
   );
 }
