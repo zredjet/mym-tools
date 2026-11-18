@@ -20,6 +20,7 @@ import {
   ungroupSelection,
 } from "../state/commands";
 import type { ToolId } from "../state/types";
+import { outlineSelection } from "../outline/convertAction";
 import {
   BOOLEAN_OP_KEYS,
   booleanSelection,
@@ -125,6 +126,25 @@ export const PENCIL_SHORTCUTS: Shortcut[] = [
     id: "tool.pencil",
     keys: [{ key: ["p"], shift: true }],
     run: ({ store }) => store.getState().setTool("pencil"),
+  },
+];
+
+// ---- 線のアウトライン化 (I。§8.13) ----
+// 中身は `outline/convertAction.ts` (「変換」の節のボタンと同じ動作)。点の編集中は `pathEdit` ツールが先に受けて止める
+export const OUTLINE_SHORTCUTS: Shortcut[] = [
+  {
+    id: "convert.outline",
+    keys: [{ key: ["o"], mod: true, shift: true, repeat: false }],
+    run: ({ store }) => {
+      if (store.getState().selection.length === 0) return false;
+      outlineSelection(store);
+    },
+  },
+  {
+    // 押しっぱなしの繰り返しは何もせずに受ける
+    id: "convert.outline.ignoreRepeat",
+    keys: [{ key: ["o"], mod: true, shift: true }],
+    run: ({ store }) => (store.getState().selection.length === 0 ? false : undefined),
   },
 ];
 
@@ -354,6 +374,7 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
   // ---- 第 2 段階の節 (担当ごと) ----
   ...CONVERT_SHORTCUTS,
   ...PENCIL_SHORTCUTS,
+  ...OUTLINE_SHORTCUTS,
 ];
 
 /** 合うショートカットを上から順に実行し、処理したものを返す。なければ null。 */
