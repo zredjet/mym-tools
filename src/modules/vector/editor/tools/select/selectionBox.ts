@@ -32,10 +32,25 @@ export type SelectionBox =
       rotation: number;
     };
 
+let lastBox: {
+  doc: CanvasDocument;
+  ids: readonly NodeId[];
+  box: SelectionBox | null;
+} | null = null;
+
 /**
  * 動かせる選択 (`transformableIds` の結果) の枠。`ids` が空か外接矩形が求められなければ null。
+ * ホバーのたびに何度も呼ぶので、文書と `ids` (同じ配列) が同じなら前の結果を返す。
  */
 export function selectionBoxOf(doc: CanvasDocument, ids: readonly NodeId[]): SelectionBox | null {
+  const last = lastBox;
+  if (last && last.doc === doc && last.ids === ids) return last.box;
+  const box = computeSelectionBox(doc, ids);
+  lastBox = { doc, ids, box };
+  return box;
+}
+
+function computeSelectionBox(doc: CanvasDocument, ids: readonly NodeId[]): SelectionBox | null {
   if (ids.length === 1) {
     const id = ids[0] as NodeId;
     const node = getNode(doc, id);
