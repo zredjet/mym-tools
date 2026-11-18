@@ -184,6 +184,20 @@ describe("outlineStroke: 曲線", () => {
     for (const join of JOINS) expectMatches(hook, stroke(16, "round", join));
   });
 
+  it("ほぼ尖った所 (ごく小さく折り返す曲線) は、折り返しの丸い扇になる", () => {
+    // レビューの再現: (0,0) c1 (60,60) c2 (dx,60) → (60,0)。dx が 0 に近いと t = 0.5 でほぼ尖る
+    for (const dx of [-2, -0.5, -0.1, -0.01, 0.01, 0.1, 0.5, 2])
+      for (const cap of CAPS) {
+        const near: Subpath[] = [
+          {
+            closed: false,
+            points: [point(0, 0, undefined, { x: 60, y: 60 }), point(60, 0, { x: dx - 60, y: 60 })],
+          },
+        ];
+        expectMatches(near, stroke(8, cap), 96);
+      }
+  });
+
   it("尖り (速さが 0 になる 3 次ベジェ)", () => {
     const cusp: Subpath[] = [
       {
@@ -314,13 +328,28 @@ describe("outlineStroke: 破線", () => {
     expect(windingNumber(r, { x: 47, y: 0 })).toBe(1);
   });
 
-  it("閉じた輪郭は始点から。終わりまで続く区間は先頭とつなぎ、始点に角を描く", () => {
-    // 周 320。[25, 10] なら最後の区間 315〜320 と先頭の 0〜25 が 1 本になり、始点 (0, 0) の角はマイター
+  it("閉じた輪郭は始点から。最後の区間が終わりまで続いても先頭とつながない (WebKit と同じ)", () => {
+    // 周 320。[25, 10] の最後の区間は 315〜320 で終わりまで届くが、始点 (0, 0) の角は描かない (どちらも端)
     const r = expectMatches(rect(0, 0, 100, 60), stroke(8, "butt", "miter", [25, 10]));
-    expect(windingNumber(r, { x: -3.5, y: -3.5 })).toBe(1);
-    // [25, 15]: 最後の区間は 280〜305 で終わりに届かないので、先頭の区間は始点で端 (butt) になる
-    const r2 = expectMatches(rect(0, 0, 100, 60), stroke(8, "butt", "miter", [25, 15]));
-    expect(windingNumber(r2, { x: -3.5, y: -3.5 })).toBe(0);
+    expect(windingNumber(r, { x: -3.5, y: -3.5 })).toBe(0);
+    expect(windingNumber(r, { x: 2, y: -3 })).toBe(1);
+    expect(windingNumber(r, { x: -3, y: 2 })).toBe(1);
+    // 40 × 40、太さ 10、[45, 5] (レビューの再現): 始点の角に 5 × 5 のマイターの四角を足さない
+    const sq = expectMatches(rect(0, 0, 40, 40), stroke(10, "butt", "miter", [45, 5]));
+    expect(windingNumber(sq, { x: -2.5, y: -2.5 })).toBe(0);
+    // 閉じた三角形と [70, 10] も同じ
+    const tri = polygon(
+      [
+        [0, 0],
+        [60, 0],
+        [30, 50],
+      ],
+      true,
+    );
+    expectMatches(tri, stroke(8, "butt", "miter", [70, 10]));
+    // 実線の閉じた輪郭は始点にも角を描く
+    const solid = expectMatches(rect(0, 0, 100, 60), stroke(8, "butt", "miter"));
+    expect(windingNumber(solid, { x: -3.5, y: -3.5 })).toBe(1);
   });
 
   it("長さ 0 の破線は丸・四角の端の点になる (点線)", () => {

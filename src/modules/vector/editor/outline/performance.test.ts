@@ -56,6 +56,68 @@ const CASES: [string, StrokeShape][] = [
   ["太さ 12、実線 (角丸と小さい円がきつい)", { width: 12, cap: "butt", join: "miter", dash: [] }],
 ];
 
+/** 交わりの多い大きな形 (合体の手間が大きい)。1 秒ほどで終わるか、手間を見積もって断ること (§8.10)。 */
+const point = (x: number, y: number, h?: [number, number]) => ({
+  x,
+  y,
+  in: h ? { x: -h[0], y: -h[1] } : null,
+  out: h ? { x: h[0], y: h[1] } : null,
+  mirror: "none" as const,
+});
+
+/** 縦横の網掛けを 1 本の折れ線で (200 + 200 点、交点 4 万ほど)。 */
+function hatch(n: number, size: number): Subpath[] {
+  const pts = [];
+  for (let i = 0; i < n; i++) pts.push(point(i % 2 ? size : 0, (i * size) / n + (i % 2) * 2));
+  for (let i = 0; i < n; i++) pts.push(point((i * size) / n + (i % 2) * 2, i % 2 ? size : 0));
+  return [{ closed: false, points: pts }];
+}
+
+/** 乱数の 3 次ベジェの落書き (n 本、300 px 四方)。 */
+function scribble(n: number, seed: number): Subpath[] {
+  let s = seed >>> 0;
+  const r = () => (s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+  const pts = Array.from({ length: n }, () => {
+    const x = r() * 300;
+    const y = r() * 300;
+    return point(x, y, [(r() - 0.5) * 40, (r() - 0.5) * 40]);
+  });
+  return [{ closed: false, points: pts }];
+}
+
+const HEAVY_BUDGET_MS = process.env["CI"] ? 3000 : 1000;
+
+describe("outlineStroke の速さ (交わりの多い形)", () => {
+  const heavy: [string, Subpath[], StrokeShape][] = [
+    ["網掛け 400 点、太さ 3", hatch(200, 300), { width: 3, cap: "round", join: "round", dash: [] }],
+    [
+      "落書き 300 本、太さ 8",
+      scribble(300, 1),
+      { width: 8, cap: "round", join: "round", dash: [] },
+    ],
+    [
+      "落書き 1000 本、太さ 8",
+      scribble(1000, 2),
+      { width: 8, cap: "round", join: "round", dash: [] },
+    ],
+  ];
+  for (const [name, subpaths, stroke] of heavy) {
+    it(`${name}: ${HEAVY_BUDGET_MS} ms 以内に終わるか断る`, () => {
+      const t0 = performance.now();
+      const result = strokeOutline(subpaths, stroke);
+      const ms = performance.now() - t0;
+      expect(ms).toBeLessThan(HEAVY_BUDGET_MS);
+      expect(result.ok || result.reason === "tooComplex").toBe(true);
+    });
+  }
+
+  it("網掛け 100 + 100 点 (交点 1 万ほど) は求められる", () => {
+    expect(
+      strokeOutline(hatch(100, 300), { width: 3, cap: "round", join: "round", dash: [] }).ok,
+    ).toBe(true);
+  });
+});
+
 describe("outlineStroke の速さ", () => {
   const icon = gearIconPath();
 

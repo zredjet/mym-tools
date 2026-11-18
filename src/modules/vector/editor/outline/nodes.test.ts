@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { getBooleanResult } from "../boolean/result";
 import { pointAt } from "../geometry/bezier";
-import { nodeMatrix } from "../geometry/matrix";
+import { applyToVector, nodeMatrix } from "../geometry/matrix";
 import {
   createBoolean,
   createEllipse,
+  createFrame,
   createGroup,
   createLine,
   createPath,
@@ -15,6 +16,7 @@ import {
   solidPaint,
 } from "../model/create";
 import { CANVAS_LIMITS } from "../model/limits";
+import { nodePageMatrix } from "../model/geometry";
 import { checkSavable } from "../model/payload";
 import type {
   CanvasDocument,
@@ -69,6 +71,15 @@ function parentShape(path: PathNode): Subpath[] {
     path.subpaths,
     nodeMatrix(path.x, path.y, path.width, path.height, path.rotation),
   );
+}
+
+const cos25 = Math.cos((25 * Math.PI) / 180);
+const sin25 = Math.sin((25 * Math.PI) / 180);
+
+/** 影のずれをページの向きにしたもの (ノードの座標系の向き → ページ)。 */
+function pageShadow(doc: CanvasDocument, id: string): { x: number; y: number } {
+  const node = doc.nodes[id] as { shadow: { x: number; y: number } };
+  return applyToVector(nodePageMatrix(doc, id), node.shadow);
 }
 
 function stroke(width: number, patch: Partial<Stroke> = {}): Stroke {
@@ -140,7 +151,12 @@ describe("outlineNodes", () => {
       rotation: 0,
       stroke: null,
       fillRule: "nonzero",
-      shadow,
+      // 影のずれは焼き込んだ回転 (25°) の分だけ回す
+      shadow: {
+        ...shadow,
+        x: expect.closeTo(2 * cos25 - 3 * sin25, 9),
+        y: expect.closeTo(2 * sin25 + 3 * cos25, 9),
+      },
       fill: solidPaint("#3366FF", 0.8),
     });
     const centerline = transformSubpaths(ellipseSubpaths(80, 40), nodeMatrix(10, 20, 80, 40, 25));
@@ -302,12 +318,66 @@ describe("outlineNodes", () => {
     expect(checkSavable(out.doc)).toBeNull();
   });
 
-  it("線が何も描かれないとき (長さ 0 の butt の線) は当てない", () => {
+  it("線が何も描かれないノード (長さ 0 の butt の線) は飛ばし、ほかに当てる。1 つも当てられなければ断る", () => {
     const doc = docOf(
-      ["l"],
-      [createLine({ id: "l", x1: 5, y1: 5, x2: 5, y2: 5, stroke: stroke(3) })],
+      ["l", "r"],
+      [
+        createLine({ id: "l", x1: 5, y1: 5, x2: 5, y2: 5, stroke: stroke(3) }),
+        createRect({ id: "r", stroke: stroke(2), fill: null }),
+      ],
     );
     expect(outlineNodes(doc, ["l"], ids())).toEqual({ ok: false, reason: "empty" });
+    const both = outlineNodes(doc, ["l", "r"], ids());
+    expect(both.ok).toBe(true);
+    if (!both.ok) return;
+    expect(both.ids).toEqual(["r"]);
+    expect(both.doc.nodes["l"]).toBe(doc.nodes["l"]);
+    expect(both.doc.nodes["r"]?.type).toBe("path");
+  });
+
+  it("影の向き (ページの上) は変わらない: 回転を焼き込んだ線の面の影も回す。塗りの形は回転を保つ", () => {
+    const shadow = { x: 10, y: 0, blur: 2, color: "#000000", opacity: 0.4 };
+    const ring = { fill: null, stroke: stroke(3), shadow };
+    // 90° 回した塗りなしの楕円 (レビューの再現): ページの上のずれは (0, 10) のまま
+    const flat = docOf(
+      ["e"],
+      [createEllipse({ id: "e", width: 40, height: 20, rotation: 90, ...ring })],
+    );
+    const before = pageShadow(flat, "e");
+    expect(before.y).toBeCloseTo(10, 9);
+    const out = outlineNodes(flat, ["e"], ids());
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const after = pageShadow(out.doc, "e");
+    expect(after.x).toBeCloseTo(before.x, 9);
+    expect(after.y).toBeCloseTo(before.y, 9);
+    // 45° の frame の中の 30° のノード
+    const framed = docOf(
+      ["f"],
+      [
+        createFrame({ id: "f", width: 200, height: 200, rotation: 45, children: ["n"] }),
+        createEllipse({ id: "n", x: 50, y: 50, width: 40, height: 20, rotation: 30, ...ring }),
+      ],
+    );
+    const b2 = pageShadow(framed, "n");
+    const o2 = outlineNodes(framed, ["n"], ids());
+    expect(o2.ok).toBe(true);
+    if (!o2.ok) return;
+    const a2 = pageShadow(o2.doc, "n");
+    expect(a2.x).toBeCloseTo(b2.x, 9);
+    expect(a2.y).toBeCloseTo(b2.y, 9);
+    // 塗りと線がある: 影は塗りの形に付き、塗りの形は回転を保つので向きは同じ
+    const filled = docOf(
+      ["r"],
+      [createRect({ id: "r", width: 40, height: 20, rotation: 30, stroke: stroke(3), shadow })],
+    );
+    const b3 = pageShadow(filled, "r");
+    const o3 = outlineNodes(filled, ["r"], ids());
+    expect(o3.ok).toBe(true);
+    if (!o3.ok) return;
+    const a3 = pageShadow(o3.doc, groupOf(o3.doc, "r").children[0]!);
+    expect(a3.x).toBeCloseTo(b3.x, 9);
+    expect(a3.y).toBeCloseTo(b3.y, 9);
   });
 
   it("ブーリアンの結果が求められないときは当てない", () => {

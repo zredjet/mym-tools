@@ -8,7 +8,8 @@
  * 1. 曲率半径が太さの半分に近くなる所 (太さの半分 ± 全体の許容値の 1/4) で分ける。分けた部分は、片側の
  *    曲率半径がどこでも太さの半分 + 許容値の 1/4 より小さい (その側を「きつい」側と呼ぶ) か、どこでも大きいか
  *    のどちらか
- * 2. ハンドルが点に重なった端 (速さが 0) のすぐそば (許容値の 1/4 の長さ) は弦 (線分) にする
+ * 2. ハンドルが点に重なった端 (速さが 0) のすぐそば (許容値の 1/4 の長さ) は弦 (線分) にする。ほぼ尖った所
+ *    (速さの極小で、曲率半径が許容値より小さい) のまわりの短い区間は除き、前後を丸い角でつなぐ (`cuspSweep`)
  * 3. 端の線の近似の誤差が許容値を超えるとき、制御点の折れ線の曲がりが 90° を超えるとき、きつい側で法線が
  *    1 点 (`pivot`) の近くを通らないときは、半分に分ける
  *
@@ -53,6 +54,11 @@ export interface OffsetPiece {
   pivot: Point | null;
   /** 速さが 0 の端のそばを弦にした短い線分 (隣の部分との境目は中心を通らずにつなぐ。`contour.ts`) */
   chord?: boolean;
+  /**
+   * この部分の後にほぼ尖った所があり、短い区間を除いてある。次の部分とは丸い角でつなぐ。値は除いた区間で
+   * 進む向きが回る角度 (ラジアン、正は時計回り。180° を超えうる)
+   */
+  cuspSweep?: number;
 }
 
 export interface OffsetOptions {
@@ -123,6 +129,32 @@ export function offsetPieces(seg: Segment, options: OffsetOptions): OffsetPiece[
     }
   }
   options.budget.pieces -= prefix.length + suffix.length;
+  // ほぼ尖った所 (速さがほぼ 0 で、曲率半径が許容値より小さい) は、部分に分けても折り返しを当てはめられない。
+  // そのまわりの短い区間を除き、その前後を丸い角 (折り返しの角度の扇) でつなぐ
+  const cusps = nearCusps(seg, start, end, options.tolerance);
+  const out: OffsetPiece[] = [...prefix];
+  let from = start;
+  for (const cusp of cusps) {
+    if (!piecesBetween(seg, from, cusp.before, options, out)) return null;
+    const last = out[out.length - 1];
+    if (last) out[out.length - 1] = { ...last, cuspSweep: cusp.sweep };
+    from = cusp.after;
+  }
+  if (!piecesBetween(seg, from, end, options, out)) return null;
+  out.push(...suffix);
+  if (options.budget.pieces < 0) return null;
+  return out;
+}
+
+/** [start, end] を部分に分けて `out` に足す。部分の数が上限を超えたら false。 */
+function piecesBetween(
+  seg: CubicSegment,
+  start: number,
+  end: number,
+  options: OffsetOptions,
+  out: OffsetPiece[],
+): boolean {
+  if (!(end > start)) return true;
   // 曲率半径が太さの半分に近い所 (± 全体の許容値の 1/4) は、きつい側に数えて向こう側の扇形は作らない
   // (`contour.ts`)。円弧の近似の曲率は太さの半分のまわりで揺れることがあり、そのたびに分けると部分が増えるため。
   // pivot が端の線より遠くなる分と、扇形を作らない分は、どちらも許容値の 1/4 以内。分けるのは、その範囲の
@@ -149,17 +181,85 @@ export function offsetPieces(seg: Segment, options: OffsetOptions): OffsetPiece[
       splits.push(r);
   }
   splits.push(end);
-  const out: OffsetPiece[] = [...prefix];
   for (let i = 0; i + 1 < splits.length; i++) {
     const a = splits[i]!;
     const b = splits[i + 1]!;
     if (!(b > a)) continue;
     const tight = tightSideAt(seg, (a + b) / 2, reach);
-    if (!refine(seg, a, b, tight, 0, options, out)) return null;
+    if (!refine(seg, a, b, tight, 0, options, out)) return false;
   }
-  out.push(...suffix);
-  if (options.budget.pieces < 0) return null;
+  return true;
+}
+
+/** ほぼ尖った所として扱う、区間の中の向きの回りの下限 (120°)。 */
+const MIN_CUSP_TURN = (2 * Math.PI) / 3;
+
+interface NearCusp {
+  /** 除く区間の始めと終わり */
+  before: number;
+  after: number;
+  /** 区間の中で進む向きが回る角度 (ラジアン、正は時計回り) */
+  sweep: number;
+}
+
+/**
+ * ほぼ尖った所: 速さの極小 (B'·B'' = 0) で、曲率半径 (|B'|²/|B''|) が `tolerance` 以下、そのまわりの長さ
+ * `tolerance` / 2 ずつ (全体の許容値の 1/4) の区間で向きが 120° 以上回るもの。除く区間と、その中で向きが回る
+ * 角度を返す。
+ *
+ * - ちょうど尖った所 (速さがちょうど 0) は除かない (向きが裏返るだけで扇は描かない。WebKit と同じ)
+ * - 区間が [start, end] の端にかかるもの、ほかの区間と重なるものは除かない
+ */
+function nearCusps(seg: CubicSegment, start: number, end: number, tolerance: number): NearCusp[] {
+  const scale =
+    Math.hypot(seg.c1.x - seg.from.x, seg.c1.y - seg.from.y) +
+    Math.hypot(seg.c2.x - seg.c1.x, seg.c2.y - seg.c1.y) +
+    Math.hypot(seg.to.x - seg.c2.x, seg.to.y - seg.c2.y);
+  const out: NearCusp[] = [];
+  const reach = tolerance / 2;
+  const from = segmentLength(seg, 0, start);
+  const to = segmentLength(seg, 0, end);
+  for (const t of speedExtrema(seg)) {
+    if (!(t > start && t < end)) continue;
+    const d1 = derivativeAt(seg, t);
+    const d2 = secondDerivativeAt(seg, t);
+    const speed = Math.hypot(d1.x, d1.y);
+    const accel = Math.hypot(d2.x, d2.y);
+    if (!(accel > 0) || speed <= 1e-9 * scale) continue;
+    if ((speed * speed) / accel > tolerance) continue;
+    const at = segmentLength(seg, 0, t);
+    if (at - reach <= from || at + reach >= to) continue;
+    const before = tAtLength(seg, at - reach);
+    const after = tAtLength(seg, at + reach);
+    const prev = out[out.length - 1];
+    if (prev && before <= prev.after) continue;
+    // 折り返し (向きが 120° 以上回る) だけ。曲がりの小さいものは部分に分けて求められる
+    const sweep = turning(seg, before, t, after);
+    if (Math.abs(sweep) < MIN_CUSP_TURN) continue;
+    out.push({ before, after, sweep });
+  }
   return out;
+}
+
+/** [a, b] で進む向きが回る角度の合計 (`m` は速さの極小。そのまわりを細かく見る)。 */
+function turning(seg: Segment, a: number, m: number, b: number): number {
+  const ts: number[] = [];
+  const n = 64;
+  // 速さの極小のまわりに標本を寄せる (m からの距離の 3 乗で並べる)
+  for (let i = 0; i <= n; i++) {
+    const u = (i / n) * 2 - 1;
+    const d = u * u * u;
+    ts.push(d < 0 ? m + d * (m - a) : m + d * (b - m));
+  }
+  let sum = 0;
+  let prev = pieceTangent(seg, a, b);
+  for (let i = 1; i < ts.length; i++) {
+    const t = ts[i]!;
+    const cur = i === ts.length - 1 ? pieceTangent(seg, b, a) : pieceTangent(seg, t, b);
+    if (prev && cur) sum += Math.atan2(cross(prev, cur), dot(prev, cur));
+    prev = cur ?? prev;
+  }
+  return sum;
 }
 
 /** 線分の部分 (端の線も線分)。長さがなければ null。 */

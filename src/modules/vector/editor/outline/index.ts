@@ -7,7 +7,8 @@
  *
  * 描画 (`render/buildNodeSvg.ts` の `stroke-*`) と同じ規則:
  * - 端 butt / round / square、角 miter / round / bevel。マイターの上限は 4 (超えたらベベル)
- * - 破線は輪郭ごとに始点から (`dash.ts`)。奇数個は繰り返して偶数個に
+ * - 破線は輪郭ごとに始点から (`dash.ts`)。奇数個は繰り返して偶数個に。閉じた輪郭でも、最後の区間と先頭の区間は
+ *   つながない (macOS の WebKit と同じ。Windows の WebView2 (Chromium) とは始点の角の見た目が違いうる)
  * - 点が 1 個の輪郭は描かない。長さ 0 の輪郭 (点が 2 個以上でどれも同じ位置) は、実線なら丸・四角の端の点
  *   (四角は x 軸の向き) を描き、破線なら描かない。輪郭の中の長さ 0 の線分は飛ばす (前後の向きで角を描く)
  * - 閉じた実線の輪郭は始点にも角を描く。開いた輪郭は閉じる辺を描かない
@@ -24,10 +25,11 @@
  * 3 次ベジェ (半径の誤差 0.027%)。破線の位置は曲線の正確な長さで決める (描画するエンジンは曲線の長さを近似する
  * ことがあり、長い曲線の終わりの方では破線の端が 0.1〜0.3 px ずれて見えることがある)。
  *
- * 求められないとき: 部分・破線の区間・輪郭の線分の数が多すぎる (`tooComplex`。結果がパスの点の数の上限に
- * 収まらない大きさ)、合体が求められない・座標が有限でない (`failed`)。
+ * 求められないとき: 部分・破線の区間・輪郭の線分の数が多すぎる、範囲の重なる線分の組が多すぎる (合体に時間が
+ * かかりすぎる。`MAX_OVERLAP_PAIRS`) (`tooComplex`)、合体が求められない・座標が有限でない (`failed`)。
  */
 import {
+  controlBounds,
   isDegenerate,
   pointAt,
   subSegment,
@@ -72,6 +74,15 @@ export const MAX_OUTLINE_PIECES = 20000;
 export const MAX_DASH_SPANS = 5000;
 /** 合体に渡す輪郭の線分の数の上限。 */
 export const MAX_OUTLINE_SEGMENTS = 60000;
+/**
+ * 合体の手間の上限: 制御点の範囲が重なる線分の組 (同じ輪郭の隣どうしを除く) の数。合体の時間はおおむねこれに
+ * 比例し、交わりが多い形ほど重い (手元の実測: 4 万組で 0.5 秒、17 万組で 5 秒)。超えたら合体を始めずに断る
+ */
+export const MAX_OVERLAP_PAIRS = 60000;
+/** 重なる組を数えるときに調べる組の数の上限 (範囲が横に長い線分が多いと、数えるだけで重くなるため)。 */
+const MAX_OVERLAP_CHECKS = 30_000_000;
+/** 1 回目の合体がこれ (ms) より長くかかったら、求め直さない (画面が長く止まらないように)。 */
+const RETRY_LIMIT_MS = 300;
 
 /** 許容値の既定: 線の太さの 1% と 0.05 px の大きい方 (§8.10)。 */
 export function outlineTolerance(width: number): number {
@@ -94,18 +105,65 @@ export function strokeOutline(
   stroke: StrokeShape,
   options: StrokeOutlineOptions = {},
 ): StrokeOutline {
-  // 部品が許容値の中でほぼ重なる (ブーリアン演算が辺の両側を決められない) ときは、扇形を少し変えて求め直す
+  // 部品が許容値の中でほぼ重なる (ブーリアン演算が辺の両側を決められない) ときは、扇形を少し変えて求め直す。
+  // 合体の手間が大きすぎる形は始めずに断り、1 回目が長くかかったときは求め直さない
   const insets = options.lobeInset === undefined ? LOBE_INSETS : [options.lobeInset];
-  for (const lobeInset of insets) {
+  for (const [attempt, lobeInset] of insets.entries()) {
     const contours = strokeContours(subpaths, stroke, { ...options, lobeInset });
     if (!contours.ok) return contours;
     if (contours.subpaths.length === 0) return { ok: true, subpaths: [] };
+    if (attempt === 0 && overlapPairs(contours.subpaths) > MAX_OVERLAP_PAIRS)
+      return { ok: false, reason: "tooComplex" };
+    const started = performance.now();
     const merged = booleanOperation("union", [
       { subpaths: contours.subpaths, fillRule: "nonzero" },
     ]);
     if (merged !== null) return { ok: true, subpaths: merged };
+    if (performance.now() - started > RETRY_LIMIT_MS) break;
   }
   return { ok: false, reason: "failed" };
+}
+
+/**
+ * 制御点の範囲が重なる線分の組の数 (同じ輪郭の隣どうしを除く)。x の順に並べて掃く。数えた組が
+ * `MAX_OVERLAP_PAIRS` を超えるか、調べた組が `MAX_OVERLAP_CHECKS` を超えたら、その時点で上限より大きい値を返す。
+ */
+export function overlapPairs(subpaths: readonly Subpath[]): number {
+  interface Box {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+    contour: number;
+    index: number;
+    count: number;
+  }
+  const boxes: Box[] = [];
+  subpaths.forEach((sub, contour) => {
+    const segs = subpathToSegments(sub, { implicitClose: true });
+    segs.forEach((seg, index) => {
+      boxes.push({ ...controlBounds(seg), contour, index, count: segs.length });
+    });
+  });
+  boxes.sort((a, b) => a.minX - b.minX);
+  let pairs = 0;
+  let checks = 0;
+  let active: Box[] = [];
+  for (const box of boxes) {
+    checks += active.length;
+    if (checks > MAX_OVERLAP_CHECKS) return MAX_OVERLAP_PAIRS + 1;
+    active = active.filter((a) => a.maxX >= box.minX);
+    for (const a of active) {
+      if (a.minY > box.maxY || box.minY > a.maxY) continue;
+      if (a.contour === box.contour) {
+        const gap = Math.abs(a.index - box.index);
+        if (gap === 1 || gap === a.count - 1) continue;
+      }
+      if (++pairs > MAX_OVERLAP_PAIRS) return pairs;
+    }
+    active.push(box);
+  }
+  return pairs;
 }
 
 /**
@@ -180,19 +238,17 @@ export function strokeContours(
     const starts = [0];
     for (const len of lengths) starts.push(starts[starts.length - 1]! + len);
     const total = starts[starts.length - 1]!;
-    const spans = dashSpans(total, sub.closed, pattern, spanBudget);
+    const spans = dashSpans(total, pattern, spanBudget);
     if (spans === null) return { ok: false, reason: "tooComplex" };
     spanBudget -= spans.length;
     for (const span of spans) {
-      if (!span.wraps && span.end <= span.start) {
+      if (span.end <= span.start) {
         const at = locate(segs, starts, span.start);
         if (at) addDot(at.point, at.tangent);
         continue;
       }
-      const parts = span.wraps
-        ? [...slice(segs, starts, span.start, total), ...slice(segs, starts, 0, span.end)]
-        : slice(segs, starts, span.start, span.end);
-      if (!addUnit(parts, false)) return { ok: false, reason: "tooComplex" };
+      if (!addUnit(slice(segs, starts, span.start, span.end), false))
+        return { ok: false, reason: "tooComplex" };
     }
   }
 

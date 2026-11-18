@@ -6,7 +6,8 @@
  * - 中心線を細かい折れ線 (位置の誤差は許容値の 1/20、隣の点との向きの差も、太さの半分の所で許容値の 1/20
  *   以内) にし、破線の区間ごとに、隣り合う 2 点の (曲線の本当の) 法線の間にあり、足までの距離が太さの半分以内
  *   なら内側 (曲線の帯 = 法線に沿って太さの半分ずつ広げた範囲。強く曲がる所の中心の向こう側も含む)
- * - 元の線分の境目 (区間の内側) は角の形 (マイターは上限 4、ベベル、丸)、区間の端は端の形 (丸・四角)
+ * - 元の線分の境目 (区間の内側) は角の形 (マイターは上限 4、ベベル、丸)、区間の端は端の形 (丸・四角)。
+ *   閉じた輪郭の破線は、最後と先頭の区間をつながない (WebKit と同じ)
  * - 長さ 0 の区間・輪郭は点 (丸は円、四角は正方形)
  *
  * `compareStrokeOnGrid`: 結果の面 (`nonzero`) と参照を格子の点で比べる。点のまわり (許容値の距離の 8 方向) で
@@ -58,32 +59,22 @@ const dot = (a: Point, b: Point) => a.x * b.x + a.y * b.y;
 const crossP = (a: Point, b: Point) => a.x * b.y - a.y * b.x;
 
 /** 破線の区間 (参照用に別に書く。`dash.ts` と同じ規則)。 */
-function refSpans(
-  total: number,
-  closed: boolean,
-  dash: readonly number[],
-): { start: number; end: number; wraps: boolean }[] | null {
+function refSpans(total: number, dash: readonly number[]): { start: number; end: number }[] | null {
   if (dash.length === 0 || dash.some((v) => !(v >= 0)) || !(dash.reduce((a, b) => a + b, 0) > 0))
     return null;
   const pattern = dash.length % 2 ? [...dash, ...dash] : dash;
-  const spans: { start: number; end: number; wraps: boolean }[] = [];
+  const spans: { start: number; end: number }[] = [];
   let pos = 0;
   let i = 0;
-  let lastOn = false;
   const snap = 1e-9 * Math.max(1, total);
   while (total - pos > snap) {
     const on = i % 2 === 0;
     const end = pos + pattern[i]!;
-    if (on) spans.push({ start: pos, end: Math.min(end, total), wraps: false });
-    lastOn = on;
+    if (on) spans.push({ start: pos, end: Math.min(end, total) });
     pos = end;
     i = (i + 1) % pattern.length;
   }
-  if (closed && lastOn && spans.length >= 2) {
-    const last = spans.pop()!;
-    const first = spans.shift()!;
-    spans.push({ start: last.start, end: first.end, wraps: true });
-  }
+  // 閉じた輪郭でも最後と先頭の区間はつながない (WebKit と同じ)
   return spans;
 }
 
@@ -103,7 +94,7 @@ export function buildReference(
     for (const p of sp.points) mag = Math.max(mag, Math.abs(p.x), Math.abs(p.y));
     const segs = subpathToSegments(sp).filter((s) => !isDegenerate(s, toleranceFor(mag)));
     if (segs.length === 0) {
-      if (stroke.dash.length === 0 || refSpans(1, false, stroke.dash) === null)
+      if (stroke.dash.length === 0 || refSpans(1, stroke.dash) === null)
         dots.push({ p: { x: sp.points[0]!.x, y: sp.points[0]!.y }, tangent: { x: 1, y: 0 } });
       continue;
     }
@@ -111,7 +102,7 @@ export function buildReference(
     const starts = [0];
     for (const l of lengths) starts.push(starts[starts.length - 1]! + l);
     const total = starts[starts.length - 1]!;
-    const spans = refSpans(total, sp.closed, stroke.dash);
+    const spans = refSpans(total, stroke.dash);
     const pieces = (a: number, b: number): { seg: Segment; t0: number; t1: number }[] => {
       const out: { seg: Segment; t0: number; t1: number }[] = [];
       segs.forEach((seg, i) => {
@@ -169,16 +160,14 @@ export function buildReference(
       continue;
     }
     for (const span of spans) {
-      if (!span.wraps && span.end <= span.start) {
+      if (span.end <= span.start) {
         let i = 0;
         while (i + 1 < segs.length && starts[i + 1]! <= span.start) i++;
         const t = tAtLength(segs[i]!, span.start - starts[i]!);
         dots.push({ p: pointAt(segs[i]!, t), tangent: tangentAt(segs[i]!, t)! });
         continue;
       }
-      const parts = span.wraps
-        ? [...pieces(span.start, total), ...pieces(0, span.end)]
-        : pieces(span.start, span.end);
+      const parts = pieces(span.start, span.end);
       if (parts.length > 0) dashes.push(toDash(parts, false));
     }
   }

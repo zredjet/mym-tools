@@ -19,7 +19,7 @@
  * 「`pivot` から反対側の端の線までの扇形」にし (向きは正のまま)、向こう側に回り込む扇形 (`pivot` から
  * きつい側の端の線まで) は別の輪郭にする。
  */
-import { cross, distanceToLineSegment, dot, type Segment } from "../geometry/bezier";
+import { cross, dot, type Segment } from "../geometry/bezier";
 import type { Point, StrokeCap, StrokeJoin } from "../model/types";
 import { leftNormal, rightNormal, sideNormal, type OffsetPiece, type Side } from "./offset";
 
@@ -30,6 +30,16 @@ const STRAIGHT_SIN = 1e-9;
 
 const add = (p: Point, v: Point, k = 1): Point => ({ x: p.x + v.x * k, y: p.y + v.y * k });
 const perp = (v: Point): Point => ({ x: -v.y, y: v.x });
+/**
+ * 点 c と、a と p を通る直線の距離 (a と p が同じ点なら 0: a → c → a は面積のない行き来)。a → c → p の c を
+ * 除くと、この距離を高さとする細い三角形 (c が a と p の間の外にはみ出す折り返しも含む) だけ形が変わる。
+ */
+const lineDistance = (c: Point, a: Point, p: Point): number => {
+  const dx = p.x - a.x;
+  const dy = p.y - a.y;
+  const len = Math.hypot(dx, dy);
+  return len === 0 ? 0 : Math.abs(dx * (c.y - a.y) - dy * (c.x - a.x)) / len;
+};
 /** a → c → p が同じ直線の上 (丸めの差を除いて) か。 */
 const collinear = (a: Point, c: Point, p: Point): boolean => {
   const ux = c.x - a.x;
@@ -51,8 +61,8 @@ const rotateVec = (v: Point, a: number): Point => {
 /**
  * 続いた線分の並びを作る。
  * - 前の終点と次の始点が `eps` 以内なら同じ点とみなす (計算の丸めの差を埋める)
- * - 線分と線分の間の点は、前後の点を結ぶ線分から `simplify` 以内なら除く (同じ直線の上の点、ごく小さな
- *   折り返し)。面積のない行き来や、ほぼ重なる短い線分の組は、ブーリアン演算が辺の両側を決められなくなる
+ * - 線分と線分の間の点は、前後の点を通る直線から `simplify` 以内なら除く (同じ直線の上の点、ごく小さな
+ *   折り返し、ほぼ同じ直線の上の行き来)。面積のない行き来や、ほぼ重なる短い線分の組は、ブーリアン演算が辺の両側を決められなくなる
  *   ため。除いて変わる形は `simplify` 以内 (許容値の 1/64 ほど)
  */
 export class ContourBuilder {
@@ -83,11 +93,7 @@ export class ContourBuilder {
       const last = this.segments[this.segments.length - 1];
       if (last?.kind !== "line") break;
       const a = last.from;
-      if (
-        distanceToLineSegment(this.current, a, p) > this.simplify &&
-        !collinear(a, this.current, p)
-      )
-        break;
+      if (lineDistance(this.current, a, p) > this.simplify && !collinear(a, this.current, p)) break;
       this.segments.pop();
       this.current = a;
       if (this.near(p, a)) return;
@@ -238,6 +244,7 @@ function joinPath(
   side: Side,
   style: StrokeStyle,
   forward: boolean,
+  roundSweep?: number,
 ): void {
   const h = style.half;
   const na = sideNormal(ta, side);
@@ -246,8 +253,8 @@ function joinPath(
   const q = add(v, nb, h);
   const [from, to] = forward ? [p, q] : [q, p];
   b.lineTo(from);
-  if (style.join === "round") {
-    const sweep = turnAngle(ta, tb);
+  if (roundSweep !== undefined || style.join === "round") {
+    const sweep = roundSweep ?? turnAngle(ta, tb);
     if (forward) b.arc(v, h, na, sweep);
     else b.arc(v, h, nb, -sweep);
   } else if (style.join === "miter" && 1 + dot(ta, tb) >= 2 / (MITER_LIMIT * MITER_LIMIT)) {
@@ -419,6 +426,17 @@ function connect(
   const v = a.seg.to;
   const from = side === "left" ? a.left.to : a.right.to;
   const to = side === "left" ? next.left.from : next.right.from;
+  if (a.cuspSweep !== undefined) {
+    // ほぼ尖った所を除いた境目: 外側は向きの回った角度の丸い扇 (曲線が実際に回った向き)。内側は中心を通る
+    if ((a.cuspSweep > 0 ? "left" : "right") === side) {
+      joinPath(b, v, a.t1, next.t0, side, style, true, a.cuspSweep);
+      b.lineTo(to);
+    } else {
+      b.lineTo(v);
+      b.lineTo(to);
+    }
+    return null;
+  }
   if (corner && isCorner(a.t1, next.t0) && outerSide(a.t1, next.t0) === side) {
     joinPath(b, v, a.t1, next.t0, side, style, true);
     return null;

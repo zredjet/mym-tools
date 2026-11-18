@@ -9,12 +9,17 @@
  * 結果 (ノードごと):
  * - 線の面: 線の見た目どおりの塗りの面のパス (`outlineStroke`)。塗りは線の色と不透明度の単色、線はなし。
  *   回転は点に焼き込む (回転 0)
- * - 塗りのないノード: 線の面のパス 1 つ。元のノードの ID・名前・表示・ロック・不透明度・影を引き継ぐ
+ * - 塗りのないノード: 線の面のパス 1 つ。元のノードの ID・名前・表示・ロック・不透明度・影を引き継ぐ。影の
+ *   ずれは、焼き込んだ回転の分だけ回す (ページの上の影の向きを変えない)
  * - 塗りもあるノード: 塗りの形 (線なしのパス。パスに変換と同じ形で、箱を持つノードは回転も同じ) と線の面を、
  *   元のノードの ID・名前・表示・ロック・不透明度の group にまとめる (塗りが背面)。影は塗りの形に付ける
- *   (group は影を持てない。線の面にも付けると、線の影が塗りの上に落ちる)。子の名前は「塗り」「線」
+ *   (塗りの形は回転を保つので、影の向きも変わらない)。**既知の近似**: group は影を持てないので、元の影 (塗りと
+ *   線を合わせた形の影) のうち、線の外側の半分の影がなくなる。塗りの不透明度が低いと影もほとんど見えなくなる
+ *   (影は塗りの形の不透明度から作られるため)。線の面にも付けると、線の影が塗りの上に落ちる。子の名前は「塗り」「線」
  * - 結果は元のノードの位置 (親と重なり順) に置く。ブーリアンは子ごと置き換える
- * - 複数のノードに当てるときは、まとめて 1 つの文書にする (履歴 1 件)。どれかが当てられなければ、どれも当てない
+ * - 複数のノードに当てるときは、まとめて 1 つの文書にする (履歴 1 件)。線が何も描かれないノード (長さ 0 の
+ *   butt の線など) は飛ばして残りに当て、当てるものが 1 つもなければ断る。ほかの理由で当てられないノードが
+ *   あれば、どれも当てない
  *
  * 線の中心線 (§8.6 の始点と向き): 矩形・楕円は描画 (`<rect rx>` と `<ellipse>`) との差が許容値の 1/8 以内に
  * なるよう、円弧を必要なだけ細かい 3 次ベジェにする (始点と向きは §8.6 の形と同じ)。線は始点から終点。
@@ -25,12 +30,20 @@
  */
 import { getBooleanResult } from "../boolean/result";
 import type { Segment } from "../geometry/bezier";
-import { nodeMatrix } from "../geometry/matrix";
+import { cosSinDeg, nodeMatrix } from "../geometry/matrix";
 import { createGroup, createPath, solidPaint } from "../model/create";
 import { DocDraft } from "../model/draft";
 import { CANVAS_LIMITS } from "../model/limits";
 import { getDepth, getNode, getParentNode, topLevelIds } from "../model/tree";
-import type { CanvasDocument, CanvasNode, NodeId, PathNode, Stroke, Subpath } from "../model/types";
+import type {
+  CanvasDocument,
+  CanvasNode,
+  NodeId,
+  PathNode,
+  Shadow,
+  Stroke,
+  Subpath,
+} from "../model/types";
 import { geometryWithinLimits, pathPointsWithinLimits } from "../panels/limits";
 import { fitPathNode } from "../path/fit";
 import { segmentsToSubpath } from "../path/segments";
@@ -278,6 +291,19 @@ function fillPart(doc: CanvasDocument, node: OutlinableNode, id: NodeId): PathNo
   }
 }
 
+/**
+ * 線の面に付ける影。影のずれはノードの座標系の向きにある (§8.4) ので、線の面に焼き込んだ回転の分だけ回す
+ * (線の面の回転は 0。祖先の frame の回転はそのまま掛かる)。
+ */
+function bakedShadow(node: OutlinableNode): Shadow | null {
+  if (node.type === "line" || node.shadow === null) return null;
+  const rotation = node.type === "boolean" ? 0 : node.rotation;
+  if (rotation === 0) return node.shadow;
+  const { cos, sin } = cosSinDeg(rotation);
+  const { x, y } = node.shadow;
+  return { ...node.shadow, x: x * cos - y * sin, y: x * sin + y * cos };
+}
+
 /** 線の面のパス。 */
 function strokePart(
   subpaths: readonly Subpath[],
@@ -313,7 +339,8 @@ export function outlineNodes(
     if (centerline === null) return { ok: false, reason: "booleanFailed" };
     const outline = strokeOutline(centerline, stroke, { tolerance });
     if (!outline.ok) return { ok: false, reason: outline.reason };
-    if (outline.subpaths.length === 0) return { ok: false, reason: "empty" };
+    // 線が何も描かれないノード (長さ 0 の butt の線など) は飛ばし、そのままにする
+    if (outline.subpaths.length === 0) continue;
     const fill = fillPart(doc, node, newId());
     if (node.type === "boolean") for (const child of node.children) draft.removeSubtree(child);
     if (fill === null) {
@@ -324,7 +351,7 @@ export function outlineNodes(
           visible: node.visible,
           locked: node.locked,
           opacity: node.opacity,
-          shadow: node.type === "line" ? null : node.shadow,
+          shadow: node.type === "line" ? null : bakedShadow(node),
         }),
       );
     } else {
@@ -353,6 +380,7 @@ export function outlineNodes(
     }
     results.push(node.id);
   }
+  if (results.length === 0) return { ok: false, reason: "empty" };
   const next = draft.finish();
   if (groups > 0 && Object.keys(next.nodes).length > CANVAS_LIMITS.maxNodes)
     return { ok: false, reason: "limits" };
