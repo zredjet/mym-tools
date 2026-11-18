@@ -103,6 +103,40 @@ export function resizeRect(input: ResizeInput): Rect {
   return normalize(x0, y0, x1, y1);
 }
 
+/**
+ * 自分の向きのリサイズ (§8.5.4) の矩形 (ノードの座標系、`resizeRect` の結果) の幅と高さを整数に丸める。
+ * 動かさない辺 (Alt なら中心。縦横比の固定で辺のハンドルが伸ばす反対の向きも中心) が動かないように位置を
+ * 決め直す。位置は丸めない (中心まわりの回転なので、整数にそろえると動かさない側がずれる)。
+ * `start` と同じ向き (位置も大きさも同じ) は変えない。
+ */
+export function roundOwnRect(
+  rect: Rect,
+  start: Rect,
+  handle: ResizeHandle,
+  fromCenter: boolean,
+): Rect {
+  const sides = handleSides(handle);
+  const axis = (
+    pos: number,
+    size: number,
+    startPos: number,
+    startSize: number,
+    side: -1 | 0 | 1,
+  ): [number, number] => {
+    if (pos === startPos && size === startSize) return [pos, size];
+    const rounded = Math.max(0, Math.round(size));
+    if (side === 0 || fromCenter) return [startPos + startSize / 2 - rounded / 2, rounded];
+    // 動かさない辺。反対側を越えて引いたら、矩形のもう一方の辺がそこに来る
+    const anchor = side > 0 ? startPos : startPos + startSize;
+    const atMin = Math.abs(pos - anchor) <= Math.abs(pos + size - anchor);
+    return atMin ? [anchor, rounded] : [anchor - rounded, rounded];
+  };
+  const [x, width] = axis(rect.x, rect.width, start.x, start.width, sides.x);
+  const [y, height] = axis(rect.y, rect.height, start.y, start.height, sides.y);
+  const zero = (v: number) => (v === 0 ? 0 : v);
+  return { x: zero(x), y: zero(y), width, height };
+}
+
 /** 辺のハンドルを押した位置から、ハンドルの辺までの差 (ページ座標)。 */
 export function grabOffset(start: Rect, handle: ResizeHandle, press: Point): Point {
   const sides = handleSides(handle);

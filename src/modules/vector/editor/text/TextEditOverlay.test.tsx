@@ -313,3 +313,45 @@ describe("TextEditOverlay: 入力と終了", () => {
     expect(state().editingTextId).toBe("t1");
   });
 });
+
+describe("TextEditOverlay: 回転したテキスト (§8.5.7)", () => {
+  const rotateNode = (id: string, rotation: number) =>
+    act(() =>
+      state().apply((doc) => ({
+        ...doc,
+        nodes: { ...doc.nodes, [id]: { ...doc.nodes[id]!, rotation } as TextNode },
+      })),
+    );
+
+  it("入力欄を同じ角度で回し、回転した箱の左上の角に合わせる", () => {
+    rotateNode("t1", 90);
+    render(<TextEditOverlay />);
+    act(() => state().startTextEdit("t1"));
+    // 箱 (frame の中の 10, 20, 32×23) を中心のまわりに 90°: 左上の角はページの (137.5, 65.5)。
+    // 余白 2 px のずれ (-2, -2) も 90° 回して (2, -2)
+    expect(textarea().style.left).toBe("139.5px");
+    expect(textarea().style.top).toBe("63.5px");
+    expect(textarea().style.transform).toBe("rotate(90deg) scale(1)");
+    // 倍率を変えても追従する
+    act(() => state().setViewport({ x: 0, y: 0, zoom: 2 }));
+    expect(textarea().style.left).toBe("277px");
+    expect(textarea().style.transform).toBe("rotate(90deg) scale(2)");
+  });
+
+  it("回転した frame の中のテキストも、frame の角度で回す", () => {
+    rotateNode("f1", 90);
+    render(<TextEditOverlay />);
+    act(() => state().startTextEdit("t1"));
+    expect(textarea().style.transform).toBe("rotate(90deg) scale(1)");
+    // frame (100, 50, 400×300) を中心 (300, 200) のまわりに 90°: frame の (10, 20) はページの (430, 10)
+    expect(Number.parseFloat(textarea().style.left)).toBeCloseTo(432, 9);
+    expect(Number.parseFloat(textarea().style.top)).toBeCloseTo(8, 9);
+  });
+
+  it("回転していなければ rotate を付けない (第 1 段階と同じ)", () => {
+    render(<TextEditOverlay />);
+    act(() => state().startTextEdit("t1"));
+    expect(textarea().style.transform).toBe("scale(1)");
+    expect(textarea().style.left).toBe("108px");
+  });
+});

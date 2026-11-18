@@ -7,7 +7,6 @@ import {
   Minus,
   Spline,
   Square,
-  SquaresUnite,
   Type,
   type LucideIcon,
 } from "lucide-react";
@@ -15,12 +14,13 @@ import {
 import { CANVAS_LIMITS } from "../../model/limits";
 import { updateNodes } from "../../model/transform";
 import { getNode } from "../../model/tree";
-import type { NodeId, NodeType } from "../../model/types";
+import type { BooleanOp, NodeId, NodeType } from "../../model/types";
 import { hasLoneSurrogate } from "../../model/validate";
 import { editorStore } from "../../state/store";
 import { clipName } from "../fields/values";
+import { BOOLEAN_OP_ICONS } from "../sections/convertActions";
 
-/** レイヤーの行に出す種別のアイコン。 */
+/** レイヤーの行に出す種別のアイコン。ブーリアンは演算ごとのアイコン (`BOOLEAN_ROW_ICONS`) を使う。 */
 export const NODE_TYPE_ICONS: Record<NodeType, LucideIcon> = {
   frame: Frame,
   group: Group,
@@ -31,8 +31,11 @@ export const NODE_TYPE_ICONS: Record<NodeType, LucideIcon> = {
   image: Image,
   svg: FileCode,
   path: Spline,
-  boolean: SquaresUnite,
+  boolean: BOOLEAN_OP_ICONS.union,
 };
+
+/** ブーリアンの行のアイコン (演算ごと。合体・型抜き・交差・中マド。§8.13)。 */
+export const BOOLEAN_ROW_ICONS: Readonly<Record<BooleanOp, LucideIcon>> = BOOLEAN_OP_ICONS;
 
 /** 名前を確定する。上限の文字数で切り、変わらなければ何もしない。 */
 export function commitLayerName(id: NodeId, input: string): void {

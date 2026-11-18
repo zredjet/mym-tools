@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rectSnapLines } from "../../snap/snap";
-import { grabOffset, moveLineEnd, resizeRect, type ResizeInput } from "./resize";
+import { grabOffset, moveLineEnd, resizeRect, roundOwnRect, type ResizeInput } from "./resize";
 
 const start = { x: 100, y: 100, width: 200, height: 100 };
 const input = (patch: Partial<ResizeInput>): ResizeInput => ({
@@ -156,6 +156,67 @@ describe("moveLineEnd", () => {
     expect(moveLineEnd({ ...base, pointer: { x: 147, y: 43 }, snap })[0]).toEqual({
       x: 150,
       y: 40,
+    });
+  });
+});
+
+describe("roundOwnRect (§8.5.4)", () => {
+  const own = { x: 0, y: 0, width: 100, height: 50 };
+
+  it("幅と高さだけを丸め、動かさない辺をそのままにする", () => {
+    expect(roundOwnRect({ x: 0, y: 0, width: 120.4, height: 50 }, own, "e", false)).toEqual({
+      x: 0,
+      y: 0,
+      width: 120,
+      height: 50,
+    });
+    // 左の辺を引いたら右の辺 (100) が動かない。位置は丸めない
+    expect(roundOwnRect({ x: -10.6, y: 0, width: 110.6, height: 50 }, own, "w", false)).toEqual({
+      x: -11,
+      y: 0,
+      width: 111,
+      height: 50,
+    });
+    expect(roundOwnRect({ x: 0, y: -0.3, width: 100.7, height: 50.3 }, own, "ne", false)).toEqual({
+      x: 0,
+      y: 0,
+      width: 101,
+      height: 50,
+    });
+  });
+
+  it("Alt と、縦横比の固定で辺のハンドルが伸ばす向きは、中心が動かない", () => {
+    expect(roundOwnRect({ x: -5.2, y: 0, width: 110.4, height: 50 }, own, "e", true)).toEqual({
+      x: -5,
+      y: 0,
+      width: 110,
+      height: 50,
+    });
+    // 縦横比の固定: 右の辺を引くと高さは中心 (25) から伸びる
+    expect(roundOwnRect({ x: 0, y: -2.7, width: 110.8, height: 55.4 }, own, "e", false)).toEqual({
+      x: 0,
+      y: -2.5,
+      width: 111,
+      height: 55,
+    });
+  });
+
+  it("反対側を越えて引いたら、もう一方の辺が動かない辺に来る", () => {
+    expect(roundOwnRect({ x: -20.4, y: 0, width: 20.4, height: 50 }, own, "e", false)).toEqual({
+      x: -20,
+      y: 0,
+      width: 20,
+      height: 50,
+    });
+  });
+
+  it("変わらない向きはそのまま (小数の大きさも丸めない)", () => {
+    const frac = { x: 0, y: 0, width: 100.5, height: 50.5 };
+    expect(roundOwnRect({ x: 0, y: 0, width: 120.2, height: 50.5 }, frac, "e", false)).toEqual({
+      x: 0,
+      y: 0,
+      width: 120,
+      height: 50.5,
     });
   });
 });

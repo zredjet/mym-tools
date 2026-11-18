@@ -6,6 +6,9 @@
  * - Cmd/Ctrl+1〜6、Cmd/Ctrl+\、Cmd/Ctrl+B はアプリ全体の割当 (`ui-design.md` §8.1) なので使わない
  * - 編集のショートカット (Undo、コピー、削除、矢印、グループ化、重なり順など) は
  *   「選択と変形」のセッションが「編集」の節に足す
+ * - 第 2 段階 (§8.13): 担当ごとに節を分け、節ごとに `XXX_SHORTCUTS` の配列を置いて `CANVAS_SHORTCUTS` の
+ *   末尾で並べる (並行の作業が同じ行を変えないため)。G は「変換」(`CONVERT_SHORTCUTS`)。
+ *   E (反転)、F (ペン)、H (鉛筆)、I (線のアウトライン化) も同じ形で自分の節を足す
  */
 import {
   copySelection,
@@ -18,9 +21,15 @@ import {
 } from "../state/commands";
 import type { ToolId } from "../state/types";
 import {
+  BOOLEAN_OP_KEYS,
+  booleanSelection,
+  flattenSelection,
+} from "../panels/sections/convertActions";
+import {
   duplicateWithinLimits,
   enterSelection,
   escapeSelection,
+  flipSelection,
   nudgeSelection,
   pasteWithinLimits,
 } from "../tools/select/actions";
@@ -73,6 +82,40 @@ const tool = (id: string, key: string, toolId: ToolId): Shortcut => ({
   keys: [{ key: [key] }],
   run: ({ store }) => store.getState().setTool(toolId),
 });
+
+// ---- 変換 (G。§8.13) ----
+// パスに変換とブーリアン演算。中身は `panels/sections/convertActions.ts` (「変換」の節のボタンと同じ動作)。
+// 点の編集中は効かせない (§8.7.3。`pathEdit` ツールが先に受け、ここでも何もしない)
+export const CONVERT_SHORTCUTS: Shortcut[] = [
+  {
+    id: "convert.flatten",
+    keys: [{ key: ["e"], mod: true, repeat: false }],
+    run: ({ store }) => {
+      if (store.getState().selection.length === 0) return false;
+      flattenSelection(store);
+    },
+  },
+  ...(["union", "subtract", "intersect", "exclude"] as const).map(
+    (op): Shortcut => ({
+      // macOS の Option は文字を変える (Option+Shift+U は「¨」) ので code で見る
+      id: `convert.boolean.${op}`,
+      keys: [{ code: [`Key${BOOLEAN_OP_KEYS[op]}`], alt: true, shift: true, repeat: false }],
+      run: ({ store }) => {
+        if (store.getState().selection.length === 0) return false;
+        booleanSelection(store, op);
+      },
+    }),
+  ),
+  {
+    // 押しっぱなしの繰り返しは何もせずに受ける
+    id: "convert.ignoreRepeat",
+    keys: [
+      { key: ["e"], mod: true },
+      { code: ["KeyU", "KeyS", "KeyI", "KeyE"], alt: true, shift: true },
+    ],
+    run: ({ store }) => (store.getState().selection.length === 0 ? false : undefined),
+  },
+];
 
 /** 割当表。上から順に調べ、最初に合って処理したものだけを実行する。 */
 export const CANVAS_SHORTCUTS: Shortcut[] = [
@@ -161,6 +204,20 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
       const state = store.getState();
       state.setView({ layersPanel: !state.view.layersPanel });
     },
+  },
+
+  // ---- 回転と反転 (§8.5.6、§8.13) ----
+  // Shift+H / Shift+V は左右反転 / 上下反転。反転できない選択 (テキスト・画像・埋め込み SVG・frame を含む) では
+  // 何もしない。Shift なしの H (手のひら) と V (選択) は上のツールの割当
+  {
+    id: "edit.flipHorizontal",
+    keys: [{ key: ["h"], shift: true, repeat: false }],
+    run: ({ store }) => flipSelection(store, "horizontal"),
+  },
+  {
+    id: "edit.flipVertical",
+    keys: [{ key: ["v"], shift: true, repeat: false }],
+    run: ({ store }) => flipSelection(store, "vertical"),
   },
 
   // ---- 編集 ----
@@ -282,6 +339,9 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
     ],
     run: () => {},
   },
+
+  // ---- 第 2 段階の節 (担当ごと) ----
+  ...CONVERT_SHORTCUTS,
 ];
 
 /** 合うショートカットを上から順に実行し、処理したものを返す。なければ null。 */

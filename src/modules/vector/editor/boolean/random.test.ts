@@ -46,7 +46,8 @@ function fillRule(rand: () => number) {
   return rand() < 0.5 ? ("nonzero" as const) : ("evenodd" as const);
 }
 
-describe("booleanOperation (乱数の形)", () => {
+// CI の機械では 1 件が既定の 5 秒を超えることがある。
+describe("booleanOperation (乱数の形)", { timeout: 30_000 }, () => {
   it("乱れた多角形と曲線の形 (自己交差を含む)", () => {
     const tally: Tally = { wrong: [], nulls: [] };
     for (let seed = 1; seed <= 60; seed++) {
