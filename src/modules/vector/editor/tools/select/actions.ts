@@ -8,7 +8,7 @@
 import type { StoreApi } from "zustand";
 import { insertFragment } from "../../model/fragment";
 import { duplicateNodes } from "../../model/structure";
-import { getAncestors, getNode, getParentNode, topLevelIds } from "../../model/tree";
+import { getAncestors, getNode, getParentNode, isGroupLike, topLevelIds } from "../../model/tree";
 import type { CanvasDocument, NodeId } from "../../model/types";
 import { geometryWithinLimits } from "../../panels/limits";
 import { editorClipboard, PASTE_OFFSET, type EditorClipboard } from "../../state/clipboard";
@@ -106,7 +106,7 @@ export function pasteWithinLimits(
 }
 
 /**
- * Enter: テキストなら本文の編集、frame / group なら中に入って子を選ぶ。
+ * Enter: テキストなら本文の編集、frame / group / ブーリアンなら中に入って子を選ぶ。
  * 1 つだけ選んでいないときと、ほかのノードでは何もしない (false)。
  */
 export function enterSelection(store: Store): boolean {
@@ -119,7 +119,7 @@ export function enterSelection(store: Store): boolean {
     state.startTextEdit(id);
     return true;
   }
-  if (node.type !== "frame" && node.type !== "group") return false;
+  if (node.type !== "frame" && !isGroupLike(node)) return false;
   state.setScope(id);
   state.setSelection(
     node.children.filter((child) => {

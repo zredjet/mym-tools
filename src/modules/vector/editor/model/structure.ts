@@ -2,20 +2,33 @@
  * 木の変更 (挿入、削除、複製、重なり順、親の付け替え、グループ化)。
  * すべて純関数で、変わらなければ引数の文書をそのまま返す。
  * 上限 (`maxDepth` / `maxNodes`) を超える変更は行わず、元の文書を返す。
+ *
+ * ブーリアンの木の規則 (§8.9.1): ブーリアンの子は 1 個以上で、種類は rect / ellipse / path / boolean だけ。
+ * - 挿入・断片の挿入・親の付け替え (レイヤーパネルの並べ替え) は、子にできない種類をブーリアンに入れない (何もしない)
+ * - グループ化は、group を置く先がブーリアンなら何もしない
+ * - 子がなくなったブーリアンは、空の group と同じく消す
+ * - 解除 (`ungroupNodes`) は group とブーリアンの両方を解く (§8.9.4。子を親へ戻し、不透明度・非表示・ロックを写す)
+ *
+ * 回転 (§8.5.2): 親を変えるとき (付け替え、グループ化) は、ページ上の見た目を変えない。箱を持つノードは中心を
+ * ページ座標で保ち、`rotation` に「元の親のページ上の角度 − 新しい親のページ上の角度」を足す。線は端点を写す
+ * (パスの点は変えない)。回転していない座標系の間では、これまでどおり平行移動だけ (第 1 段階と同じ値)。
  */
 import { createGroup } from "./create";
 import { DocDraft } from "./draft";
-import { parentOrigin } from "./geometry";
+import { isTranslation, pageVectorToLocal, parentMatrix } from "./geometry";
+import { invert, multiply } from "../geometry/matrix";
 import { createId, getOwn } from "./ids";
 import { CANVAS_LIMITS } from "./limits";
-import { translateInDraft } from "./transform";
+import { transformInDraft, translateInDraft } from "./transform";
 import {
+  canHaveChildOfType,
   getDepth,
   getDescendantIds,
   getNode,
   getParent,
   isAncestorOf,
   isContainer,
+  isGroupLike,
   sameParent,
   topLevelIds,
   type ParentRef,
@@ -54,13 +67,16 @@ export function subtreeHeight(
   return 1 + max;
 }
 
-/** 空になった group を消し、空になった親の group も続けて消す (§3.3: group は子が 1 個以上)。 */
+/**
+ * 空になった group とブーリアンを消し、空になった親の group・ブーリアンも続けて消す
+ * (§3.3: group は子が 1 個以上。§8.9.1: ブーリアンも同じ)。
+ */
 function removeEmptyGroups(draft: DocDraft, candidates: Iterable<ParentRef | null>): void {
   for (const parent of candidates) {
     let current = parent;
     while (current?.kind === "node") {
       const node = draft.get(current.id);
-      if (!node || node.type !== "group" || node.children.length > 0) break;
+      if (!node || !isGroupLike(node) || node.children.length > 0) break;
       const up = draft.parentOf(node.id);
       draft.detach(node.id);
       draft.remove(node.id);
@@ -75,7 +91,8 @@ function removeEmptyGroups(draft: DocDraft, candidates: Iterable<ParentRef | nul
 
 /**
  * 子を持たないノード (または子のない frame) を親の `index` (省略すると最前面) に入れる。
- * 座標は親の座標系で渡す (`pageToLocal` で直す)。子を持つものは `insertFragment` を使う。
+ * 座標は親の座標系で渡す (`pageToLocal` で直す)。子を持つものと group・ブーリアンは `insertFragment` を使う。
+ * 親がブーリアンで、子にできない種類なら何もしない (§8.9.1)。
  */
 export function insertNode(
   doc: CanvasDocument,
@@ -84,7 +101,9 @@ export function insertNode(
   index?: number,
 ): CanvasDocument {
   if (getNode(doc, node.id) !== undefined || !parentExists(doc, parent)) return doc;
-  if (isContainer(node) && node.children.length > 0) return doc;
+  if (!canHaveChildOfType(doc, parent, node.type)) return doc;
+  // group とブーリアンは子が 1 個以上 (§3.3、§8.9.1) なので、子のないものも入れない (`insertFragment` を使う)
+  if (isGroupLike(node) || (isContainer(node) && node.children.length > 0)) return doc;
   if (parentDepth(doc, parent) + 1 > CANVAS_LIMITS.maxDepth) return doc;
   if (Object.keys(doc.nodes).length + 1 > CANVAS_LIMITS.maxNodes) return doc;
   const draft = new DocDraft(doc);
@@ -145,8 +164,8 @@ export function cloneSubtreeInto(
 }
 
 /**
- * ノードを子孫ごと複製し、それぞれ元のすぐ前面に置く。`offset` だけずらす。
- * Alt を押しながらの移動はずらさずに複製してから動かす。
+ * ノードを子孫ごと複製し、それぞれ元のすぐ前面に置く。`offset` (ページ座標のずれ) だけずらす。
+ * Alt を押しながらの移動はずらさずに複製してから動かす。ブーリアンの子の複製はブーリアンの中に置く。
  */
 export function duplicateNodes(
   doc: CanvasDocument,
@@ -164,7 +183,8 @@ export function duplicateNodes(
     const parent = draft.parentOf(id);
     if (!parent) continue;
     const copyId = cloneSubtreeInto(draft, doc.nodes, id, taken);
-    translateInDraft(draft, copyId, offset.x, offset.y);
+    const local = pageVectorToLocal(doc, parent, offset);
+    translateInDraft(draft, copyId, local.x, local.y);
     draft.attach(copyId, parent, draft.children(parent).indexOf(id) + 1);
     result.push(copyId);
   }
@@ -252,12 +272,38 @@ function canMoveInto(doc: CanvasDocument, id: NodeId, target: ParentRef): boolea
 }
 
 /**
+ * 下書きの中でノードを、元の親の座標系から新しい親の座標系へ写す (見た目の位置を変えない。§8.5.2)。
+ * 原点と行列は元の文書で求める (付け替えの前後で、`from` と `to` とその祖先は動かない)。
+ */
+function relocateInDraft(
+  doc: CanvasDocument,
+  draft: DocDraft,
+  id: NodeId,
+  from: ParentRef,
+  to: ParentRef,
+): void {
+  const source = parentMatrix(doc, from);
+  const target = parentMatrix(doc, to);
+  if (isTranslation(source) && isTranslation(target)) {
+    // 回転していない座標系の間は、原点の差だけ動かす (第 1 段階と同じ計算)
+    translateInDraft(draft, id, source.e - target.e, source.f - target.f);
+    return;
+  }
+  // 片方でも回転していれば、元の座標系 → 新しい座標系の行列で写す。回転の向きが同じ座標系の間では
+  // この行列は平行移動だけになるが、ずれは新しい座標系での値 (`m.e`, `m.f`) で、ページの原点の差ではない
+  const back = invert(target);
+  if (!back) return;
+  transformInDraft(draft, id, multiply(back, source));
+}
+
+/**
  * ノードを `target` の子にする (レイヤーパネルの並べ替え、frame への出し入れ)。
  * 見た目の位置が変わらないように、座標系の原点の差だけ座標を直す。
  *
  * `index` は付け替える前の `target.children` の位置で、その位置にある子の背面に入れる
  * (省略すると最前面)。選んだノードの相対順は保つ。自分の子孫の中へは動かせず、
- * 深さが `maxDepth` を超える場合は何もしない。
+ * 深さが `maxDepth` を超える場合は何もしない。`target` がブーリアンで、子にできない種類が混ざるなら
+ * 何もしない (§8.9.1)。回転した frame の間の付け替えは、見た目を保つように回転も写す (§8.5.2)。
  */
 export function moveNodes(
   doc: CanvasDocument,
@@ -268,12 +314,17 @@ export function moveNodes(
   if (!parentExists(doc, target)) return doc;
   const tops = topLevelIds(doc, ids).filter((id) => canMoveInto(doc, id, target));
   if (tops.length === 0) return doc;
+  if (
+    tops.some((id) => {
+      const node = getNode(doc, id);
+      return !node || !canHaveChildOfType(doc, target, node.type);
+    })
+  )
+    return doc;
   const depth = parentDepth(doc, target);
   if (tops.some((id) => depth + subtreeHeight(doc.nodes, id) > CANVAS_LIMITS.maxDepth)) return doc;
 
   const moving = new Set(tops);
-  // 原点は元の文書で求める (target とその祖先は動かないので、付け替えの前後で変わらない)
-  const targetOrigin = parentOrigin(doc, target);
   const draft = new DocDraft(doc);
   const children = draft.children(target);
   // 入れる位置の目印: index の位置から前面へ、動かさない最初の子
@@ -291,10 +342,7 @@ export function moveNodes(
   for (const id of tops) {
     const parent = getParent(doc, id);
     oldParents.push(parent);
-    if (!sameParent(parent, target) && parent) {
-      const from = parentOrigin(doc, parent);
-      translateInDraft(draft, id, from.x - targetOrigin.x, from.y - targetOrigin.y);
-    }
+    if (!sameParent(parent, target) && parent) relocateInDraft(doc, draft, id, parent, target);
     draft.detach(id);
   }
   const rest = [...draft.children(target)];
@@ -311,8 +359,9 @@ export function moveNodes(
 
 /**
  * ノードをまとめて group にする。group は最も前面のノードの親の、そのノードがあった位置に置く。
- * ほかの親にあるノードは、見た目の位置を保ったままその親へ移す。
+ * ほかの親にあるノードは、見た目の位置を保ったままその親へ移す (回転した frame の間でも見た目を保つ)。
  * `groupId` を渡しておくと、呼び出し側がその ID で選択し直せる。
+ * group を置く先がブーリアンなら何もしない (ブーリアンの中ではグループ化できない。§8.9.1)。
  */
 export function groupNodes(
   doc: CanvasDocument,
@@ -325,13 +374,13 @@ export function groupNodes(
   if (front === undefined || getNode(doc, groupId) !== undefined) return doc;
   const target = getParent(doc, front);
   if (!target) return doc;
+  if (!canHaveChildOfType(doc, target, "group")) return doc;
   if (Object.keys(doc.nodes).length + 1 > CANVAS_LIMITS.maxNodes) return doc;
   const depth = parentDepth(doc, target);
   if (tops.some((id) => depth + 1 + subtreeHeight(doc.nodes, id) > CANVAS_LIMITS.maxDepth))
     return doc;
 
   const draft = new DocDraft(doc);
-  const targetOrigin = parentOrigin(doc, target);
   const siblings = draft.children(target);
   const frontIndex = siblings.indexOf(front);
   const at = frontIndex - siblings.slice(0, frontIndex).filter((id) => tops.includes(id)).length;
@@ -340,10 +389,7 @@ export function groupNodes(
   for (const id of tops) {
     const parent = getParent(doc, id);
     oldParents.push(parent);
-    if (parent && !sameParent(parent, target)) {
-      const from = parentOrigin(doc, parent);
-      translateInDraft(draft, id, from.x - targetOrigin.x, from.y - targetOrigin.y);
-    }
+    if (parent && !sameParent(parent, target)) relocateInDraft(doc, draft, id, parent, target);
     draft.detach(id);
   }
   draft.set(createGroup(tops, { ...init, id: groupId }));
@@ -353,21 +399,24 @@ export function groupNodes(
 }
 
 /**
- * group を解除し、子を group があった位置に並べる (座標はそのまま。group は座標系を作らない)。
- * 見た目と状態を保つため、group の不透明度は子に掛け合わせ、非表示の group の子は非表示に、
- * ロック中の group の子はロックにする (§4.6)。
- * group でない ID は無視する。入れ子の group を同時に解除するときは内側から解く。
+ * group とブーリアンを解除し、子をそれがあった位置に並べる (座標はそのまま。どちらも座標系を作らない)。
+ * 見た目と状態を保つため、不透明度は子に掛け合わせ、非表示なら子を非表示に、ロック中なら子をロックにする
+ * (§4.6、§8.9.4)。ブーリアンの子は、解除すると自分の塗りで描かれるようになる。
+ * group・ブーリアンでない ID は無視する。入れ子を同時に解除するときは内側から解く。
  */
 export function ungroupNodes(doc: CanvasDocument, ids: readonly NodeId[]): CanvasDocument {
   const groups = [...new Set(ids)]
-    .filter((id) => getNode(doc, id)?.type === "group")
+    .filter((id) => {
+      const node = getNode(doc, id);
+      return node !== undefined && isGroupLike(node);
+    })
     .sort((a, b) => getDepth(doc, b) - getDepth(doc, a));
   if (groups.length === 0) return doc;
   const draft = new DocDraft(doc);
   for (const id of groups) {
     const group = draft.get(id);
     const parent = draft.parentOf(id);
-    if (!group || group.type !== "group" || !parent) continue;
+    if (!group || !isGroupLike(group) || !parent) continue;
     for (const childId of group.children) {
       const child = draft.get(childId);
       if (!child) continue;

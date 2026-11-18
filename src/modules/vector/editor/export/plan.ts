@@ -10,10 +10,12 @@
  * - frame の範囲は frame の矩形ちょうど。frame の線の外側半分、影、はみ出した子は入らない
  *   (書き出す画像の大きさを frame の大きさと一致させるため)
  * - 入れ子のノードは、親の座標系の原点へ移して位置だけを合わせる。祖先の切り抜きと不透明度は反映しない
+ * - 回転 (§8.5.2): frame の範囲は回転を含めた外接矩形 (回転していなければ frame の矩形ちょうど)。
+ *   入れ子のノードは祖先の frame の回転も掛ける (`export/svg.ts`)。ほかは描く範囲 (回転と結果の範囲を含む) の和
  */
 import { renderBounds } from "../canvas/culling";
 import { DEFAULT_NODE_NAMES } from "../model/create";
-import { nodeOrigin, unionRects, type Rect } from "../model/geometry";
+import { getPageBounds, unionRects, type Rect } from "../model/geometry";
 import { getAncestors, getNode, getPage, topLevelIds } from "../model/tree";
 import type { CanvasDocument, NodeId, PageId } from "../model/types";
 import type { TextMeasurer } from "../render/types";
@@ -105,13 +107,9 @@ export function planExport(
     for (const id of visible) {
       const frame = getNode(doc, id);
       if (!frame || frame.type !== "frame") continue;
-      const origin = nodeOrigin(doc, id);
-      const bounds = snapRectOutward({
-        x: origin.x + frame.x,
-        y: origin.y + frame.y,
-        width: frame.width,
-        height: frame.height,
-      });
+      const box = getPageBounds(doc, id);
+      if (!box) continue;
+      const bounds = snapRectOutward(box);
       const name = nodeName(doc, id);
       if (isEmpty(bounds)) return failure(kind, `フレーム「${name}」の大きさが 0 です。`);
       targets.push({ nodeIds: [id], bounds, name });

@@ -17,9 +17,13 @@
  *
  * 計算はページ座標で行う。ドラッグの途中で表示位置が変わると、キャンバスが今のポインター位置で
  * `onPointerMove` を呼ぶので、そのまま追従する。
+ *
+ * 回転した frame の中 (§8.5.2): 押した点と今の点を frame の座標系に直してから箱にする (frame の向きにそろう。
+ * `rotation` は 0)。吸着とスマートガイドはページの向きなので、回転した座標系では使わない。
  */
 import { createEllipse, createFrame, createLine, createRect } from "../../model/create";
-import { getPageBounds, parentOrigin } from "../../model/geometry";
+import { applyToPoint, invert, type Matrix } from "../../geometry/matrix";
+import { getPageBounds, isTranslation, parentMatrix } from "../../model/geometry";
 import { createId } from "../../model/ids";
 import { insertNode } from "../../model/structure";
 import { getNode, type ParentRef } from "../../model/tree";
@@ -59,7 +63,21 @@ interface Press {
   parent: ParentRef;
   /** 親の座標系の原点 (ページ座標) */
   origin: Point;
+  /** ページ → 親の座標系。親が回転していなければ null (原点の差で直す) */
+  toLocal: Matrix | null;
   targets: SnapTargets;
+}
+
+const ZERO: Point = { x: 0, y: 0 };
+
+/**
+ * `dragBox` などに渡す点と原点。回転していない親は、ページ座標の点と親の原点 (第 1 段階と同じ計算)。
+ * 回転した親は、親の座標系に直した点と原点 (0, 0)。
+ */
+function localArgs(press: Press, points: Point[]): { points: Point[]; origin: Point } {
+  const toLocal = press.toLocal;
+  if (!toLocal) return { points, origin: press.origin };
+  return { points: points.map((p) => applyToPoint(toLocal, p)), origin: ZERO };
 }
 
 type Phase =
@@ -142,20 +160,23 @@ export function createDragTool(kind: ShapeKind): DragCreateTool {
     const store = ctx.store;
     const state = store.getState();
     const options = snapOptions(state);
-    const snapping = !event.mod;
+    // 回転した親の中では吸着しない (候補とガイドはページの向き)
+    const snapping = !event.mod && press.toLocal === null;
     let node: CanvasNode | null;
     if (kind === "line") {
       // 45° 刻みのときは吸着しない (選択ツールの端点と同じ)
       const pointer =
         snapping && !event.shift ? snapPoint(event.page, press.targets, options) : event.page;
-      const line = dragLine(press.page, pointer, press.origin, {
+      const args = localArgs(press, [press.page, pointer]);
+      const line = dragLine(args.points[0] as Point, args.points[1] as Point, args.origin, {
         constrain: event.shift,
         fromCenter: event.alt,
       });
       node = line ? createLine({ id, ...line }) : null;
     } else {
       const pointer = snapping ? snapPoint(event.page, press.targets, options) : event.page;
-      const box = dragBox(press.page, pointer, press.origin, {
+      const args = localArgs(press, [press.page, pointer]);
+      const box = dragBox(args.points[0] as Point, args.points[1] as Point, args.origin, {
         square: event.shift,
         fromCenter: event.alt,
       });
@@ -205,6 +226,8 @@ export function createDragTool(kind: ShapeKind): DragCreateTool {
     state.setHovered(null);
     const doc = state.doc;
     const parent = creationParent(doc, state.pageId, state.scopeId, event.page);
+    const space = parentMatrix(doc, parent);
+    const toLocal = isTranslation(space) ? null : invert(space);
     const frame = parentCoordinateFrame(doc, parent);
     // 候補は押したときに 1 回だけ集める (ノードが数千個でもドラッグのたびに調べ直さない)
     const targets = collectSnapTargets(doc, state.pageId, {
@@ -212,7 +235,10 @@ export function createDragTool(kind: ShapeKind): DragCreateTool {
       frames: frame === null ? [] : [frame],
       exclude: new Set(),
     });
-    const page = event.mod ? event.page : snapPoint(event.page, targets, snapOptions(state));
+    const page =
+      event.mod || toLocal !== null
+        ? event.page
+        : snapPoint(event.page, targets, snapOptions(state));
     phase = {
       kind: "pending",
       press: {
@@ -221,7 +247,8 @@ export function createDragTool(kind: ShapeKind): DragCreateTool {
         doc,
         selection: state.selection,
         parent,
-        origin: parentOrigin(doc, parent),
+        origin: { x: space.e, y: space.f },
+        toLocal,
         targets,
       },
     };
@@ -272,7 +299,8 @@ export function createDragTool(kind: ShapeKind): DragCreateTool {
       const size = kind === "frame" ? getLastFrameSize() : CLICK_SHAPE_SIZE;
       const state = store.getState();
       const id = createId(state.doc.nodes);
-      const node = boxNode(kind, id, clickBox(press.page, press.origin, size));
+      const args = localArgs(press, [press.page]);
+      const node = boxNode(kind, id, clickBox(args.points[0] as Point, args.origin, size));
       state.apply((doc) => insertChecked(doc, node, press.parent) ?? doc);
       finish(ctx, id, press.parent);
       return;
