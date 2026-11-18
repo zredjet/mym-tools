@@ -157,6 +157,17 @@ describe("確認のダイアログ", () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
+  it("閉じたら開く前の要素へフォーカスを戻す", () => {
+    const opener = document.createElement("button");
+    opener.textContent = "開く";
+    document.body.appendChild(opener);
+    opener.focus();
+    render(<ConvertConfirmDialog items={items} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "変換する" }));
+    fireEvent.click(screen.getByRole("button", { name: "やめる" }));
+    expect(document.activeElement).toBe(opener);
+  });
+
   it("openConvertConfirm は選んだ結果を返して片付ける", async () => {
     vi.useFakeTimers();
     try {

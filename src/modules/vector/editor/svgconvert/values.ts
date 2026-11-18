@@ -18,13 +18,19 @@ import { IDENTITY, type Matrix, multiply, rotate, scale, translate } from "../ge
 // 数値
 // ---------------------------------------------------------------------------
 
+/**
+ * 1 つの値 (数値・長さ・色・不透明度・viewBox) として読む文字列の長さの上限。これより長いものは読めない値として
+ * 扱う (信頼しない入力の巨大な属性を、要素を展開するたびに読み直さないように)。
+ */
+export const MAX_SCALAR_LENGTH = 256;
+
 // 整数部と小数部の \d が重ならない形にする (読めない長い数字の並びで、正規表現の後戻りが増えないように)
 const NUMBER_SOURCE = String.raw`[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?`;
 const NUMBER = new RegExp(`^${NUMBER_SOURCE}$`);
 
 /** SVG の数値。前後の空白は許す。有限でなければ null。 */
 export function parseNumber(value: string | null | undefined): number | null {
-  if (value == null) return null;
+  if (value == null || value.length > MAX_SCALAR_LENGTH) return null;
   const trimmed = value.trim();
   if (!NUMBER.test(trimmed)) return null;
   const n = Number(trimmed);
@@ -116,7 +122,7 @@ export function parseLength(
   context: LengthContext,
   axis: LengthAxis = "other",
 ): number | null {
-  if (value == null) return null;
+  if (value == null || value.length > MAX_SCALAR_LENGTH) return null;
   const match = LENGTH.exec(value.trim());
   if (!match) return null;
   const n = Number(match[1]);
@@ -240,7 +246,7 @@ function hueToRgb(p: number, q: number, t: number): number {
 
 /** CSS の色。読めなければ null (`none`、`currentColor`、`url(...)` も null。呼び出し側が先に見る)。 */
 export function parseColor(value: string | null | undefined): ParsedColor | null {
-  if (value == null) return null;
+  if (value == null || value.length > MAX_SCALAR_LENGTH) return null;
   const v = value.trim().toLowerCase();
   if (v === "transparent") return { color: "#000000", alpha: 0 };
   const named = NAMED_COLORS.get(v);
@@ -293,7 +299,7 @@ export function parseColor(value: string | null | undefined): ParsedColor | null
 
 /** 不透明度 (`opacity`、`fill-opacity` など)。数値か %。0〜1 に収める。読めなければ null。 */
 export function parseOpacity(value: string | null | undefined): number | null {
-  if (value == null) return null;
+  if (value == null || value.length > MAX_SCALAR_LENGTH) return null;
   return alphaChannel(value.trim());
 }
 
@@ -378,7 +384,7 @@ export interface ViewBox {
 
 /** `viewBox`。4 つの数値で幅と高さが正のものだけ (ほかは無いものとして扱う)。 */
 export function parseViewBox(value: string | null | undefined): ViewBox | null {
-  if (value == null) return null;
+  if (value == null || value.length > MAX_SCALAR_LENGTH * 4) return null;
   const numbers = parseNumberList(value);
   if (numbers.length !== 4) return null;
   const [x, y, width, height] = numbers as [number, number, number, number];

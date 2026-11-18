@@ -1,7 +1,10 @@
 /**
  * 埋め込み SVG の SVG 文書を、編集できるノードの断片にする (`docs/canvas-editor-design.md` §8.12)。純関数
  * (計測の `measurer` を除く)。SVG は信頼しない入力として扱う: `DOMParser` で読むだけで文書には挿入しない、
- * `href` は文書の中の `#id` だけを引く (外部の参照は読まない)、`use` の循環・深さと要素の展開の数に上限を設ける。
+ * `href` は文書の中の `#id` だけを引く (外部の参照は読まない)、`use` の循環・深さ、要素の入れ子の深さ
+ * (`MAX_NESTING`)、仕事の量 (`MAX_WORK`: 要素の展開、テキストの中の要素と文字、パスの点、長い属性) に上限を
+ * 設ける。要素ごとに読んだもの (transform、形、グラデーション、テキストのチャンク、title) は使い回し、展開の
+ * たびに読み直さない。塗りも線もない形は形を読まない。長すぎる値と読めない値は宣言がないものとして扱う。
  *
  * `convertSvg(svg, options)`:
  * - 結果の座標は「埋め込み SVG のノードの座標系」(箱の左上が原点、回転の前)。見た目の基準は今の描画
@@ -68,9 +71,17 @@ import type { TextMeasurer } from "../render/types";
 import { fitTextNodes } from "../text/fit";
 import { baselineOffset } from "../text/layout";
 import { DroppedCollector, type DroppedItem } from "./dropped";
-import { gradientAverageStop, gradientToPaint, readGradient, type BoxSpace } from "./gradient";
 import {
+  gradientAverageStop,
+  gradientToPaint,
+  readGradient,
+  type BoxSpace,
+  type GradientSource,
+} from "./gradient";
+import {
+  childElements,
   computeStyle,
+  descendantElements,
   hrefTarget,
   INITIAL_STYLE,
   nonInheritedValue,
@@ -78,7 +89,7 @@ import {
   SVG_NS,
   type ComputedStyle,
 } from "./style";
-import { readTextChunks } from "./text";
+import { readTextChunks, type TextChunk } from "./text";
 import {
   cleanNumber,
   parseColor,
@@ -95,10 +106,24 @@ import {
 // 上限
 // ---------------------------------------------------------------------------
 
-/** 要素をたどる回数の上限 (`use` の展開を含む)。巨大な展開で止まらないように。 */
-export const MAX_ELEMENT_VISITS = 200_000;
+/**
+ * 変換の仕事の量の上限 (単位は下の `WORK_*`)。要素をたどる回数 (`use` の展開を含む) と、展開のたびに行う
+ * 読み取り (テキストの `tspan` と文字、パスの点、長い属性の字句) を合わせて数え、超えたら `tooLarge` で断る。
+ * 巨大な展開や、展開のたびに重い要素を読み直す入力で止まらないように。
+ */
+export const MAX_WORK = 300_000;
+/** 要素 1 個をたどる (変換の対象の要素) */
+const WORK_ELEMENT = 1;
+/** テキストの中の要素 1 個 (`tspan` など。書式を求める) */
+const WORK_TEXT_ELEMENT = 8;
+/** 属性やテキストの文字をこの数だけ読むごとに 1 */
+const WORK_CHARS = 256;
+/** 作るパスの点をこの数だけ写すごとに 1 */
+const WORK_POINTS = 16;
 /** `use` の入れ子の深さの上限。 */
 export const MAX_USE_DEPTH = 32;
+/** 要素の入れ子の深さの上限 (`use` の展開を含む)。深すぎる入れ子で再帰が尽きないように。 */
+export const MAX_NESTING = 256;
 
 class TooLarge extends Error {}
 
@@ -129,6 +154,8 @@ interface Context {
   style: ComputedStyle;
   /** % の基準になる viewport */
   viewport: { width: number; height: number };
+  /** 要素の入れ子の深さ (ルートの子が 1) */
+  depth: number;
 }
 
 type PaintSpec =
@@ -145,21 +172,43 @@ class Converter {
   readonly dropped = new DroppedCollector();
   private readonly ids = new Map<string, Element>();
   private readonly useStack: Element[] = [];
-  private visits = 0;
+  private work = 0;
   private nodeCount = 0;
+  private pathPoints = 0;
   private counter = 0;
+  /** 要素ごとに 1 回だけ読むもの (`use` の展開のたびに読み直さない) */
+  private readonly transforms = new WeakMap<Element, Matrix>();
+  private readonly titles = new WeakMap<Element, string | null>();
+  private readonly geometries = new WeakMap<Element, Map<string, Geometry | null>>();
+  private readonly gradients = new WeakMap<Element, Map<string, GradientSource | null>>();
+  private readonly textChunks = new WeakMap<
+    Element,
+    Map<ComputedStyle, Map<string, { chunks: TextChunk[]; dropped: DroppedItem[] }>>
+  >();
+  /** `<title>` から名前を付けたノード (畳んだ group の名前を上書きしない) */
+  private readonly titled = new Set<NodeId>();
 
   constructor(
     root: Element,
     private readonly measurer: TextMeasurer,
   ) {
-    for (const element of [root, ...root.getElementsByTagName("*")]) {
+    for (const element of descendantElements(root)) {
       const id = element.getAttribute("id");
       if (id !== null && !this.ids.has(id)) this.ids.set(id, element);
     }
   }
 
   private lookup = (id: string): Element | undefined => this.ids.get(id);
+
+  /** 仕事の量を数え、上限を超えたら止める。 */
+  private charge(units: number): void {
+    this.work += units;
+    if (this.work > MAX_WORK) throw new TooLarge();
+  }
+
+  private chargeChars(length: number): void {
+    this.charge(1 + Math.floor(length / WORK_CHARS));
+  }
 
   private nextId(): NodeId {
     this.counter += 1;
@@ -169,22 +218,43 @@ class Converter {
   private add<T extends CanvasNode>(node: T): T {
     this.nodeCount += 1;
     if (this.nodeCount > CANVAS_LIMITS.maxNodes) throw new TooLarge();
+    if (node.type === "path") {
+      // 文書の全パスの点の上限を超えるなら、置けないので早めに止める
+      for (const sub of node.subpaths) this.pathPoints += sub.points.length;
+      if (this.pathPoints > CANVAS_LIMITS.maxTotalPathPoints) throw new TooLarge();
+    }
     this.nodes[node.id] = node;
     return node;
+  }
+
+  /** 作ったノードを、外接矩形を求めるための文書にする (ページは使わない)。 */
+  private workingDocument(): CanvasDocument {
+    return { pages: [], nodes: this.nodes, assets: {} };
   }
 
   private lengthContext(context: Context, style: ComputedStyle): LengthContext {
     return { viewport: context.viewport, fontSize: style.fontSize };
   }
 
-  /** 要素の `<title>` (レイヤーの名前)。 */
+  /** 要素の `<title>` (レイヤーの名前)。要素ごとに 1 回だけ読む。 */
   private titleOf(element: Element): string | null {
-    for (const child of element.children)
+    const cached = this.titles.get(element);
+    if (cached !== undefined) return cached;
+    let title: string | null = null;
+    for (const child of childElements(element)) {
+      this.charge(WORK_ELEMENT);
       if (child.namespaceURI === SVG_NS && child.localName === "title") {
-        const text = (child.textContent ?? "").replace(/\s+/g, " ").trim();
-        if (text !== "") return [...text].slice(0, CANVAS_LIMITS.maxNameLength).join("");
+        const raw = child.textContent ?? "";
+        this.chargeChars(raw.length);
+        const text = raw.replace(/\s+/g, " ").trim();
+        if (text !== "") {
+          title = [...text].slice(0, CANVAS_LIMITS.maxNameLength).join("");
+          break;
+        }
       }
-    return null;
+    }
+    this.titles.set(element, title);
+    return title;
   }
 
   /** `clip-path` `mask` `filter` を落とす (結果が空でないときに数える)。 */
@@ -202,8 +272,46 @@ class Converter {
     return parseOpacity(nonInheritedValue(element, "opacity")) ?? 1;
   }
 
+  /** `transform` 属性 (要素ごとに 1 回だけ読む)。 */
   private transformOf(element: Element): Matrix {
-    return parseTransformList(element.getAttribute("transform")) ?? IDENTITY;
+    const cached = this.transforms.get(element);
+    if (cached) return cached;
+    const raw = element.getAttribute("transform");
+    if (raw !== null) this.chargeChars(raw.length);
+    const m = parseTransformList(raw) ?? IDENTITY;
+    this.transforms.set(element, m);
+    return m;
+  }
+
+  /** 形 (要素と長さの基準ごとに 1 回だけ読む)。 */
+  private geometryOf(element: Element, lc: LengthContext): Geometry | null {
+    const key = `${lc.viewport.width},${lc.viewport.height},${lc.fontSize}`;
+    let byKey = this.geometries.get(element);
+    if (!byKey) {
+      byKey = new Map();
+      this.geometries.set(element, byKey);
+    }
+    if (byKey.has(key)) return byKey.get(key) ?? null;
+    const source = element.getAttribute("d") ?? element.getAttribute("points") ?? "";
+    this.chargeChars(source.length);
+    const geometry = readGeometry(element, lc);
+    byKey.set(key, geometry);
+    return geometry;
+  }
+
+  /** グラデーション (要素と長さの基準ごとに 1 回だけ読む)。 */
+  private gradientOf(element: Element, lc: LengthContext): GradientSource | null {
+    const key = `${lc.viewport.width},${lc.viewport.height},${lc.fontSize}`;
+    let byKey = this.gradients.get(element);
+    if (!byKey) {
+      byKey = new Map();
+      this.gradients.set(element, byKey);
+    }
+    if (byKey.has(key)) return byKey.get(key) ?? null;
+    const source = readGradient(element, this.lookup, lc);
+    this.charge(WORK_ELEMENT + (source?.stops.length ?? 0));
+    byKey.set(key, source);
+    return source;
   }
 
   /**
@@ -214,8 +322,14 @@ class Converter {
     this.countEffects(element);
     if (ids.length === 1) {
       const id = ids[0] as NodeId;
-      const node = this.nodes[id] as CanvasNode;
-      if (opacity !== 1) this.nodes[id] = { ...node, opacity: node.opacity * opacity };
+      let node = this.nodes[id] as CanvasNode;
+      if (opacity !== 1) node = { ...node, opacity: node.opacity * opacity };
+      // 畳んだ要素の名前は、子に自分の名前 (`<title>`) がなければ子に渡す
+      if (name !== null && !this.titled.has(id)) {
+        node = { ...node, name };
+        this.titled.add(id);
+      }
+      this.nodes[id] = node;
       return ids;
     }
     const group = createGroup(ids, {
@@ -223,13 +337,14 @@ class Converter {
       opacity,
       ...(name === null ? {} : { name }),
     });
+    if (name !== null) this.titled.add(group.id);
     return [this.add(group).id];
   }
 
   /** 要素を変換し、作ったノード (この要素の階層の根) の ID を返す。 */
   visit(element: Element, context: Context): NodeId[] {
-    this.visits += 1;
-    if (this.visits > MAX_ELEMENT_VISITS) throw new TooLarge();
+    this.charge(WORK_ELEMENT);
+    if (context.depth > MAX_NESTING) throw new TooLarge();
     if (element.namespaceURI !== SVG_NS) return [];
     if (nonInheritedValue(element, "display")?.toLowerCase() === "none") return [];
     const style = computeStyle(element, context.style, this.lengthContext(context, context.style));
@@ -262,7 +377,8 @@ class Converter {
 
   private visitChildren(element: Element, context: Context): NodeId[] {
     const ids: NodeId[] = [];
-    for (const child of element.children) ids.push(...this.visit(child, context));
+    const inner = { ...context, depth: context.depth + 1 };
+    for (const child of childElements(element)) ids.push(...this.visit(child, inner));
     return ids;
   }
 
@@ -302,15 +418,32 @@ class Converter {
       multiply(translate(x, y), inner),
     );
     const viewport = viewBox ? { width: viewBox.width, height: viewBox.height } : { width, height };
-    const ids = this.visitChildren(element, { m, style, viewport });
+    const ids = this.visitChildren(element, { m, style, viewport, depth: context.depth });
     const overflow = nonInheritedValue(element, "overflow")?.toLowerCase();
-    if (ids.length > 0 && overflow !== "visible" && overflow !== "auto")
-      this.dropped.add("nestedClip");
+    // 切り抜きは、中身が viewport (x, y, width, height) からはみ出すときだけ落とすものに数える
+    if (ids.length > 0 && overflow !== "visible" && overflow !== "auto") {
+      const viewportSpace = multiply(
+        multiply(context.m, isSymbol ? IDENTITY : this.transformOf(element)),
+        translate(x, y),
+      );
+      const toViewport = invert(viewportSpace);
+      const doc = this.workingDocument();
+      if (
+        !toViewport ||
+        ids.some((id) =>
+          leafExtents(doc, id, this.measurer).some(
+            (rect) => !rectInside(mappedRect(toViewport, rect), width, height),
+          ),
+        )
+      )
+        this.dropped.add("nestedClip");
+    }
     return this.wrap(ids, element, this.opacityOf(element), this.titleOf(element));
   }
 
   private visitUse(element: Element, context: Context, style: ComputedStyle): NodeId[] {
     const id = hrefTarget(element);
+    if (id !== null) this.chargeChars(id.length);
     const target = id === null ? undefined : this.lookup(id);
     if (!target || target.namespaceURI !== SVG_NS) return [];
     if (
@@ -326,7 +459,7 @@ class Converter {
     const x = parseLength(element.getAttribute("x"), lc, "x") ?? 0;
     const y = parseLength(element.getAttribute("y"), lc, "y") ?? 0;
     const m = multiply(multiply(context.m, this.transformOf(element)), translate(x, y));
-    const inner: Context = { ...context, m, style };
+    const inner: Context = { ...context, m, style, depth: context.depth + 1 };
     this.useStack.push(target);
     let ids: NodeId[];
     try {
@@ -356,6 +489,7 @@ class Converter {
     which: "fill" | "stroke",
   ): PaintSpec {
     const raw = (value ?? "none").trim();
+    this.chargeChars(raw.length);
     const lower = raw.toLowerCase();
     if (lower === "none" || lower === "") return { kind: "none" };
     if (lower === "currentcolor") return this.colorSpec(style.values["color"] ?? "black", which);
@@ -369,8 +503,12 @@ class Converter {
         return { kind: "gradient", element: target };
       if (target?.namespaceURI === SVG_NS && target.localName === "pattern")
         this.dropped.add("pattern");
-      if (reference.fallback === null) return { kind: "none" };
-      return this.paintSpec(reference.fallback, style, which);
+      // 代わりの値は none か色だけ (再帰しない。書式の検証で、それ以外の値は宣言ごと読まない)
+      const fallback = reference.fallback?.trim().toLowerCase() ?? "none";
+      if (fallback === "none") return { kind: "none" };
+      if (fallback === "currentcolor")
+        return this.colorSpec(style.values["color"] ?? "black", which);
+      return parseColor(fallback) ? this.colorSpec(fallback, which) : { kind: "none" };
     }
     return this.colorSpec(raw, which);
   }
@@ -395,7 +533,7 @@ class Converter {
     if (spec.kind === "none") return null;
     if (spec.kind === "color")
       return { type: "solid", color: spec.color, opacity: spec.alpha * opacity };
-    const source = readGradient(spec.element, this.lookup, this.lengthContext(context, style));
+    const source = this.gradientOf(spec.element, this.lengthContext(context, style));
     if (!source) return null;
     return gradientToPaint(source, opacity, space, this.dropped);
   }
@@ -421,7 +559,7 @@ class Converter {
       color = spec.color;
       alpha = spec.alpha;
     } else {
-      const source = readGradient(spec.element, this.lookup, lc);
+      const source = this.gradientOf(spec.element, lc);
       const stop = source ? gradientAverageStop(source) : null;
       if (!stop) return null;
       this.dropped.add("strokeGradient");
@@ -462,6 +600,7 @@ class Converter {
 
   private dashArray(value: string | undefined, lc: LengthContext, factor: number): number[] {
     if (!value || value.trim().toLowerCase() === "none") return [];
+    this.chargeChars(value.length);
     const parts = value.trim().split(/[\s,]+/);
     const lengths: number[] = [];
     for (const part of parts) {
@@ -500,10 +639,15 @@ class Converter {
 
   private visitShape(element: Element, context: Context, style: ComputedStyle): NodeId[] {
     if (isHidden(style)) return [];
-    const geometry = readGeometry(element, this.lengthContext(context, style));
+    const v = style.values;
+    // 塗りも線もない形は、形を読まずに飛ばす (読むだけ読んでノードを作らない仕事をしない)
+    const fillValue = element.localName === "line" ? "none" : (v["fill"] ?? "none");
+    const strokeValue = v["stroke"] ?? "none";
+    if (fillValue.trim().toLowerCase() === "none" && strokeValue.trim().toLowerCase() === "none")
+      return [];
+    const geometry = this.geometryOf(element, this.lengthContext(context, style));
     if (!geometry) return [];
     const m = multiply(context.m, this.transformOf(element));
-    const v = style.values;
     const fillSpec =
       element.localName === "line"
         ? ({ kind: "none" } as const)
@@ -511,10 +655,11 @@ class Converter {
     const stroke = this.stroke(element, style, context, m, fillSpec.kind !== "none");
     if (fillSpec.kind === "none" && stroke === null) return [];
     const fillOpacity = parseOpacity(v["fill-opacity"]) ?? 1;
+    const title = this.titleOf(element);
     const common = {
       id: this.nextId(),
       opacity: this.opacityOf(element),
-      ...(this.titleOf(element) === null ? {} : { name: this.titleOf(element) as string }),
+      ...(title === null ? {} : { name: title }),
     };
     let node: CanvasNode;
 
@@ -556,6 +701,9 @@ class Converter {
       } else {
         const local = geometry.kind === "box" ? boxSubpaths(geometry) : geometry.subpaths;
         if (local.length === 0) return [];
+        let count = 0;
+        for (const sub of local) count += sub.points.length;
+        this.charge(1 + Math.floor(count / WORK_POINTS));
         const subpaths = transformSubpaths(local, m);
         const path: PathNode = createPath(subpaths, {
           ...common,
@@ -576,6 +724,7 @@ class Converter {
     }
     this.countMarkers(element, style);
     this.countEffects(element);
+    if (title !== null) this.titled.add(node.id);
     return [this.add(node).id];
   }
 
@@ -584,15 +733,10 @@ class Converter {
   private visitText(element: Element, context: Context, style: ComputedStyle): NodeId[] {
     const m = multiply(context.m, this.transformOf(element));
     const lc = this.lengthContext(context, style);
-    const chunks = readTextChunks(element, style, {
-      context: lc,
-      dropped: this.dropped,
-      measureWidth: (text, s) => this.measurer.measure(text, fontOf(s, 1)),
-    });
+    const chunks = this.textChunksOf(element, context, style, lc);
     const ids: NodeId[] = [];
-    const d = decompose(m);
     const factor = Math.sqrt(Math.abs(determinant(m)));
-    const rotation = d ? cleanRotation(d.rotation) : 0;
+    const rotation = textRotation(m);
     for (const chunk of chunks) {
       const font = fontOf(chunk.style, factor);
       if (chunk.mixedStyle) this.dropped.add("textStyle");
@@ -655,6 +799,59 @@ class Converter {
       ids.push(this.add({ ...node, fill }).id);
     }
     return this.wrap(ids, element, this.opacityOf(element), this.titleOf(element));
+  }
+
+  /**
+   * テキストのチャンク (要素と、継承した書式と長さの基準ごとに 1 回だけ読む)。読むときは、中の要素と文字の数を
+   * 仕事の量に数える。
+   */
+  private textChunksOf(
+    element: Element,
+    context: Context,
+    style: ComputedStyle,
+    lc: LengthContext,
+  ): TextChunk[] {
+    const key = `${lc.viewport.width},${lc.viewport.height}`;
+    let byStyle = this.textChunks.get(element);
+    if (!byStyle) {
+      byStyle = new Map();
+      this.textChunks.set(element, byStyle);
+    }
+    let byKey = byStyle.get(context.style);
+    if (!byKey) {
+      byKey = new Map();
+      byStyle.set(context.style, byKey);
+    }
+    let entry = byKey.get(key);
+    if (!entry) {
+      entry = this.readChunks(element, style, lc);
+      byKey.set(key, entry);
+    }
+    // 読んだときの落とすもの (textPath) は、使うたびに数える
+    for (const item of entry.dropped) this.dropped.add(item.kind, item.count);
+    return entry.chunks;
+  }
+
+  private readChunks(
+    element: Element,
+    style: ComputedStyle,
+    lc: LengthContext,
+  ): { chunks: TextChunk[]; dropped: DroppedItem[] } {
+    const dropped = new DroppedCollector();
+    const chunks = readTextChunks(element, style, {
+      context: lc,
+      dropped,
+      measureWidth: (text, s) => this.measurer.measure(text, fontOf(s, 1)),
+      charge: (elements, chars) => {
+        this.charge(elements * WORK_TEXT_ELEMENT);
+        if (chars > 0) this.chargeChars(chars);
+      },
+      maxDepth: MAX_NESTING,
+      tooDeep: () => {
+        throw new TooLarge();
+      },
+    });
+    return { chunks, dropped: dropped.list() };
   }
 
   private clampRange(value: number, min: number, max: number): number {
@@ -962,33 +1159,77 @@ function textInkBounds(node: TextNode, measurer: TextMeasurer): Rect {
 }
 
 /**
- * 結果の形が箱 (0〜width, 0〜height) の外へはみ出すか (線の太さの半分を含める。テキストは字の範囲の近似)。
- * 今の描画は埋め込み SVG を箱で切り抜いているので、はみ出した部分は変換すると見えるようになる。
+ * ノード (group なら中の葉) の範囲。線の太さの半分を含め、テキストは字の範囲の近似。親の座標系の
+ * 軸に平行な矩形。
+ */
+function leafExtents(doc: CanvasDocument, id: NodeId, measurer: TextMeasurer): Rect[] {
+  const node = doc.nodes[id];
+  if (!node) return [];
+  if (node.type === "group")
+    return node.children.flatMap((child) => leafExtents(doc, child, measurer));
+  const bounds = node.type === "text" ? textInkBounds(node, measurer) : getLocalBounds(doc, id);
+  if (!bounds) return [];
+  const half = "stroke" in node && node.stroke ? node.stroke.width / 2 : 0;
+  return [
+    {
+      x: bounds.x - half,
+      y: bounds.y - half,
+      width: bounds.width + 2 * half,
+      height: bounds.height + 2 * half,
+    },
+  ];
+}
+
+/** 矩形の 4 隅を行列で写したものの外接矩形。 */
+function mappedRect(m: Matrix, rect: Rect): Rect {
+  const corners = [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y + rect.height },
+    { x: rect.x, y: rect.y + rect.height },
+  ].map((p) => applyToPoint(m, p));
+  const xs = corners.map((p) => p.x);
+  const ys = corners.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };
+}
+
+/** 矩形が (0, 0)〜(width, height) に収まるか (0.5 の余裕)。 */
+function rectInside(rect: Rect, width: number, height: number): boolean {
+  const tolerance = 0.5;
+  return (
+    rect.x >= -tolerance &&
+    rect.y >= -tolerance &&
+    rect.x + rect.width <= width + tolerance &&
+    rect.y + rect.height <= height + tolerance
+  );
+}
+
+/**
+ * 結果の形が箱 (0〜width, 0〜height) の外へはみ出すか。今の描画は埋め込み SVG を箱で切り抜いているので、
+ * はみ出した部分は変換すると見えるようになる。
  */
 function overflowsBox(
-  fragmentDoc: CanvasDocument,
+  doc: CanvasDocument,
   ids: readonly NodeId[],
   width: number,
   height: number,
   measurer: TextMeasurer,
 ): boolean {
-  const tolerance = 0.5;
-  const visit = (id: NodeId): boolean => {
-    const node = fragmentDoc.nodes[id];
-    if (!node) return false;
-    if (node.type === "group") return node.children.some(visit);
-    const bounds =
-      node.type === "text" ? textInkBounds(node, measurer) : getLocalBounds(fragmentDoc, id);
-    if (!bounds) return false;
-    const stroke = "stroke" in node && node.stroke ? node.stroke.width / 2 : 0;
-    return (
-      bounds.x - stroke < -tolerance ||
-      bounds.y - stroke < -tolerance ||
-      bounds.x + bounds.width + stroke > width + tolerance ||
-      bounds.y + bounds.height + stroke > height + tolerance
-    );
-  };
-  return ids.some(visit);
+  return ids.some((id) =>
+    leafExtents(doc, id, measurer).some((rect) => !rectInside(rect, width, height)),
+  );
+}
+
+/**
+ * テキストの向き (度)。テキストは鏡像を表せないので、行列の反転を除き、テキストの下向き (自分の y 軸) が
+ * 行列で写した y 軸の向きになる角度にする (左右反転したテキストは正立した文字になる)。
+ */
+function textRotation(m: Matrix): number {
+  const down = { x: m.c, y: m.d };
+  if (!(Math.hypot(down.x, down.y) > 0)) return 0;
+  return cleanRotation((Math.atan2(-down.x, down.y) * 180) / Math.PI);
 }
 
 /** ルートの座標系 (利用者の座標 → 箱) と viewport。 */
@@ -1039,9 +1280,14 @@ export function convertSvg(svg: string, options: SvgConvertOptions): SvgConvertR
   let ids: NodeId[];
   try {
     ids = [];
-    for (const child of root.children)
+    for (const child of childElements(root))
       ids.push(
-        ...converter.visit(child, { m: space.m, style: rootStyle, viewport: space.viewport }),
+        ...converter.visit(child, {
+          m: space.m,
+          style: rootStyle,
+          viewport: space.viewport,
+          depth: 1,
+        }),
       );
   } catch (error) {
     if (error instanceof TooLarge) return { ok: false, reason: "tooLarge", detail: null };

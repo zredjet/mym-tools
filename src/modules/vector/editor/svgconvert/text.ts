@@ -12,7 +12,7 @@
  * `dx` `dy` `rotate` `textLength` と文字ごとの位置は読まない (呼び出し側が、テキストの位置を近似として一覧に出す)。
  */
 import type { DroppedCollector } from "./dropped";
-import { computeStyle, nonInheritedValue, SVG_NS, type ComputedStyle } from "./style";
+import { childNodes, computeStyle, nonInheritedValue, SVG_NS, type ComputedStyle } from "./style";
 import { parseLength, type LengthContext } from "./values";
 
 export interface TextChunk {
@@ -48,6 +48,7 @@ function xmlSpacePreserve(element: Element, inherited: boolean): boolean {
   return inherited;
 }
 
+/** 属性の最初の値 (`x="10 20 30"` の 10)。長い並びでも先頭だけを読む。 */
 function firstLength(
   element: Element,
   name: string,
@@ -56,7 +57,7 @@ function firstLength(
 ): number | null {
   const raw = element.getAttribute(name);
   if (raw === null) return null;
-  const first = raw.trim().split(/[\s,]+/)[0];
+  const first = /^[\s,]*([^\s,]*)/.exec(raw.slice(0, 512))?.[1];
   if (first === undefined || first === "") return null;
   return parseLength(first, context, axis);
 }
@@ -83,11 +84,19 @@ export interface TextReadOptions {
   dropped: DroppedCollector;
   /** チャンクの幅 (利用者の座標)。x を省いた次のチャンクの位置に使う */
   measureWidth: (text: string, style: ComputedStyle) => number;
+  /** 読んだ中の要素の数と文字の数を、呼び出し側の仕事の量に数える (上限を超えたら呼び出し側が投げる) */
+  charge?: (elements: number, chars: number) => void;
+  /** 中の要素の入れ子の深さの上限。超えたら `tooDeep` を呼ぶ (投げる) */
+  maxDepth?: number;
+  tooDeep?: () => never;
 }
 
 /**
  * `text` 要素をチャンクに分ける。`style` は `text` 要素の書式 (計算済み)。
  * 見えないチャンク (`visibility: hidden`) と空のチャンクは返さない。
+ *
+ * 位置: `x` / `y` は最初の値、`dx` / `dy` も最初の値を足す (`<tspan x="10" dy="1.2em">` の複数行)。
+ * 新しいチャンクを始めない `tspan` の `dx` / `dy` は今の位置に足し、次のチャンクの位置に効かせる。
  */
 export function readTextChunks(
   text: Element,
@@ -95,9 +104,17 @@ export function readTextChunks(
   options: TextReadOptions,
 ): TextChunk[] {
   const { context, dropped } = options;
+  const charge = options.charge ?? (() => undefined);
+  const maxDepth = options.maxDepth ?? Number.POSITIVE_INFINITY;
   const chunks: TextChunk[] = [];
-  let currentX = firstLength(text, "x", context, "x") ?? 0;
-  let currentY = firstLength(text, "y", context, "y") ?? 0;
+  const own = (s: ComputedStyle) => ({ ...context, fontSize: s.fontSize });
+  let currentX =
+    (firstLength(text, "x", context, "x") ?? 0) + (firstLength(text, "dx", context, "x") ?? 0);
+  let currentY =
+    (firstLength(text, "y", context, "y") ?? 0) + (firstLength(text, "dy", context, "y") ?? 0);
+  /** 今のチャンクの中で、位置を持たない `tspan` の `dx` / `dy` を足した量 */
+  let shiftX = 0;
+  let shiftY = 0;
   let open: OpenChunk = { x: currentX, y: currentY, style, pieces: [] };
 
   const anchorFactor = (s: ComputedStyle) => {
@@ -108,6 +125,7 @@ export function readTextChunks(
   const close = () => {
     const visible = open.pieces.filter((piece) => !hiddenStyle(piece.style));
     const body = normalize(visible);
+    let end = open.x;
     if (body !== "") {
       chunks.push({
         x: open.x,
@@ -117,19 +135,30 @@ export function readTextChunks(
         mixedStyle: visible.some((piece) => piece.style !== open.style),
       });
       const width = options.measureWidth(body, open.style);
-      if (Number.isFinite(width)) currentX = open.x + width * (1 - anchorFactor(open.style));
+      if (Number.isFinite(width)) end = open.x + width * (1 - anchorFactor(open.style));
     }
-    currentY = open.y;
+    currentX = end + shiftX;
+    currentY = open.y + shiftY;
+    shiftX = 0;
+    shiftY = 0;
   };
 
-  const walk = (element: Element, elementStyle: ComputedStyle, preserve: boolean) => {
-    for (const child of element.childNodes) {
+  const walk = (
+    element: Element,
+    elementStyle: ComputedStyle,
+    preserve: boolean,
+    depth: number,
+  ) => {
+    if (depth > maxDepth) options.tooDeep?.();
+    for (const child of childNodes(element)) {
       if (child.nodeType === 3 || child.nodeType === 4) {
         const value = child.nodeValue ?? "";
+        charge(0, value.length);
         if (value !== "") open.pieces.push({ text: value, style: elementStyle, preserve });
         continue;
       }
       if (child.nodeType !== 1) continue;
+      charge(1, 0);
       const el = child as Element;
       if (el.namespaceURI !== SVG_NS) continue;
       if (nonInheritedValue(el, "display")?.toLowerCase() === "none") continue;
@@ -138,31 +167,39 @@ export function readTextChunks(
         continue;
       }
       if (el.localName !== "tspan" && el.localName !== "a") continue;
-      const childStyle = computeStyle(el, elementStyle, {
-        ...context,
-        fontSize: elementStyle.fontSize,
-      });
+      const childStyle = computeStyle(el, elementStyle, own(elementStyle));
       const childPreserve = xmlSpacePreserve(el, preserve);
       if (el.localName === "tspan") {
-        const x = firstLength(el, "x", context, "x");
-        const y = firstLength(el, "y", context, "y");
+        const lc = own(childStyle);
+        const x = firstLength(el, "x", lc, "x");
+        const y = firstLength(el, "y", lc, "y");
+        const dx = firstLength(el, "dx", lc, "x") ?? 0;
+        const dy = firstLength(el, "dy", lc, "y") ?? 0;
         if (x !== null || y !== null) {
           close();
-          open = { x: x ?? currentX, y: y ?? currentY, style: childStyle, pieces: [] };
+          open = {
+            x: (x ?? currentX) + dx,
+            y: (y ?? currentY) + dy,
+            style: childStyle,
+            pieces: [],
+          };
+        } else {
+          shiftX += dx;
+          shiftY += dy;
         }
       }
-      walk(el, childStyle, childPreserve);
+      walk(el, childStyle, childPreserve, depth + 1);
     }
   };
   let inherited = false;
   for (let e = text.parentElement; e; e = e.parentElement) {
-    const own = e.getAttributeNS(XML_NS, "space") ?? e.getAttribute("xml:space");
-    if (own === "preserve" || own === "default") {
-      inherited = own === "preserve";
+    const space = e.getAttributeNS(XML_NS, "space") ?? e.getAttribute("xml:space");
+    if (space === "preserve" || space === "default") {
+      inherited = space === "preserve";
       break;
     }
   }
-  walk(text, style, xmlSpacePreserve(text, inherited));
+  walk(text, style, xmlSpacePreserve(text, inherited), 1);
   close();
   return chunks;
 }

@@ -27,7 +27,7 @@ import {
 import { CANVAS_LIMITS } from "../model/limits";
 import type { GradientStop, Paint, Point } from "../model/types";
 import type { DroppedCollector } from "./dropped";
-import { hrefTarget, nonInheritedValue, ownValue, SVG_NS } from "./style";
+import { childElements, hrefTarget, nonInheritedValue, ownValue, SVG_NS } from "./style";
 import {
   cleanNumber,
   parseColor,
@@ -99,7 +99,7 @@ function inheritedColor(element: Element): string {
 function readStops(gradient: Element): GradientStop[] {
   const stops: GradientStop[] = [];
   let previous = 0;
-  for (const child of gradient.children) {
+  for (const child of childElements(gradient)) {
     if (child.namespaceURI !== SVG_NS || child.localName !== "stop") continue;
     const raw = child.getAttribute("offset")?.trim() ?? "0";
     const n = raw.endsWith("%") ? parseNumber(raw.slice(0, -1)) : parseNumber(raw);
@@ -185,7 +185,7 @@ export function readGradient(
     coords["fy"] = (fy === null ? null : coordinate(fy, "y")) ?? (coords["cy"] as number);
   }
   const stopsOwner = chain.find((e) =>
-    [...e.children].some((c) => c.namespaceURI === SVG_NS && c.localName === "stop"),
+    [...childElements(e)].some((c) => c.namespaceURI === SVG_NS && c.localName === "stop"),
   );
   return { type, units, transform, spread, coords, stops: stopsOwner ? readStops(stopsOwner) : [] };
 }

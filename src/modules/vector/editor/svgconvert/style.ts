@@ -3,10 +3,39 @@
  * `style` を優先する。継承するもの (`INHERITED`) は親の値を引き継ぎ、`inherit` は親の値にする。
  * `<style>` 要素と `class` は SVG ポリシーが許さないので見ない (ポリシーが通した値だけを読む)。
  */
-import { parseLength, parseNumber, type LengthContext } from "./values";
+import { parseColor, parseLength, parseNumber, parseOpacity, type LengthContext } from "./values";
 
 export const SVG_NS = "http://www.w3.org/2000/svg";
 export const XLINK_NS = "http://www.w3.org/1999/xlink";
+
+/**
+ * 子の要素を順にたどる。`children` / `childNodes` の添字のたどり方はエンジンによって子の数の 2 乗の時間が
+ * かかる (jsdom) ので、兄弟の参照でたどる。
+ */
+export function* childElements(element: Element): Generator<Element> {
+  for (let child = element.firstElementChild; child; child = child.nextElementSibling) yield child;
+}
+
+/** 子のノード (テキストを含む) を順にたどる。 */
+export function* childNodes(node: Node): Generator<ChildNode> {
+  for (let child = node.firstChild; child; child = child.nextSibling) yield child;
+}
+
+/** 自分と子孫の要素を、文書の順にたどる (再帰しない)。 */
+export function* descendantElements(root: Element): Generator<Element> {
+  let current: Element | null = root;
+  while (current) {
+    yield current;
+    if (current.firstElementChild) {
+      current = current.firstElementChild;
+      continue;
+    }
+    while (current && current !== root && !current.nextElementSibling)
+      current = current.parentElement;
+    if (!current || current === root) break;
+    current = current.nextElementSibling;
+  }
+}
 
 /** 継承する属性と初期値。 */
 const INHERITED_INITIAL: Readonly<Record<string, string>> = {
@@ -74,12 +103,135 @@ function styleDeclarations(element: Element): ReadonlyMap<string, string> {
   return result;
 }
 
-/** 要素自身に書かれた値 (`style` が表示属性より優先)。無ければ null。 */
+/**
+ * 見た目の属性の値の長さの上限。これより長い値は読めない値として扱う (信頼しない入力の巨大な値を、要素を
+ * 展開するたびに読み直さないように)。
+ */
+export const MAX_STYLE_VALUE_LENGTH = 4096;
+
+/** 要素自身に書かれた値 (`style` が表示属性より優先)。無ければ null。長すぎる値は無いものとして扱う。 */
 export function ownValue(element: Element, name: string): string | null {
   const fromStyle = styleDeclarations(element).get(name);
-  if (fromStyle !== undefined) return fromStyle;
+  if (fromStyle !== undefined && fromStyle.length <= MAX_STYLE_VALUE_LENGTH) return fromStyle;
   const attr = element.getAttribute(name);
-  return attr === null ? null : attr.trim();
+  if (attr === null || attr.length > MAX_STYLE_VALUE_LENGTH) return null;
+  return attr.trim();
+}
+
+// ---------------------------------------------------------------------------
+// 値の検証 (読めない値は宣言がないものとして扱う。CSS と同じく、継承した値を上書きしない)
+// ---------------------------------------------------------------------------
+
+const VALIDATION_CONTEXT: LengthContext = { viewport: { width: 100, height: 100 }, fontSize: 16 };
+
+const isLength = (v: string) => parseLength(v, VALIDATION_CONTEXT) !== null;
+const isColor = (v: string) => v.toLowerCase() === "currentcolor" || parseColor(v) !== null;
+const oneOf =
+  (...values: string[]) =>
+  (v: string) =>
+    values.includes(v.toLowerCase());
+
+/** 塗り: `none`、`currentColor`、色、`url(#id)` と代わりの値 (`none` か色)。 */
+export function isPaintValue(value: string): boolean {
+  const v = value.trim();
+  if (v.toLowerCase() === "none" || isColor(v)) return true;
+  const reference = parseUrlReference(v);
+  if (!reference) return false;
+  return (
+    reference.fallback === null ||
+    reference.fallback.toLowerCase() === "none" ||
+    isColor(reference.fallback)
+  );
+}
+
+function isDashArray(value: string): boolean {
+  if (value.toLowerCase() === "none") return true;
+  const parts = value.trim().split(/[\s,]+/);
+  return parts.every((part) => {
+    const n = parseLength(part, VALIDATION_CONTEXT);
+    return n !== null && n >= 0;
+  });
+}
+
+function isFontSize(value: string): boolean {
+  const v = value.toLowerCase();
+  if (FONT_SIZE_KEYWORDS[v] !== undefined || v === "larger" || v === "smaller") return true;
+  if (v.endsWith("%")) {
+    const n = parseNumber(v.slice(0, -1));
+    return n !== null && n >= 0;
+  }
+  const n = parseLength(v, VALIDATION_CONTEXT);
+  return n !== null && n >= 0;
+}
+
+const VALIDATORS: Readonly<Record<string, (value: string) => boolean>> = {
+  fill: isPaintValue,
+  stroke: isPaintValue,
+  "fill-opacity": (v) => parseOpacity(v) !== null,
+  "stroke-opacity": (v) => parseOpacity(v) !== null,
+  "fill-rule": oneOf("nonzero", "evenodd"),
+  "stroke-width": (v) => {
+    const n = parseLength(v, VALIDATION_CONTEXT);
+    return n !== null && n >= 0;
+  },
+  "stroke-linecap": oneOf("butt", "round", "square"),
+  "stroke-linejoin": oneOf("miter", "round", "bevel", "miter-clip", "arcs"),
+  "stroke-dasharray": isDashArray,
+  "stroke-dashoffset": isLength,
+  "stroke-miterlimit": (v) => {
+    const n = parseNumber(v);
+    return n !== null && n >= 1;
+  },
+  color: isColor,
+  "font-family": (v) => v.trim() !== "",
+  "font-style": (v) => /^(normal|italic|oblique)\b/i.test(v.trim()),
+  "font-weight": (v) => {
+    if (/^(normal|bold|bolder|lighter)$/i.test(v.trim())) return true;
+    const n = parseNumber(v);
+    return n !== null && n >= 1 && n <= 1000;
+  },
+  "letter-spacing": (v) => v.toLowerCase() === "normal" || isLength(v),
+  "text-anchor": oneOf("start", "middle", "end"),
+  visibility: oneOf("visible", "hidden", "collapse"),
+  "font-size": isFontSize,
+};
+
+/** 継承する属性の値として読めるか (`inherit` は読める)。検証のない属性は空でなければ読める。 */
+export function isValidValue(name: string, value: string): boolean {
+  if (value === "") return false;
+  if (value.toLowerCase() === "inherit") return true;
+  const validate = VALIDATORS[name];
+  return validate ? validate(value) : true;
+}
+
+/** 要素自身の、読める値 (`style` が読めなければ表示属性)。 */
+function ownValidValue(element: Element, name: string): string | null {
+  const fromStyle = styleDeclarations(element).get(name);
+  if (
+    fromStyle !== undefined &&
+    fromStyle.length <= MAX_STYLE_VALUE_LENGTH &&
+    isValidValue(name, fromStyle)
+  )
+    return fromStyle;
+  const attr = element.getAttribute(name)?.trim();
+  if (attr === undefined || attr.length > MAX_STYLE_VALUE_LENGTH || !isValidValue(name, attr))
+    return null;
+  return attr;
+}
+
+const ownStyleCache = new WeakMap<Element, ReadonlyMap<string, string>>();
+
+/** 要素自身に書かれた、継承する属性とフォントサイズの読める値 (要素ごとに 1 回だけ求める)。 */
+function ownStyle(element: Element): ReadonlyMap<string, string> {
+  const cached = ownStyleCache.get(element);
+  if (cached) return cached;
+  const result = new Map<string, string>();
+  for (const name of [...INHERITED, "font-size"]) {
+    const value = ownValidValue(element, name);
+    if (value !== null) result.set(name, value);
+  }
+  ownStyleCache.set(element, result);
+  return result;
 }
 
 const FONT_SIZE_KEYWORDS: Readonly<Record<string, number>> = {
@@ -114,24 +266,25 @@ export function computeStyle(
   parent: ComputedStyle,
   context: LengthContext,
 ): ComputedStyle {
+  const own = ownStyle(element);
   let values: Record<string, string> | null = null;
-  for (const name of INHERITED) {
-    const own = ownValue(element, name);
-    if (own === null || own === "" || own.toLowerCase() === "inherit") continue;
+  for (const [name, value] of own) {
+    if (name === "font-size" || value.toLowerCase() === "inherit") continue;
     values ??= { ...parent.values };
-    values[name] = own;
+    values[name] = value;
   }
-  const fontSize = resolveFontSize(ownValue(element, "font-size"), parent.fontSize, context);
+  const fontSize = resolveFontSize(own.get("font-size") ?? null, parent.fontSize, context);
   if (values === null && fontSize === parent.fontSize) return parent;
   return { values: values ?? parent.values, fontSize };
 }
 
 /** 継承しない属性 (`opacity`、`display`、`clip-path` など) の値。`inherit` は親の要素の値。 */
 export function nonInheritedValue(element: Element, name: string): string | null {
-  const own = ownValue(element, name);
-  if (own === null || own.toLowerCase() !== "inherit") return own;
-  const parent = element.parentElement;
-  return parent ? nonInheritedValue(parent, name) : null;
+  for (let e: Element | null = element; e; e = e.parentElement) {
+    const own = ownValue(e, name);
+    if (own === null || own.toLowerCase() !== "inherit") return own;
+  }
+  return null;
 }
 
 /** `href` (SVG 2) か `xlink:href` の参照先の ID。`#id` の形でなければ null。 */

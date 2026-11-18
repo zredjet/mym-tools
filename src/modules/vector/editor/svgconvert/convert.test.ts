@@ -394,14 +394,19 @@ describe("convertSvg: use / symbol / 入れ子の svg", () => {
     expect(b.fill).toEqual({ type: "solid", color: "#000000", opacity: 1 });
   });
 
-  it("symbol は use の width / height と symbol の viewBox で置く (切り抜きは落とす)", () => {
+  it("symbol は use の width / height と symbol の viewBox で置く (はみ出すときだけ切り抜きを落とす)", () => {
     const svg = svgOf(
       `<symbol id="s" viewBox="0 0 10 10"><rect width="10" height="10"/></symbol><use href="#s" x="5" y="5" width="20" height="20"/>`,
     );
     const { leaves, dropped } = convertOk(svg);
     const rect = only(leaves, "rect");
     expect([rect.x, rect.y, rect.width, rect.height]).toEqual([5, 5, 20, 20]);
-    expect(droppedCounts(dropped)).toEqual({ nestedClip: 1 });
+    expect(dropped).toEqual([]);
+
+    const over = svgOf(
+      `<symbol id="s" viewBox="0 0 10 10"><rect x="5" width="10" height="10"/></symbol><use href="#s" x="5" y="5" width="20" height="20"/>`,
+    );
+    expect(droppedCounts(convertOk(over).dropped)).toEqual({ nestedClip: 1 });
   });
 
   it("入れ子の svg は viewBox の変換 (既定は xMidYMid meet) を掛ける", () => {
