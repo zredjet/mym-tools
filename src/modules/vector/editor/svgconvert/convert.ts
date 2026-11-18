@@ -1,5 +1,5 @@
 /**
- * 埋め込み SVG の SVG 文書を、編集できるノードの断片にする (`docs/canvas-editor-design.md` §8.12)。純関数
+ * 埋め込み SVG の SVG 文書を、編集できるノードの断片にする (`docs/canvas-editor-design.md` §4.17)。純関数
  * (計測の `measurer` を除く)。SVG は信頼しない入力として扱う: `DOMParser` で読むだけで文書には挿入しない、
  * `href` は文書の中の `#id` だけを引く (外部の参照は読まない)、`use` の循環・深さ、要素の入れ子の深さ
  * (`MAX_NESTING`)、仕事の量 (`MAX_WORK`: 要素の展開、テキストの中の要素と文字、パスの点、長い属性) に上限を
@@ -11,7 +11,7 @@
  *   (`<image preserveAspectRatio="none">` で箱に引き伸ばしたもの): ルートの `viewBox` を箱へ縦横別々に
  *   引き伸ばす。`viewBox` がなければ、ルートの `width` / `height` (なければアセットの大きさ) を座標系にする
  * - 断片の根は group 1 個 (子が 1 個でも)。名前・表示・ロック・不透明度は置く側 (`place.ts`) が決める
- * - 対応 (§8.12): `g` と `a` は group (子が 1 個なら作らない)、`path` `polyline` `polygon` はパス、`rect` は
+ * - 対応 (§4.17): `g` と `a` は group (子が 1 個なら作らない)、`path` `polyline` `polygon` はパス、`rect` は
  *   矩形 (角丸の縦横が違えばパス)、`circle` `ellipse` は楕円、`line` は線、`text` `tspan` はテキスト
  *   (位置を指定した `tspan` ごとに 1 行、`auto-width`)、`use` と `symbol` は展開、入れ子の `svg` は viewBox の
  *   変換を掛けて中身を展開する (切り抜きは落とす)

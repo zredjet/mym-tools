@@ -1,5 +1,5 @@
 /**
- * 線のアウトライン化 (`docs/canvas-editor-design.md` §8.10)。
+ * 線のアウトライン化 (`docs/canvas-editor-design.md` §4.16)。
  *
  * `outlineStroke(subpaths, stroke)`: 点の形 (`Subpath[]`) と線 (`Stroke` の太さ・端・角・破線) から、線の見た目
  * どおりの塗りの面の輪郭を返す。結果は閉じた輪郭の並びで、`nonzero` で塗る (外側は時計回り、穴は反時計回り。
@@ -84,7 +84,7 @@ const MAX_OVERLAP_CHECKS = 30_000_000;
 /** 1 回目の合体がこれ (ms) より長くかかったら、求め直さない (画面が長く止まらないように)。 */
 const RETRY_LIMIT_MS = 300;
 
-/** 許容値の既定: 線の太さの 1% と 0.05 px の大きい方 (§8.10)。 */
+/** 許容値の既定: 線の太さの 1% と 0.05 px の大きい方 (§4.16)。 */
 export function outlineTolerance(width: number): number {
   return Math.max(width * 0.01, 0.05);
 }
@@ -222,7 +222,7 @@ export function strokeContours(
   };
 
   for (const sub of subpaths) {
-    if (sub.points.length < 2) continue; // 描かない (§8.4)
+    if (sub.points.length < 2) continue; // 描かない (§4.3)
     const segs = subpathToSegments(sub).filter((seg) => !isDegenerate(seg, degenerate));
     if (segs.length === 0) {
       // 長さ 0 の輪郭: 実線なら端の点 (向きは x 軸)。破線は描かない

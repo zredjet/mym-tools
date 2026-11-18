@@ -6,7 +6,7 @@
  * - Cmd/Ctrl+1〜6、Cmd/Ctrl+\、Cmd/Ctrl+B はアプリ全体の割当 (`ui-design.md` §8.1) なので使わない
  * - 編集のショートカット (Undo、コピー、削除、矢印、グループ化、重なり順など) は
  *   「選択と変形」のセッションが「編集」の節に足す
- * - 第 2 段階 (§8.13): 担当ごとに節を分け、節ごとに `XXX_SHORTCUTS` の配列を置いて `CANVAS_SHORTCUTS` の
+ * - 第 2 段階 (§5.4): 担当ごとに節を分け、節ごとに `XXX_SHORTCUTS` の配列を置いて `CANVAS_SHORTCUTS` の
  *   末尾で並べる (並行の作業が同じ行を変えないため)。G は「変換」(`CONVERT_SHORTCUTS`)。
  *   E (反転)、F (ペン)、H (鉛筆)、I (線のアウトライン化) も同じ形で自分の節を足す
  */
@@ -84,9 +84,9 @@ const tool = (id: string, key: string, toolId: ToolId): Shortcut => ({
   run: ({ store }) => store.getState().setTool(toolId),
 });
 
-// ---- 変換 (G。§8.13) ----
+// ---- 変換 (G。§5.4) ----
 // パスに変換とブーリアン演算。中身は `panels/sections/convertActions.ts` (「変換」の節のボタンと同じ動作)。
-// 点の編集中は効かせない (§8.7.3。`pathEdit` ツールが先に受け、ここでも何もしない)
+// 点の編集中は効かせない (§4.13.3。`pathEdit` ツールが先に受け、ここでも何もしない)
 export const CONVERT_SHORTCUTS: Shortcut[] = [
   {
     id: "convert.flatten",
@@ -118,7 +118,7 @@ export const CONVERT_SHORTCUTS: Shortcut[] = [
   },
 ];
 
-// ---- 鉛筆 (H。§8.13) ----
+// ---- 鉛筆 (H。§5.4) ----
 // Cmd/Ctrl+Shift+P はアプリ全体の割当 (プロジェクト切替) なので、Cmd/Ctrl なしの Shift+P だけ。
 // 多角形と星にはキーを割り当てない
 export const PENCIL_SHORTCUTS: Shortcut[] = [
@@ -129,7 +129,7 @@ export const PENCIL_SHORTCUTS: Shortcut[] = [
   },
 ];
 
-// ---- 線のアウトライン化 (I。§8.13) ----
+// ---- 線のアウトライン化 (I。§5.4) ----
 // 中身は `outline/convertAction.ts` (「変換」の節のボタンと同じ動作)。点の編集中は `pathEdit` ツールが先に受けて止める
 export const OUTLINE_SHORTCUTS: Shortcut[] = [
   {
@@ -159,8 +159,8 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
   tool("tool.text", "t", "text"),
   tool("tool.hand", "h", "hand"),
 
-  // ---- ペンと点の編集 (§8.13、F) ----
-  // Shift+P (鉛筆) は多角形・星・鉛筆のセッションが足す。点の編集の中のキーは `pathEdit` ツールが先に受ける
+  // ---- ペンと点の編集 (§5.4、F) ----
+  // Shift+P (鉛筆) は `PENCIL_SHORTCUTS`。点の編集の中のキーは `pathEdit` ツールが先に受ける
   tool("tool.pen", "p", "pen"),
 
   {
@@ -237,7 +237,7 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
     },
   },
 
-  // ---- 回転と反転 (§8.5.6、§8.13) ----
+  // ---- 回転と反転 (§4.11.6、§5.4) ----
   // Shift+H / Shift+V は左右反転 / 上下反転。反転できない選択 (テキスト・画像・埋め込み SVG・frame を含む) では
   // 何もしない。Shift なしの H (手のひら) と V (選択) は上のツールの割当
   {

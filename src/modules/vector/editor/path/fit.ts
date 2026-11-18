@@ -1,5 +1,5 @@
 /**
- * パスの箱を形に合わせる (`docs/canvas-editor-design.md` §8.6)。
+ * パスの箱を形に合わせる (`docs/canvas-editor-design.md` §4.12)。
  *
  * パスの箱は形にぴったり合わせる: 曲線の範囲 (ハンドルの先は含めない) の左上が (0, 0)、大きさが `width` × `height`。
  * 形を変える操作 (点の編集、リサイズ、変換) のあとは、同じ `DocRecipe` の中で `fitPathNodes(doc, ids)` を通す。
@@ -17,7 +17,7 @@ import type { CanvasDocument, NodeId, PathNode } from "../model/types";
 import { pathBounds } from "./measure";
 import { translateSubpaths } from "./transform";
 
-/** 範囲がこれ以下しかずれていなければ直さない (§8.6)。 */
+/** 範囲がこれ以下しかずれていなければ直さない (§4.12)。 */
 export const PATH_FIT_EPSILON = 1e-6;
 
 /** `-0` を `0` にする。 */
@@ -68,7 +68,7 @@ export function fitPathNode(node: PathNode): PathNode {
 }
 
 /**
- * `ids` のノードとその子孫のうち、パスの箱を形に合わせる (§8.6)。`ids` が null なら文書のすべてのパス。
+ * `ids` のノードとその子孫のうち、パスの箱を形に合わせる (§4.12)。`ids` が null なら文書のすべてのパス。
  * 変わるものがなければ引数の文書そのものを返す (履歴も `revision` も増えない)。
  */
 export function fitPathNodes(doc: CanvasDocument, ids: readonly NodeId[] | null): CanvasDocument {

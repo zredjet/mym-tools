@@ -1,5 +1,5 @@
 /**
- * 第 2 段階 (payload v3) の描画 (§8.4)。回転、線の端・角・破線、パス、ブーリアン。
+ * 第 2 段階 (payload v3) の描画 (§4.3)。回転、線の端・角・破線、パス、ブーリアン。
  * 回転 0 と線の既定値の出力が v2 と同じことは、`buildNodeSvg.test.tsx` (v2 からのテスト) が確かめる。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -64,7 +64,7 @@ function findAll(tree: SvgEl | string, tag: string): SvgEl[] {
 
 const corner = (x: number, y: number) => ({ x, y, in: null, out: null, mirror: "none" as const });
 
-describe("回転 (§8.4)", () => {
+describe("回転 (§4.3)", () => {
   it("回転した矩形は自分の要素に rotate(θ cx cy) を付ける (中心は箱の中心、親の座標系)", () => {
     const rect = createRect({ id: "r", x: 10, y: 20, width: 40, height: 30, rotation: 30 });
     expect(build(docOf([rect], ["r"]), "r").attrs).toMatchObject({
@@ -141,7 +141,7 @@ describe("回転 (§8.4)", () => {
   });
 });
 
-describe("線の端・角・破線 (§8.4)", () => {
+describe("線の端・角・破線 (§4.3)", () => {
   it("既定値 (butt、miter、空) では属性を付けない", () => {
     const line = createLine({ id: "l", stroke: createStroke("#000000", 2) });
     const attrs = build(docOf([line], ["l"]), "l").attrs;
@@ -185,7 +185,7 @@ describe("線の端・角・破線 (§8.4)", () => {
   });
 });
 
-describe("パス (§8.4、§8.6)", () => {
+describe("パス (§4.3、§4.12)", () => {
   const triangle: Subpath = { closed: true, points: [corner(0, 0), corner(10, 0), corner(5, 8)] };
 
   it("<path d> 1 つと fill-rule で描く。点には箱の x y だけを足す", () => {
@@ -278,7 +278,7 @@ describe("パス (§8.4、§8.6)", () => {
   });
 });
 
-describe("ブーリアン (§8.4、§8.9.3)", () => {
+describe("ブーリアン (§4.3、§4.15.3)", () => {
   const children = () => [
     createRect({ id: "a", x: 0, y: 0, width: 10, height: 10 }),
     createEllipse({ id: "b", x: 5, y: 5, width: 10, height: 10 }),

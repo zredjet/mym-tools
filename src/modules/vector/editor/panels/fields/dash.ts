@@ -1,5 +1,5 @@
 /**
- * 破線の欄の値 (§8.11、§8.3.2)。数値をスペースかカンマ (全角を含む) で区切った 1 つの文字列。空は実線。
+ * 破線の欄の値 (§5.3、§3.5)。数値をスペースかカンマ (全角を含む) で区切った 1 つの文字列。空は実線。
  */
 import { CANVAS_LIMITS } from "../../model/limits";
 import { parseNumberInput } from "./values";
@@ -9,7 +9,7 @@ const SEPARATORS = /[\s,，、]+/u;
 
 /**
  * 破線の入力を長さと間隔の並びにする。空 (空白だけ) は実線 (`[]`)。
- * §8.3.2 に合わない入力 (数値でない、`maxDashCount` 個を超える、`maxDashLength` を超えるか負の値、合計が 0)
+ * §3.5 に合わない入力 (数値でない、`maxDashCount` 個を超える、`maxDashLength` を超えるか負の値、合計が 0)
  * は null。値は小数第 2 位に丸める。
  */
 export function parseDashInput(text: string): number[] | null {

@@ -104,7 +104,7 @@ describe("flattenNodes (1 個)", () => {
     // 始点は (rx, 0) から時計回り (描画と同じ。破線の位置が変わらない)
     expect(path.subpaths[0]?.points[0]).toMatchObject({ x: 8, y: 0 });
     expect(checkSavable(out.doc)).toBeNull();
-    // 角丸なしなら外接矩形も同じ (角丸ありは曲線の範囲なので小さくなる。§8.5.1)
+    // 角丸なしなら外接矩形も同じ (角丸ありは曲線の範囲なので小さくなる。§4.11.1)
     const square = docOf(
       ["s"],
       [createRect({ id: "s", x: 3, y: 4, width: 30, height: 10, rotation: 30 })],

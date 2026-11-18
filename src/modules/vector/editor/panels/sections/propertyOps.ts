@@ -1,11 +1,11 @@
 /**
  * プロパティパネルの変更 (純関数)。どれも変わらなければ引数の文書をそのまま返す。
  *
- * 位置と大きさ (§8.5.5、G がパネルの欄から呼ぶ):
+ * 位置と大きさ (§4.11.5、G がパネルの欄から呼ぶ):
  * - `readPosition(doc, selection)`: 1 個の箱を持つノードは W / H が回転の前の大きさ、X / Y が回転した箱の左上の角
  *   (ノードの座標系の原点を親の座標系へ写した点)。複数選択・group・ブーリアンは軸に平行な外接矩形、線は始点と終点
  * - `setBoundsField(doc, selection, field, value)`: 1 個の回転した箱を持つノードは、X / Y でその角を入力した位置へ
- *   動かし、W / H は左上の角を動かさずに自分の向きでリサイズする (§8.5.4。大きさは整数に丸める)
+ *   動かし、W / H は左上の角を動かさずに自分の向きでリサイズする (§4.11.4。大きさは整数に丸める)
  * - `readRotation(doc, selection)`: 回転の欄の値。箱を持つノードだけの選択なら、全部同じ値ならその値、違えば
  *   `MIXED`。箱を持たないノードを含むか、空なら null (欄を出さない)
  * - `setRotationField(doc, selection, value)`: 各ノードを自分の中心のまわりに、入力した角度へそろえる
@@ -63,7 +63,7 @@ export type PositionValues =
   | { mode: "line"; values: Record<LineField, number | Mixed> };
 
 /**
- * 1 個だけ選んだ、自分の向きで読み書きする箱を持つノード (§8.5.5)。自分が回転しているか、回転した frame の
+ * 1 個だけ選んだ、自分の向きで読み書きする箱を持つノード (§4.11.5)。自分が回転しているか、回転した frame の
  * 中にあるもの (ページ上の向きが 0 でなくなりうるもの)。なければ null。
  */
 function singleRotatedBox(doc: CanvasDocument, ids: readonly NodeId[]): BoxNode | null {
@@ -83,7 +83,7 @@ function boxCorner(node: BoxNode): { x: number; y: number } {
  * 位置と大きさの節に出す値。親の座標系で見る (frame の子は frame の左上が原点)。
  * 祖先も選ばれているノードは除く (祖先と一緒に動くため)。線だけを選んでいれば始点と終点。
  * group は外接矩形。選択が空なら null。
- * 1 個の回転した箱を持つノードは、W / H が回転の前の大きさ、X / Y が回転した箱の左上の角 (§8.5.5)。
+ * 1 個の回転した箱を持つノードは、W / H が回転の前の大きさ、X / Y が回転した箱の左上の角 (§4.11.5)。
  */
 export function readPosition(
   doc: CanvasDocument,
@@ -130,7 +130,7 @@ export function readPosition(
  * テキストの大きさは同じ変更の中で求め直す (`auto-height` の幅を変えたら、高さが折り返しの結果になる。§4.7)。
  * 結果が範囲の外へ出るなら変えない。
  * 1 個の回転した箱を持つノード (回転した frame の中のものを含む) は、X / Y で回転した箱の左上の角を入力した
- * 位置へ動かし、W / H は左上の角を動かさずに自分の向きでリサイズする (§8.5.4、§8.5.5。大きさは整数に丸め、
+ * 位置へ動かし、W / H は左上の角を動かさずに自分の向きでリサイズする (§4.11.4、§4.11.5。大きさは整数に丸め、
  * `x` `y` は丸めない)。回転した frame の中の group と複数選択の W / H は、読み取りと同じ親の座標系で比例させる。
  */
 export function setBoundsField(
@@ -212,7 +212,7 @@ function zeroSizePatch(node: BoxNode, field: "width" | "height", value: number):
 }
 
 /**
- * 回転の欄の値 (§8.5.5)。箱を持つノードだけの選択なら、全部同じ値ならその値、違えば `MIXED`。
+ * 回転の欄の値 (§4.11.5)。箱を持つノードだけの選択なら、全部同じ値ならその値、違えば `MIXED`。
  * 箱を持たないノード (線・group・ブーリアン) を含むか、選択が空なら null (欄を出さない)。
  */
 export function readRotation(

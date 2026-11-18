@@ -1,5 +1,5 @@
 /**
- * 選択ツールの回転と変形 (§8.5.3〜§8.5.6、第 2 段階の E)。回転していない文書の操作は selectTool.test.ts。
+ * 選択ツールの回転と変形 (§4.11.3〜§4.11.6、第 2 段階の E)。回転していない文書の操作は selectTool.test.ts。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { applyToPoint } from "../geometry/matrix";
@@ -137,7 +137,7 @@ const close = (value: Point, expected: Point, digits = 9) => {
   expect(value.y).toBeCloseTo(expected.y, digits);
 };
 
-describe("回転のハンドル (§8.5.3)", () => {
+describe("回転のハンドル (§4.11.3)", () => {
   it("回転した枠の 4 隅のすぐ外で回転のカーソル、角のハンドルは向きに合わせたカーソル", () => {
     const t = setup();
     t.s().setSelection(["r"]);
@@ -253,7 +253,7 @@ describe("回転のハンドル (§8.5.3)", () => {
   });
 });
 
-describe("回転した枠のリサイズ (§8.5.4)", () => {
+describe("回転した枠のリサイズ (§4.11.4)", () => {
   it("辺のハンドルは自分の向きに伸ばし、反対の辺は動かない。幅と高さだけを丸める", () => {
     const t = setup();
     t.s().setSelection(["r"]);
@@ -390,7 +390,7 @@ describe("回転した選択の移動と当たり", () => {
   });
 });
 
-describe("矢印キー (§8.5.2)", () => {
+describe("矢印キー (§4.11.2)", () => {
   it("回転した frame の中では frame の軸に沿って動き、x と y の両方を丸める", () => {
     const store = createEditorStore(rotatedDoc());
     store.getState().setSelection(["c"]);
@@ -424,7 +424,7 @@ describe("矢印キー (§8.5.2)", () => {
   });
 });
 
-describe("反転 (§8.5.6)", () => {
+describe("反転 (§4.11.6)", () => {
   const key = (k: string): KeyInput => ({
     key: k,
     code: `Key${k.toUpperCase()}`,

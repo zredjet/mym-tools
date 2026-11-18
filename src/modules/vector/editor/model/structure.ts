@@ -3,13 +3,13 @@
  * すべて純関数で、変わらなければ引数の文書をそのまま返す。
  * 上限 (`maxDepth` / `maxNodes`) を超える変更は行わず、元の文書を返す。
  *
- * ブーリアンの木の規則 (§8.9.1): ブーリアンの子は 1 個以上で、種類は rect / ellipse / path / boolean だけ。
+ * ブーリアンの木の規則 (§4.15.1): ブーリアンの子は 1 個以上で、種類は rect / ellipse / path / boolean だけ。
  * - 挿入・断片の挿入・親の付け替え (レイヤーパネルの並べ替え) は、子にできない種類をブーリアンに入れない (何もしない)
  * - グループ化は、group を置く先がブーリアンなら何もしない
  * - 子がなくなったブーリアンは、空の group と同じく消す
- * - 解除 (`ungroupNodes`) は group とブーリアンの両方を解く (§8.9.4。子を親へ戻し、不透明度・非表示・ロックを写す)
+ * - 解除 (`ungroupNodes`) は group とブーリアンの両方を解く (§4.15.4。子を親へ戻し、不透明度・非表示・ロックを写す)
  *
- * 回転 (§8.5.2): 親を変えるとき (付け替え、グループ化) は、ページ上の見た目を変えない。箱を持つノードは中心を
+ * 回転 (§4.11.2): 親を変えるとき (付け替え、グループ化) は、ページ上の見た目を変えない。箱を持つノードは中心を
  * ページ座標で保ち、`rotation` に「元の親のページ上の角度 − 新しい親のページ上の角度」を足す。線は端点を写す
  * (パスの点は変えない)。回転していない座標系の間では、これまでどおり平行移動だけ (第 1 段階と同じ値)。
  */
@@ -69,7 +69,7 @@ export function subtreeHeight(
 
 /**
  * 空になった group とブーリアンを消し、空になった親の group・ブーリアンも続けて消す
- * (§3.3: group は子が 1 個以上。§8.9.1: ブーリアンも同じ)。
+ * (§3.3: group は子が 1 個以上。§4.15.1: ブーリアンも同じ)。
  */
 function removeEmptyGroups(draft: DocDraft, candidates: Iterable<ParentRef | null>): void {
   for (const parent of candidates) {
@@ -92,7 +92,7 @@ function removeEmptyGroups(draft: DocDraft, candidates: Iterable<ParentRef | nul
 /**
  * 子を持たないノード (または子のない frame) を親の `index` (省略すると最前面) に入れる。
  * 座標は親の座標系で渡す (`pageToLocal` で直す)。子を持つものと group・ブーリアンは `insertFragment` を使う。
- * 親がブーリアンで、子にできない種類なら何もしない (§8.9.1)。
+ * 親がブーリアンで、子にできない種類なら何もしない (§4.15.1)。
  */
 export function insertNode(
   doc: CanvasDocument,
@@ -102,7 +102,7 @@ export function insertNode(
 ): CanvasDocument {
   if (getNode(doc, node.id) !== undefined || !parentExists(doc, parent)) return doc;
   if (!canHaveChildOfType(doc, parent, node.type)) return doc;
-  // group とブーリアンは子が 1 個以上 (§3.3、§8.9.1) なので、子のないものも入れない (`insertFragment` を使う)
+  // group とブーリアンは子が 1 個以上 (§3.3、§4.15.1) なので、子のないものも入れない (`insertFragment` を使う)
   if (isGroupLike(node) || (isContainer(node) && node.children.length > 0)) return doc;
   if (parentDepth(doc, parent) + 1 > CANVAS_LIMITS.maxDepth) return doc;
   if (Object.keys(doc.nodes).length + 1 > CANVAS_LIMITS.maxNodes) return doc;
@@ -272,7 +272,7 @@ function canMoveInto(doc: CanvasDocument, id: NodeId, target: ParentRef): boolea
 }
 
 /**
- * 下書きの中でノードを、元の親の座標系から新しい親の座標系へ写す (見た目の位置を変えない。§8.5.2)。
+ * 下書きの中でノードを、元の親の座標系から新しい親の座標系へ写す (見た目の位置を変えない。§4.11.2)。
  * 原点と行列は元の文書で求める (付け替えの前後で、`from` と `to` とその祖先は動かない)。
  */
 function relocateInDraft(
@@ -303,7 +303,7 @@ function relocateInDraft(
  * `index` は付け替える前の `target.children` の位置で、その位置にある子の背面に入れる
  * (省略すると最前面)。選んだノードの相対順は保つ。自分の子孫の中へは動かせず、
  * 深さが `maxDepth` を超える場合は何もしない。`target` がブーリアンで、子にできない種類が混ざるなら
- * 何もしない (§8.9.1)。回転した frame の間の付け替えは、見た目を保つように回転も写す (§8.5.2)。
+ * 何もしない (§4.15.1)。回転した frame の間の付け替えは、見た目を保つように回転も写す (§4.11.2)。
  */
 export function moveNodes(
   doc: CanvasDocument,
@@ -361,7 +361,7 @@ export function moveNodes(
  * ノードをまとめて group にする。group は最も前面のノードの親の、そのノードがあった位置に置く。
  * ほかの親にあるノードは、見た目の位置を保ったままその親へ移す (回転した frame の間でも見た目を保つ)。
  * `groupId` を渡しておくと、呼び出し側がその ID で選択し直せる。
- * group を置く先がブーリアンなら何もしない (ブーリアンの中ではグループ化できない。§8.9.1)。
+ * group を置く先がブーリアンなら何もしない (ブーリアンの中ではグループ化できない。§4.15.1)。
  */
 export function groupNodes(
   doc: CanvasDocument,
@@ -401,7 +401,7 @@ export function groupNodes(
 /**
  * group とブーリアンを解除し、子をそれがあった位置に並べる (座標はそのまま。どちらも座標系を作らない)。
  * 見た目と状態を保つため、不透明度は子に掛け合わせ、非表示なら子を非表示に、ロック中なら子をロックにする
- * (§4.6、§8.9.4)。ブーリアンの子は、解除すると自分の塗りで描かれるようになる。
+ * (§4.6、§4.15.4)。ブーリアンの子は、解除すると自分の塗りで描かれるようになる。
  * group・ブーリアンでない ID は無視する。入れ子を同時に解除するときは内側から解く。
  */
 export function ungroupNodes(doc: CanvasDocument, ids: readonly NodeId[]): CanvasDocument {

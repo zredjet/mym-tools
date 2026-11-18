@@ -1,5 +1,5 @@
 /**
- * パスの点の編集 (`docs/canvas-editor-design.md` §8.7.1〜§8.7.3)。ツールバーには出さず、`startPathEdit` が
+ * パスの点の編集 (`docs/canvas-editor-design.md` §4.13.1〜§4.13.3)。ツールバーには出さず、`startPathEdit` が
  * 切り替える。編集しているパスは store の `editingPathId`、選んでいる点は `path/editSession.ts`。
  *
  * ポインター:
@@ -18,7 +18,7 @@
  *
  * 操作 1 回が履歴 1 件。ドラッグは `beginGesture` / `updateGesture` / `commitGesture` を自分で開いて閉じ、
  * Esc とフォーカス喪失 (`onCancel`) で自分のジェスチャーだけを取り消す (§4.4)。形を変えたら同じ変更の中で
- * `fitPathNodes` を通し (`withSubpaths`)、§3.5 と §8.3.2 の上限を超える結果は当てない。
+ * `fitPathNodes` を通し (`withSubpaths`)、§3.5 の上限を超える結果は当てない。
  */
 import {
   alignedGuides,
@@ -348,7 +348,7 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
     if (onPath) return;
     const current = store.getState();
     const pick = pickTarget(current.doc, hits, current.scopeId, { point: event.page });
-    // 選択を変えると store が点の編集を終える (§8.7.1)
+    // 選択を変えると store が点の編集を終える (§4.13.1)
     current.setSelection(pick.id === null ? [] : [pick.id]);
     if (store.getState().editingPathId === null) store.getState().setScope(pick.scopeId);
   });
@@ -556,7 +556,7 @@ const ARROWS: Record<string, Point> = {
 const MODIFIER_KEYS = new Set(["Shift", "Alt", "Meta", "Control"]);
 
 /**
- * 点の編集の中で効かせないノードの編集のショートカット (§8.7.3)。コピー、切り取り、貼り付け、複製、
+ * 点の編集の中で効かせないノードの編集のショートカット (§4.13.3)。コピー、切り取り、貼り付け、複製、
  * グループ化と解除、重なり順、反転 (Shift+H / V)、パスに変換 (Cmd/Ctrl+E)、線のアウトライン化
  * (Shift+Cmd/Ctrl+O)、ブーリアン (Alt+Shift+文字)。Cmd/Ctrl なしの Alt+Shift は、キーの文字に関係なくすべて止める
  * (macOS では Alt で文字が変わり、配列によってはデッドキー (`Dead`) になる。ブーリアンは `code` で判定されるため)。
@@ -581,7 +581,7 @@ export function pathEditKey(event: CanvasKeyEvent, store: Store): boolean {
   if (id === null) return false;
   const key = event.key;
   if (event.mod && !event.alt && key.toLowerCase() === "z") {
-    // Undo / Redo は選んでいる点を外してから store へ回す (§8.7.1)
+    // Undo / Redo は選んでいる点を外してから store へ回す (§4.13.1)
     clearSelectedPoints();
     return false;
   }

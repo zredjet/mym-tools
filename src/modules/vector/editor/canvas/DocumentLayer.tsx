@@ -26,7 +26,7 @@ interface NodeViewProps {
 
 /**
  * ノード 1 個。frame / group は子の `NodeView` を差し込み位置に置く。
- * ブーリアンは子を描かず、演算の結果を購読する (子孫が変われば結果のオブジェクトが変わる。§8.9.3)。
+ * ブーリアンは子を描かず、演算の結果を購読する (子孫が変われば結果のオブジェクトが変わる。§4.15.3)。
  */
 export const NodeView = memo(function NodeView({ id, depth }: NodeViewProps) {
   const node = useEditorStore((state) => getNode(state.doc, id));

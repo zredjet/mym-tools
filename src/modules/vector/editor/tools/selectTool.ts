@@ -1,5 +1,5 @@
 /**
- * 選択ツール (§4.4〜§4.6、§8.5)。クリックでの選択、範囲選択、移動、リサイズ、回転、線の端点、ガイド線の移動。
+ * 選択ツール (§4.4〜§4.6、§4.11)。クリックでの選択、範囲選択、移動、リサイズ、回転、線の端点、ガイド線の移動。
  *
  * 押してから `DRAG_THRESHOLD` 画面 px 動くまではクリックとして扱い、動かないクリックは文書を変えない
  * (履歴も revision も増えない)。しきい値を越えたらドラッグを始める。文書を変えるドラッグは
@@ -12,7 +12,7 @@
  *
  * 状態はモジュールの変数に持つ (ツールは 1 つだけで、同時に追うポインターも 1 本だけ)。
  *
- * 回転 (§8.5.3、§8.5.4):
+ * 回転 (§4.11.3、§4.11.4):
  * - 選択枠は `select/selectionBox.ts`。1 個だけ選んだ、ページ上の角度が 0 でない箱を持つノードは回転した枠、
  *   それ以外は軸に平行な外接矩形
  * - 回転のハンドルは枠の 4 隅のすぐ外。ドラッグで回し (Shift で 15° 刻み)、角度を重ね描きする。
@@ -167,7 +167,7 @@ interface ResizeDrag {
   hasText: boolean;
   targets: SnapTargets;
   /**
-   * 1 個の回転したノードを自分の向きでリサイズする (§8.5.4)。`back` は開始時の ノードの座標系 ← ページ。
+   * 1 個の回転したノードを自分の向きでリサイズする (§4.11.4)。`back` は開始時の ノードの座標系 ← ページ。
    * null なら外接矩形の比例 (§4.6)
    */
   own: { id: NodeId; back: Matrix } | null;
@@ -297,7 +297,7 @@ function hitHandle(state: EditorStore, point: Point): HandleHit | null {
 }
 
 /**
- * 点の下の回転のハンドル (枠の 4 隅のすぐ外。§8.5.3)。線を 1 本だけ選んだときは出さない (端点を動かす)。
+ * 点の下の回転のハンドル (枠の 4 隅のすぐ外。§4.11.3)。線を 1 本だけ選んだときは出さない (端点を動かす)。
  * リサイズのハンドル・ガイド線・frame の名前のラベルの方を先に調べること (ラベルは frame の左上の角の外にある)。
  */
 function hitRotation(
@@ -492,7 +492,7 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
         phase = { kind: "inert", press: null };
         return;
       }
-      // パスは点の編集に入る (§8.7.2)。ツールが変わるので、この押下は終わり
+      // パスは点の編集に入る (§4.13.2)。ツールが変わるので、この押下は終わり
       if (node?.type === "path" && beginPathEdit(store, id)) {
         phase = { kind: "idle" };
         return;
@@ -647,7 +647,7 @@ function startDrag(
 
 /**
  * リサイズの開始。回転した枠 (1 個の回転したノード) はノードの座標系で、それ以外は外接矩形 (ページ座標) で
- * 計算する (§8.5.4)。
+ * 計算する (§4.11.4)。
  */
 function startResize(state: EditorStore, handle: ResizeHandle, pressed: Point): ResizeDrag | null {
   const ids = handleTargets(state);
@@ -692,7 +692,7 @@ function startResize(state: EditorStore, handle: ResizeHandle, pressed: Point): 
   };
 }
 
-/** 回転の開始 (§8.5.3)。中心は 1 個の箱を持つノードなら箱の中心、それ以外は選択の外接矩形の中心。 */
+/** 回転の開始 (§4.11.3)。中心は 1 個の箱を持つノードなら箱の中心、それ以外は選択の外接矩形の中心。 */
 function startRotate(state: EditorStore, pressed: Point): RotateDrag | null {
   const ids = handleTargets(state);
   const center = ids.length > 0 ? rotationCenter(state.doc, ids) : null;
@@ -948,7 +948,7 @@ function updateDrag(drag: Drag, start: Press, event: CanvasPointerEvent, ctx: To
 }
 
 /**
- * 1 個の回転したノードのリサイズ (§8.5.4)。ポインターをノードの座標系に直し、第 1 段階と同じ規則
+ * 1 個の回転したノードのリサイズ (§4.11.4)。ポインターをノードの座標系に直し、第 1 段階と同じ規則
  * (`resizeRect`) で箱を求め、幅と高さだけを丸めて `resizeNodeInOwnFrame` で当てる。
  */
 function updateOwnResize(
@@ -981,7 +981,7 @@ function updateOwnResize(
 }
 
 /**
- * 回転のドラッグ (§8.5.3)。開始時の文書に毎回当て直す。Shift なら、1 個の箱を持つノードは結果の角度を、
+ * 回転のドラッグ (§4.11.3)。開始時の文書に毎回当て直す。Shift なら、1 個の箱を持つノードは結果の角度を、
  * それ以外は回した量を 15° の倍数にする。スナップはしない。
  */
 function updateRotate(drag: RotateDrag, event: CanvasPointerEvent, ctx: ToolContext): void {

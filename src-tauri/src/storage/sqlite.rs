@@ -1840,7 +1840,7 @@ mod tests {
     }
 
     // キャンバスの版に依存するテストは、版の定数 (`vector::testing::CURRENT`) から期待する版と契約データ
-    // (`model/fixtures/payload-v<版>.json`) を選ぶ。定数が 2 でも 3 でも通る (§8.3.3)。v1 の作品のテストは、
+    // (`model/fixtures/payload-v<版>.json`) を選ぶ。定数が 2 でも 3 でも通る (§3.9)。v1 の作品のテストは、
     // 版が 3 のときの経路 (v1 → v2 → v3) も確かめる。今の版は本物の `VectorModule`、ほかの版は
     // `VectorModuleAt` を使う (`vector_backend_at` / `module_backends_at`)。
     use crate::modules::vector::testing::{
@@ -2443,7 +2443,7 @@ mod tests {
             .unwrap()
     }
 
-    /// 版が 3 のとき、v2 の作品は読んだときに v3 へ変換して書き戻す (§8.3.3、ADR-0006)。利用者の編集
+    /// 版が 3 のとき、v2 の作品は読んだときに v3 へ変換して書き戻す (§3.9、ADR-0006)。利用者の編集
     /// ではないので data_revision も updated_at も変えない。検索用テキストは変わらない。
     #[test]
     fn vector_v2_items_are_upgraded_to_v3_on_read_without_bumping_data_revision() {
@@ -2478,7 +2478,7 @@ mod tests {
     }
 
     /// 版が 3 のとき、壊れた v2 の作品 (v2 の検証を通らないもの) は開けず、v2 のまま残り、上書きを拒否する。
-    /// エクスポートでは v2 のまま書き出して `not_upgraded` で知らせる (§8.3.3、ADR-0027)。
+    /// エクスポートでは v2 のまま書き出して `not_upgraded` で知らせる (§3.9、ADR-0027)。
     #[test]
     fn broken_vector_v2_items_stay_v2_when_the_version_is_3() {
         use crate::exchange::export::build_export_data;

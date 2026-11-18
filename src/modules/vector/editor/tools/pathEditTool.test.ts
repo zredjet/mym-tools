@@ -85,7 +85,7 @@ beforeEach(() => {
   resetPathEditSession();
 });
 
-describe("入る・出る (§8.7.2)", () => {
+describe("入る・出る (§4.13.2)", () => {
   it("パスを選んで Enter で入り、Enter と Esc で出る", () => {
     const { s, store, key } = setup(pathEditDocument(), null);
     s().setSelection(["sq"]);

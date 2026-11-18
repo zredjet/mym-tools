@@ -1,10 +1,10 @@
 /**
- * パネルと変換の操作の結果が §3.5 と §8.3.2 の範囲に収まるかの確認。
+ * パネルと変換の操作の結果が §3.5 の範囲に収まるかの確認。
  * `translateNodes` / `resizeNodes` / `moveNodes` / 回転・反転は上限を見ないので、確定の前に確かめる。
  *
  * - `geometryWithinLimits(doc, ids)`: 変えたノードと子孫 (ブーリアンの子を含む) の座標と大きさ。パスは点と
  *   ハンドルも見る (点の座標とハンドルの相対値をそれぞれ。保存の検証と同じ。絶対値が `maxCoordinate` 以下)
- * - `pathPointsWithinLimits(doc, ids)`: 変えたパスの輪郭の数・点の数と、文書の全パスの点の合計 (§8.3.2)
+ * - `pathPointsWithinLimits(doc, ids)`: 変えたパスの輪郭の数・点の数と、文書の全パスの点の合計 (§3.5)
  */
 import { CANVAS_LIMITS } from "../model/limits";
 import { getDescendantIds, getNode, topLevelIds } from "../model/tree";
@@ -19,7 +19,7 @@ function selfAndDescendants(doc: CanvasDocument, id: NodeId): NodeId[] {
 }
 
 /**
- * パスの点とハンドルが座標の範囲に収まっているか。保存の検証 (§8.3.2、TypeScript と Rust) と同じく、点の
+ * パスの点とハンドルが座標の範囲に収まっているか。保存の検証 (§3.5、TypeScript と Rust) と同じく、点の
  * `x` `y` と、`in` `out` の各成分 (点からの相対) をそれぞれ確かめる (ハンドルの先 = 点 + ハンドルは見ない。
  * 見ると、保存できる文書のパネルでの操作まで断ってしまう)。
  */
@@ -59,7 +59,7 @@ export function pathPointCount(node: PathNode): number {
 }
 
 /**
- * 変えたパス (`ids` と子孫) の輪郭の数と点の数が上限以下で、文書の全パスの点の合計も上限以下か (§8.3.2)。
+ * 変えたパス (`ids` と子孫) の輪郭の数と点の数が上限以下で、文書の全パスの点の合計も上限以下か (§3.5)。
  */
 export function pathPointsWithinLimits(doc: CanvasDocument, ids: readonly NodeId[]): boolean {
   const L = CANVAS_LIMITS;

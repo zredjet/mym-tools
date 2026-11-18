@@ -1,7 +1,7 @@
 /**
  * ページ直下の frame の名前のラベル (純関数)。frame の左上の外側に、倍率に関係なく同じ大きさで出す。
  * 「選択と変形」のセッションは `frameLabelRect` でラベルの矩形を得て、クリックで frame を選ぶ (§4.5)。
- * 回転した frame のラベルは回さず、回転した箱の外接矩形の左上に置く (§8.5.2)。
+ * 回転した frame のラベルは回さず、回転した箱の外接矩形の左上に置く (§4.11.2)。
  */
 import { DEFAULT_NODE_NAMES } from "../model/create";
 import { getPageBounds, type Rect } from "../model/geometry";

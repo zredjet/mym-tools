@@ -1,5 +1,5 @@
 /**
- * なぞった点を 3 次ベジェに当てはめる (`docs/canvas-editor-design.md` §8.8)。純関数。
+ * なぞった点を 3 次ベジェに当てはめる (`docs/canvas-editor-design.md` §4.14)。純関数。
  *
  * Schneider の方法 ("An Algorithm for Automatically Fitting Digitized Curves", Graphics Gems, 1990):
  * 1. 弦の長さで各点のパラメーターを決め、両端の接線の向きを固定して最小二乗で制御点を求める

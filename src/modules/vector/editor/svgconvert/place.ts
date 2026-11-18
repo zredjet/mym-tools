@@ -1,5 +1,5 @@
 /**
- * 埋め込み SVG を編集できる形に置き換える (`docs/canvas-editor-design.md` §8.12)。純関数 (計測を除く)。
+ * 埋め込み SVG を編集できる形に置き換える (`docs/canvas-editor-design.md` §4.17)。純関数 (計測を除く)。
  *
  * `prepareSvgConversion(doc, id, measurer)`:
  * - `convertSvg` で SVG を断片 (埋め込み SVG のノードの座標系) にし、根の group に埋め込み SVG の名前・表示・
@@ -7,7 +7,7 @@
  * - 断片を、埋め込み SVG のノードの行列 (祖先の frame の回転と自分の回転を含む、回転と平行移動だけ) で
  *   ページ座標へ写し (`transformInDraft`。箱を持つノードは `rotation` に角度が足され、線とパスの点は写る)、
  *   埋め込み SVG の位置 (親、重なり順) に `insertFragment` で入れる。親の frame の向きへは `insertFragment` が
- *   §8.5.2 のとおり戻す。ID はすべて振り直す
+ *   §4.11.2 のとおり戻す。ID はすべて振り直す
  * - 埋め込み SVG のノードは消す。アセットは残す (Undo で戻るように。保存の前に `pruneAssets` が落とす。§3.4)
  * - 上限 (ノード数、深さ、座標、大きさ、パスの点の数) を超えるなら当てない。元の文書が保存の検証を通るなら、
  *   結果も保存の検証 (`checkSavable`) を通ることを確かめる (テキストの合計などの残りの上限)

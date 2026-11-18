@@ -1,5 +1,5 @@
 /**
- * 「変換」の節の操作の型と、操作を書くための補助 (§8.13)。
+ * 「変換」の節の操作の型と、操作を書くための補助 (§5.3)。
  *
  * 操作の一覧は `convertActions.ts` の `CONVERT_ACTIONS`。I (線のアウトライン化) と J (編集できる形に変換) は、
  * `outline/convertAction.ts` の `OUTLINE_CONVERT_ACTIONS` と `svgconvert/convertAction.ts` の
@@ -11,7 +11,7 @@
  *   を求めるなど) は `run` の中で行う。出さないなら null、出して押せないなら `{ enabled: false, reason }`
  * - `run` は履歴に 1 件だけ積む (`applyConvertChange`)。当てられないときは文書を変えず、`refuseConvert` で
  *   理由を出す
- * - 点の編集中 (`editingPathId`) は、どの操作も出さない (一覧の側で除く。§8.7.3)
+ * - 点の編集中 (`editingPathId`) は、どの操作も出さない (一覧の側で除く。§4.13.3)
  */
 import type { LucideIcon } from "lucide-react";
 import type { StoreApi } from "zustand";

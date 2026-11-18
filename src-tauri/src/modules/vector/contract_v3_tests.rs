@@ -1,5 +1,5 @@
 //! payload v3 の契約 (`model/fixtures/payload-v3.json`、`model/limits.json`) と、v2 → v3 の変換、
-//! 版が 3 のときの `upgrade_payload` / `validate_payload` の経路 (`docs/canvas-editor-design.md` §8.3)。
+//! 版が 3 のときの `upgrade_payload` / `validate_payload` の経路 (`docs/canvas-editor-design.md` §3)。
 
 use super::scene::{search_text, validate, validate_v3, LIMITS};
 use super::testing::{
@@ -23,7 +23,7 @@ fn cases(section: &str) -> &'static Vec<Value> {
 
 #[test]
 fn limits_json_has_the_v3_limits() {
-    // §8.3.2 の表の値
+    // §3.5 の表の値
     assert_eq!(LIMITS.max_subpaths, 1000);
     assert_eq!(LIMITS.max_path_points, 10_000);
     assert_eq!(LIMITS.max_total_path_points, 100_000);
@@ -130,7 +130,7 @@ fn contract_invalid_cases_fail_for_the_documented_reason() {
         ("text-mismatch", "文書と一致しません"),
         ("guide-axis-invalid", "axis"),
         ("top-level-unknown-field", "未知のフィールド version"),
-        // §8.3.2 の規則
+        // §3.5 の規則
         (
             "rotation-above-max",
             "rect1」の rotation は -180 以上 180 以下",
@@ -353,7 +353,7 @@ fn every_v2_contract_document_upgrades() {
     }
 }
 
-/// 壊れた v2 (v2 の検証を通らないもの) は変換を失敗にし、v2 のまま残す (§8.3.3)。v3 の形を先取りした
+/// 壊れた v2 (v2 の検証を通らないもの) は変換を失敗にし、v2 のまま残す (§3.9)。v3 の形を先取りした
 /// 行 (rotation を持つ v2) も、v3 として通してしまわない。
 #[test]
 fn broken_v2_is_an_upgrade_error() {

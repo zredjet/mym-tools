@@ -1,5 +1,5 @@
 /**
- * 線分と 3 次ベジェ 1 本の幾何 (`docs/canvas-editor-design.md` §8.5〜§8.9)。交点は `intersect.ts`。
+ * 線分と 3 次ベジェ 1 本の幾何 (`docs/canvas-editor-design.md` §4.11〜§4.15)。交点は `intersect.ts`。
  *
  * 返すもの:
  * - `Segment` は線分 (`line`) か 3 次ベジェ (`cubic`)。t は 0〜1 の媒介変数 (線分は長さに比例)

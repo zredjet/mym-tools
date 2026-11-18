@@ -459,19 +459,19 @@ function ellipseError(sub: Subpath[], cx: number, cy: number, rx: number, ry: nu
 }
 
 describe("中心線", () => {
-  it("楕円は描画 (本当の楕円) との差が許容値以内になるよう細かくする。始点と向きは §8.6 と同じ", () => {
-    // 4 本の 3 次ベジェ (§8.6) では半径の 0.027% (1000 px で 0.27 px) ずれる
+  it("楕円は描画 (本当の楕円) との差が許容値以内になるよう細かくする。始点と向きは §4.12 と同じ", () => {
+    // 4 本の 3 次ベジェ (§4.12) では半径の 0.027% (1000 px で 0.27 px) ずれる
     expect(ellipseError(ellipseSubpaths(4000, 2000), 2000, 1000, 2000, 1000)).toBeGreaterThan(0.1);
     const big = ellipseCenterline(4000, 2000, 0.01);
     expect(ellipseError(big, 2000, 1000, 2000, 1000)).toBeLessThan(0.01);
     expect(big[0]!.points[0]).toMatchObject({ x: 4000, y: 1000 });
     // 時計回り (y が下向き): 次の点は下へ
     expect(big[0]!.points[1]!.y).toBeGreaterThan(1000);
-    // 小さい楕円は §8.6 の形のまま
+    // 小さい楕円は §4.12 の形のまま
     expect(ellipseCenterline(20, 10, 0.05)).toEqual(ellipseSubpaths(20, 10));
   });
 
-  it("角丸の矩形も同じ。角丸なしは §8.6 の形のまま", () => {
+  it("角丸の矩形も同じ。角丸なしは §4.12 の形のまま", () => {
     const rr = rectCenterline(3000, 2000, 900, 0.01);
     expect(rr[0]!.points[0]).toMatchObject({ x: 900, y: 0 });
     expect(rr[0]!.points[1]).toMatchObject({ x: 2100, y: 0 });

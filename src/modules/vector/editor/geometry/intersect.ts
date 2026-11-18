@@ -1,5 +1,5 @@
 /**
- * 線分と 3 次ベジェの交点 (`docs/canvas-editor-design.md` §8.9.3 のブーリアン演算の土台)。
+ * 線分と 3 次ベジェの交点 (`docs/canvas-editor-design.md` §4.15.3 のブーリアン演算の土台)。
  *
  * 返すもの:
  * - `intersectSegments(a, b)` は `{ intersections, overlaps, complete }`

@@ -85,7 +85,7 @@ describe("Toolbar の「画像」", () => {
   });
 });
 
-describe("Toolbar のツール (§8.13)", () => {
+describe("Toolbar のツール (§5.1)", () => {
   it("決めた順に並べ、点の編集のツールは出さない", () => {
     render(<Toolbar />);
     const labels = screen

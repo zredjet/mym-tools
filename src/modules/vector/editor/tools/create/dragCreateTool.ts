@@ -18,7 +18,7 @@
  * 計算はページ座標で行う。ドラッグの途中で表示位置が変わると、キャンバスが今のポインター位置で
  * `onPointerMove` を呼ぶので、そのまま追従する。
  *
- * 回転した frame の中 (§8.5.2): 押した点と今の点を frame の座標系に直してから箱にする (frame の向きにそろう。
+ * 回転した frame の中 (§4.11.2): 押した点と今の点を frame の座標系に直してから箱にする (frame の向きにそろう。
  * `rotation` は 0)。吸着とスマートガイドはページの向きなので、回転した座標系では使わない。
  */
 import { createEllipse, createFrame, createLine, createRect } from "../../model/create";

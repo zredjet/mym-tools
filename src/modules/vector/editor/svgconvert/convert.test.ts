@@ -48,7 +48,7 @@ function only<T extends CanvasNode["type"]>(
 
 const pathFrom = (d: string, m: Matrix) => transformSubpaths(parsePathData(d).subpaths, m);
 
-describe("convertSvg: パス (§8.12)", () => {
+describe("convertSvg: パス (§4.17)", () => {
   it("アイコンの path (円弧を含む) を viewBox から箱への変換を掛けた点にする", () => {
     const d = "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20zM12 6v6l4 2";
     const svg = svgOf(

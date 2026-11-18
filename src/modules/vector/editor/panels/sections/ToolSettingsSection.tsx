@@ -15,7 +15,7 @@ import { FieldGrid, Section } from "../fields/Section";
 const RATIO_PERCENT_PRECISION = 1;
 
 /**
- * ツールの設定の節 (§8.8 / §8.13)。多角形・星のツールを選んでいる間だけ出す。
+ * ツールの設定の節 (§4.14 / §5.3)。多角形・星のツールを選んでいる間だけ出す。
  * 頂点の数 (3〜60) と、星の凹み (内側の半径 ÷ 外側の半径、1〜100 %)。
  *
  * 値はエディタを開いている間だけ覚える (`tools/polygonTool.ts` のモジュールの変数。store にも settings.json にも

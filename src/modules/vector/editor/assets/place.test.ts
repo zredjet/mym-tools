@@ -228,7 +228,7 @@ describe("placeAsset", () => {
   });
 });
 
-describe("回転した frame へ置く (§8.5.2)", () => {
+describe("回転した frame へ置く (§4.11.2)", () => {
   it("frame の向きにそろえ、中心を指定の点に置く", () => {
     const doc = insertNode(
       createEmptyDocument(),

@@ -55,7 +55,7 @@ const rotatedDoc = () =>
     ["f", "r"],
   );
 
-describe("パネルの位置と大きさ (§8.5.5)", () => {
+describe("パネルの位置と大きさ (§4.11.5)", () => {
   const doc = rotatedDoc();
 
   it("1 個の回転した箱: W / H は回転の前、X / Y は回転した箱の左上の角", () => {
@@ -95,7 +95,7 @@ describe("パネルの位置と大きさ (§8.5.5)", () => {
   });
 });
 
-describe("回転した frame の中のパネルの W / H (§8.5.5)", () => {
+describe("回転した frame の中のパネルの W / H (§4.11.5)", () => {
   const doc = docOf(
     [
       createFrame({
@@ -135,7 +135,7 @@ describe("回転した frame の中のパネルの W / H (§8.5.5)", () => {
   });
 });
 
-describe("回転した frame の中の移動 (§8.5.2)", () => {
+describe("回転した frame の中の移動 (§4.11.2)", () => {
   const doc = rotatedDoc();
 
   it("ポインターのずれ (ページ座標) を親の座標系に直して足し、x と y の両方を丸める", () => {
@@ -166,7 +166,7 @@ describe("回転した frame の中の移動 (§8.5.2)", () => {
   });
 });
 
-describe("回転した frame の中の作成 (§8.5.2)", () => {
+describe("回転した frame の中の作成 (§4.11.2)", () => {
   const doc = docOf(
     [createFrame({ id: "f", x: 0, y: 0, width: 100, height: 100, rotation: 45, children: [] })],
     ["f"],
@@ -189,7 +189,7 @@ describe("回転した frame の中の作成 (§8.5.2)", () => {
   });
 });
 
-describe("ブーリアンのスコープ (§8.9.1)", () => {
+describe("ブーリアンのスコープ (§4.15.1)", () => {
   const doc = docOf(
     [
       createFrame({ id: "f", x: 0, y: 0, width: 300, height: 300, children: ["u"] }),

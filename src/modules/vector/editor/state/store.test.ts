@@ -284,7 +284,7 @@ describe("ジェスチャーと履歴の境界 (レビューの指摘)", () => {
   });
 });
 
-describe("点の編集 (§8.7.1)", () => {
+describe("点の編集 (§4.13.1)", () => {
   const SQUARE = [
     {
       closed: true,

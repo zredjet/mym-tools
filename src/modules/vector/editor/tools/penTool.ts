@@ -1,5 +1,5 @@
 /**
- * ペン (P、`docs/canvas-editor-design.md` §8.7.4)。
+ * ペン (P、`docs/canvas-editor-design.md` §4.13.4)。
  *
  * - クリックで角の点、ドラッグで滑らかな点 (ドラッグの向きと長さが描く向きの `out`、反対が `in`、
  *   `angle-length`) を足す。Shift で、前の点から見て 45° 刻みに固定する (ページの向き。ドラッグのハンドルも)
@@ -490,7 +490,7 @@ function recordCommit(before: CanvasDocument, after: CanvasDocument): void {
 
 /**
  * 描いている間の Backspace: 最後の点を消す。今の文書がこの描画で点を確定した後の文書のままなら、Undo で取り消す
- * (作ったパスの 2 点目なら作成ごと取り消し、履歴に何も残さない。§8.7.4)。ほかの操作の後なら、点を消す変更を当てる。
+ * (作ったパスの 2 点目なら作成ごと取り消し、履歴に何も残さない。§4.13.4)。ほかの操作の後なら、点を消す変更を当てる。
  */
 function removeLastPoint(store: Store, drawing: { pen: PenDrawing; target: PenTarget }): void {
   const state = store.getState();
@@ -522,7 +522,7 @@ function onKeyDown(event: CanvasKeyEvent, ctx: ToolContext): boolean {
       finishDrawing(ctx);
       return true;
     }
-    // 点の編集の中で描いていなければ、点の編集へ戻る (Esc の順、§8.7.2)
+    // 点の編集の中で描いていなければ、点の編集へ戻る (Esc の順、§4.13.2)
     if (store.getState().editingPathId !== null) {
       store.getState().setTool("pathEdit");
       return true;

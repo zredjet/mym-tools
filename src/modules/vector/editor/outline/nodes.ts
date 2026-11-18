@@ -1,8 +1,8 @@
 /**
- * 線のアウトライン化の操作のモデル (`docs/canvas-editor-design.md` §8.10)。純関数で、引数の文書は変えない。
+ * 線のアウトライン化の操作のモデル (`docs/canvas-editor-design.md` §4.16)。純関数で、引数の文書は変えない。
  *
  * - `outlineTargets(doc, ids)`: 当てるノード (祖先も選ばれているノードを除き、重なり順)。対象は線のある矩形・
- *   楕円・線・パス・ブーリアン。線のないノードとブーリアンの子 (子の線は描かない。§8.9.1) は飛ばす。ほかの
+ *   楕円・線・パス・ブーリアン。線のないノードとブーリアンの子 (子の線は描かない。§4.15.1) は飛ばす。ほかの
  *   種類を含む選択では効かない
  * - `outlineNodes(doc, ids, newId)`: 当てた文書と、選び直す ID。当てられなければ理由
  *
@@ -21,11 +21,11 @@
  *   butt の線など) は飛ばして残りに当て、当てるものが 1 つもなければ断る。ほかの理由で当てられないノードが
  *   あれば、どれも当てない
  *
- * 線の中心線 (§8.6 の始点と向き): 矩形・楕円は描画 (`<rect rx>` と `<ellipse>`) との差が許容値の 1/8 以内に
- * なるよう、円弧を必要なだけ細かい 3 次ベジェにする (始点と向きは §8.6 の形と同じ)。線は始点から終点。
+ * 線の中心線 (§4.12 の始点と向き): 矩形・楕円は描画 (`<rect rx>` と `<ellipse>`) との差が許容値の 1/8 以内に
+ * なるよう、円弧を必要なだけ細かい 3 次ベジェにする (始点と向きは §4.12 の形と同じ)。線は始点から終点。
  * パスは点の形。ブーリアンは結果の形 (`getBooleanResult`)。
  *
- * 当てないとき: 結果が §3.5 と §8.3.2 の上限 (座標、大きさ、輪郭・点の数、ノードの数、入れ子の深さ) を超える、
+ * 当てないとき: 結果が §3.5 の上限 (座標、大きさ、輪郭・点の数、ノードの数、入れ子の深さ) を超える、
  * 線の形を求められない、ブーリアンの結果が求められない、線が何も描かれていない。
  */
 import { getBooleanResult } from "../boolean/result";
@@ -102,7 +102,7 @@ export function isOutlinable(node: CanvasNode): node is OutlinableNode {
   );
 }
 
-/** ブーリアンの子か (子の線は描かないので、アウトライン化しない。§8.9.1)。 */
+/** ブーリアンの子か (子の線は描かないので、アウトライン化しない。§4.15.1)。 */
 export function isBooleanChild(doc: CanvasDocument, id: NodeId): boolean {
   return getParentNode(doc, id)?.type === "boolean";
 }
@@ -144,7 +144,7 @@ function arcPieces(radius: number, tolerance: number): number {
 
 /**
  * 矩形の中心線。角丸は描画 (`<rect rx>` の楕円の角) との差が `tolerance` 以内になるよう細かく分ける。
- * 始点と向きは §8.6 (`rectSubpaths`) と同じ: (rx, 0) から時計回り。
+ * 始点と向きは §4.12 (`rectSubpaths`) と同じ: (rx, 0) から時計回り。
  */
 export function rectCenterline(
   width: number,
@@ -201,7 +201,7 @@ function ellipseArc(
 }
 
 /**
- * 楕円の中心線。描画 (`<ellipse>`) との差が `tolerance` 以内になるよう細かく分ける。始点と向きは §8.6
+ * 楕円の中心線。描画 (`<ellipse>`) との差が `tolerance` 以内になるよう細かく分ける。始点と向きは §4.12
  * (`ellipseSubpaths`) と同じ: (cx + rx, cy) から時計回り。
  */
 export function ellipseCenterline(width: number, height: number, tolerance: number): Subpath[] {
@@ -292,7 +292,7 @@ function fillPart(doc: CanvasDocument, node: OutlinableNode, id: NodeId): PathNo
 }
 
 /**
- * 線の面に付ける影。影のずれはノードの座標系の向きにある (§8.4) ので、線の面に焼き込んだ回転の分だけ回す
+ * 線の面に付ける影。影のずれはノードの座標系の向きにある (§4.3) ので、線の面に焼き込んだ回転の分だけ回す
  * (線の面の回転は 0。祖先の frame の回転はそのまま掛かる)。
  */
 function bakedShadow(node: OutlinableNode): Shadow | null {
@@ -319,7 +319,7 @@ function strokePart(
 }
 
 /**
- * 選んだノードの線をアウトライン化する (§8.10)。`newId` は新しいノード (group の子) の ID を作る関数
+ * 選んだノードの線をアウトライン化する (§4.16)。`newId` は新しいノード (group の子) の ID を作る関数
  * (呼ぶたびに別の ID)。当てられなければ理由を返す (文書は変えない)。
  */
 export function outlineNodes(

@@ -82,7 +82,7 @@ describe("payload との変換", () => {
   });
 });
 
-describe("v3 の作成の既定値 (§8.3)", () => {
+describe("v3 の作成の既定値 (§3)", () => {
   const curve = [
     {
       closed: false,
@@ -122,7 +122,7 @@ describe("v3 の作成の既定値 (§8.3)", () => {
     expect(path.subpaths[0]).not.toBe(curve[0]);
   });
 
-  it("パスの点は範囲の左上が (0, 0) になるよう動かし、その分を x / y に足す (§8.6)", () => {
+  it("パスの点は範囲の左上が (0, 0) になるよう動かし、その分を x / y に足す (§4.12)", () => {
     const corner = (x: number, y: number) => ({
       x,
       y,

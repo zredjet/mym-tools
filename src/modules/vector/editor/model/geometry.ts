@@ -1,8 +1,8 @@
 /**
- * 幾何。座標の規則は §3.2 と §8.5: ページ直下はページ座標、frame の子は frame の座標系 (回転の前の箱の左上が原点)、
+ * 幾何。座標の規則は §3.2 と §4.11: ページ直下はページ座標、frame の子は frame の座標系 (回転の前の箱の左上が原点)、
  * group とブーリアンは座標系を作らない。外接矩形は図形の幾何だけから求める (線の太さ・影は含めない)。
  *
- * 変換は「親の座標系 ← ノードの座標系」の行列 (`geometry/matrix.ts`) で表す (§8.5)。
+ * 変換は「親の座標系 ← ノードの座標系」の行列 (`geometry/matrix.ts`) で表す (§4.11)。
  * - 箱を持つノード: `T(x, y) · R(rotation, 箱の中心)`。線・group・ブーリアン: 恒等
  * - frame は平行移動と回転だけなので、どの行列も「回転 + 平行移動」(距離を変えない)
  * - 回転していない文書では、どの関数も第 1 段階と同じ値を返す (平行移動だけの行列は足し算で求める)
@@ -16,7 +16,7 @@
  * - `localToPage` / `pageToLocal` / `localVectorToPage` / `pageVectorToLocal`: 親の座標系とページ座標の変換
  * - `nodeOrigin` / `parentOrigin`: 座標系の原点のページ座標 (回転した frame の中では、点の変換に使えない。
  *   行列を使うこと)
- * - `getLocalBounds` / `getPageBounds` / `getSelectionBounds` / `getChildrenBounds`: 軸に平行な外接矩形 (§8.5.1)
+ * - `getLocalBounds` / `getPageBounds` / `getSelectionBounds` / `getChildrenBounds`: 軸に平行な外接矩形 (§4.11.1)
  * - `getNodeCorners(doc, id)`: 箱を持つノードの回転した箱の 4 隅 (ページ座標、[左上, 右上, 右下, 左下]。
  *   ノードの座標系での向き)。1 個だけ選んだ回転したノードの選択枠とハンドルに使う
  * - `boxCenter(node)`: 箱の中心 (親の座標系)。`mapRectBounds(m, rect)`: 矩形を行列で写した外接矩形
@@ -105,7 +105,7 @@ function frameRotationSum(doc: CanvasDocument, frame: CanvasNode | null, guard =
 }
 
 /**
- * ノードのページ上の角度 φ (§8.5)。自分の `rotation` (箱を持つノード) と祖先の frame の `rotation` の和を
+ * ノードのページ上の角度 φ (§4.11)。自分の `rotation` (箱を持つノード) と祖先の frame の `rotation` の和を
  * (-180, 180] にそろえたもの。線・group・ブーリアンは祖先の和。
  */
 export function pageRotation(doc: CanvasDocument, id: NodeId): number {
@@ -256,7 +256,7 @@ function boundsIn(
     case "group":
       return childrenBoundsIn(doc, node.children, space, seen);
     case "boolean": {
-      // 結果の範囲。空か求められないときは子の外接矩形の和 (§8.5.1)
+      // 結果の範囲。空か求められないときは子の外接矩形の和 (§4.11.1)
       const result = getBooleanResult(doc, node.id);
       if (result && result.bounds && result.subpaths.length > 0) {
         if (isTranslation(space)) return mapRectBounds(space, result.bounds);
@@ -266,7 +266,7 @@ function boundsIn(
       return childrenBoundsIn(doc, node.children, space, seen);
     }
     case "path": {
-      // 形を行列で写してから曲線の範囲を求める (4 隅を囲むのではない。§8.5.1)
+      // 形を行列で写してから曲線の範囲を求める (4 隅を囲むのではない。§4.11.1)
       if (node.rotation === 0 && isTranslation(space)) {
         const local = pathLocalBounds(node);
         if (!local) return null;
@@ -310,7 +310,7 @@ function childrenBoundsIn(
 }
 
 /**
- * ノードの軸に平行な外接矩形を親の座標系で返す (§8.5.1)。
+ * ノードの軸に平行な外接矩形を親の座標系で返す (§4.11.1)。
  * - 箱を持つノード (frame・楕円・テキストを含む) は回転した箱の 4 隅を囲む矩形。frame は子がはみ出しても含めない
  * - パスは形を写してから曲線の範囲 (ハンドルの先は含めない)
  * - ブーリアンは結果の範囲。空か求められないときは子の外接矩形の和

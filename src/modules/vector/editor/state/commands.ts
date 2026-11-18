@@ -81,7 +81,7 @@ export function groupSelection(store: Store): void {
   });
 }
 
-/** 選択の中の group とブーリアンを解除し、元の子を選ぶ (Shift+Cmd/Ctrl+G。§8.9.4)。 */
+/** 選択の中の group とブーリアンを解除し、元の子を選ぶ (Shift+Cmd/Ctrl+G。§4.15.4)。 */
 export function ungroupSelection(store: Store): void {
   const { selection } = store.getState();
   applyChange(store, (doc) => {
@@ -146,7 +146,7 @@ function parentOnPage(state: EditorState, parent: ParentRef): boolean {
  * 3. スコープがあればその中、なければページの直下
  *
  * 決めた親がブーリアンで、コピーした根に子にできない種類 (rect / ellipse / path / boolean 以外) が混ざるなら、
- * ブーリアンの外の最も近い親にする (§8.9.1)。
+ * ブーリアンの外の最も近い親にする (§4.15.1)。
  */
 export function pasteTarget(
   state: EditorState,

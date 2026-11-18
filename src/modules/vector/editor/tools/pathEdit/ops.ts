@@ -1,13 +1,13 @@
 /**
- * 点の編集とペンが使う純関数 (`docs/canvas-editor-design.md` §8.6、§8.7)。
+ * 点の編集とペンが使う純関数 (`docs/canvas-editor-design.md` §4.12、§4.13)。
  *
  * - 座標: パスの点はノードの座標系 (回転の前の箱の左上が原点)。ポインターから決まる点とハンドルは、
- *   親の座標系で小数第 2 位に丸めてから入れる (§8.6)。回転したパス、回転した frame の中のパスでも、
+ *   親の座標系で小数第 2 位に丸めてから入れる (§4.12)。回転したパス、回転した frame の中のパスでも、
  *   行列 (`model/geometry.ts`) でページ座標と行き来する
  * - 当たり: 点・ハンドル・線分の当たりはページ座標で、画面 px の余裕を倍率で割って判定する
  * - 形の変更: 輪郭の並び (`Subpath[]`) を受け取って新しい並びを返す。変えない点は同じオブジェクトのまま
  * - 文書への反映: `withSubpaths` が形を入れ、同じ変更の中で `fitPathNodes` を通して箱を合わせ直し、
- *   §3.5 と §8.3.2 の上限を確かめる (超えるなら null。当てない)
+ *   §3.5 の上限を確かめる (超えるなら null。当てない)
  */
 import { applyToPoint, applyToVector, invert, multiply, type Matrix } from "../../geometry/matrix";
 import { nearestPoint } from "../../geometry/bezier";
@@ -81,7 +81,7 @@ export function pathSpace(doc: CanvasDocument, node: PathNode): PathSpace | null
   };
 }
 
-/** ページ座標の点を、親の座標系で丸めてからノードの座標系へ直す (§8.6)。 */
+/** ページ座標の点を、親の座標系で丸めてからノードの座標系へ直す (§4.12)。 */
 export function pageToLocalRounded(space: PathSpace, page: Point): Point {
   const parent = applyToPoint(space.pageToParent, page);
   return applyToPoint(space.parentToLocal, { x: round2(parent.x), y: round2(parent.y) });
@@ -293,7 +293,7 @@ export function mapPoints(
 
 /**
  * 点を動かす (ハンドルは点からの相対なので一緒に動く)。`delta` はページ座標のずれ。
- * `round` が "position" なら動かした後の位置を親の座標系で小数第 2 位に丸める (ポインターで動かすとき。§8.6)。
+ * `round` が "position" なら動かした後の位置を親の座標系で小数第 2 位に丸める (ポインターで動かすとき。§4.12)。
  * "none" は丸めない (矢印キー。ずれはポインターから来ないので、回転した frame の中でもページの 1 px を
  * ちょうど 1 px 動かす)。ずれが 0 なら同じ並びを返す。
  */
@@ -336,7 +336,7 @@ function negate(v: Point): Point {
 }
 
 /**
- * ハンドルを変える (§8.7.3)。`vector` はノードの座標系の点からの相対 (null は点に重ねる)。
+ * ハンドルを変える (§4.13.3)。`vector` はノードの座標系の点からの相対 (null は点に重ねる)。
  * `mirror` が `angle` なら反対のハンドルの向きを、`angle-length` なら向きと長さをそろえる。
  * `breakLink` (Alt) は、その点の `mirror` を `none` にして反対のハンドルを変えない。
  */
@@ -377,7 +377,7 @@ export function pullHandles(
 }
 
 /**
- * 角と滑らかを切り替える (点のダブルクリック、§8.7.3)。ハンドルがあれば角 (ハンドルなし、`none`)、
+ * 角と滑らかを切り替える (点のダブルクリック、§4.13.3)。ハンドルがあれば角 (ハンドルなし、`none`)、
  * なければ前後の点から求めたハンドル (`angle-length`) にする。向きは前の点から次の点へ、長さは前後の点
  * までの距離の 1/3 の平均。端の点は 1 つの隣だけから求める。求められなければ同じ並びを返す。
  */
@@ -441,7 +441,7 @@ export function setMirror(
 }
 
 /**
- * 点を消して前後をつなぐ (§8.7.3)。点がなくなった輪郭は消す。点が 1 個になった輪郭は閉じない。
+ * 点を消して前後をつなぐ (§4.13.3)。点がなくなった輪郭は消す。点が 1 個になった輪郭は閉じない。
  * 輪郭がなくなれば空の並びを返す (呼び出し側がノードごと消す)。
  */
 export function deletePoints(subpaths: readonly Subpath[], refs: readonly PointRef[]): Subpath[] {
@@ -495,7 +495,7 @@ export function totalPathPoints(doc: CanvasDocument): number {
 }
 
 /**
- * パスが §3.5 と §8.3.2 の上限に収まっているか: 輪郭の数、点の数、点とハンドルの座標、箱。
+ * パスが §3.5 の上限に収まっているか: 輪郭の数、点の数、点とハンドルの座標、箱。
  * `checkTotal` なら文書の全パスの点の合計も確かめる (点を足すとき)。
  */
 export function pathWithinLimits(doc: CanvasDocument, id: NodeId, checkTotal: boolean): boolean {
@@ -519,7 +519,7 @@ export function pathWithinLimits(doc: CanvasDocument, id: NodeId, checkTotal: bo
 }
 
 /**
- * パスの形を入れ替え、箱を合わせ直す (§8.6)。上限を超えるなら null。同じなら文書をそのまま返す。
+ * パスの形を入れ替え、箱を合わせ直す (§4.12)。上限を超えるなら null。同じなら文書をそのまま返す。
  * 輪郭がなくなればノードごと消す。`checkTotal` は点を足すとき。
  */
 export function withSubpaths(

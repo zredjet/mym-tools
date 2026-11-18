@@ -1,5 +1,5 @@
 /**
- * ブーリアン演算 (`docs/canvas-editor-design.md` §8.9)。
+ * ブーリアン演算 (`docs/canvas-editor-design.md` §4.15)。
  *
  * 名前と引数は契約で、描画 (`boolean/result.ts` の `getBooleanResult`)、パスに変換、線のアウトライン化が呼ぶ。
  *

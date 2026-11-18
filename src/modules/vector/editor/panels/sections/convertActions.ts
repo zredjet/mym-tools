@@ -1,5 +1,5 @@
 /**
- * 「変換」の節の操作の一覧 (§8.13)。節 (`ConvertSection`) とショートカット (`canvas/shortcuts.ts`) が使う。
+ * 「変換」の節の操作の一覧 (§5.3)。節 (`ConvertSection`) とショートカット (`canvas/shortcuts.ts`) が使う。
  *
  * - G: パスに変換 (`path/flatten.ts`)、ブーリアン演算の 4 つ (`model/booleanOps.ts`)
  * - I: 線のアウトライン化 (`outline/convertAction.ts` の `OUTLINE_CONVERT_ACTIONS`)
@@ -129,7 +129,7 @@ export const BOOLEAN_OP_ICONS: Readonly<Record<BooleanOp, LucideIcon>> = {
   exclude: SquaresExclude,
 };
 
-/** ショートカットの文字 (Alt+Shift+この文字。§8.13)。 */
+/** ショートカットの文字 (Alt+Shift+この文字。§5.3)。 */
 export const BOOLEAN_OP_KEYS: Readonly<Record<BooleanOp, string>> = {
   union: "U",
   subtract: "S",
@@ -211,7 +211,7 @@ export interface AvailableConvertAction {
   availability: ConvertAvailability;
 }
 
-/** 今の状態で節に出す操作。点の編集中は出さない (§8.7.3)。 */
+/** 今の状態で節に出す操作。点の編集中は出さない (§4.13.3)。 */
 export function availableConvertActions(
   context: ConvertContext & { editingPathId: NodeId | null },
   actions: readonly ConvertAction[] = CONVERT_ACTIONS,

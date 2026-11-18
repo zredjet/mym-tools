@@ -68,7 +68,7 @@ const sample = () =>
     ["f"],
   );
 
-describe("ブーリアンの木 (§8.9.1)", () => {
+describe("ブーリアンの木 (§4.15.1)", () => {
   const doc = sample();
 
   it("子を持つノードと、座標系を作らない入れ物の述語", () => {
@@ -167,7 +167,7 @@ describe("ブーリアンの木 (§8.9.1)", () => {
   });
 });
 
-describe("回転の向きが同じ座標系の間の付け替え (§8.5.2)", () => {
+describe("回転の向きが同じ座標系の間の付け替え (§4.11.2)", () => {
   const corners = (d: CanvasDocument, id: string) => getNodeCorners(d, id)!;
 
   it.each([30, 90, 180, 17])("同じ角度 (%s°) の 2 つの frame の間で見た目を変えない", (rot) => {
@@ -235,7 +235,7 @@ describe("回転の向きが同じ座標系の間の付け替え (§8.5.2)", () 
   });
 });
 
-describe("回転した frame の間の付け替え (§8.5.2)", () => {
+describe("回転した frame の間の付け替え (§4.11.2)", () => {
   const doc = docOf(
     [
       createFrame({

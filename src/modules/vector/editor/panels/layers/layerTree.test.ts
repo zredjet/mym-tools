@@ -231,7 +231,7 @@ describe("rangeBetween / expandForSelection", () => {
   });
 });
 
-describe("ブーリアンの行 (§8.9.1、§8.13)", () => {
+describe("ブーリアンの行 (§4.15.1、§5.2)", () => {
   /** ページ直下は [t, u]。u (合体) の子は [a, b]。t はテキスト、e は楕円 (ページ直下の最前面)。 */
   const boolDoc = deepFreeze({
     pages: [{ id: "p1", name: "ページ 1", children: ["t", "u", "e"], guides: [] }],

@@ -1,5 +1,5 @@
 /**
- * 回転と反転のモデルの関数 (`docs/canvas-editor-design.md` §8.5.3、§8.5.6)。すべて純関数で、
+ * 回転と反転のモデルの関数 (`docs/canvas-editor-design.md` §4.11.3、§4.11.6)。すべて純関数で、
  * 変わらなければ引数の文書をそのまま返す。
  *
  * E・G が使うもの (角度は度、時計回りが正。点はページ座標):
@@ -43,7 +43,7 @@ import type { CanvasDocument, CanvasNode, NodeId, Paint, PathPoint, Point, Shado
 /** Shift の回転の刻み (度)。 */
 export const ROTATION_SNAP_STEP = 15;
 
-/** (-180, 180] にそろえて小数第 2 位で丸める (§8.5.3)。 */
+/** (-180, 180] にそろえて小数第 2 位で丸める (§4.11.3)。 */
 export function roundRotation(angle: number): number {
   const r = Math.round(normalizeRotation(angle) * 100) / 100;
   const n = r <= -180 ? r + 360 : r;
@@ -87,7 +87,7 @@ function roundRotationInDraft(draft: DocDraft, id: NodeId): void {
 }
 
 /**
- * 選択を `center` (ページ座標) のまわりに `angle` 度回す (§8.5.3)。祖先も選ばれているノードは祖先と一緒に回る。
+ * 選択を `center` (ページ座標) のまわりに `angle` 度回す (§4.11.3)。祖先も選ばれているノードは祖先と一緒に回る。
  * 回転した frame の中のノードも、ページ上で同じ角度だけ回る (frame は回転と平行移動だけなので、親の座標系でも
  * 同じ角度)。`angle` が 0 なら文書をそのまま返す。
  */
@@ -111,7 +111,7 @@ export function rotateNodes(
 }
 
 /**
- * 箱を持つノードを、それぞれ自分の中心のまわりに `angle` (自分の `rotation` の値) へそろえる (§8.5.5 の
+ * 箱を持つノードを、それぞれ自分の中心のまわりに `angle` (自分の `rotation` の値) へそろえる (§4.11.5 の
  * 回転の欄)。回転は箱の中心のまわりなので、`x` `y` `width` `height` は変わらない。箱を持たないノードは変えない。
  */
 export function setNodesRotation(
@@ -136,7 +136,7 @@ export function setNodesRotation(
 
 export type FlipAxis = "horizontal" | "vertical";
 
-/** 鏡像を表せない種類 (§8.5.6)。 */
+/** 鏡像を表せない種類 (§4.11.6)。 */
 function cannotMirror(node: CanvasNode | undefined): boolean {
   return (
     node === undefined ||
@@ -216,7 +216,7 @@ function flipInDraft(
       return;
     case "boolean": {
       for (const child of node.children) flipInDraft(doc, draft, child, mirror, space, pageAxis);
-      // ブーリアンの塗りと影は親の座標系の向き。祖先の frame の角度が 90° の倍数でなければ近似 (§8.5.6)
+      // ブーリアンの塗りと影は親の座標系の向き。祖先の frame の角度が 90° の倍数でなければ近似 (§4.11.6)
       const parent = getParent(doc, id);
       const axis = nearestAxis(pageAxis, parent ? parentPageRotation(doc, parent) : 0);
       draft.set({
@@ -235,7 +235,7 @@ function flipInDraft(
     case "rect":
     case "ellipse":
     case "path": {
-      // ページ上の角度 φ は −φ になり、自分の座標系では同じ向き (左右なら x) に映す (§8.5.6)
+      // ページ上の角度 φ は −φ になり、自分の座標系では同じ向き (左右なら x) に映す (§4.11.6)
       const phi = pageRotation(doc, id);
       const parent = getParent(doc, id);
       const alpha = parent ? parentPageRotation(doc, parent) : 0;
@@ -270,7 +270,7 @@ function flipInDraft(
 
 /**
  * 選択を、選択の外接矩形の中心を通るページの縦 (`"horizontal"`、左右反転) か横 (`"vertical"`、上下反転) の
- * 軸で映す (§8.5.6)。反転できない選択 (`canFlip` が false) なら何もしない。位置は丸めない。
+ * 軸で映す (§4.11.6)。反転できない選択 (`canFlip` が false) なら何もしない。位置は丸めない。
  */
 export function flipNodes(
   doc: CanvasDocument,

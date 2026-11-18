@@ -1,5 +1,5 @@
 /**
- * 多角形と星の作成ツール (`docs/canvas-editor-design.md` §8.8)。星のツール (`starTool.ts`) もここの
+ * 多角形と星の作成ツール (`docs/canvas-editor-design.md` §4.14)。星のツール (`starTool.ts`) もここの
  * `createRegularShapeTool` で作る。
  *
  * - ドラッグした矩形に収まる形を作る。ドラッグの決め方 (Shift で正方形、Alt で中心から、吸着とスマートガイド、
@@ -7,7 +7,7 @@
  *   Esc とフォーカス喪失での取消、作ったら選んで選択ツールへ戻ることは、矩形ツール (`create/dragCreateTool.ts`)
  *   と同じ。矩形ツールをそのまま動かし、文書に入る矩形を同じ箱・同じ ID のパスに置き換える (`shapeContext`)
  * - 形は、最初の頂点を上の中央に置いた正多角形 (星は外側と内側の頂点を交互) を、箱にぴったり収まるよう
- *   縦横に拡大したもの (`path/polygon.ts`)。角の点だけの閉じたパス。点は小数第 2 位に丸める (§8.6)
+ *   縦横に拡大したもの (`path/polygon.ts`)。角の点だけの閉じたパス。点は小数第 2 位に丸める (§4.12)
  * - 名前は「多角形」「星」。塗り・線・影は矩形ツールが作る矩形のもの (矩形の既定)
  * - 頂点の数と凹みは「ツールの設定」(`getShapeToolSettings`)。プロパティパネルの節で変え、エディタを開いている
  *   間だけ覚える (store にも settings.json にも入れない。節がエディタを開くたびに `resetShapeToolSettings` を呼ぶ)
@@ -34,7 +34,7 @@ import type { Tool, ToolContext } from "./types";
 
 export type RegularShapeKind = "polygon" | "star";
 
-/** 作るパスの名前 (§8.8)。 */
+/** 作るパスの名前 (§4.14)。 */
 export const REGULAR_SHAPE_NAMES: Readonly<Record<RegularShapeKind, string>> = {
   polygon: "多角形",
   star: "星",
@@ -143,7 +143,7 @@ export function regularShapeFromRect(
 }
 
 /**
- * `next` で `base` に無かった矩形を形に置き換える。置き換えた結果が点の上限 (§8.3.2) を超えるなら null。
+ * `next` で `base` に無かった矩形を形に置き換える。置き換えた結果が点の上限 (§3.5) を超えるなら null。
  * 置き換えるものがなければ `next` をそのまま返す。
  */
 export function convertCreatedRects(
@@ -207,5 +207,5 @@ export function createRegularShapeTool(kind: RegularShapeKind): RegularShapeTool
   };
 }
 
-/** 多角形 (§8.8)。 */
+/** 多角形 (§4.14)。 */
 export const polygonTool = createRegularShapeTool("polygon");

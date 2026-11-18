@@ -1,6 +1,6 @@
 /**
  * ブーリアン演算の前半: 入力の輪郭を交点で分け、部分 (piece) の並びと頂点にする
- * (`docs/canvas-editor-design.md` §8.9.3)。
+ * (`docs/canvas-editor-design.md` §4.15.3)。
  *
  * 返すもの (`splitOperands`):
  * - `pieces`: 入力の曲線を交点・接点・重なりの端・自己交差で分けた部分。どの 2 つも端以外では交わらない

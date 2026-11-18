@@ -15,7 +15,7 @@ export interface SelectOverlayState {
   /** スマートガイド (ページ座標) */
   guides: readonly SnapGuide[];
   /**
-   * 回転のドラッグの角度 (§8.5.3)。`value` は表示する角度 (度)、`at` はポインターの位置 (ページ座標)。
+   * 回転のドラッグの角度 (§4.11.3)。`value` は表示する角度 (度)、`at` はポインターの位置 (ページ座標)。
    * 画面座標の重ね描き (`SelectionScreenLabels`) が、ポインターの近くに数値で出す
    */
   angle: { value: number; at: Point } | null;

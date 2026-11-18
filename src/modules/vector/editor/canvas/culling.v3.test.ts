@@ -36,7 +36,7 @@ const closeRect = (
   expect(value!.height).toBeCloseTo(expected.height, digits);
 };
 
-describe("回転した描く範囲 (§8.5.1)", () => {
+describe("回転した描く範囲 (§4.11.1)", () => {
   it("1000×10 を 90° 回した矩形は、y 200〜400 の表示で画面外にならない", () => {
     const doc = docOf(
       [createRect({ id: "r", x: 0, y: 0, width: 1000, height: 10, rotation: 90, stroke: null })],
@@ -125,7 +125,7 @@ describe("回転した描く範囲 (§8.5.1)", () => {
   });
 });
 
-describe("回転した frame の書き出しとラベル (§8.5.2)", () => {
+describe("回転した frame の書き出しとラベル (§4.11.2)", () => {
   const doc = docOf(
     [
       createFrame({

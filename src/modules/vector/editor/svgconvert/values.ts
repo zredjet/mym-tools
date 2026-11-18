@@ -1,5 +1,5 @@
 /**
- * SVG の属性の値の読み取り (埋め込み SVG の変換、§8.12)。純関数で、読めない値は null を返す (例外は投げない)。
+ * SVG の属性の値の読み取り (埋め込み SVG の変換、§4.17)。純関数で、読めない値は null を返す (例外は投げない)。
  *
  * - `parseNumber` / `parseNumberList`: SVG の数値 (`1e-3`、`.5`、`-1` を受ける)
  * - `parseLength(value, context)`: 長さ。単位は px・なし・pt・pc・mm・cm・in・em・ex・%。% は向き (`x` は

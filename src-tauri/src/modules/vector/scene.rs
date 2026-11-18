@@ -1,10 +1,10 @@
 //! payload v2 / v3 (キャンバスのシーン形式) の検証と検索用テキスト (ADR-0026、ADR-0028)。
 //!
-//! 仕様の正典は `docs/canvas-editor-design.md` §3.3〜3.6 (v2) と §8.3 (v3 の差分)、型は
+//! 仕様の正典は `docs/canvas-editor-design.md` §3.3〜3.6 (v2) と §3 (v3 の差分)、型は
 //! `src/modules/vector/editor/model/types.ts`、上限と書式は `model/limits.json`。
 //! 上限の値は Rust に書き写さず、`limits.json` を `include_str!` で読む。
 //!
-//! v2 の検証 (`validate`) は凍結し、v1 → v2 の段の結果を確かめるためだけに使う (§8.3.3)。
+//! v2 の検証 (`validate`) は凍結し、v1 → v2 の段の結果を確かめるためだけに使う (§3.9)。
 //! v3 の検証 (`validate_v3`) は別の入口で、`VectorModule::validate_payload` (版が 3 のとき) と
 //! v2 → v3 の段の結果に使う。v3 で足した規則は、どれも `Schema::V3` のときだけ当てる。
 
@@ -57,7 +57,7 @@ pub(crate) struct Limits {
     /// 手書きの判定 (`is_color`) と同じ意味であることをテストで確かめる。
     #[cfg_attr(not(test), allow(dead_code))]
     pub color_pattern: String,
-    // 下の 5 つは v3 で足した上限 (§8.3.2)。
+    // 下の 5 つは v3 で足した上限 (§3.5)。
     pub max_subpaths: usize,
     pub max_path_points: usize,
     pub max_total_path_points: usize,
@@ -185,7 +185,7 @@ pub fn search_text(payload: &Value) -> String {
                     pick(node.get("name"));
                     stack.extend(child_ids(node).rev());
                 }
-                // ブーリアン (v3) は group と同じく拾わずに子へ進む (§8.3.2)。v2 の文書には
+                // ブーリアン (v3) は group と同じく拾わずに子へ進む (§3.5)。v2 の文書には
                 // ブーリアンが無い (検証が拒否する) ので、v2 の結果は変わらない
                 Some("group" | "boolean") => stack.extend(child_ids(node).rev()),
                 Some("text") => pick(node.get("text")),
@@ -329,7 +329,7 @@ fn clip(value: &str) -> String {
     }
 }
 
-/// どの版の規則で確かめるか。v3 の規則は v2 の規則に足すだけ (§8.3.1)。
+/// どの版の規則で確かめるか。v3 の規則は v2 の規則に足すだけ (§3.8)。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Schema {
     V2,
@@ -357,7 +357,7 @@ struct NodeInfo<'a> {
 const COMMON: [&str; 6] = ["id", "name", "visible", "locked", "opacity", "type"];
 const BOX: [&str; 4] = ["x", "y", "width", "height"];
 
-/// ノードの種類ごとのフィールド。v3 は箱を持つノードに `rotation` を足し、path と boolean を足す (§8.3.1)。
+/// ノードの種類ごとのフィールド。v3 は箱を持つノードに `rotation` を足し、path と boolean を足す (§3.8)。
 fn node_keys(kind: &str, schema: Schema) -> Option<Vec<&'static str>> {
     let (with_box, extra): (bool, &[&str]) = match kind {
         "frame" => (
@@ -421,7 +421,7 @@ fn validate_stroke(value: &Value, at: String, l: &Limits) -> Result<()> {
     Ok(())
 }
 
-/// v3 の線。v2 の線に端・角・破線を足す (§8.3.2)。
+/// v3 の線。v2 の線に端・角・破線を足す (§3.5)。
 fn validate_stroke_v3(value: &Value, at: String, l: &Limits) -> Result<()> {
     let f = Fields::new(
         value,
@@ -456,7 +456,7 @@ fn validate_stroke_v3(value: &Value, at: String, l: &Limits) -> Result<()> {
     Ok(())
 }
 
-/// パスの点のハンドル (点からの相対)。null か、各成分の絶対値が `maxCoordinate` 以下 (§8.3.2)。
+/// パスの点のハンドル (点からの相対)。null か、各成分の絶対値が `maxCoordinate` 以下 (§3.5)。
 fn validate_handle(f: &Fields<'_>, key: &str, l: &Limits) -> Result<()> {
     let Some(value) = f.nullable(key) else {
         return Ok(());
@@ -467,7 +467,7 @@ fn validate_handle(f: &Fields<'_>, key: &str, l: &Limits) -> Result<()> {
     Ok(())
 }
 
-/// パスの `subpaths` を確かめ、点の数を返す (§8.3.2)。
+/// パスの `subpaths` を確かめ、点の数を返す (§3.5)。
 fn validate_subpaths(f: &Fields<'_>, l: &Limits) -> Result<usize> {
     let subpaths = f.array("subpaths")?;
     if subpaths.is_empty() || subpaths.len() > l.max_subpaths {
@@ -778,7 +778,7 @@ pub fn validate(payload: &Value) -> Result<()> {
     validate_with(payload, Schema::V2)
 }
 
-/// payload v3 を検証する (§3.3〜3.6 と §8.3.2)。版が 3 のときの `VectorModule::validate_payload` と、
+/// payload v3 を検証する (§3.3〜3.6 と §3.5)。版が 3 のときの `VectorModule::validate_payload` と、
 /// v2 → v3 の段 (`upgrade_v2`) の結果に使う。
 pub fn validate_v3(payload: &Value) -> Result<()> {
     validate_with(payload, Schema::V3)
@@ -924,7 +924,7 @@ fn validate_with(payload: &Value, schema: Schema) -> Result<()> {
             "ノード「{orphan}」がどのページ・frame・group からも参照されていません。"
         )));
     }
-    // ブーリアンの子の種類 (§8.3.2)。木をたどった後なので、子はどれも nodes にある
+    // ブーリアンの子の種類 (§3.5)。木をたどった後なので、子はどれも nodes にある
     for (id, info) in &infos {
         if info.kind != "boolean" {
             continue;

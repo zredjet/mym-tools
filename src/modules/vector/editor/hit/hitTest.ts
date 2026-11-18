@@ -1,5 +1,5 @@
 /**
- * ヒットテスト (§4.5、§8.5.8)。文書の幾何だけから求める純関数で、DOM (`elementFromPoint`) には頼らない。
+ * ヒットテスト (§4.5、§4.11.8)。文書の幾何だけから求める純関数で、DOM (`elementFromPoint`) には頼らない。
  *
  * 2 段に分ける。
  * 1. `hitTestPath`: 点の下にある前面のノードを、ページ直下から当たったノードまでの道として返す
@@ -7,14 +7,14 @@
  *
  * ページ直下の frame の名前のラベルは `hitFrameLabel` で別に調べる (ラベルは文書より前面に描く)。
  *
- * 回転 (§8.5.8): 箱を持つノードは、点をノードの座標系へ戻してから箱で判定する。frame の子は frame の座標系の点で
+ * 回転 (§4.11.8): 箱を持つノードは、点をノードの座標系へ戻してから箱で判定する。frame の子は frame の座標系の点で
  * 調べる。座標系はどれも回転と平行移動だけなので、距離 (線の太さ・余裕) は変わらない。
  *
  * E・F が使うもの:
  * - `hitTestPath(doc, pageId, point, zoom, scopeId?)`: `scopeId` (今のスコープ) を渡すと、スコープかその祖先の
  *   ブーリアンの中で子を個別に当てる (子は形の輪郭の上と内側で当たる)。渡さないとブーリアンは結果の形で当たり、
  *   道の末尾に点の下の子を足す (Cmd/Ctrl のクリックで子を選べる)
- * - `pathShapeHit(subpaths, fillRule, point, hasFill, strokeWidth, slop)`: パスの形の当たり (§8.5.8 の規則)
+ * - `pathShapeHit(subpaths, fillRule, point, hasFill, strokeWidth, slop)`: パスの形の当たり (§4.11.8 の規則)
  */
 import { frameLabelRect } from "../canvas/frameLabels";
 import { getBooleanEvaluation, shapeOperand, type BooleanEvaluation } from "../boolean/result";
@@ -93,7 +93,7 @@ function ellipseHit(
 }
 
 /**
- * パスの形の当たり (§8.5.8)。塗りがあれば塗りの規則で内側 (閉じていない輪郭は閉じた形)。線があれば、
+ * パスの形の当たり (§4.11.8)。塗りがあれば塗りの規則で内側 (閉じていない輪郭は閉じた形)。線があれば、
  * 描かれる輪郭までの距離が (太さ + 余裕) の半分以内。どちらもなければ、輪郭までの距離が余裕の半分以内
  * (第 1 段階の矩形・楕円・線の `shapeHit` と同じ。§4.5 の「線は太さに 4 画面 px の余裕を足す」)。
  * `bounds` (形の範囲) を渡すと、明らかに遠い点では曲線を調べない。
@@ -124,7 +124,7 @@ export function pathShapeHit(
 }
 
 /**
- * 形の輪郭の上か内側か (ブーリアンの子の当たり。§8.5.8)。輪郭の余裕は片側 slop / 2
+ * 形の輪郭の上か内側か (ブーリアンの子の当たり。§4.11.8)。輪郭の余裕は片側 slop / 2
  * (第 1 段階の太さ 0 の線と同じ)。
  */
 function outlineOrInside(operand: BooleanOperand, p: Point, slop: number): boolean {
@@ -189,7 +189,7 @@ function pathNodeHit(node: PathNode, space: Matrix, p: Point, slop: number): boo
   );
 }
 
-/** ブーリアンの結果の形の当たり。求められなかったときは、子の形をそれぞれ塗りと線で描いたもの (§8.9.3)。 */
+/** ブーリアンの結果の形の当たり。求められなかったときは、子の形をそれぞれ塗りと線で描いたもの (§4.15.3)。 */
 function booleanShapeHit(
   node: BooleanNode,
   evaluation: BooleanEvaluation | null,
@@ -258,7 +258,7 @@ interface HitContext {
 }
 
 /**
- * ブーリアンの子のうち、点の下の最も前面のものへの道。子は形 (輪郭) の線の上と内側で当たる (§8.5.8)。
+ * ブーリアンの子のうち、点の下の最も前面のものへの道。子は形 (輪郭) の線の上と内側で当たる (§4.11.8)。
  * スコープの中の子のブーリアンは、さらにその子を個別に当てる。
  */
 function hitBooleanChildren(
@@ -368,7 +368,7 @@ function hitChildren(
  * - 前面から順に調べる。`visible` が false か `locked` が true のノードとその子孫は当たらない
  * - 塗りのない図形は線の上だけが当たる。線は太さに `STROKE_HIT_SLOP` 画面 px を足す
  * - frame は、子に当たらなければ矩形の中が当たる (道が frame で終わる)
- * - パスとブーリアンは §8.5.8 の規則 (`pathShapeHit`)。ブーリアンは結果の形で当たり、`scopeId` かその祖先の
+ * - パスとブーリアンは §4.11.8 の規則 (`pathShapeHit`)。ブーリアンは結果の形で当たり、`scopeId` かその祖先の
  *   ブーリアンの中では、子を個別に (輪郭の上と内側で) 当てる
  */
 export function hitTestPath(

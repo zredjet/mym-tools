@@ -13,8 +13,8 @@ const OPS: readonly { value: BooleanOp; label: string }[] = (
 ).map((op) => ({ value: op, label: BOOLEAN_OP_NAMES[op] }));
 
 /**
- * ブーリアンの節 (§8.13)。演算の切替 (押すたびに履歴 1 件)。対象は選択の中のブーリアン。
- * 結果を求められなかったブーリアンがあれば、その旨を出す (§8.9.3)。
+ * ブーリアンの節 (§5.3)。演算の切替 (押すたびに履歴 1 件)。対象は選択の中のブーリアン。
+ * 結果を求められなかったブーリアンがあれば、その旨を出す (§4.15.3)。
  */
 export function BooleanSection({ booleans }: { booleans: readonly BooleanNode[] }) {
   const value = commonValue(booleans.map((node) => node.op));

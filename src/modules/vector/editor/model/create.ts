@@ -1,5 +1,5 @@
 /**
- * 文書とノードの作成。既定値は `docs/canvas-editor-design.md` §3、§5.7、§8.3 に合わせる。
+ * 文書とノードの作成。既定値は `docs/canvas-editor-design.md` §3、§5.7、§3 に合わせる。
  * どの関数も `init` で任意のフィールドを上書きできる (`id` を省くと新しい ID を振る)。
  */
 import { pathBounds } from "../path/measure";
@@ -49,7 +49,7 @@ export const DEFAULT_NODE_NAMES = {
   boolean: "ブーリアン",
 } as const;
 
-/** ブーリアンの演算ごとの名前 (§8.9.4)。新しいブーリアンの名前と、画面の演算の表示に使う。 */
+/** ブーリアンの演算ごとの名前 (§4.15.4)。新しいブーリアンの名前と、画面の演算の表示に使う。 */
 export const BOOLEAN_OP_NAMES: Readonly<Record<BooleanOp, string>> = {
   union: "合体",
   subtract: "型抜き",
@@ -57,7 +57,7 @@ export const BOOLEAN_OP_NAMES: Readonly<Record<BooleanOp, string>> = {
   exclude: "中マド",
 };
 
-/** 線の端・角・破線の既定 (§8.4)。描画はこの値のとき属性を付けない (v2 と同じ出力)。 */
+/** 線の端・角・破線の既定 (§4.3)。描画はこの値のとき属性を付けない (v2 と同じ出力)。 */
 export const DEFAULT_STROKE_CAP: StrokeCap = "butt";
 export const DEFAULT_STROKE_JOIN: StrokeJoin = "miter";
 
@@ -225,7 +225,7 @@ export function createSvg(assetId: string, init: Init<SvgNode> = {}): SvgNode {
 }
 
 /**
- * パス。箱を形にぴったり合わせる (§8.6): 点を曲線の範囲 (`pathBounds`、ハンドルの先は含めない) の左上が
+ * パス。箱を形にぴったり合わせる (§4.12): 点を曲線の範囲 (`pathBounds`、ハンドルの先は含めない) の左上が
  * (0, 0) になるよう動かし、動かした分を `x` / `y` に足す。`width` / `height` は範囲の大きさ。
  * `init.x` / `init.y` は点の座標系の原点の位置 (省くと 0) なので、渡した点はその分だけずらした位置に来る。
  * 既定はペンと同じ (塗りなし、線は `createStroke()`、名前は「パス」)。多角形・星は塗りと線を上書きする。
@@ -262,7 +262,7 @@ export function createPath(subpaths: readonly Subpath[], init: Init<PathNode> = 
 
 /**
  * ブーリアン。子は 1 個以上 (rect / ellipse / path / boolean) なので、子の ID を必ず受け取る。
- * 名前は演算の名前 (§8.9.4)。塗り・線・影は、作る操作が最背面の子のものを写して上書きする。
+ * 名前は演算の名前 (§4.15.4)。塗り・線・影は、作る操作が最背面の子のものを写して上書きする。
  */
 export function createBoolean(
   op: BooleanOp,

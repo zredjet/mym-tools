@@ -1,5 +1,5 @@
 /**
- * 2 × 3 のアフィン行列 (`docs/canvas-editor-design.md` §8.5)。
+ * 2 × 3 のアフィン行列 (`docs/canvas-editor-design.md` §4.11)。
  *
  * 返すもの:
  * - 行列は SVG の `matrix(a b c d e f)` と同じ並び。点 (x, y) を (a·x + c·y + e, b·x + d·y + f) へ写す
@@ -125,7 +125,7 @@ export function flipVertical(cy = 0): Matrix {
 }
 
 /**
- * 箱を持つノードの「親の座標系 ← ノードの座標系」の行列 (§8.5)。
+ * 箱を持つノードの「親の座標系 ← ノードの座標系」の行列 (§4.11)。
  * `T(x, y) · R(rotation, (width/2, height/2))`。ノードの座標系の原点は回転の前の箱の左上。
  */
 export function nodeMatrix(
@@ -195,7 +195,7 @@ export function decompose(m: Matrix): DecomposedMatrix | null {
 }
 
 /**
- * 角度を (-180, 180] にそろえる (§8.3.2)。丸めはしない。
+ * 角度を (-180, 180] にそろえる (§3.5)。丸めはしない。
  * 有限でない値はそのまま返す (呼び出し側の検証に任せる)。
  */
 export function normalizeRotation(degrees: number): number {

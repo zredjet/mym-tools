@@ -3,7 +3,7 @@
  * 索引は文書のオブジェクトをキーに WeakMap で使い回す (文書は書き換えない前提なので安全)。
  *
  * 子を持つノードは frame・group・ブーリアン (`isContainer`)。そのうち座標系を作るのは frame だけで、
- * group とブーリアンは「座標系を作らない入れ物」(`isGroupLike`。子は自分の親の座標系で持つ、§8.3.1、§8.9.1)。
+ * group とブーリアンは「座標系を作らない入れ物」(`isGroupLike`。子は自分の親の座標系で持つ、§3.8、§4.15.1)。
  * group だけを見ていた判定 (中に入れるか、移動、範囲選択、画面外の判定、コマンドなど) は `isGroupLike` を使う。
  *
  * E・F・G が使うもの:
@@ -12,7 +12,7 @@
  * - `canBeBooleanChild(type)` / `BOOLEAN_CHILD_TYPES`: ブーリアンの子にできる種類か (rect / ellipse / path / boolean)
  * - `canHaveChildOfType(doc, parent, type)`: 親 (ページ / frame / group / ブーリアン) がその種類の子を持てるか
  * - `insertionParent(doc, parent, types)`: 親がブーリアンで、子にできない種類が混ざるなら、ブーリアンの外の
- *   最も近い親 (§8.9.1 の「ブーリアンの親に置く」)
+ *   最も近い親 (§4.15.1 の「ブーリアンの親に置く」)
  * - `outsideBooleans(doc, parent)`: ブーリアンの外の最も近い親 (作成ツール・ペン・取込の親)
  */
 import { hasOwn } from "./ids";
@@ -83,7 +83,7 @@ export function isGroupLike(node: CanvasNode): node is GroupLikeNode {
   return node.type === "group" || node.type === "boolean";
 }
 
-/** ブーリアンの子にできる種類 (§8.3.2、§8.9.1)。 */
+/** ブーリアンの子にできる種類 (§3.5、§4.15.1)。 */
 export const BOOLEAN_CHILD_TYPES: readonly NodeType[] = ["rect", "ellipse", "path", "boolean"];
 
 /** ブーリアンの子にできる種類か。 */
@@ -108,7 +108,7 @@ export function canHaveChildOfType(
 
 /**
  * ブーリアンの外の最も近い親。`parent` がブーリアン (の中) なら、祖先のブーリアンも越えて出る。
- * 作成ツール・ペン・取込の親に使う (§8.9.1)。
+ * 作成ツール・ペン・取込の親に使う (§4.15.1)。
  */
 export function outsideBooleans(doc: CanvasDocument, parent: ParentRef): ParentRef {
   let current = parent;
@@ -208,7 +208,7 @@ export function isAncestorOf(doc: CanvasDocument, ancestorId: NodeId, id: NodeId
 }
 
 /**
- * 座標系を作る最も近い祖先の frame。group とブーリアンは座標系を作らない (§3.2、§8.3.1) ので飛ばす。
+ * 座標系を作る最も近い祖先の frame。group とブーリアンは座標系を作らない (§3.2、§3.8) ので飛ばす。
  * null ならページ座標。
  */
 export function getCoordinateFrame(doc: CanvasDocument, id: NodeId): FrameNode | null {

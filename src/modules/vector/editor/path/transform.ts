@@ -1,5 +1,5 @@
 /**
- * パスの点の形を写す・向きを変える (`docs/canvas-editor-design.md` §8.5.4、§8.5.6、§8.6、§8.9.2)。
+ * パスの点の形を写す・向きを変える (`docs/canvas-editor-design.md` §4.11.4、§4.11.6、§4.12、§4.15.2)。
  *
  * 返すもの:
  * - `transformSubpaths(subpaths, m)`: 点に行列を、ハンドル (点からの相対) に行列の線形部分を掛ける。

@@ -62,7 +62,7 @@ export const LayerRow = memo(function LayerRow({
   const node = useEditorStore((s) => getNode(s.doc, id));
   const selected = useEditorStore((s) => selectionSet(s.selection).has(id));
   const hovered = useEditorStore((s) => s.hoveredId === id);
-  // ブーリアンの結果を求められなかった (§8.9.3)。結果は文書のノードごとに使い回されるので、毎回引いても軽い
+  // ブーリアンの結果を求められなかった (§4.15.3)。結果は文書のノードごとに使い回されるので、毎回引いても軽い
   const booleanFailed = useEditorStore((s) => {
     if (getNode(s.doc, id)?.type !== "boolean") return false;
     return getBooleanEvaluation(s.doc, id)?.result === null;

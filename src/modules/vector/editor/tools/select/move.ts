@@ -1,8 +1,8 @@
 /**
- * 移動の計算 (§4.6、§8.5.2)。純関数。
+ * 移動の計算 (§4.6、§4.11.2)。純関数。
  *
  * 回転した frame の中のノードは、ポインターのずれ (ページ座標) を親の座標系のずれに直して足し、x と y の両方を
- * 丸める (「動かした向きだけを丸める」は、親が回転していないときだけ)。パスの丸めは箱に対して行う (§8.6)。
+ * 丸める (「動かした向きだけを丸める」は、親が回転していないときだけ)。パスの丸めは箱に対して行う (§4.12)。
  */
 import { applyToVector, invert } from "../../geometry/matrix";
 import { coordinateMatrix, isTranslation } from "../../model/geometry";
@@ -60,7 +60,7 @@ function translatePatch(node: CanvasNode, dx: number, dy: number, both = false):
  * ノードを (dx, dy) (ページ座標) 動かし、動かした向きの座標を整数に丸める (§4.6)。
  * 動かしていない向き (0) の座標は変えず、(0, 0) なら文書をそのまま返す。
  * 祖先も選ばれているノードは祖先と一緒に動くので重ねて動かさない。
- * 回転した frame の中のノードは、ずれを親の座標系に直して足し、x と y の両方を丸める (§8.5.2)。
+ * 回転した frame の中のノードは、ずれを親の座標系に直して足し、x と y の両方を丸める (§4.11.2)。
  */
 export function translateRounded(
   doc: CanvasDocument,

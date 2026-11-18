@@ -1,5 +1,5 @@
 /**
- * 多角形と星の点 (`docs/canvas-editor-design.md` §8.8)。
+ * 多角形と星の点 (`docs/canvas-editor-design.md` §4.14)。
  *
  * 返すもの:
  * - `polygonSubpath(sides, rect)`: 正多角形の閉じた輪郭 (角の点だけ)
@@ -12,7 +12,7 @@
  *   `rect` の辺ちょうどの値にする
  * - 頂点の数は 3〜60 (`POLYGON_MIN_SIDES`〜`POLYGON_MAX_SIDES`) に、凹み (内側の半径 ÷ 外側の半径) は
  *   0.01〜1 にそろえる (整数でない頂点の数は切り捨て)。`rect` の幅・高さが 0 なら、その向きは 1 点に潰れる
- * - 点は丸めない (ツールの入力の丸め、§8.6、は呼び出し側で)
+ * - 点は丸めない (ツールの入力の丸め、§4.12、は呼び出し側で)
  */
 import { cosSinDeg } from "../geometry/matrix";
 import type { PathPoint, Point, Subpath } from "../model/types";

@@ -2,7 +2,7 @@
 //!
 //! - v1 (`{ svg, text }`) から v2 (シーン形式) へ (ADR-0026、`docs/canvas-editor-design.md` §3.7)。
 //!   v1 の SVG を編集できない埋め込み SVG 1 個の文書に包む。`upgrade_payload(1, ..)` が `upgrade_v1` を呼ぶ
-//! - v2 から v3 へ (ADR-0028、§8.3.3)。回転 0 と線の既定値を足すだけ。`upgrade_payload(2, ..)` が
+//! - v2 から v3 へ (ADR-0028、§3.9)。回転 0 と線の既定値を足すだけ。`upgrade_payload(2, ..)` が
 //!   `upgrade_v2` を呼ぶ
 //!
 //! ストレージは段ごとに `upgrade_payload` を呼ぶだけなので、各段の中で自分の結果を検証する
@@ -94,7 +94,7 @@ const ROTATED_KINDS: [&str; 6] = ["frame", "rect", "ellipse", "text", "image", "
 /// v2 → v3 で、null でない `stroke` に端・角・破線の既定値を足すノード (v2 で線を持てるもの)。
 const STROKED_KINDS: [&str; 4] = ["frame", "rect", "ellipse", "line"];
 
-/// v2 の payload を v3 にする (§8.3.3)。結果は入力だけで決まる。`VectorModule::upgrade_payload(2, ..)`
+/// v2 の payload を v3 にする (§3.9)。結果は入力だけで決まる。`VectorModule::upgrade_payload(2, ..)`
 /// から呼ぶ形。
 ///
 /// - frame・矩形・楕円・テキスト・画像・埋め込み SVG に `rotation: 0`
@@ -103,7 +103,7 @@ const STROKED_KINDS: [&str; 4] = ["frame", "rect", "ellipse", "line"];
 /// ほかの値と配列の順は変えない。検索用テキストは変わらないので `text` はそのまま残す。
 ///
 /// 入力は凍結した v2 の検証で確かめる。壊れた v2 (検証を通らないもの) は変換を失敗にし、v2 のまま
-/// 残す (§8.3.3。ADR-0027 の規則 2 で上書きも拒否される)。足すだけの変換なので、v2 の検証を通る行は
+/// 残す (§3.9。ADR-0027 の規則 2 で上書きも拒否される)。足すだけの変換なので、v2 の検証を通る行は
 /// 必ず v3 の検証を通るが、壊れた v3 を返さないよう結果も v3 の検証で確かめる (ADR-0027 §2.1)。
 pub fn upgrade_v2(payload: &Value) -> Result<Value, ModuleError> {
     validate(payload)

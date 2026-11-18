@@ -1,5 +1,5 @@
 /**
- * 回転した選択枠と角度の表示 (§8.5.3)。回転していない文書の表示は SelectionOverlay.test.tsx。
+ * 回転した選択枠と角度の表示 (§4.11.3)。回転していない文書の表示は SelectionOverlay.test.tsx。
  */
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

@@ -4,7 +4,7 @@
  * ノードは画面と同じ `buildNodeSvg` で `SvgEl` にし、ルートの `<svg>` も `SvgEl` で組んで
  * `svgElToString` で文字列にする (描画の規則と XML のエスケープを書き出し側に書き直さない)。
  * `viewBox` は範囲のページ座標なので、各ノードは親の座標系 (ページ座標) へ写す。回転した frame の中のノードは、
- * 祖先の frame の回転も掛ける (`matrix(…)`、§8.5.2。数値は §8.4 の `formatPathNumber`)。回転していなければ、
+ * 祖先の frame の回転も掛ける (`matrix(…)`、§4.11.2。数値は §4.3 の `formatPathNumber`)。回転していなければ、
  * これまでどおり平行移動だけ (`translate(…)`) にする (v2 の文書の出力を変えない)。
  * 背景は透明 (frame の塗りは frame のノードとして描かれる)。
  *

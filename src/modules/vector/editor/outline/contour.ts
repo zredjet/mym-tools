@@ -1,5 +1,5 @@
 /**
- * 線のアウトライン化の輪郭づくり (`docs/canvas-editor-design.md` §8.10、§8.11)。
+ * 線のアウトライン化の輪郭づくり (`docs/canvas-editor-design.md` §4.16、§5.3)。
  *
  * 線の面は、次の部品の合体 (SVG 2 の「線の形」と同じ定義):
  * - 中心線の各部分の帯 (法線に沿って太さの半分ずつ広げた範囲)
@@ -23,7 +23,7 @@ import { cross, dot, type Segment } from "../geometry/bezier";
 import type { Point, StrokeCap, StrokeJoin } from "../model/types";
 import { leftNormal, rightNormal, sideNormal, type OffsetPiece, type Side } from "./offset";
 
-/** SVG の既定の `stroke-miterlimit` (描画と同じ。§8.4)。 */
+/** SVG の既定の `stroke-miterlimit` (描画と同じ。§4.3)。 */
 export const MITER_LIMIT = 4;
 /** 角の向きの変わりがこれより小さい (sin) なら角を描かない (端の線がほぼつながっている)。 */
 const STRAIGHT_SIN = 1e-9;

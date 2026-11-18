@@ -21,7 +21,7 @@ import {
 
 const COORD = { min: -CANVAS_LIMITS.maxCoordinate, max: CANVAS_LIMITS.maxCoordinate };
 const SIZE = { min: 0, max: CANVAS_LIMITS.maxSize };
-/** 回転の欄の範囲。-180 より大きく 180 以下へそろえて当てるので、1 周分の外まで受け付ける (§8.5.5) */
+/** 回転の欄の範囲。-180 より大きく 180 以下へそろえて当てるので、1 周分の外まで受け付ける (§4.11.5) */
 const ROTATION = { min: -360, max: 360 };
 
 const BOX_FIELDS: readonly { field: BoundsField; label: string; aria: string }[] = [
@@ -59,10 +59,10 @@ function flip(axis: FlipAxis): void {
 }
 
 /**
- * 位置と大きさの節 (§5.3、§8.13)。X、Y、W、H (線は始点と終点)。group は外接矩形。
- * 値は親の座標系で、確定は整数に丸める (§4.6)。1 個の回転した箱を持つノードの X / Y / W / H は §8.5.5。
+ * 位置と大きさの節 (§5.3)。X、Y、W、H (線は始点と終点)。group は外接矩形。
+ * 値は親の座標系で、確定は整数に丸める (§4.6)。1 個の回転した箱を持つノードの X / Y / W / H は §4.11.5。
  * 箱を持つノードだけの選択には回転の欄 (度。全部同じならその値、違えば「混在」) を出す。
- * 見出しの右に左右反転・上下反転のボタン (反転できない選択では押せない。§8.5.6)。
+ * 見出しの右に左右反転・上下反転のボタン (反転できない選択では押せない。§4.11.6)。
  */
 export function PositionSection() {
   const key = useEditorStore((s) => positionKey(s.doc, s.selection));

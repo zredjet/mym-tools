@@ -1,5 +1,5 @@
 /**
- * payload v3 の検証 (§3.3〜3.6 と §8.3.2)。Rust の検証 (`scene::validate_v3`) と同じ規則で、
+ * payload v3 の検証 (§3.3〜3.6 と §3.5)。Rust の検証 (`scene::validate_v3`) と同じ規則で、
  * 契約データ `fixtures/payload-v3.json` で両者の合否をそろえる。保存の前の確認と、読み込んだ payload の
  * 確認に使う。古い版 (v1、v2) の payload は Rust が読み込みのときに v3 へ変換するので、ここには来ない。
  *
@@ -222,7 +222,7 @@ function checkHandle(value: unknown, path: string): void {
   abs(handle["y"], `${path}.y`, L.maxCoordinate);
 }
 
-/** パスの `subpaths` (§8.3.2)。点の数を返す。 */
+/** パスの `subpaths` (§3.5)。点の数を返す。 */
 function checkSubpaths(value: unknown, path: string): number {
   const subpaths = array(value, path);
   if (subpaths.length < 1 || subpaths.length > L.maxSubpaths)
@@ -257,7 +257,7 @@ function checkSubpaths(value: unknown, path: string): number {
 // ---------------------------------------------------------------------------
 
 const COMMON = ["id", "name", "visible", "locked", "opacity", "type"] as const;
-/** 箱を持つノードの位置と大きさ。v3 で `rotation` を足した (§8.3.1) */
+/** 箱を持つノードの位置と大きさ。v3 で `rotation` を足した (§3.8) */
 const BOX = ["x", "y", "width", "height", "rotation"] as const;
 const NODE_KEYS = {
   frame: [...COMMON, ...BOX, "children", "clip", "fill", "stroke", "radius", "shadow"],
@@ -288,7 +288,7 @@ const NODE_KEYS = {
 type NodeTypeName = keyof typeof NODE_KEYS;
 const NODE_TYPES = Object.keys(NODE_KEYS) as NodeTypeName[];
 
-/** ブーリアンの子にできる種類 (§8.3.2) */
+/** ブーリアンの子にできる種類 (§3.5) */
 const BOOLEAN_CHILD_TYPES: readonly NodeTypeName[] = ["rect", "ellipse", "path", "boolean"];
 
 interface NodeInfo {
@@ -544,7 +544,7 @@ function checkPayload(value: unknown): void {
   for (const { path, children } of pageChildren) walk(children, path, 1);
   for (const key of nodeKeys)
     if (!seen.has(key)) fail(`nodes.${key}`, "どの親からも参照されていません");
-  // ブーリアンの子の種類 (§8.3.2)。木をたどった後なので、子はどれも nodes にある
+  // ブーリアンの子の種類 (§3.5)。木をたどった後なので、子はどれも nodes にある
   for (const [key, info] of infos) {
     if (info.type !== "boolean" || !info.children) continue;
     info.children.forEach((child, i) => {

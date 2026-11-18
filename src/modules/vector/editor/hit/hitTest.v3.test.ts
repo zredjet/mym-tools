@@ -34,7 +34,7 @@ const triangle: Subpath[] = [
   },
 ];
 
-describe("回転したノードの当たり (§8.5.8)", () => {
+describe("回転したノードの当たり (§4.11.8)", () => {
   it("1000×10 を 90° 回した矩形は、回した形の中で当たる", () => {
     const doc = docOf(
       [createRect({ id: "r", x: 0, y: 0, width: 1000, height: 10, rotation: 90, stroke: null })],
@@ -193,7 +193,7 @@ describe("ブーリアンの当たり", () => {
   });
 });
 
-describe("ドロップ先の frame (§8.5.2)", () => {
+describe("ドロップ先の frame (§4.11.2)", () => {
   it("回転した frame は点を frame の座標系に直して判定する", () => {
     const doc = docOf(
       [

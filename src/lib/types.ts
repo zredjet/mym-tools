@@ -79,7 +79,7 @@ export interface DiagramPayloadV1 {
 
 /**
  * M-Canvas (`vector`) payload v3 (`data-model.md` §10.9)。シーン形式の型はエディタのモデルが正典
- * (`src/modules/vector/editor/model/types.ts`、`docs/canvas-editor-design.md` §3 と §8.3)。
+ * (`src/modules/vector/editor/model/types.ts`、`docs/canvas-editor-design.md` §3)。
  * v1 (`{ svg, text }`) と v2 は Rust の Eager-on-Read が読んだときに v3 へ変換するので、画面には届かない。
  */
 export type { VectorPayloadV3 } from "@/modules/vector/editor/model/types";

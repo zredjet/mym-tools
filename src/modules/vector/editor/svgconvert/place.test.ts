@@ -55,7 +55,7 @@ function rotatedDoc(svg: string): CanvasDocument {
   };
 }
 
-describe("prepareSvgConversion (§8.12)", () => {
+describe("prepareSvgConversion (§4.17)", () => {
   const svg = svgOf(
     `<g><title>レイヤー</title><rect x="10" y="20" width="30" height="40" fill="#ff0000"/>
      <path d="M50 50L90 50L70 90Z" fill="#00ff00" stroke="#000" stroke-width="2"/>

@@ -42,7 +42,7 @@ describe("cleanRotation", () => {
   });
 });
 
-describe("fitPathNodes (§8.6)", () => {
+describe("fitPathNodes (§4.12)", () => {
   it("点を動かして箱を合わせ、見た目を動かさない", () => {
     const base = createPath(square(10), { id: "p", x: 100, y: 50 });
     const shifted: PathNode = {
@@ -92,7 +92,7 @@ describe("fitPathNodes (§8.6)", () => {
   });
 });
 
-describe("resizeNodes の回転 (§8.5.4)", () => {
+describe("resizeNodes の回転 (§4.11.4)", () => {
   it("回転していないパスも点を写す (箱だけを変えない)", () => {
     const doc = docOf([createPath(square(10), { id: "p", x: 0, y: 0 })], ["p"]);
     const next = resizeNodes(
@@ -166,7 +166,7 @@ describe("resizeNodes の回転 (§8.5.4)", () => {
   });
 });
 
-describe("resizeNodeInOwnFrame (§8.5.4)", () => {
+describe("resizeNodeInOwnFrame (§4.11.4)", () => {
   it("動かさない辺 (左上) が親の座標系で動かない", () => {
     const doc = docOf(
       [createRect({ id: "r", x: 10, y: 20, width: 40, height: 10, rotation: 30 })],
@@ -208,7 +208,7 @@ describe("resizeNodeInOwnFrame (§8.5.4)", () => {
   });
 });
 
-describe("fitTextNodes の回転したテキスト (§8.5.7)", () => {
+describe("fitTextNodes の回転したテキスト (§4.11.7)", () => {
   const measurer = fixedWidthMeasurer(0.5);
   const text = (align: TextNode["align"]) =>
     createText({

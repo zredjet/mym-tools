@@ -1,5 +1,5 @@
 /**
- * ブーリアンの作成と演算の切替 (`docs/canvas-editor-design.md` §8.9.4)。純関数で、変わらなければ引数の文書を
+ * ブーリアンの作成と演算の切替 (`docs/canvas-editor-design.md` §4.15.4)。純関数で、変わらなければ引数の文書を
  * そのまま返す。解除は `structure.ts` の `ungroupNodes` が group と同じく行う。
  *
  * - `booleanCandidates(doc, ids)`: ブーリアンにできる選択なら、子にするノード (重なり順、背面が先)。できなければ null。
@@ -10,7 +10,7 @@
  * - `setBooleanOp(doc, ids, op)`: 選択の中のブーリアンの演算を変える。名前が元の演算の既定の名前のままなら、
  *   名前も新しい演算の名前にする
  *
- * §8.9.1 の不変条件 (ブーリアンの子は 1 個以上で、種類は rect / ellipse / path / boolean だけ) は、
+ * §4.15.1 の不変条件 (ブーリアンの子は 1 個以上で、種類は rect / ellipse / path / boolean だけ) は、
  * `booleanCandidates` が種類を確かめ、子を同じ親から移すだけなので保たれる (元の親は子を失うが、2 個以上を
  * 1 個のブーリアンに置き換えるので空にはならない)。
  */
@@ -37,7 +37,7 @@ export interface BooleanCandidates {
 }
 
 /**
- * ブーリアンにできる選択なら、子にするノードと親。できなければ null (§8.9.4)。
+ * ブーリアンにできる選択なら、子にするノードと親。できなければ null (§4.15.4)。
  * 祖先も選ばれているノードは除いてから数える。
  */
 export function booleanCandidates(
@@ -76,7 +76,7 @@ function copyLook(node: CanvasNode): Partial<Pick<BooleanNode, "fill" | "stroke"
 }
 
 /**
- * 選んだノードをブーリアンに入れる (§8.9.4)。`booleanId` を渡しておくと、呼び出し側がその ID で選び直せる。
+ * 選んだノードをブーリアンに入れる (§4.15.4)。`booleanId` を渡しておくと、呼び出し側がその ID で選び直せる。
  * ブーリアンにできない選択、ID が使われている、ノード数・深さの上限を超えるときは何もしない。
  */
 export function createBooleanFromNodes(

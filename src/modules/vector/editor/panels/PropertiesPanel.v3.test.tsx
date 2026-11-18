@@ -64,7 +64,7 @@ beforeEach(() => {
   state().setView({ ...DEFAULT_VIEW_OPTIONS });
 });
 
-describe("位置と大きさ: 回転と反転 (§8.13)", () => {
+describe("位置と大きさ: 回転と反転 (§5.3)", () => {
   it("回転の欄は自分の rotation。入力は -180〜180 にそろえる (履歴 1 件)", () => {
     render(<PropertiesPanel />);
     select("a");
@@ -108,7 +108,7 @@ describe("位置と大きさ: 回転と反転 (§8.13)", () => {
   });
 });
 
-describe("線: 端・角・破線 (§8.11)", () => {
+describe("線: 端・角・破線 (§5.3)", () => {
   it("端と角を切り替え、破線を入れる。空は実線", () => {
     render(<PropertiesPanel />);
     select("l", "p");
@@ -198,7 +198,7 @@ describe("パスとブーリアンの節", () => {
   });
 });
 
-describe("変換の節 (§8.13)", () => {
+describe("変換の節 (§5.3)", () => {
   const convertButton = (name: string) => within(section("変換")).getByRole("button", { name });
 
   it("2 個以上の矩形・楕円でブーリアンを作り、それを選ぶ", () => {

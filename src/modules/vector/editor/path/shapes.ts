@@ -1,5 +1,5 @@
 /**
- * 矩形・楕円・線を、描画と同じ形の点の形 (`Subpath[]`) にする (`docs/canvas-editor-design.md` §8.6、§8.10)。
+ * 矩形・楕円・線を、描画と同じ形の点の形 (`Subpath[]`) にする (`docs/canvas-editor-design.md` §4.12、§4.16)。
  *
  * 返すもの (座標はどれも、渡した値の座標系のまま):
  * - `rectSubpaths(width, height, radius)`: 箱の左上を原点とする閉じた輪郭 1 本。幅か高さが 0 以下なら空の配列
@@ -21,7 +21,7 @@
 import type { HandleMirror, PathPoint, Point, Subpath } from "../model/types";
 import { inferMirror } from "./segments";
 
-/** 1/4 円を 3 次ベジェで近似するハンドルの長さの比 (§8.6)。 */
+/** 1/4 円を 3 次ベジェで近似するハンドルの長さの比 (§4.12)。 */
 export const ELLIPSE_KAPPA = 0.5522847498;
 
 export function rectSubpaths(width: number, height: number, radius: number): Subpath[] {

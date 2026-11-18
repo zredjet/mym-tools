@@ -1,15 +1,15 @@
 /**
- * 変形とプロパティの更新 (§4.6、§8.5)。すべて純関数で、変わらなければ引数の文書をそのまま返す。
+ * 変形とプロパティの更新 (§4.6、§4.11)。すべて純関数で、変わらなければ引数の文書をそのまま返す。
  *
  * E・F・G が使うもの:
  * - `translateInDraft` / `translateNodes`: 親の座標系での平行移動 (丸めない)
  * - `transformInDraft(draft, id, m)`: 回転と平行移動の行列 `m` (新しい座標系 ← 元の座標系) でノードを写す。
  *   箱を持つノードは中心を写して `rotation` に `m` の角度を足し、線は端点、group とブーリアンは子に同じことをする。
- *   frame の子とパスの点は変えない (§8.5.2 の親の付け替え、§8.5.3 の回転)
- * - `resizeNodes(doc, ids, from, to, options)`: 外接矩形 (ページ座標) の比例のリサイズ (§4.6、§8.5.4)。
+ *   frame の子とパスの点は変えない (§4.11.2 の親の付け替え、§4.11.3 の回転)
+ * - `resizeNodes(doc, ids, from, to, options)`: 外接矩形 (ページ座標) の比例のリサイズ (§4.6、§4.11.4)。
  *   回転したノード (祖先の frame の回転を含む) は中心を比例させ、大きさを自分の向きに沿った倍率で変える。
  *   パスは点とハンドルの先をページ座標で写してから箱を合わせる (厳密)
- * - `resizeNodeInOwnFrame(doc, id, rect)`: 1 個のノードを自分の向きでリサイズする (§8.5.4)。`rect` は今の
+ * - `resizeNodeInOwnFrame(doc, id, rect)`: 1 個のノードを自分の向きでリサイズする (§4.11.4)。`rect` は今の
  *   ノードの座標系 (回転の前の箱の左上が原点) での新しい箱。動かさない辺・角 (Alt なら中心) を `rect` の側で
  *   決めて渡すと、その辺は親の座標系で動かない。`width` `height` は呼び出し側が丸めて渡す。`x` `y` は丸めない
  * - `ownScaleFactors(sx, sy, phi)`: ページの倍率 (sx, sy) を、ページ上の角度 φ のノードの向きの倍率にする
@@ -89,7 +89,7 @@ export function cleanRotation(r: number): number {
 }
 
 /**
- * 下書きの中でノードを、回転と平行移動の行列 `m` (新しい座標系 ← 元の座標系) で写す (§8.5.2、§8.5.3)。
+ * 下書きの中でノードを、回転と平行移動の行列 `m` (新しい座標系 ← 元の座標系) で写す (§4.11.2、§4.11.3)。
  * - 平行移動だけなら `translateInDraft` と同じ (第 1 段階と同じ値)
  * - 箱を持つノード (frame・パスを含む) は中心を写し、`rotation` に `m` の角度を足す。frame の子とパスの点は変えない
  * - 線は端点を写す。group とブーリアンは子に同じことをする
@@ -169,7 +169,7 @@ function normalizeRect(r: Rect): Rect {
 const noNegativeZero = (v: number) => (v === 0 ? 0 : v);
 
 /**
- * ページ座標の外接矩形 `from` を `to` へ写すように、ノードを拡大縮小する (§4.6、§8.5.4)。
+ * ページ座標の外接矩形 `from` を `to` へ写すように、ノードを拡大縮小する (§4.6、§4.11.4)。
  *
  * - 複数のノードと group は、子孫の位置と大きさを `from` に対する割合のまま比例させる
  * - frame は自分の矩形だけを変え、子は動かさない (group や複数選択の中の frame も同じ)
@@ -181,7 +181,7 @@ const noNegativeZero = (v: number) => (v === 0 ? 0 : v);
  * - 反転 (負の幅) は扱わない。`from` と `to` は正規化 (負の幅なら左右を入れ替える) してから使う
  * - 中身が変わらなければ引数の文書をそのまま返す
  *
- * 回転 (§8.5.4): ページ上の角度 φ が 0 でないノード (祖先の frame の回転を含む) は、中心を比例させ、
+ * 回転 (§4.11.4): ページ上の角度 φ が 0 でないノード (祖先の frame の回転を含む) は、中心を比例させ、
  * 大きさを自分の向きに沿った倍率 (`ownScaleFactors`) で変える。角度は変えない。`round` は `width` `height` だけを
  * 丸める (`x` `y` は中心から決める)。テキストの大きさの決め方は、自分の向きでの倍率で判定する。
  * パスは点とハンドルの先をページ座標で P′ = A + S·(P − A) に写してから、角度を変えずに自分の座標系へ戻し、
@@ -323,7 +323,7 @@ export function resizeNodes(
     }
     const pageSpace = coordinateMatrix(doc, id);
     const space = frameBack ? multiply(frameBack, pageSpace) : pageSpace;
-    // パスは回転していなくても点を写す (箱だけを変えない。§8.5.4)
+    // パスは回転していなくても点を写す (箱だけを変えない。§4.11.4)
     const rotated =
       node.type === "path" || !isTranslation(space) || (isBoxNode(node) && node.rotation !== 0);
     if (rotated) visitRotated(node, space);
@@ -340,7 +340,7 @@ function nearlyOne(v: number): boolean {
 }
 
 /**
- * ページの倍率 (sx, sy) を、ページ上の角度 φ のノードの向きの倍率にする (§8.5.4)。
+ * ページの倍率 (sx, sy) を、ページ上の角度 φ のノードの向きの倍率にする (§4.11.4)。
  * 幅は √((sx·cos φ)² + (sy·sin φ)²)、高さは √((sx·sin φ)² + (sy·cos φ)²)。φ が 90° の倍数なら厳密。
  */
 export function ownScaleFactors(sx: number, sy: number, phi: number): Point {
@@ -366,7 +366,7 @@ function mapPathPoint(pt: PathPoint, map: (p: Point) => Point): PathPoint {
 }
 
 /**
- * 1 個のノードを自分の向きでリサイズする (§8.5.4、§8.5.5)。`rect` は今のノードの座標系 (回転の前の箱の左上が
+ * 1 個のノードを自分の向きでリサイズする (§4.11.4、§4.11.5)。`rect` は今のノードの座標系 (回転の前の箱の左上が
  * 原点) での新しい箱 (`width` `height` は 0 以上で、呼び出し側が丸める)。新しい箱が `rect` の位置にそのまま
  * 描かれるよう `x` `y` を決める (丸めない)。動かさない辺 (Alt なら中心) を `rect` の側でそろえれば、その辺は
  * 親の座標系で動かない。

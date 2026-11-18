@@ -1,6 +1,6 @@
 /**
  * パスの点の形 (`Subpath` / `PathPoint`、`model/types.ts` の契約) と、計算しやすい線分の並び (`Segment[]`、
- * `geometry/bezier.ts`) の相互変換 (`docs/canvas-editor-design.md` §8.6)。
+ * `geometry/bezier.ts`) の相互変換 (`docs/canvas-editor-design.md` §4.12)。
  *
  * 返すもの:
  * - `subpathToSegments(sub)`: 点 i から点 i + 1 への線分 (または曲線) の並び。閉じた輪郭は最後に
@@ -8,7 +8,7 @@
  *   最後の点から先頭の点への線分で閉じる (塗りの判定用。終点と始点が同じなら足さない)
  *   - 前の点の `out` と次の点の `in` がどちらも null なら線分、そうでなければ 3 次ベジェ
  *     (null の側は点そのものを制御点にする)。`d` の書き出しと同じ規則
- *   - 点が 1 個の輪郭は空 (描かれない、§8.4)
+ *   - 点が 1 個の輪郭は空 (描かれない、§4.3)
  * - `segmentsToSubpath(segments, closed, options)`: 逆向き。各線分の `from` を点にし、制御点をハンドル
  *   (点からの相対) にする。ハンドルが点と同じ (長さ 0) なら null。`mirror` は `inferMirror` で決める
  *   - **新しく形を作るとき** (`d` の読み込み、ブーリアンの結果、SVG の変換) のためのもの。既存のパスの編集には
@@ -64,7 +64,7 @@ export function subpathsToSegments(
   return subpaths.map((sub) => subpathToSegments(sub, options));
 }
 
-/** 点 p から点 q への線分 (または曲線)。§8.6 の `d` の規則と同じ。 */
+/** 点 p から点 q への線分 (または曲線)。§4.12 の `d` の規則と同じ。 */
 export function segmentBetween(p: PathPoint, q: PathPoint): Segment {
   const from = { x: p.x, y: p.y };
   const to = { x: q.x, y: q.y };

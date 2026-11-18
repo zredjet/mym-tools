@@ -1,5 +1,5 @@
 /**
- * ブーリアンの結果を求められなかったとき (`booleanOperation` が null) の、外接矩形・当たり・描く範囲 (§8.9.3)。
+ * ブーリアンの結果を求められなかったとき (`booleanOperation` が null) の、外接矩形・当たり・描く範囲 (§4.15.3)。
  */
 import { describe, expect, it, vi } from "vitest";
 

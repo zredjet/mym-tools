@@ -160,7 +160,7 @@ describe("moveLineEnd", () => {
   });
 });
 
-describe("roundOwnRect (§8.5.4)", () => {
+describe("roundOwnRect (§4.11.4)", () => {
   const own = { x: 0, y: 0, width: 100, height: 50 };
 
   it("幅と高さだけを丸め、動かさない辺をそのままにする", () => {

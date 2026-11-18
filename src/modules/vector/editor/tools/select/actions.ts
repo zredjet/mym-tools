@@ -4,8 +4,8 @@
  * - 結果の座標が §3.5 の範囲を超える操作を当てない (矢印、複製、貼り付け)
  * - ロック中・非表示のノードを動かさない (矢印)
  * - Enter / Esc の段階的な動作
- * - 回転した frame の中の矢印は frame の軸に沿って動かす (§8.5.2)
- * - 反転 (Shift+H / Shift+V。§8.5.6)
+ * - 回転した frame の中の矢印は frame の軸に沿って動かす (§4.11.2)
+ * - 反転 (Shift+H / Shift+V。§4.11.6)
  */
 import type { StoreApi } from "zustand";
 import { insertFragment } from "../../model/fragment";
@@ -98,7 +98,7 @@ function movedLeaves(doc: CanvasDocument, ids: readonly NodeId[]): NodeId[] {
   return result;
 }
 
-/** 親の座標系で (dx, dy) 動かし、x と y の両方を整数に丸める (回転した親の中の移動。§8.5.2)。 */
+/** 親の座標系で (dx, dy) 動かし、x と y の両方を整数に丸める (回転した親の中の移動。§4.11.2)。 */
 function shiftRounded(node: CanvasNode, dx: number, dy: number): NodePatch | null {
   const round = (v: number) => {
     const r = Math.round(v);
@@ -122,7 +122,7 @@ function shiftRounded(node: CanvasNode, dx: number, dy: number): NodePatch | nul
 
 /**
  * 矢印キーの移動の結果。(dx, dy) はノードが座標を持つ座標系 (親の座標系) のずれで、回転した frame の中の
- * ノードは frame の軸に沿って動き、x と y の両方を丸める (§8.5.2)。回転していない座標系のノードは第 1 段階と
+ * ノードは frame の軸に沿って動き、x と y の両方を丸める (§4.11.2)。回転していない座標系のノードは第 1 段階と
  * 同じ (`moveDocument`。動かした向きだけを丸める)。結果が §3.5 の範囲を超えるなら null。
  */
 export function nudgeDocument(
@@ -143,7 +143,7 @@ export function nudgeDocument(
 }
 
 /**
- * Shift+H / Shift+V: 選択を左右 (上下) に反転する (§8.5.6)。テキスト・画像・埋め込み SVG・frame を (子孫に)
+ * Shift+H / Shift+V: 選択を左右 (上下) に反転する (§4.11.6)。テキスト・画像・埋め込み SVG・frame を (子孫に)
  * 含む選択と、動かせるものがない選択では何もしない (false)。結果が §3.5 の範囲を超えるなら当てない。
  */
 export function flipSelection(store: Store, axis: FlipAxis): boolean {
@@ -182,7 +182,7 @@ export function pasteWithinLimits(
 }
 
 /**
- * Enter: テキストなら本文の編集、パスなら点の編集 (§8.7.2)、frame / group / ブーリアンなら中に入って子を選ぶ。
+ * Enter: テキストなら本文の編集、パスなら点の編集 (§4.13.2)、frame / group / ブーリアンなら中に入って子を選ぶ。
  * 1 つだけ選んでいないときと、ほかのノードでは何もしない (false)。
  */
 export function enterSelection(store: Store): boolean {
@@ -209,7 +209,7 @@ export function enterSelection(store: Store): boolean {
 
 /**
  * Esc (何もしていないとき): 点の編集の終了 → 本文の編集の終了 → スコープを 1 段外へ (出たノードを選ぶ) →
- * 選択の解除 (§8.7.2)。何もすることがなければ false。
+ * 選択の解除 (§4.13.2)。何もすることがなければ false。
  */
 export function escapeSelection(store: Store): boolean {
   const state = store.getState();

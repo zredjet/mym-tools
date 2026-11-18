@@ -149,7 +149,7 @@ function describeOpenError(cause: unknown): string {
 /**
  * 作品を開けなかったこと。`rescuable` は、変換できない v1 の作品で、元の SVG を書き出せる
  * (`vector_export_original_svg`、ADR-0027)。変換の失敗からは元の版が分からないので、壊れた v2 の行
- * (§8.3.3) でも true になる。そのときは書き出しが「元の形式で保存されていません」と理由を出す。
+ * (§3.9) でも true になる。そのときは書き出しが「元の形式で保存されていません」と理由を出す。
  */
 interface Failure {
   message: string;

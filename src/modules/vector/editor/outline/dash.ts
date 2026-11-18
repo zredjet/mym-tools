@@ -1,5 +1,5 @@
 /**
- * 破線の区間 (`docs/canvas-editor-design.md` §8.10、§8.11)。描画 (`stroke-dasharray`) と同じ規則:
+ * 破線の区間 (`docs/canvas-editor-design.md` §4.16、§5.3)。描画 (`stroke-dasharray`) と同じ規則:
  *
  * - 破線は輪郭ごとに、輪郭の始点から始める (ずらしはない)。奇数個の並びは 2 回繰り返して偶数個にする
  * - 値が空、負・有限でない値を含む、合計が 0 のときは実線 (SVG で無効な値は実線になる)

@@ -1,5 +1,5 @@
 /**
- * SVG の円弧 (`A` 命令) を 3 次ベジェで近似する (`docs/canvas-editor-design.md` §8.12)。
+ * SVG の円弧 (`A` 命令) を 3 次ベジェで近似する (`docs/canvas-editor-design.md` §4.17)。
  *
  * 返すもの:
  * - `arcToCubics(from, rx, ry, xAxisRotation, largeArc, sweep, to)`: 線分 (`line`) か 3 次ベジェの並び

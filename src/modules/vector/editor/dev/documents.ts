@@ -93,7 +93,7 @@ export function stressDocument(frames = 40, perFrame = 50): CanvasDocument {
 }
 
 /**
- * パスを、点を囲む範囲の左上が箱の左上になるように作る (§8.6)。`subpaths` は親の座標系で渡す。
+ * パスを、点を囲む範囲の左上が箱の左上になるように作る (§4.12)。`subpaths` は親の座標系で渡す。
  */
 function placedPath(
   id: string,
@@ -125,9 +125,9 @@ const stroke = (width: number, patch: Partial<Stroke> = {}, color = "#111827"): 
 });
 
 /**
- * 第 2 段階 (payload v3) の見本 (§8.3、§8.4)。先頭のページに、回転 (矩形・楕円・テキスト・切り抜く frame と
+ * 第 2 段階 (payload v3) の見本 (§3、§4.3)。先頭のページに、回転 (矩形・楕円・テキスト・切り抜く frame と
  * その子)、線の端・角・破線、パス (曲線、塗りの規則、開いた輪郭、点 1 個の輪郭)、ブーリアン (4 つの演算と
- * 入れ子) を並べる。ブーリアンの演算が入るまでは、子の形を重ねて描く (§8.9.3)。
+ * 入れ子) を並べる。ブーリアンの演算が入るまでは、子の形を重ねて描く (§4.15.3)。
  */
 export function stage2Document(): CanvasDocument {
   const nodes: CanvasNode[] = [];
@@ -314,7 +314,7 @@ export function stage2Document(): CanvasDocument {
           closed: false,
           points: [corner(480, 460), smooth(540, 370, 40, 0), corner(620, 460)],
         },
-        // 点 1 個の輪郭は描かない (§8.4)
+        // 点 1 個の輪郭は描かない (§4.3)
         { closed: false, points: [corner(550, 440)] },
       ],
       {

@@ -1,4 +1,4 @@
-//! キャンバス (ADR-0026、ADR-0028)。payload v2 / v3 はシーン形式 (`docs/canvas-editor-design.md` §3、§8.3)。
+//! キャンバス (ADR-0026、ADR-0028)。payload v2 / v3 はシーン形式 (`docs/canvas-editor-design.md` §3)。
 //! 保存・JSON 取込・Eager-on-Read のどの経路も、この `VectorModule` の検証を通る。
 pub mod commands;
 mod drawio_import;
@@ -19,7 +19,7 @@ pub use validation::{validate_svg, MAX_SVG_BYTES, MAX_TEXT_BYTES};
 /// 回転・線の端と角と破線・パス・ブーリアンを足したもの (ADR-0028)。
 ///
 /// 3 なので、`upgrade_payload` が v1 / v2 を v3 へ変換し、`validate_payload` が v3 を検証し、起動時に
-/// `pre-payload-vector-v3` のバックアップを取る (§8.15 の C1)。画面の `PAYLOAD_VERSION`
+/// `pre-payload-vector-v3` のバックアップを取る (§6.5 の C1)。画面の `PAYLOAD_VERSION`
 /// (`src/modules/vector/editor/model/payload.ts`) と同じ値にする。
 const CURRENT_PAYLOAD_VERSION: u32 = 3;
 
@@ -33,7 +33,7 @@ fn validate_as(version: u32, payload: &Value) -> Result<(), ModuleError> {
 }
 
 /// 今の版が `current` のときの `upgrade_payload`。`from` の文書を 1 つ上の版にする。
-/// 各段は自分の結果をその版の検証で確かめる (v1 → v2 は v2、v2 → v3 は v3。§8.3.3)。
+/// 各段は自分の結果をその版の検証で確かめる (v1 → v2 は v2、v2 → v3 は v3。§3.9)。
 /// 今の版より上の版へは変換しない。
 fn upgrade_from(current: u32, from_version: u32, payload: &Value) -> Result<Value, ModuleError> {
     match from_version {
@@ -55,7 +55,7 @@ impl ModuleBackend for VectorModule {
         CURRENT_PAYLOAD_VERSION
     }
     /// v1 の SVG を編集できない埋め込み SVG 1 個の文書に包む (§3.7)。v2 に回転 0 と線の既定値を足す
-    /// (§8.3.3)。変換結果がその版の検証を通らなければ `UpgradeFailed` を返し、呼び出し側
+    /// (§3.9)。変換結果がその版の検証を通らなければ `UpgradeFailed` を返し、呼び出し側
     /// (Eager-on-Read) は古い行を書き換えない。
     fn upgrade_payload(&self, from_version: u32, payload: Value) -> Result<Value, ModuleError> {
         upgrade_from(CURRENT_PAYLOAD_VERSION, from_version, &payload)

@@ -1,5 +1,5 @@
 /**
- * パスの点の編集に使う幾何 (`docs/canvas-editor-design.md` §8.7.3)。
+ * パスの点の編集に使う幾何 (`docs/canvas-editor-design.md` §4.13.3)。
  *
  * 返すもの:
  * - `insertPointAt(sub, segmentIndex, t)`: 辺 `segmentIndex` (`subpathToSegments` の添字。点 i から点 i + 1、

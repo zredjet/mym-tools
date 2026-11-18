@@ -102,7 +102,7 @@ function initialState(doc: CanvasDocument): EditorState {
  * - `revision` は `apply` / `commitGesture` (文書が変わったとき) / `undo` / `redo` で 1 増える。
  *   ジェスチャーの途中 (`updateGesture`) では増えない
  * - `load` は表示位置と表示の設定を残し、ツールを選択に戻す
- * - 点の編集 (§8.7.1): 編集中のパスが文書から消えたら (削除、Undo など) 編集を終え、ツールが `pathEdit` なら
+ * - 点の編集 (§4.13.1): 編集中のパスが文書から消えたら (削除、Undo など) 編集を終え、ツールが `pathEdit` なら
  *   選択ツールへ戻す。Undo / Redo でパスが残っていれば編集を続け、選択をそのパスにする。
  *   `setTool("pathEdit")` は点の編集中 (ペンから戻るとき) だけ効く
  */
@@ -161,7 +161,7 @@ export function createEditorStore(
     };
 
     const restore = (snapshot: Snapshot) => {
-      // 点の編集は、編集中のパスが戻した文書に残っていれば続ける (§8.7.1)
+      // 点の編集は、編集中のパスが戻した文書に残っていれば続ける (§4.13.1)
       const pathId = get().editingPathId;
       const keepsPath = pathId !== null && getNode(snapshot.doc, pathId)?.type === "path";
       set(
@@ -241,7 +241,7 @@ export function createEditorStore(
         const state = get();
         const { selection } = sanitizeRefs(state.doc, { ...pickRefs(state), selection: ids });
         const pathId = state.editingPathId;
-        // 点の編集中に、編集中のパスだけの選択から変えたら、点の編集を終える (§8.7.1)
+        // 点の編集中に、編集中のパスだけの選択から変えたら、点の編集を終える (§4.13.1)
         const endsPathEdit = pathId !== null && !sameIds(selection, [pathId]);
         if (sameIds(selection, state.selection) && !endsPathEdit) return;
         set({
@@ -265,7 +265,7 @@ export function createEditorStore(
       setTool(toolId) {
         const state = get();
         if (toolId === "pathEdit" && state.editingPathId === null) return;
-        // ペンへの切替だけは点の編集を残す (同じパスに輪郭を足すため。§8.7.1)
+        // ペンへの切替だけは点の編集を残す (同じパスに輪郭を足すため。§4.13.1)
         const endsPathEdit =
           state.editingPathId !== null && toolId !== "pathEdit" && toolId !== "pen";
         if (toolId === state.toolId && !endsPathEdit) return;

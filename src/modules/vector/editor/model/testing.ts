@@ -7,7 +7,7 @@ import { createFrame, createGroup, createLine, createRect } from "./create";
 import { fromPayload } from "./payload";
 import type { CanvasDocument, CanvasNode, VectorPayloadV3 } from "./types";
 
-/** 契約データの patch の 1 件 (§8.3.3)。`path` は文字列 (キー) と整数 (添字) の並び。 */
+/** 契約データの patch の 1 件 (§3.9)。`path` は文字列 (キー) と整数 (添字) の並び。 */
 export interface FixturePatchOp {
   op: string;
   path: (string | number)[];

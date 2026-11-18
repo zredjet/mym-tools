@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CANVAS_LIMITS } from "../../model/limits";
 import { formatDash, parseDashInput } from "./dash";
 
-describe("parseDashInput (§8.11、§8.3.2)", () => {
+describe("parseDashInput (§5.3、§3.5)", () => {
   it("スペースとカンマ (全角を含む) で区切る。空は実線", () => {
     expect(parseDashInput("4 2")).toEqual([4, 2]);
     expect(parseDashInput(" 4,2 , 1 ")).toEqual([4, 2, 1]);

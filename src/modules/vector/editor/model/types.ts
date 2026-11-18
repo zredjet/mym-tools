@@ -1,6 +1,6 @@
 /**
  * キャンバス (module id `vector`) の payload v3 = シーン形式。
- * 仕様の正典は `docs/canvas-editor-design.md` §3 (ADR-0026) と、v2 からの差分の §8.3 (ADR-0028)。
+ * 仕様の正典は `docs/canvas-editor-design.md` §3 (ADR-0026) と、v2 からの差分の §3 (ADR-0028)。
  *
  * この型が保存形式そのもので、エディタのメモリ上のモデルも同じ形を使う (変換層を持たない)。
  * すべてのフィールドは必須。未知のフィールドは Rust の検証で拒否される。
@@ -209,7 +209,7 @@ export interface SvgNode extends NodeCommon, BoxGeometry {
 }
 
 /**
- * 点と曲線で作る形 (§8.3.1、§8.6)。点は自分の座標系 (箱の左上が原点、回転の前) で持ち、
+ * 点と曲線で作る形 (§3.8、§4.12)。点は自分の座標系 (箱の左上が原点、回転の前) で持ち、
  * 箱は形の曲線の範囲 (ハンドルの先は含めない) にぴったり合わせる。
  */
 export interface PathNode extends NodeCommon, BoxGeometry {
@@ -223,7 +223,7 @@ export interface PathNode extends NodeCommon, BoxGeometry {
 }
 
 /**
- * 子の形を演算した結果を、自分の塗り・線・影で描く (§8.9)。座標系は作らず (子は自分の親の座標系で持つ)、
+ * 子の形を演算した結果を、自分の塗り・線・影で描く (§4.15)。座標系は作らず (子は自分の親の座標系で持つ)、
  * 外接矩形は結果から求める。子の塗り・線・影は描かない。
  */
 export interface BooleanNode extends NodeCommon {
@@ -249,11 +249,11 @@ export type CanvasNode =
   | BooleanNode;
 
 export type NodeType = CanvasNode["type"];
-/** 子を持つノードのうち frame と group。ブーリアンも子を持つが、木の規則 (§8.9.1) が違うので含めない */
+/** 子を持つノードのうち frame と group。ブーリアンも子を持つが、木の規則 (§4.15.1) が違うので含めない */
 export type ContainerNode = FrameNode | GroupNode;
 
 // ---------------------------------------------------------------------------
-// パスの形 (`docs/canvas-editor-design.md` §8.3、§8.6)
+// パスの形 (`docs/canvas-editor-design.md` §3、§4.12)
 // ---------------------------------------------------------------------------
 
 export type FillRule = "nonzero" | "evenodd";

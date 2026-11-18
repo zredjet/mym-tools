@@ -314,7 +314,7 @@ describe("TextEditOverlay: 入力と終了", () => {
   });
 });
 
-describe("TextEditOverlay: 回転したテキスト (§8.5.7)", () => {
+describe("TextEditOverlay: 回転したテキスト (§4.11.7)", () => {
   const rotateNode = (id: string, rotation: number) =>
     act(() =>
       state().apply((doc) => ({

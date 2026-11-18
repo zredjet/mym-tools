@@ -53,7 +53,7 @@ describe("回転の値", () => {
   });
 });
 
-describe("rotateNodes (§8.5.3)", () => {
+describe("rotateNodes (§4.11.3)", () => {
   it("1 個の箱は自分の中心のまわりに回り、x y width height は変わらない", () => {
     const doc = docOf([createRect({ id: "r", x: 10, y: 20, width: 40, height: 10 })], ["r"]);
     const center = rotationCenter(doc, ["r"])!;
@@ -145,7 +145,7 @@ describe("rotateNodes (§8.5.3)", () => {
   });
 });
 
-describe("flipNodes (§8.5.6)", () => {
+describe("flipNodes (§4.11.6)", () => {
   it("反転できない種類を (子孫に) 含む選択はできない", () => {
     const doc = docOf(
       [

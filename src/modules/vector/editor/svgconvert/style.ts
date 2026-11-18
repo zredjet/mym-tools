@@ -1,5 +1,5 @@
 /**
- * SVG の見た目の属性の求め方 (§8.12)。表示属性 (`fill="red"`) と `style` 属性 (`style="fill: red"`) を読み、
+ * SVG の見た目の属性の求め方 (§4.17)。表示属性 (`fill="red"`) と `style` 属性 (`style="fill: red"`) を読み、
  * `style` を優先する。継承するもの (`INHERITED`) は親の値を引き継ぎ、`inherit` は親の値にする。
  * `<style>` 要素と `class` は SVG ポリシーが許さないので見ない (ポリシーが通した値だけを読む)。
  */

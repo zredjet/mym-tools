@@ -1,5 +1,5 @@
 /**
- * パスの点の編集とペンのセッション (`docs/canvas-editor-design.md` §8.7.1)。
+ * パスの点の編集とペンのセッション (`docs/canvas-editor-design.md` §4.13.1)。
  *
  * 選んでいる点、ホバーしている点・ハンドル・線分、ペンの描きかけの状態を持つ。store には入れない
  * (文書でも履歴でもなく、未保存の判定に関係しない)。点の編集のツール (`tools/pathEditTool.ts`)、ペン
@@ -13,7 +13,7 @@
  * 選んでいる点の有効性: 選んだ時点のパスの ID と、そのパスの `subpaths` のオブジェクトを覚える。
  * 文書のパスの `subpaths` が別のオブジェクトになったら (Undo / Redo、ほかの操作で形が変わったとき) 選択は
  * 無効 (空) とみなす。点の添字は形が変わるとずれるため。自分の操作で形を変えたら `syncSelectedPoints` で
- * 覚え直す。Undo / Redo のキーでは、形が同じでも `clearSelectedPoints` で外す (§8.7.1)。
+ * 覚え直す。Undo / Redo のキーでは、形が同じでも `clearSelectedPoints` で外す (§4.13.1)。
  */
 import { useSyncExternalStore } from "react";
 import type { StoreApi } from "zustand";
@@ -49,7 +49,7 @@ export interface PenPoint {
 }
 
 /**
- * ペンの描きかけ (§8.7.4)。
+ * ペンの描きかけ (§4.13.4)。
  * - `pathId` が null: 新しいパスの最初の点だけ (`origin`)。まだ文書にない
  * - `created` が "path" / "subpath": この描画で作ったパス / 輪郭。Undo で消えたら最初の点だけの状態に戻り、
  *   Redo で戻ればまたそれを続ける (`pathId` と輪郭の添字は消えても残す)
@@ -75,7 +75,7 @@ export interface PenDrawing {
   subpathCount: number;
   /**
    * この描画で 1 点ずつ確定した後の文書 (古い順)。今の文書がこのどれかなら、それより後にほかの操作はないので、
-   * Backspace は最後の点を消す代わりに Undo で取り消す (作ったパスの 2 点目なら作成ごと取り消す、§8.7.4)
+   * Backspace は最後の点を消す代わりに Undo で取り消す (作ったパスの 2 点目なら作成ごと取り消す、§4.13.4)
    */
   commits: readonly CanvasDocument[];
   /** 点の編集の中から描き始めたか (終えたら点の編集に戻る) */
@@ -142,7 +142,7 @@ export function resetPathEditSession(): void {
 }
 
 /**
- * パスの点の編集に入る (§8.7.2。選択ツールのダブルクリックと Enter から呼ぶ)。前の編集で選んでいた点と
+ * パスの点の編集に入る (§4.13.2。選択ツールのダブルクリックと Enter から呼ぶ)。前の編集で選んでいた点と
  * ペンの描きかけを捨ててから、store の `startPathEdit` を呼ぶ。パスでなければ何もしない。
  */
 export function beginPathEdit(store: StoreApi<EditorStore>, id: NodeId): boolean {

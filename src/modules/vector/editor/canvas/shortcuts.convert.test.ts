@@ -42,7 +42,7 @@ function env(selection: string[]): ShortcutEnv {
 const run = (e: ShortcutEnv, input: Partial<KeyInput>, mac = true) =>
   runShortcut(key(input), e, CANVAS_SHORTCUTS, mac)?.id ?? null;
 
-describe("変換のショートカット (§8.13)", () => {
+describe("変換のショートカット (§5.4)", () => {
   it("Cmd/Ctrl+E でパスに変換", () => {
     const e = env(["a"]);
     expect(run(e, { key: "e", code: "KeyE", metaKey: true })).toBe("convert.flatten");

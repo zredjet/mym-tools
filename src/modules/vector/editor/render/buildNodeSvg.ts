@@ -1,17 +1,17 @@
 /**
- * ノードを `SvgEl` にする (§4.3、§8.4、契約は `render/types.ts` の `BuildNodeSvg`)。
+ * ノードを `SvgEl` にする (§4.3、契約は `render/types.ts` の `BuildNodeSvg`)。
  *
  * 形の規則は `buildNodeShell` (ノード 1 個、子は差し込み位置のまま) にだけ書く。
  * 書き出し用の `buildNodeSvg` はそれを再帰で組み立て、画面 (`canvas/DocumentLayer.tsx`) は
  * ノードごとのコンポーネントが同じ関数を呼んで子のコンポーネントを差し込む。
  *
- * 第 2 段階 (§8.4) で足した描き方:
+ * 第 2 段階 (§4.3) で足した描き方:
  * - 回転は、ノードを描く要素のうち最も外側に `transform="rotate(θ cx cy)"` を付ける (中心は箱の中心、
  *   親の座標系)。frame は子と切り抜きも含めて回る。回転 0 では付けない
  * - 線の端・角・破線は `stroke-linecap` `stroke-linejoin` `stroke-dasharray`。既定値 (butt、miter、空) では
  *   付けない
  * - パスは `<path d>` 1 つと `fill-rule`。ブーリアンは演算の結果を `<path d>` 1 つにして自分の塗り・線・影で
- *   描き、子を個別には描かない。結果を求められなければ、子の形をそれぞれ重ねて描く (§8.9.3)
+ *   描き、子を個別には描かない。結果を求められなければ、子の形をそれぞれ重ねて描く (§4.15.3)
  * - これらの属性 (`d`、`transform`、`stroke-dasharray`) の数値は `formatPathNumber` で書く。v2 からある属性の
  *   書き方は変えないので、回転 0 と線の既定値の文書は v2 と同じ出力になる
  */
@@ -212,7 +212,7 @@ function strokeAttrs(stroke: Stroke | null): Record<string, string | number | un
   };
 }
 
-/** SVG の既定の `stroke-miterlimit` (描画も線のアウトライン化もこの値。§8.4、§8.10)。 */
+/** SVG の既定の `stroke-miterlimit` (描画も線のアウトライン化もこの値。§4.3、§4.16)。 */
 const MITER_LIMIT = 4;
 
 /**
@@ -334,7 +334,7 @@ function boxOf(node: { x: number; y: number; width: number; height: number }): B
 }
 
 /**
- * 回転したノードの最も外側の要素に `rotate(θ cx cy)` を付ける (§8.4)。中心は箱の中心 (親の座標系)。
+ * 回転したノードの最も外側の要素に `rotate(θ cx cy)` を付ける (§4.3)。中心は箱の中心 (親の座標系)。
  * 要素がすでに `transform` を持っていれば (子だけの frame の `translate`)、その前に置く。回転 0 なら何もしない。
  */
 function withRotation(node: CanvasNode, shell: SvgEl): SvgEl {
@@ -523,7 +523,7 @@ function buildShape(node: CanvasNode, ctx: ShellContext): SvgEl {
 
     case "path": {
       const d = subpathsToPathData(node.subpaths, { x: node.x, y: node.y });
-      if (d === "") return emptyShell(node); // 点が 1 個だけの輪郭は描かない (§8.4)
+      if (d === "") return emptyShell(node); // 点が 1 個だけの輪郭は描かない (§4.3)
       const box = boxOf(node);
       const filter =
         node.shadow === null
@@ -543,7 +543,7 @@ function buildShape(node: CanvasNode, ctx: ShellContext): SvgEl {
     }
 
     case "boolean": {
-      // 結果は親の座標系で持つので transform は付けない (§8.4)
+      // 結果は親の座標系で持つので transform は付けない (§4.3)
       const evaluation = ctx.boolean;
       if (!evaluation) return emptyShell(node);
       const { result } = evaluation;
@@ -552,7 +552,7 @@ function buildShape(node: CanvasNode, ctx: ShellContext): SvgEl {
       )
         .map((shape) => ({ d: subpathsToPathData(shape.subpaths), fillRule: shape.fillRule }))
         .filter((shape) => shape.d !== "");
-      // グラデーションを写す箱は結果の外接矩形。求められなければ子の形を囲む範囲 (§8.4、§8.9.3)
+      // グラデーションを写す箱は結果の外接矩形。求められなければ子の形を囲む範囲 (§4.3、§4.15.3)
       const box = result ? result.bounds : operandsBounds(evaluation.operands);
       if (shapes.length === 0 || !box) return emptyShell(node);
       const paint = {
@@ -618,7 +618,7 @@ function buildRecursive(
     asset: assetOf(doc, node),
     boolean: booleanEvaluationOf(doc, node),
   });
-  // ブーリアンは子を個別に描かない (結果を 1 つの形にして描く。§8.4) ので、子の SVG を作らない
+  // ブーリアンは子を個別に描かない (結果を 1 つの形にして描く。§4.3) ので、子の SVG を作らない
   if (!shell || !isContainer(node) || node.type === "boolean") return shell;
   ancestors.add(nodeId);
   const children: SvgEl[] = [];

@@ -451,7 +451,7 @@ mod startup_data_migration_tests {
     }
 
     /// 版を 3 にしたとき、起動の手順が v1 と v2 の行の最初の変換の前に `pre-payload-vector-v3` を
-    /// 1 回だけ取り、行は変えない (ADR-0027 の規則 1、§8.3.3)。版が 2 のときに v2 の分を取った後でも取る。
+    /// 1 回だけ取り、行は変えない (ADR-0027 の規則 1、§3.9)。版が 2 のときに v2 の分を取った後でも取る。
     #[test]
     fn startup_takes_the_v3_backup_once_for_v1_and_v2_rows() {
         for rows in [&[1u32, 2][..], &[1], &[2]] {
