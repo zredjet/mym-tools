@@ -21,7 +21,10 @@ vi.mock("./layers/layerActions", async (importOriginal) => {
   const icons = Object.fromEntries(
     Object.keys(original.NODE_TYPE_ICONS).map((type) => [type, counting]),
   );
-  return { ...original, NODE_TYPE_ICONS: icons };
+  const booleanIcons = Object.fromEntries(
+    Object.keys(original.BOOLEAN_ROW_ICONS).map((op) => [op, counting]),
+  );
+  return { ...original, NODE_TYPE_ICONS: icons, BOOLEAN_ROW_ICONS: booleanIcons };
 });
 
 const state = () => editorStore.getState();

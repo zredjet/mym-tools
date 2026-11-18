@@ -618,7 +618,8 @@ function buildRecursive(
     asset: assetOf(doc, node),
     boolean: booleanEvaluationOf(doc, node),
   });
-  if (!shell || !isContainer(node)) return shell;
+  // ブーリアンは子を個別に描かない (結果を 1 つの形にして描く。§8.4) ので、子の SVG を作らない
+  if (!shell || !isContainer(node) || node.type === "boolean") return shell;
   ancestors.add(nodeId);
   const children: SvgEl[] = [];
   for (const child of node.children) {
