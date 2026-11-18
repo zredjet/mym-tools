@@ -1,6 +1,6 @@
 # データモデル (Data Model)
 
-最終更新: 2026-11-15 / ステータス: Draft (Phase 1)
+最終更新: 2026-11-18 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**データをどう持つか**」を定義する。
 要件 (`requirements.md`) と構造 (`architecture.md`) で確定した方針を、
@@ -407,7 +407,7 @@ Eager-on-Read により、**読まれた行は必ず最新の search_text を持
 ただし**読まれていない古い行は古い search_text のまま残る** ため、その行は最新の検索条件に部分的にしかヒットしない可能性がある。
 
 **緩和策 — 管理コマンド「検索インデックス再構築」**:
-- ユーザーが設定画面から起動できる Rust 側コマンド `core_rebuild_search_index(module_id?)` を提供 (C-16 の実装時に追加)。**未実装**。初めて版を上げたキャンバス (v1 → v2) では、v1 と v2 の `search_text` が U+0085 を含む作品のほかは同じ値になるので作っていない (ADR-0027)
+- ユーザーが設定画面から起動できる Rust 側コマンド `core_rebuild_search_index(module_id?)` を提供 (C-16 の実装時に追加)。**未実装**。初めて版を上げたキャンバス (v1 → v2) では、v1 と v2 の `search_text` が U+0085 を含む作品のほかは同じ値になるので作っていない (ADR-0027)。v2 → v3 (ADR-0028) は検索用テキストを変えない
 - 指定モジュール (省略時は全モジュール) の全行を読み出して Eager-on-Read を強制発火 → 全行最新化
 - ペイロードバージョンを上げたモジュールアップデート直後にユーザーに案内する選択肢として持つ
 - バックグラウンドで黙って走らせない (data_revision を一気に増やしバックアップ判定を狂わせるため、ユーザー判断にする)
@@ -455,7 +455,7 @@ impl ModuleBackend for PromptModule {
 | FTS5 トリガが失敗 | トリガ定義の不整合等 | UPDATE 全体がロールバックされる。扱いは上の行と同じ |
 
 **呼び出し元の振る舞い**:
-- **詳細取得 API** (1件読み込み): エラーをそのまま返す。UI 側でエラーを表示し、編集させない (キャンバスは理由を出し、「元の SVG を書き出す」・削除・再試行を出す。§10.9)
+- **詳細取得 API** (1件読み込み): エラーをそのまま返す。UI 側でエラーを表示し、編集させない (キャンバスは理由を出し、削除・再試行を出す。変換できない v1 の作品には「元の SVG を書き出す」も出す。§10.9)
 - **一覧取得 API** (複数件): Eager-on-Read を発火しないので、失敗する item も共通カラム (`title` / `tags` / `updated_at` 等) で一覧に出る。本文・詳細領域の「破損項目」マーカーは**未実装** (開いたときに上の扱いになる)
 - **検索経路**: §7.3 の通り Eager-on-Read を発火しないため、検索ヒット自体は古い search_text に基づいて発生し得る。クリックして詳細を開いたタイミングで上記のエラー扱いに進む
 - **エクスポート経路**: 失敗 item は**そのままの (古い) payload と payload_schema_version で書き出す**。アップグレード前提の処理を export 時にも行うと「アプリで開けなかった item を export で消す」事故が起きるため。書き出した item の ID・モジュール・タイトル・版・理由は `ExportSummary.not_upgraded` で返し、完了の表示に出す (取り込む側では失敗として数えられる。ADR-0027)。変換の失敗でないエラー (DB の読み取りの失敗、モジュールの内部エラー) ではエクスポートを止める
@@ -774,10 +774,10 @@ project 削除実行時、StorageService は**削除トランザクションの�
 
 **search_text 生成**: `title + " " + tags + " " + text`
 
-### 10.9 M-Canvas (`id = vector`、ADR-0026)
+### 10.9 M-Canvas (`id = vector`、ADR-0026、ADR-0028)
 
 ```jsonc
-// items.payload (version 2)
+// items.payload (version 3)
 {
   "pages":  [ { "id": "page1", "name": "ページ 1", "children": ["frame1"], "guides": [] } ],
   "nodes":  { "frame1": { "id": "frame1", "type": "frame", "name": "ホーム画面", ... } },
@@ -786,14 +786,17 @@ project 削除実行時、StorageService は**削除トランザクションの�
 }
 ```
 
-- 形式の正典は [キャンバスの設計](canvas-editor-design.md) §3 (型は `src/modules/vector/editor/model/types.ts`、上限は `model/limits.json`、検証の合否と変換の例は `model/fixtures/payload-v2.json`)。Rust と TypeScript が同じ JSON を読む
-- `nodes` は ID から引く平たい表で、木の形は `pages[].children` と frame / group の `children` が決める。すべてのフィールドは必須で、未知のフィールドは拒否する
+- 形式の正典は [キャンバスの設計](canvas-editor-design.md) §3 (型は `src/modules/vector/editor/model/types.ts`、上限は `model/limits.json`、検証の合否と変換の例は `model/fixtures/payload-v3.json`。v2 の `payload-v2.json` は v1 → v2 の段のテストのために凍結)。Rust と TypeScript が同じ JSON を読む
+- `nodes` は ID から引く平たい表で、木の形は `pages[].children` と frame / group / ブーリアンの `children` が決める。すべてのフィールドは必須で、未知のフィールドは拒否する
+- v3 (ADR-0028) は v2 に、箱を持つノードの回転 `rotation`、線の端・角・破線 (`cap` `join` `dash`)、パス `path` (輪郭の並び、塗りの規則)、ブーリアン `boolean` (演算と子。元の図形を残し、結果は保存しない) を足したもの。多角形・星・鉛筆やパスに変換の結果は普通のパスとして持つ
 - 画像 (PNG / JPEG / WebP の base64) と埋め込み SVG は `assets` に持ち、同じ画像は 1 つのアセットを共有する。別添付テーブルは作らない。全アセットの合計は 20 MiB 以下
 - `text`: frame の名前、テキストの本文、埋め込み SVG の文字を決まった規則 (§3.6) で求めた検索用文字列。UTF-8 で 1 MiB 以下。Rust は保存と JSON 取込のたびに求め直し、一致しなければ拒否する
 - 表示位置、ルーラー・グリッドなどの表示設定、選択、Undo/Redo 履歴は保存しない
 - DB schema と JSON export schema は変えない
 
-**v1 からの変換 (Eager-on-Read)**: payload v1 `{ svg, text }` (ADR-0021 のベクター描画) は、読んだときに `upgrade_payload(1)` で「編集できない埋め込み SVG 1 個」の v2 文書にして書き戻す (§7.2。`data_revision` と `updated_at` は変えない)。SVG は v1 のまま埋め込むので見た目は残り、書き出せる。変換は戻せず、新しい版で開いた作品は古い版のアプリでは読めない。アセットの `text` は v1 の `text` を使わず、SVG から求め直す (v1 の `text` が今の抽出と違うだけで開けなくならないように)。SVG が今の SVG ポリシーを通らない古い作品などは変換を失敗にして v1 のまま残し (§7.6)、開こうとすると理由を表示する。そうした作品は、画面の「元の SVG を書き出す」(`vector_export_original_svg`。行は変えない) で中身を取り出せ、保存では上書きされない。JSON エクスポートでは元の payload と `payload_schema_version: 1` のまま書き出し、完了の表示で知らせる。最初の変換の前に、起動時に `pre-payload-vector-v2` のバックアップを 1 回取る (ADR-0027)
+**v1 からの変換 (Eager-on-Read)**: payload v1 `{ svg, text }` (ADR-0021 のベクター描画) は、読んだときに `upgrade_payload(1)` で「編集できない埋め込み SVG 1 個」の v2 文書にし、続けて v2 からの変換 (下) で v3 にして書き戻す (§7.2。`data_revision` と `updated_at` は変えない)。SVG は v1 のまま埋め込むので見た目は残り、書き出せる。変換は戻せず、新しい版で開いた作品は古い版のアプリでは読めない。アセットの `text` は v1 の `text` を使わず、SVG から求め直す (v1 の `text` が今の抽出と違うだけで開けなくならないように)。SVG が今の SVG ポリシーを通らない古い作品などは変換を失敗にして v1 のまま残し (§7.6)、開こうとすると理由を表示する。そうした作品は、画面の「元の SVG を書き出す」(`vector_export_original_svg`。行は変えない) で中身を取り出せ、保存では上書きされない。JSON エクスポートでは元の payload と `payload_schema_version: 1` のまま書き出し、完了の表示で知らせる。版が 2 のアプリは、最初の変換の前に起動時に `pre-payload-vector-v2` のバックアップを 1 回取った (ADR-0027)
+
+**v2 からの変換 (Eager-on-Read、ADR-0028)**: payload v2 は、読んだときに `upgrade_payload(2)` で v3 にして書き戻す (`data_revision` と `updated_at` は変えない)。足すのは、frame・矩形・楕円・テキスト・画像・埋め込み SVG の `rotation: 0` と、すべての線の `cap: "butt"`・`join: "miter"`・`dash: []` だけで、見た目と検索用テキストは変わらない。入力は v2 の検証で、結果は v3 の検証で確かめる (v3 だけのフィールドを持つ壊れた v2 の行を黙って直さない)。v2 の検証を通らない行は変換を失敗にして v2 のまま残し、保存では上書きせず、JSON エクスポートでは `payload_schema_version: 2` のまま書き出して知らせる。変換は戻せず、v3 で開いた作品は第 1 段階の版のアプリでは読めない。最初の変換の前に、起動時に `pre-payload-vector-v3` のバックアップを 1 回取る (ADR-0027。v1 と v2 のどちらの行があっても取る。`meta.payload_upgrade_backup.vector` は 3 になる)
 
 **search_text 生成**: `title + " " + tags + " " + text`
 
@@ -1404,10 +1407,11 @@ D-11 (Lazy Migration on Read) の文言は **Eager-on-Read** に改訂する (§
 | 2026-10-02 | 1.8 | §10.2 に Link のネットワーク上の場所を開く時の確認を、§11 に `modules.linkmemo.trusted_network_hosts` を追加 |
 | 2026-11-10 | 1.9 | §6.6 プロジェクト間の移動 (`core_move_item`) を追加。書き換える列、`position` と `updated_at` の扱い、`data_revision +1`、§13.2 の増分対象、§15 の T-51〜T-53 |
 | 2026-11-15 | 1.10 | ADR-0026 / ADR-0027 を反映。§10.9 キャンバスの payload v2 と v1 からの変換を追加し、末尾の参照APIの節を v2 に合わせる。エクスポートの実装を §7.6 (失敗した item を古い payload のまま書き出す) に合わせた。§7.6 を ADR-0027 と実装に合わせて書き直す (新しい版は項目ごとのエラーで起動は止めない、書き戻しの失敗でも結果を返す、上書きの拒否、エクスポートの `not_upgraded`、最初の変換の前のバックアップ。破損項目の管理画面 C-14 は未実装と明記)。§4 に `meta.payload_upgrade_backup.<module_id>`、§13.4 に `pre-payload-<module_id>-v<N>` と `pre-split-linkmemo` を追加。§7.3 の再構築コマンドと T-31 は未実装と明記。T-54〜T-56 を追加 |
+| 2026-11-18 | 1.11 | ADR-0028 を反映。§10.9 キャンバスの payload を v3 にし (回転、線の端・角・破線、パス、ブーリアン)、v2 からの変換 (回転 0 と線の既定値を足すだけ、入力は v2・結果は v3 の検証、変換できない行は v2 のまま残す) と `pre-payload-vector-v3` のバックアップを追加。末尾の参照APIの節を v3 に合わせる |
 
 ## 大きな作品と軽量な参照API（ADR-0021、ADR-0026）
 
-`vector` の payload は §10.9 (v2)。v1 (`{ svg, text }`、ADR-0021) は読み込み時に v2 へ変換する。
+`vector` の payload は §10.9 (v3)。v1 (`{ svg, text }`、ADR-0021) と v2 (ADR-0026) は読み込み時に v3 へ変換する。
 
 `ItemSummary`はid/project_id/module_id/title/tags/position/created_at/updated_atだけを持つ。`core_list_item_summaries`はproject_id/module_idで絞り、updated_at DESC・id DESC、最大100件ずつ返す。SQLはpayloadを選択しない。
 

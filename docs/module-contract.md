@@ -1,6 +1,6 @@
 # モジュール契約 (Module Contract)
 
-最終更新: 2026-11-15 / ステータス: Draft (Phase 1)
+最終更新: 2026-11-18 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**モジュールがコアと交わす契約**」を定義する。
 モジュールが提供するもの / コアが提供するもの / 両者がしてはいけないことを具体 API レベルで決めて、
@@ -940,16 +940,17 @@ byte配列は`expandByteArrays = false`では長さだけを表示する。true�
 | 2026-11-10 | 1.13 | §12.11 に `jsonfmt` を追加し、`JSON.parse` の往復を使わない理由、値を書き換えない規則、上限を記載 |
 | 2026-11-10 | 1.14 | §5.1 に `ScopedStorage::move_item` と `core_move_item` を追加 |
 | 2026-11-15 | 1.15 | ADR-0026 / ADR-0027 を反映。末尾の vector の契約をキャンバス (payload v2、`upgrade_payload(1)`、`vector_editor_url` の廃止、書き出す SVG の検証、変換できない作品の `vector_export_original_svg`、取り込める画像の大きさ) に書き換え |
+| 2026-11-18 | 1.16 | ADR-0028 を反映。末尾の vector の契約を payload v3 (`current_payload_version() = 3`、`upgrade_payload(2)` の v2 → v3、検証の版、`pre-payload-vector-v3`) にする |
 
-## キャンバスと検索投影の追加契約（ADR-0026、ADR-0021 を置き換え）
+## キャンバスと検索投影の追加契約（ADR-0026、ADR-0028、ADR-0021 を置き換え）
 
 | 項目 | 契約 |
 |---|---|
 | id / 表示名 / カテゴリ | `vector` / キャンバス / `design` (ID は ADR-0021 のまま変えない) |
 | 状態 | stateful、既定有効、プロジェクト所属 |
-| payload | v2 `{ pages, nodes, assets, text }` (`data-model.md` §10.9、`canvas-editor-design.md` §3)。`current_payload_version() = 2` |
-| アップグレード | `upgrade_payload(1, { svg, text })` は v1 の SVG を編集できない埋め込み SVG 1 個の文書にする。アセットの `text` は v1 の値ではなく SVG から求め直す。SVG が今の SVG ポリシーを通らないなど、結果が v2 の検証を通らなければ `UpgradeFailed` (行は v1 のまま残る、`data-model.md` §7.6)。そうした行は保存で上書きされず (ADR-0027)、`vector_export_original_svg` で元の SVG を取り出せる |
-| 検証 | `validate_payload` は v2 の構造・上限・参照・アセットの中身 (画像の形式、埋め込み SVG の SVG ポリシー) を確かめ、`text` を文書から求め直して一致しなければ拒否する。`index_text` は `text` |
+| payload | v3 `{ pages, nodes, assets, text }` (`data-model.md` §10.9、`canvas-editor-design.md` §3)。v2 に回転、線の端・角・破線、パス、ブーリアンを足したもの (ADR-0028)。`current_payload_version() = 3`。画面の `PAYLOAD_VERSION` (`src/modules/vector/editor/model/payload.ts`) と同じ値にする (テストで確かめる) |
+| アップグレード | 1 段ずつ変換し、各段は自分の結果をその版の検証で確かめる。`upgrade_payload(1, { svg, text })` は v1 の SVG を編集できない埋め込み SVG 1 個の v2 文書にする。アセットの `text` は v1 の値ではなく SVG から求め直す。SVG が今の SVG ポリシーを通らないなど、結果が v2 の検証を通らなければ `UpgradeFailed` (行は v1 のまま残る、`data-model.md` §7.6)。そうした行は保存で上書きされず (ADR-0027)、`vector_export_original_svg` で元の SVG を取り出せる。`upgrade_payload(2, …)` は入力を v2 の検証で確かめ、箱を持つノードに `rotation: 0`、線に `cap: "butt"`・`join: "miter"`・`dash: []` を足すだけ (結果は v3 の検証で確かめる)。v2 の検証を通らない行は `UpgradeFailed` で v2 のまま残る (取り出す専用の口はなく、JSON エクスポートでは v2 のまま書き出す)。最初の変換の前のバックアップは `pre-payload-vector-v3` |
+| 検証 | `validate_payload` は v3 の構造・上限・参照・アセットの中身 (画像の形式、埋め込み SVG の SVG ポリシー) を確かめ、`text` を文書から求め直して一致しなければ拒否する。`index_text` は `text` |
 | ルート | `/projects/:projectId/m/vector`、`/new`、`/edit/:itemId` |
 | 保存 | 共通CRUD、タイトル・タグ、明示保存・Cmd/Ctrl+S |
 | 固有IPC | `vector_read_file`、`vector_read_image`、`vector_write_file`、`vector_export_original_svg` (`vector_editor_url` は廃止) |
