@@ -15,7 +15,7 @@
  */
 import { createGroup } from "./create";
 import { DocDraft } from "./draft";
-import { pageVectorToLocal, parentMatrix } from "./geometry";
+import { isTranslation, pageVectorToLocal, parentMatrix } from "./geometry";
 import { invert, multiply } from "../geometry/matrix";
 import { createId, getOwn } from "./ids";
 import { CANVAS_LIMITS } from "./limits";
@@ -91,7 +91,7 @@ function removeEmptyGroups(draft: DocDraft, candidates: Iterable<ParentRef | nul
 
 /**
  * 子を持たないノード (または子のない frame) を親の `index` (省略すると最前面) に入れる。
- * 座標は親の座標系で渡す (`pageToLocal` で直す)。子を持つものは `insertFragment` を使う。
+ * 座標は親の座標系で渡す (`pageToLocal` で直す)。子を持つものと group・ブーリアンは `insertFragment` を使う。
  * 親がブーリアンで、子にできない種類なら何もしない (§8.9.1)。
  */
 export function insertNode(
@@ -102,7 +102,8 @@ export function insertNode(
 ): CanvasDocument {
   if (getNode(doc, node.id) !== undefined || !parentExists(doc, parent)) return doc;
   if (!canHaveChildOfType(doc, parent, node.type)) return doc;
-  if (isContainer(node) && node.children.length > 0) return doc;
+  // group とブーリアンは子が 1 個以上 (§3.3、§8.9.1) なので、子のないものも入れない (`insertFragment` を使う)
+  if (isGroupLike(node) || (isContainer(node) && node.children.length > 0)) return doc;
   if (parentDepth(doc, parent) + 1 > CANVAS_LIMITS.maxDepth) return doc;
   if (Object.keys(doc.nodes).length + 1 > CANVAS_LIMITS.maxNodes) return doc;
   const draft = new DocDraft(doc);
@@ -283,15 +284,16 @@ function relocateInDraft(
 ): void {
   const source = parentMatrix(doc, from);
   const target = parentMatrix(doc, to);
-  const back = invert(target);
-  if (!back) return;
-  const m = multiply(back, source);
-  if (m.a === 1 && m.b === 0 && m.c === 0 && m.d === 1) {
+  if (isTranslation(source) && isTranslation(target)) {
     // 回転していない座標系の間は、原点の差だけ動かす (第 1 段階と同じ計算)
     translateInDraft(draft, id, source.e - target.e, source.f - target.f);
     return;
   }
-  transformInDraft(draft, id, m);
+  // 片方でも回転していれば、元の座標系 → 新しい座標系の行列で写す。回転の向きが同じ座標系の間では
+  // この行列は平行移動だけになるが、ずれは新しい座標系での値 (`m.e`, `m.f`) で、ページの原点の差ではない
+  const back = invert(target);
+  if (!back) return;
+  transformInDraft(draft, id, multiply(back, source));
 }
 
 /**

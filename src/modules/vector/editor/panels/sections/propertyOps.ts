@@ -12,10 +12,13 @@
  */
 import { applyToPoint } from "../../geometry/matrix";
 import {
+  coordinateMatrix,
   getLocalBounds,
   getPageBounds,
   isBoxNode,
+  isTranslation,
   nodeTransform,
+  parentMatrix,
   type BoxNode,
 } from "../../model/geometry";
 import { CANVAS_LIMITS } from "../../model/limits";
@@ -27,7 +30,7 @@ import {
   updateNodes,
   type NodePatch,
 } from "../../model/transform";
-import { getNode, topLevelIds } from "../../model/tree";
+import { getNode, getParent, topLevelIds } from "../../model/tree";
 import type { CanvasDocument, CanvasNode, NodeId, Shadow, Stroke } from "../../model/types";
 import { canvasTextMeasurer } from "../../render/measureText";
 import type { TextMeasurer } from "../../render/types";
@@ -59,11 +62,16 @@ export type PositionValues =
   | { mode: "box"; values: Record<BoundsField, number | Mixed> }
   | { mode: "line"; values: Record<LineField, number | Mixed> };
 
-/** 1 個だけ選んだ、回転した箱を持つノード (§8.5.5 の欄の意味が変わるもの)。なければ null。 */
+/**
+ * 1 個だけ選んだ、自分の向きで読み書きする箱を持つノード (§8.5.5)。自分が回転しているか、回転した frame の
+ * 中にあるもの (ページ上の向きが 0 でなくなりうるもの)。なければ null。
+ */
 function singleRotatedBox(doc: CanvasDocument, ids: readonly NodeId[]): BoxNode | null {
   if (ids.length !== 1) return null;
-  const node = getNode(doc, ids[0] as NodeId);
-  return node && isBoxNode(node) && node.rotation !== 0 ? node : null;
+  const id = ids[0] as NodeId;
+  const node = getNode(doc, id);
+  if (!node || !isBoxNode(node)) return null;
+  return node.rotation !== 0 || !isTranslation(coordinateMatrix(doc, id)) ? node : null;
 }
 
 /** 回転した箱の左上の角 (ノードの座標系の原点を親の座標系へ写した点)。 */
@@ -121,8 +129,9 @@ export function readPosition(
  * W と H は左上を保って大きさを変える (`resizeNodes`、整数に丸める)。複数選択はそれぞれに当てる。
  * テキストの大きさは同じ変更の中で求め直す (`auto-height` の幅を変えたら、高さが折り返しの結果になる。§4.7)。
  * 結果が範囲の外へ出るなら変えない。
- * 1 個の回転した箱を持つノードは、X / Y で回転した箱の左上の角を入力した位置へ動かし、W / H は左上の角を
- * 動かさずに自分の向きでリサイズする (§8.5.4、§8.5.5。大きさは整数に丸め、`x` `y` は丸めない)。
+ * 1 個の回転した箱を持つノード (回転した frame の中のものを含む) は、X / Y で回転した箱の左上の角を入力した
+ * 位置へ動かし、W / H は左上の角を動かさずに自分の向きでリサイズする (§8.5.4、§8.5.5。大きさは整数に丸め、
+ * `x` `y` は丸めない)。回転した frame の中の group と複数選択の W / H は、読み取りと同じ親の座標系で比例させる。
  */
 export function setBoundsField(
   doc: CanvasDocument,
@@ -164,7 +173,10 @@ export function setBoundsField(
       const delta = value - local[field];
       next = translateNodes(next, [id], field === "x" ? delta : 0, field === "y" ? delta : 0);
     } else {
-      const from = getPageBounds(next, id);
+      // 回転した frame の中では、読み取りと同じ親の座標系の外接矩形で比例させる
+      const parent = getParent(next, id);
+      const inParent = parent !== null && !isTranslation(parentMatrix(next, parent));
+      const from = inParent ? getLocalBounds(next, id) : getPageBounds(next, id);
       if (!from) continue;
       const node = getNode(next, id);
       // 大きさ 0 のパスは点を広げられない (どの点も同じ x か y) ので変えない
@@ -174,7 +186,13 @@ export function setBoundsField(
         next = updateNodes(next, [id], zeroSizePatch(node, field, value));
         continue;
       }
-      next = resizeNodes(next, [id], from, { ...from, [field]: value }, { round: true });
+      next = resizeNodes(
+        next,
+        [id],
+        from,
+        { ...from, [field]: value },
+        inParent && parent ? { round: true, parent } : { round: true },
+      );
     }
   }
   if (field === "width" || field === "height") next = fitTextNodes(next, ids, measurer);

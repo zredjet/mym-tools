@@ -26,10 +26,12 @@ import {
   nodeOrigin,
   nodeTransform,
   pageRotation,
+  parentMatrix,
+  parentPageRotation,
   type Rect,
 } from "./geometry";
 import { hasOwn } from "./ids";
-import { topLevelIds } from "./tree";
+import { topLevelIds, type ParentRef } from "./tree";
 import type {
   CanvasDocument,
   CanvasNode,
@@ -147,6 +149,11 @@ export function translateNodes(
 export interface ResizeOptions {
   /** 結果の辺を整数に丸める (左右・上下の辺をそれぞれ丸めるので、隣り合う図形の間に隙間ができない) */
   round?: boolean;
+  /**
+   * `from` / `to` を、ページ座標でなくこの親の子の座標系の矩形として扱う (パネルの W / H。回転した frame の中の
+   * group と複数選択を、読み取りと同じ親の座標系で比例させる)。省くとページ座標
+   */
+  parent?: ParentRef;
 }
 
 function normalizeRect(r: Rect): Rect {
@@ -194,8 +201,11 @@ export function resizeNodes(
   const sx = src.width === 0 ? 1 : dst.width / src.width;
   const sy = src.height === 0 ? 1 : dst.height / src.height;
   const round = options.round ? Math.round : (v: number) => v;
+  // `from` / `to` の座標系 (ページ ← その座標系) とそのページ上の角度。省くとページ座標
+  const frameBack = options.parent ? invert(parentMatrix(doc, options.parent)) : null;
+  const frameAngle = options.parent ? parentPageRotation(doc, options.parent) : 0;
   const draft = new DocDraft(doc);
-  /** ページ座標の点を写す。 */
+  /** `from` / `to` の座標系の点を写す。 */
   const mapPage = (p: Point): Point => ({
     x: dst.x + (p.x - src.x) * sx,
     y: dst.y + (p.y - src.y) * sy,
@@ -240,7 +250,10 @@ export function resizeNodes(
     if (!shallowEqual(next, node)) draft.set(next);
   };
 
-  /** 回転したノードか、回転した frame の中のノードか、パス。`space` はページ ← 親の座標系。 */
+  /**
+   * 回転したノードか、回転した frame の中のノードか、パス。`space` は `from` / `to` の座標系 ← 親の座標系
+   * (`from` / `to` がページ座標ならページ ← 親の座標系)。
+   */
   const visitRotated = (node: CanvasNode, space: Matrix) => {
     const back = invert(space);
     if (!back) return;
@@ -272,7 +285,8 @@ export function resizeNodes(
         break;
       }
       default: {
-        const phi = pageRotation(doc, node.id);
+        // `from` / `to` の座標系から見た角度 (ページ座標なら、ページ上の角度 φ)
+        const phi = normalizeRotation(pageRotation(doc, node.id) - frameAngle);
         const f = ownScaleFactors(sx, sy, phi);
         const width = Math.max(0, round(node.width * f.x));
         let height = Math.max(0, round(node.height * f.y));
@@ -307,12 +321,13 @@ export function resizeNodes(
       for (const child of node.children) visit(child);
       return;
     }
-    const space = coordinateMatrix(doc, id);
+    const pageSpace = coordinateMatrix(doc, id);
+    const space = frameBack ? multiply(frameBack, pageSpace) : pageSpace;
     // パスは回転していなくても点を写す (箱だけを変えない。§8.5.4)
     const rotated =
       node.type === "path" || !isTranslation(space) || (isBoxNode(node) && node.rotation !== 0);
     if (rotated) visitRotated(node, space);
-    else visitPlain(node, nodeOrigin(doc, id));
+    else visitPlain(node, frameBack ? { x: space.e, y: space.f } : nodeOrigin(doc, id));
   };
 
   for (const id of topLevelIds(doc, ids)) visit(id);

@@ -94,7 +94,8 @@ function ellipseHit(
 
 /**
  * パスの形の当たり (§8.5.8)。塗りがあれば塗りの規則で内側 (閉じていない輪郭は閉じた形)。線があれば、
- * 描かれる輪郭までの距離が太さの半分 + 余裕以内。どちらもなければ、輪郭までの距離が余裕以内。
+ * 描かれる輪郭までの距離が (太さ + 余裕) の半分以内。どちらもなければ、輪郭までの距離が余裕の半分以内
+ * (第 1 段階の矩形・楕円・線の `shapeHit` と同じ。§4.5 の「線は太さに 4 画面 px の余裕を足す」)。
  * `bounds` (形の範囲) を渡すと、明らかに遠い点では曲線を調べない。
  */
 export function pathShapeHit(
@@ -107,7 +108,9 @@ export function pathShapeHit(
   bounds: Rect | null = pathBoundsRect(subpaths),
 ): boolean {
   if (!bounds) return false;
-  const reach = (strokeWidth ?? 0) / 2 + slop;
+  // 余裕は第 1 段階の矩形・楕円・線と同じ片側 slop / 2 (線は太さ + slop の帯、§4.5)。
+  // 矩形・楕円・線をパスに変換しても当たりが変わらないように
+  const reach = (strokeWidth ?? 0) / 2 + slop / 2;
   if (
     p.x < bounds.x - reach ||
     p.x > bounds.x + bounds.width + reach ||
@@ -120,17 +123,21 @@ export function pathShapeHit(
   return distanceToPath(subpaths, p) <= reach;
 }
 
-/** 形の輪郭の上か内側か (ブーリアンの子の当たり。§8.5.8)。 */
+/**
+ * 形の輪郭の上か内側か (ブーリアンの子の当たり。§8.5.8)。輪郭の余裕は片側 slop / 2
+ * (第 1 段階の太さ 0 の線と同じ)。
+ */
 function outlineOrInside(operand: BooleanOperand, p: Point, slop: number): boolean {
   const bounds = pathBoundsRect(operand.subpaths);
   if (!bounds) return false;
+  const reach = slop / 2;
   if (
     !rectContainsPoint(
       {
-        x: bounds.x - slop,
-        y: bounds.y - slop,
-        width: bounds.width + slop * 2,
-        height: bounds.height + slop * 2,
+        x: bounds.x - reach,
+        y: bounds.y - reach,
+        width: bounds.width + reach * 2,
+        height: bounds.height + reach * 2,
       },
       p,
     )
@@ -138,7 +145,7 @@ function outlineOrInside(operand: BooleanOperand, p: Point, slop: number): boole
     return false;
   return (
     containsPoint(operand.subpaths, p, operand.fillRule) ||
-    distanceToPath(operand.subpaths, p) <= slop
+    distanceToPath(operand.subpaths, p) <= reach
   );
 }
 

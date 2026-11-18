@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { applyToPoint } from "../geometry/matrix";
-import { createBoolean, createFrame, createRect, createText } from "../model/create";
+import { createBoolean, createFrame, createGroup, createRect, createText } from "../model/create";
 import { getNodeCorners, nodePageMatrix } from "../model/geometry";
 import { checkSavable } from "../model/payload";
 import { deepFreeze } from "../model/testing";
@@ -92,6 +92,46 @@ describe("パネルの位置と大きさ (§8.5.5)", () => {
     expect((next.nodes.c as RectNode).rotation).toBe(45);
     // 回転は中心のまわりなので x y は変わらない
     expect(next.nodes.r).toMatchObject({ x: 0, y: 300 });
+  });
+});
+
+describe("回転した frame の中のパネルの W / H (§8.5.5)", () => {
+  const doc = docOf(
+    [
+      createFrame({
+        id: "f",
+        x: 100,
+        y: 100,
+        width: 600,
+        height: 400,
+        rotation: 30,
+        children: ["c", "g"],
+      }),
+      createRect({ id: "c", x: 10, y: 20, width: 100, height: 50 }),
+      createGroup(["g1", "g2"], { id: "g" }),
+      createRect({ id: "g1", x: 200, y: 200, width: 50, height: 50 }),
+      createRect({ id: "g2", x: 300, y: 200, width: 50, height: 50 }),
+    ],
+    ["f"],
+  );
+
+  it("回転していない 1 個は、自分の向き (frame の向き) で左上の角を動かさない", () => {
+    const before = getNodeCorners(doc, "c")!;
+    const next = setBoundsField(doc, ["c"], "width", 200);
+    expect(next.nodes.c).toMatchObject({ width: 200, height: 50, rotation: 0 });
+    close(getNodeCorners(next, "c")![0]!, before[0]!);
+    expect(readPosition(next, ["c"])?.values).toMatchObject({ width: 200, height: 50 });
+  });
+
+  it("group と複数選択は、読み取りと同じ親の座標系で比例させる", () => {
+    expect(readPosition(doc, ["g"])?.values).toEqual({ x: 200, y: 200, width: 150, height: 50 });
+    const next = setBoundsField(doc, ["g"], "width", 300);
+    expect(readPosition(next, ["g"])?.values).toEqual({ x: 200, y: 200, width: 300, height: 50 });
+    expect(next.nodes.g1).toMatchObject({ x: 200, y: 200, width: 100, height: 50 });
+    expect(next.nodes.g2).toMatchObject({ x: 400, y: 200, width: 100, height: 50 });
+    const both = setBoundsField(doc, ["g1", "g2"], "height", 80);
+    expect(both.nodes.g1).toMatchObject({ x: 200, y: 200, width: 50, height: 80 });
+    expect(both.nodes.g2).toMatchObject({ x: 300, y: 200, width: 50, height: 80 });
   });
 });
 

@@ -85,7 +85,7 @@ describe("回転したノードの当たり (§8.5.8)", () => {
 });
 
 describe("パスの当たり", () => {
-  it("塗りは内側、線は太さの半分 + 余裕、どちらもなければ輪郭の近く", () => {
+  it("塗りは内側、線は (太さ + 余裕) の半分、どちらもなければ余裕の半分 (第 1 段階と同じ)", () => {
     const doc = docOf(
       [
         createPath(triangle, { id: "fill", x: 0, y: 0, fill: solidPaint("#000000"), stroke: null }),
@@ -102,12 +102,36 @@ describe("パスの当たり", () => {
     );
     expect(hit(doc, 20, 20)).toEqual(["fill"]);
     expect(hit(doc, 80, 80)).toBeNull();
-    // 線だけのパスは輪郭の近くだけ (太さの半分 1 + 余裕 4)
-    expect(hit(doc, 250, 4)).toEqual(["line"]);
-    expect(hit(doc, 250, 6)).toBeNull();
+    // 線だけのパスは輪郭の近くだけ ((太さ 2 + 余裕 4) / 2 = 3)
+    expect(hit(doc, 250, 3)).toEqual(["line"]);
+    expect(hit(doc, 250, 3.5)).toBeNull();
     expect(hit(doc, 220, 20)).toBeNull();
-    expect(hit(doc, 450, 3)).toEqual(["none"]);
+    // 塗りも線もなければ余裕の半分 (2)
+    expect(hit(doc, 450, 2)).toEqual(["none"]);
+    expect(hit(doc, 450, 2.5)).toBeNull();
     expect(hit(doc, 420, 20)).toBeNull();
+  });
+
+  it("矩形とそれをパスにした形は、線の帯の当たりが同じ", () => {
+    const stroke = createStroke("#000000", 2);
+    const square: Subpath[] = [
+      {
+        closed: true,
+        points: [
+          { x: 0, y: 0, in: null, out: null, mirror: "none" },
+          { x: 100, y: 0, in: null, out: null, mirror: "none" },
+          { x: 100, y: 100, in: null, out: null, mirror: "none" },
+          { x: 0, y: 100, in: null, out: null, mirror: "none" },
+        ],
+      },
+    ];
+    const rect = docOf(
+      [createRect({ id: "s", x: 0, y: 0, width: 100, height: 100, fill: null, stroke })],
+      ["s"],
+    );
+    const path = docOf([createPath(square, { id: "s", fill: null, stroke })], ["s"]);
+    for (const y of [-3.5, -3, -1, 0, 2, 3, 3.5, 50])
+      expect(hit(path, 50, y) !== null).toBe(hit(rect, 50, y) !== null);
   });
 
   it("回転したパスは自分の座標系で判定する", () => {
@@ -148,6 +172,9 @@ describe("ブーリアンの当たり", () => {
     expect(hit(doc, 50, 50, "s")).toEqual(["s", "b"]);
     expect(pickTarget(doc, hit(doc, 50, 50, "s"), "s").id).toBe("b");
     expect(pickTarget(doc, hit(doc, 10, 10, "s"), "s").id).toBe("a");
+    // 子の輪郭の余裕は片側 2 (第 1 段階の太さ 0 の線と同じ)。b の上の辺 (y 25) から 2 の所は b
+    expect(hit(doc, 50, 23, "s")).toEqual(["s", "b"]);
+    expect(hit(doc, 50, 22.5, "s")).toEqual(["s", "a"]);
   });
 
   it("ブーリアンは Enter とダブルクリックで中に入れる。外接矩形の中の何もない場所もスコープの中", () => {

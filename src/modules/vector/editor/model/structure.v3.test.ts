@@ -143,6 +143,12 @@ describe("ブーリアンの木 (§8.9.1)", () => {
     expect(insertFragment(doc, shapes, u).ids).toHaveLength(1);
   });
 
+  it("子のない group とブーリアンは insertNode で入れない (検証に通らない)", () => {
+    const page = { kind: "page", id: "p1" } as const;
+    expect(insertNode(doc, createBoolean("union", [], { id: "e" }), page)).toBe(doc);
+    expect(insertNode(doc, createGroup([], { id: "g0" }), page)).toBe(doc);
+  });
+
   it("ブーリアンの中ではグループ化できない", () => {
     expect(groupNodes(doc, ["b", "c"], "g1")).toBe(doc);
     // ブーリアンの子を外の親へまとめるのはできる (空になったブーリアンは消える)
@@ -158,6 +164,74 @@ describe("ブーリアンの木 (§8.9.1)", () => {
     expect((next.nodes.a as RectNode).opacity).toBe(0.5);
     expect((next.nodes.inner as BooleanNode).opacity).toBe(0.5);
     expect(checkSavable(next)).toBeNull();
+  });
+});
+
+describe("回転の向きが同じ座標系の間の付け替え (§8.5.2)", () => {
+  const corners = (d: CanvasDocument, id: string) => getNodeCorners(d, id)!;
+
+  it.each([30, 90, 180, 17])("同じ角度 (%s°) の 2 つの frame の間で見た目を変えない", (rot) => {
+    const d = docOf(
+      [
+        createFrame({
+          id: "f1",
+          x: 0,
+          y: 0,
+          width: 400,
+          height: 300,
+          rotation: rot,
+          children: ["r"],
+        }),
+        createFrame({
+          id: "f2",
+          x: 500,
+          y: 0,
+          width: 400,
+          height: 300,
+          rotation: rot,
+          children: [],
+        }),
+        createRect({ id: "r", x: 20, y: 30, width: 100, height: 50 }),
+      ],
+      ["f1", "f2"],
+    );
+    const next = moveNodes(d, ["r"], { kind: "node", id: "f2" });
+    expect(getParent(next, "r")).toEqual({ kind: "node", id: "f2" });
+    expect((next.nodes.r as RectNode).rotation).toBe(0);
+    corners(next, "r").forEach((p, i) => close(p, corners(d, "r")[i]!));
+  });
+
+  const nested = (children: string[], gChildren: string[], extra: CanvasNode[] = []) =>
+    docOf(
+      [
+        createFrame({ id: "F", x: 100, y: 100, width: 600, height: 400, rotation: 30, children }),
+        createFrame({ id: "G", x: 300, y: 50, width: 200, height: 200, children: gChildren }),
+        createRect({ id: "r", x: 20, y: 30, width: 100, height: 50 }),
+        ...extra,
+      ],
+      ["F"],
+    );
+
+  it("回転した frame から、その中の回転していない frame へ入れても見た目を変えない", () => {
+    const d = nested(["r", "G"], []);
+    const next = moveNodes(d, ["r"], { kind: "node", id: "G" });
+    expect(getParent(next, "r")).toEqual({ kind: "node", id: "G" });
+    expect(next.nodes.r).toMatchObject({ x: -280, y: -20, rotation: 0 });
+    corners(next, "r").forEach((p, i) => close(p, corners(d, "r")[i]!));
+    const back = moveNodes(next, ["r"], { kind: "node", id: "F" });
+    expect(back.nodes.r).toMatchObject({ x: 20, y: 30, rotation: 0 });
+  });
+
+  it("その 2 つにまたがるグループ化で、どちらの子も動かない", () => {
+    const d = nested(
+      ["G", "r"],
+      ["s"],
+      [createRect({ id: "s", x: 5, y: 5, width: 10, height: 10 })],
+    );
+    const next = groupNodes(d, ["s", "r"], "GG");
+    expect(getParent(next, "GG")).toEqual({ kind: "node", id: "F" });
+    corners(next, "s").forEach((p, i) => close(p, corners(d, "s")[i]!));
+    corners(next, "r").forEach((p, i) => close(p, corners(d, "r")[i]!));
   });
 });
 
