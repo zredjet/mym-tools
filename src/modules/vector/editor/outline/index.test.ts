@@ -22,6 +22,12 @@ import {
 } from "./index";
 import { compareStrokeOnGrid } from "./testing";
 
+/**
+ * 格子で結果を確かめるテストは重く、CI の遅い機械や負荷の高い手元では既定の 5 秒を超えることがある
+ * (`canvas-stage2` の CI で時間切れになった)。速さは `performance.test.ts` が見るので、ここは時間切れだけを延ばす
+ */
+const HEAVY_TIMEOUT_MS = 30_000;
+
 function stroke(
   width: number,
   cap: StrokeCap = "butt",
@@ -49,7 +55,7 @@ function expectMatches(subpaths: Subpath[], s: StrokeShape, steps = 72): Subpath
 const CAPS: StrokeCap[] = ["butt", "round", "square"];
 const JOINS: StrokeJoin[] = ["miter", "round", "bevel"];
 
-describe("outlineStroke: 端と角", () => {
+describe("outlineStroke: 端と角", { timeout: HEAVY_TIMEOUT_MS }, () => {
   for (const cap of CAPS) {
     it(`線分の端 (${cap})`, () => {
       const r = expectMatches(
@@ -149,7 +155,7 @@ describe("outlineStroke: 端と角", () => {
   });
 });
 
-describe("outlineStroke: 曲線", () => {
+describe("outlineStroke: 曲線", { timeout: HEAVY_TIMEOUT_MS }, () => {
   it("円と楕円 (太さが半径より小さい)", () => {
     expectMatches(ellipse(50, 50, 40), stroke(6));
     expectMatches(ellipse(50, 50, 60, 20), stroke(10, "butt", "round"));
@@ -297,7 +303,7 @@ describe("outlineStroke: 曲線", () => {
   });
 });
 
-describe("outlineStroke: 破線", () => {
+describe("outlineStroke: 破線", { timeout: HEAVY_TIMEOUT_MS }, () => {
   it("開いた輪郭の破線 (線分の境目をまたぐ区間、端)", () => {
     const zig = polygon(
       [
@@ -384,7 +390,7 @@ describe("outlineStroke: 破線", () => {
   });
 });
 
-describe("outlineStroke: 長さ 0 と点", () => {
+describe("outlineStroke: 長さ 0 と点", { timeout: HEAVY_TIMEOUT_MS }, () => {
   it("点 1 個の輪郭は描かない", () => {
     expect(outlineStroke([{ closed: false, points: [point(5, 5)] }], stroke(10, "round"))).toEqual(
       [],
@@ -435,7 +441,7 @@ describe("outlineStroke: 長さ 0 と点", () => {
   });
 });
 
-describe("outlineStroke: 乱れた形と座標", () => {
+describe("outlineStroke: 乱れた形と座標", { timeout: HEAVY_TIMEOUT_MS }, () => {
   it("乱れた曲線の形 (乱数)", () => {
     const rand = random(7);
     for (let i = 0; i < 12; i++) {
