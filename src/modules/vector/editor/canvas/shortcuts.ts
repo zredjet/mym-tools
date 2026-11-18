@@ -127,6 +127,11 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
   tool("tool.line", "l", "line"),
   tool("tool.text", "t", "text"),
   tool("tool.hand", "h", "hand"),
+
+  // ---- ペンと点の編集 (§8.13、F) ----
+  // Shift+P (鉛筆) は多角形・星・鉛筆のセッションが足す。点の編集の中のキーは `pathEdit` ツールが先に受ける
+  tool("tool.pen", "p", "pen"),
+
   {
     // 作成ツールや手のひらのときの Esc は選択ツールへ戻る (途中の操作は CanvasView が先に取り消す)
     id: "tool.escape",

@@ -11,6 +11,7 @@ import { ExportSection } from "./sections/ExportSection";
 import { FillSection } from "./sections/FillSection";
 import { FrameSection } from "./sections/FrameSection";
 import { PageSection } from "./sections/PageSection";
+import { PathPointSection } from "./sections/PathPointSection";
 import { PathSection } from "./sections/PathSection";
 import { PositionSection } from "./sections/PositionSection";
 import { hasFill, hasShadow, hasStroke } from "./sections/propertyOps";
@@ -64,6 +65,7 @@ export function PropertiesPanel() {
           <>
             <AlignSection />
             <PositionSection />
+            <PathPointSection />
             <AppearanceSection nodes={nodes} />
             {fills.length > 0 && <FillSection nodes={fills} />}
             {strokes.length > 0 && <StrokeSection nodes={strokes} />}

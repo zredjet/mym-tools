@@ -67,6 +67,7 @@ import { resizeNodeInOwnFrame, resizeNodes, updateNode } from "../model/transfor
 import { getNode, getPage, getParent, isAncestorOf, type ParentRef } from "../model/tree";
 import type { CanvasDocument, NodeId, Point } from "../model/types";
 import { geometryWithinLimits } from "../panels/limits";
+import { beginPathEdit } from "../path/editSession";
 import type { EditorStore } from "../state/types";
 import {
   alignedGuides,
@@ -489,6 +490,11 @@ function onPointerDown(event: CanvasPointerEvent, ctx: ToolContext): void {
         // 本文の編集を始めたら、この押下は終わり (取り消しても選択を戻さない)
         store.getState().startTextEdit(id);
         phase = { kind: "inert", press: null };
+        return;
+      }
+      // パスは点の編集に入る (§8.7.2)。ツールが変わるので、この押下は終わり
+      if (node?.type === "path" && beginPathEdit(store, id)) {
+        phase = { kind: "idle" };
         return;
       }
       if (canEnter(state.doc, id)) {

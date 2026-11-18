@@ -20,6 +20,7 @@ import { editorClipboard, PASTE_OFFSET, type EditorClipboard } from "../../state
 import { duplicateSelection, pasteClipboard, pasteTarget } from "../../state/commands";
 import type { EditorStore } from "../../state/types";
 import { isInteractive, isTopLevelFrame } from "../../hit/hitTest";
+import { beginPathEdit } from "../../path/editSession";
 import { moveDocument, translateRounded } from "./move";
 
 type Store = StoreApi<EditorStore>;
@@ -181,7 +182,7 @@ export function pasteWithinLimits(
 }
 
 /**
- * Enter: テキストなら本文の編集、frame / group / ブーリアンなら中に入って子を選ぶ。
+ * Enter: テキストなら本文の編集、パスなら点の編集 (§8.7.2)、frame / group / ブーリアンなら中に入って子を選ぶ。
  * 1 つだけ選んでいないときと、ほかのノードでは何もしない (false)。
  */
 export function enterSelection(store: Store): boolean {
@@ -194,6 +195,7 @@ export function enterSelection(store: Store): boolean {
     state.startTextEdit(id);
     return true;
   }
+  if (node.type === "path") return beginPathEdit(store, id);
   if (node.type !== "frame" && !isGroupLike(node)) return false;
   state.setScope(id);
   state.setSelection(
@@ -206,11 +208,15 @@ export function enterSelection(store: Store): boolean {
 }
 
 /**
- * Esc (何もしていないとき): 本文の編集の終了 → スコープを 1 段外へ (出たノードを選ぶ) → 選択の解除。
- * 何もすることがなければ false。
+ * Esc (何もしていないとき): 点の編集の終了 → 本文の編集の終了 → スコープを 1 段外へ (出たノードを選ぶ) →
+ * 選択の解除 (§8.7.2)。何もすることがなければ false。
  */
 export function escapeSelection(store: Store): boolean {
   const state = store.getState();
+  if (state.editingPathId !== null) {
+    state.endPathEdit();
+    return true;
+  }
   if (state.editingTextId !== null) {
     state.endTextEdit();
     return true;
