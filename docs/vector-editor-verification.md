@@ -1,9 +1,9 @@
 # キャンバスの検証と実機受入
 
-最終確認: 2026-11-18 (第 2 段階の切替の PR)。仕様は [ADR-0026](decisions/0026-self-built-canvas-editor.md)、[ADR-0028](decisions/0028-canvas-stage2-paths-rotation.md) と [キャンバスの設計](canvas-editor-design.md)。
+最終確認: 2026-11-18 (第 2 段階の切替の PR #195)。仕様は [ADR-0026](decisions/0026-self-built-canvas-editor.md)、[ADR-0028](decisions/0028-canvas-stage2-paths-rotation.md) と [キャンバスの設計](canvas-editor-design.md)。
 
 - 第 1 段階 (#180、payload v2): 自動テストと開発用の画面 (Vite) で確かめ、利用者が macOS の実アプリで確かめてからマージした
-- 第 2 段階 (統合ブランチ `canvas-stage2` の A〜J と切替の PR、payload v3): 自動テストと開発用の画面での確認まで済んでいる。**macOS / Windows の実アプリでの受入は未実施**で、両 OS の配布受入完了とは扱わない
+- 第 2 段階 (統合ブランチ `canvas-stage2` の A〜J と切替の #195、payload v3): 自動テストと開発用の画面での確認まで済んでいる。**macOS / Windows の実アプリでの受入は未実施**で、両 OS の配布受入完了とは扱わない
 
 SVG-Edit (ADR-0021) の時の検証記録は、このファイルの git の履歴 (2026-09-24 の版) にある。
 
@@ -53,7 +53,7 @@ SVG-Edit (ADR-0021) の時の検証記録は、このファイルの git の履�
 
 ### 実アプリで確かめること (未実施)
 
-切替の PR の CI (`build-tauri`) の成果物の portable ZIP を使う。identifier は普段のアプリと同じ `com.zredjet.mymtools` に戻してあるので、普段のデータを開く (macOS は `~/Library/Application Support/com.zredjet.mymtools/`、Windows は `%APPDATA%\com.zredjet.mymtools\`)。普段のデータでの確認は 1 回だけにする。統合ブランチのアプリ (`com.zredjet.mymtools.stage2`) のデータは別のフォルダにあり、この確認では触らない (要らなければ確認の後に自分で消す)。
+切替の PR (#195) の CI (`build-tauri`) の成果物の portable ZIP を使う。identifier は普段のアプリと同じ `com.zredjet.mymtools` に戻してあるので、普段のデータを開く (macOS は `~/Library/Application Support/com.zredjet.mymtools/`、Windows は `%APPDATA%\com.zredjet.mymtools\`)。普段のデータでの確認は 1 回だけにする。統合ブランチのアプリ (`com.zredjet.mymtools.stage2`) のデータは別のフォルダにあり、この確認では触らない (要らなければ確認の後に自分で消す)。
 
 #### 確認の前に (必ず今使っている版のアプリで)
 
