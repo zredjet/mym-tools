@@ -183,7 +183,9 @@ export function windingsAt(
       if (b[k * 4 + 2 + rayAxis]! < at - reach) continue;
       isMember = ctx.edgeOf[k] === edge;
       op = ctx.operands[k]!;
-      forEachCrossing(ctx.segs[k]!, horizontal, value, visit);
+      // 部分がすべて点より先なら、交わる位置は要らない (数と向きだけ)
+      const exact = b[k * 4 + rayAxis]! <= at + reach;
+      forEachCrossing(ctx.segs[k]!, horizontal, value, visit, exact);
       if (ambiguous) return null;
     }
   }
@@ -198,12 +200,15 @@ export function windingsAt(
 /**
  * 曲線と、光線の直線 (横なら y = value、縦なら x = value) の交わり。`other` は交わる点のもう一方の座標、
  * `weight` は巻き数への寄与 (横の光線は y が増える横切りで +1、縦の光線は x が減る横切りで +1)。
+ * `exact` が false なら交わる位置を求めず、`other` は Infinity (呼び出し側が、曲線がすべて点より先にあると
+ * 分かっているとき)。
  */
 export function forEachCrossing(
   seg: Segment,
   horizontal: boolean,
   value: number,
   visit: (other: number, weight: number) => void,
+  exact = true,
 ): void {
   const c0 = horizontal ? seg.from.y : seg.from.x;
   const c3 = horizontal ? seg.to.y : seg.to.x;
@@ -215,7 +220,7 @@ export function forEachCrossing(
     const increasing = c3 > c0;
     if (increasing ? value < c0 || value >= c3 : value < c3 || value >= c0) return;
     const t = (value - c0) / (c3 - c0);
-    visit(o0 + (o3 - o0) * t, increasing ? sign : -sign);
+    visit(exact ? o0 + (o3 - o0) * t : Infinity, increasing ? sign : -sign);
     return;
   }
   const c1 = horizontal ? seg.c1.y : seg.c1.x;
@@ -268,6 +273,10 @@ export function forEachCrossing(
     if (va === v1) continue;
     const increasing = v1 > va;
     if (increasing ? value < va || value >= v1 : value < v1 || value >= va) continue;
+    if (!exact) {
+      visit(Infinity, increasing ? sign : -sign);
+      continue;
+    }
     const t =
       va === value ? ta : solveMonotone(ca, cb, cc, c0 - value, ta, t1, va - value, v1 - value);
     const other = t === 0 ? o0 : cubicAt(o0, o1, o2, o3, t);

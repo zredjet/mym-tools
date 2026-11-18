@@ -15,12 +15,13 @@
  *
  * 求められないとき (null): 交点を探し尽くせなかった (`intersectSegments` の打ち切り)、同じ点にまとめた
  * 交点が離れすぎている、辺のどの点でも巻き数が決まらない (ほかの曲線が許容値の中で寄り添う)、結果の面の
- * 境界に矛盾がある (`graph.ts` の検査)、座標が有限でない、計算の中で例外が起きた。
+ * 境界に矛盾がある (`graph.ts` の検査)、座標の大きさに比べて小さすぎる輪郭がある (`MIN_EXTENT_FACTOR`)、
+ * 座標が大きすぎる (`MAX_MAGNITUDE`)・有限でない、計算の中で例外が起きた。
  */
 import { toleranceFor } from "../geometry/bezier";
 import type { BooleanOp, FillRule, Subpath } from "../model/types";
 import { buildResult } from "./graph";
-import { collectSegments, splitOperands, tolerancesFor } from "./split";
+import { buildContours, collectContours, splitOperands, tolerancesFor } from "./split";
 
 /** 演算の入力 1 個。座標は呼び出し側がそろえる (ブーリアンのノードの親の座標系)。 */
 export interface BooleanOperand {
@@ -51,6 +52,19 @@ export function booleanOperation(
 
 const OPS: readonly BooleanOp[] = ["union", "subtract", "intersect", "exclude"];
 
+/**
+ * 座標の絶対値の上限。これを超えると面積などの計算 (座標の 2 乗) の桁が足りなくなり、1e154 ほどで
+ * あふれるので、求められなかった (null) とする。文書の座標の上限 (1e6) よりずっと大きい。
+ */
+export const MAX_MAGNITUDE = 1e15;
+/**
+ * 輪郭の大きさ (制御点の範囲の幅と高さの大きい方) の下限の、同じ点にまとめる距離 (`Tolerances.spread`)
+ * に対する倍率。これより小さい輪郭は、頂点をまとめたり細い輪を落としたりすると形が崩れうるので、
+ * 面がないと誤って言わないよう null にする。ふつうの座標 (1000 以下) では 1.28e-3 px、座標が 1e6 の
+ * 近くでは 1.28 px。長さ 0 の線分の許容値以下の輪郭は点として除く (面積はその 2 乗以下)
+ */
+export const MIN_EXTENT_FACTOR = 100;
+
 function compute(op: BooleanOp, operands: readonly BooleanOperand[]): Subpath[] | null {
   if (!OPS.includes(op)) return null;
   for (const operand of operands) {
@@ -58,13 +72,18 @@ function compute(op: BooleanOp, operands: readonly BooleanOperand[]): Subpath[] 
     if (!finiteSubpaths(operand.subpaths)) return null;
   }
   if (operands.length === 0) return [];
-  const { segments, contours, magnitude } = collectSegments(operands);
+  const { raw, magnitude } = collectContours(operands);
+  if (magnitude > MAX_MAGNITUDE) return null;
+  const tol = tolerancesFor(toleranceFor(magnitude));
+  for (const c of raw) {
+    if (c.extent > tol.intersect && c.extent < MIN_EXTENT_FACTOR * tol.spread) return null;
+  }
+  const { segments, contours } = buildContours(raw, tol.intersect);
   // 面のない入力: 交差は空、型抜きは引かれる側がなければ空
   const present = operands.map((_, k) => contours.some((c) => c.operand === k));
   if (op === "intersect" && present.some((p) => !p)) return [];
   if (op === "subtract" && !present[0]) return [];
   if (segments.length === 0) return [];
-  const tol = tolerancesFor(toleranceFor(magnitude));
   const split = splitOperands(segments, contours, tol);
   if (!split) return null;
   return buildResult(op, {

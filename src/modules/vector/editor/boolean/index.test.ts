@@ -354,3 +354,58 @@ describe("booleanOperation の結果の形", () => {
     expect(r.map(signedArea).sort((a, b) => a - b)).toEqual([-6400, 3600, 10000]);
   });
 });
+
+describe("booleanOperation の座標の範囲", () => {
+  const OPS4: BooleanOp[] = ["union", "subtract", "intersect", "exclude"];
+
+  it("座標の大きさに比べて小さすぎる輪郭があれば、空ではなく null", () => {
+    // 座標 1e6 の近く (許容値 1e-4) で一辺 0.001 と 0.003 の正方形
+    for (const s of [0.001, 0.003]) {
+      const ops = [operand(rect(1e6, 0, s, s)), operand(rect(1e6 + s / 2, s / 2, s, s))];
+      for (const op of OPS4) expect(booleanOperation(op, ops), `${s} ${op}`).toBeNull();
+    }
+    // 原点の近くで一辺 1e-4
+    const tiny = [operand(rect(0, 0, 1e-4, 1e-4)), operand(rect(5e-5, 5e-5, 1e-4, 1e-4))];
+    for (const op of OPS4) expect(booleanOperation(op, tiny)).toBeNull();
+    // 大きな形に、小さすぎる輪郭が 1 つ混ざっている
+    expect(
+      booleanOperation("union", [
+        operand(rect(0, 0, 100, 100)),
+        operand(rect(200, 200, 1e-4, 1e-4)),
+      ]),
+    ).toBeNull();
+  });
+
+  it("小さくても範囲の中なら求める", () => {
+    // 原点の近くで一辺 0.01、座標 1e6 の近くで一辺 2
+    for (const [x, s] of [
+      [0, 0.01],
+      [1e6, 2],
+    ] as const) {
+      const ops = [operand(rect(x, 0, s, s)), operand(rect(x + s / 2, s / 2, s, s))];
+      const expected = { union: 1.75, subtract: 0.75, intersect: 0.25, exclude: 1.5 };
+      for (const op of OPS4) {
+        const r = run(op, ops);
+        const area = r.reduce((sum, sub) => sum + signedArea(sub), 0);
+        expect(area / (s * s)).toBeCloseTo(expected[op], 6);
+      }
+    }
+  });
+
+  it("長さ 0 の許容値以下の輪郭は点として除く (null にしない)", () => {
+    const dot = operand([
+      { closed: true, points: [point(50, 50), point(50 + 1e-9, 50), point(50, 50 + 1e-9)] },
+    ]);
+    expect(run("union", [operand(rect(0, 0, 100, 100)), dot])).toHaveLength(1);
+  });
+
+  it("座標が大きすぎれば null (面積の計算があふれる)", () => {
+    const big = [operand(rect(0, 0, 1e200, 1e200)), operand(rect(5e199, 5e199, 2.5e199, 2.5e199))];
+    for (const op of OPS4) expect(booleanOperation(op, big)).toBeNull();
+    const justOver = [operand(rect(0, 0, 2e15, 2e15)), operand(rect(1e15, 1e15, 2e15, 2e15))];
+    expect(booleanOperation("union", justOver)).toBeNull();
+    const under = [operand(rect(0, 0, 5e14, 5e14)), operand(rect(2.5e14, 2.5e14, 5e14, 5e14))];
+    const u = run("union", under);
+    expect(u.reduce((sum, sub) => sum + signedArea(sub), 0) / 25e28).toBeCloseTo(1.75, 6);
+  });
+});

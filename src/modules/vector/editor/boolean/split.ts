@@ -15,7 +15,8 @@
  * 2. 輪郭の継ぎ目 (前の線分の t = 1 と次の線分の t = 0) を同じ頂点にする
  * 3. 範囲が重なる線分の組 (x で並べて掃く) の交点と重なり、3 次ベジェ 1 本の自己交差を求め、
  *    両方の線分に分ける点 (event) を足して同じ頂点にする。輪郭で隣り合う 2 本は、継ぎ目を通る直線で
- *    分けられるなら継ぎ目でしか会わないので調べない (アイコンでは組の大半がこれ)
+ *    分けられるなら継ぎ目でしか会わないので調べない (アイコンでは組の大半がこれ)。そのほかの組は、
+ *    曲線を細かく分けた覆い (`buildCover`) で交わらないと分かれば調べない
  * 4. 線分ごとに分ける点を t の順に並べ、間の曲線が短すぎる (`merge` 以下) 点どうしを 1 つにまとめる
  *    (継ぎ目の近くで同じ交点が 2 回報告される場合や、端点のすぐ近くの交点)。まとめた点は同じ頂点
  * 5. 頂点の点は、輪郭の継ぎ目 (入力の点そのもの) を含めばそれ、なければ最初の交点
@@ -31,6 +32,7 @@ import {
   segmentMagnitude,
   subSegment,
   tangentAt,
+  unionBounds,
 } from "../geometry/bezier";
 import { intersectSegments, selfIntersection } from "../geometry/intersect";
 import type { Point } from "../model/types";
@@ -93,31 +95,42 @@ export function tolerancesFor(intersect: number): Tolerances {
   return { intersect, merge: 8 * intersect, spread: 128 * intersect };
 }
 
+/** 入力の輪郭 1 つ (閉じた線分の並び)。 */
+export interface RawContour {
+  operand: number;
+  segs: Segment[];
+  /** 制御点の範囲の幅と高さの大きい方 */
+  extent: number;
+}
+
 /** 入力の輪郭を閉じた線分の並びにする。座標の絶対値の最大も返す。 */
-export function collectSegments(operands: readonly BooleanOperand[]): {
-  segments: InputSegment[];
-  contours: InputContour[];
+export function collectContours(operands: readonly BooleanOperand[]): {
+  raw: RawContour[];
   magnitude: number;
 } {
-  const raw: { operand: number; segs: Segment[] }[] = [];
+  const raw: RawContour[] = [];
   let magnitude = 0;
   operands.forEach((operand, k) => {
     for (const sub of operand.subpaths) {
       const segs = subpathToSegments(sub, { implicitClose: true });
       if (segs.length === 0) continue;
-      for (const s of segs) magnitude = Math.max(magnitude, segmentMagnitude(s));
-      raw.push({ operand: k, segs });
+      let box: Bounds | null = null;
+      for (const s of segs) {
+        magnitude = Math.max(magnitude, segmentMagnitude(s));
+        box = unionBounds(box, controlBounds(s));
+      }
+      const extent = box ? Math.max(box.maxX - box.minX, box.maxY - box.minY) : 0;
+      raw.push({ operand: k, segs, extent });
     }
   });
-  return { ...buildContours(raw, magnitude), magnitude };
+  return { raw, magnitude };
 }
 
-function buildContours(
-  raw: readonly { operand: number; segs: Segment[] }[],
-  magnitude: number,
+/** 長さ 0 (`tol` 以下) の線分を除き、輪郭と線分の表にする。線分が残らない輪郭は除く。 */
+export function buildContours(
+  raw: readonly RawContour[],
+  tol: number,
 ): { segments: InputSegment[]; contours: InputContour[] } {
-  // 長さ 0 の線分を除く許容値は、交点と同じ規則 (座標の大きさ × 1e-10、下限 1e-7)
-  const tol = Math.max(1e-7, magnitude * 1e-10);
   const segments: InputSegment[] = [];
   const contours: InputContour[] = [];
   for (const { operand, segs } of raw) {
@@ -213,8 +226,9 @@ export function splitOperands(
     if (self) events.link(i, self.t1, i, self.t2, self.point);
   });
   // 3. 組の交点
+  const covers = segments.map((s) => buildCover(s.seg));
   for (const [a, b] of candidatePairs(segments, tol.intersect)) {
-    if (!intersectPair(segments, contours, a, b, tol, events)) return null;
+    if (!intersectPair(segments, contours, covers, a, b, tol, events)) return null;
   }
   // 4. 線分ごとに分ける点をまとめる
   const eventIds: number[][] = segments.map(() => []);
@@ -309,26 +323,41 @@ export function splitOperands(
   return { segments, contours, pieces, vertices };
 }
 
-/** 範囲 (制御点の範囲) が重なる線分の組 (a < b)。x で並べて掃く。結果は (a, b) の昇順。 */
+/**
+ * 範囲 (制御点の範囲) が重なる線分の組 (a < b)。x で並べて掃く。順は掃いた順 (入力の順だけで決まる)。
+ */
 function candidatePairs(segments: readonly InputSegment[], margin: number): [number, number][] {
+  const n = segments.length;
   const order = segments.map((_, i) => i);
   order.sort((p, q) => {
     const d = segments[p]!.bounds.minX - segments[q]!.bounds.minX;
     return d !== 0 ? d : p - q;
   });
+  // 並べた順の範囲
+  const minX = new Float64Array(n);
+  const minY = new Float64Array(n);
+  const maxX = new Float64Array(n);
+  const maxY = new Float64Array(n);
+  order.forEach((s, i) => {
+    const b = segments[s]!.bounds;
+    minX[i] = b.minX;
+    minY[i] = b.minY;
+    maxX[i] = b.maxX;
+    maxY[i] = b.maxY;
+  });
   const pairs: [number, number][] = [];
-  for (let i = 0; i < order.length; i++) {
-    const a = order[i]!;
-    const ba = segments[a]!.bounds;
-    for (let j = i + 1; j < order.length; j++) {
+  for (let i = 0; i < n; i++) {
+    const right = maxX[i]! + margin;
+    const top = minY[i]! - margin;
+    const bottom = maxY[i]! + margin;
+    for (let j = i + 1; j < n; j++) {
+      if (minX[j]! > right) break;
+      if (minY[j]! > bottom || maxY[j]! < top) continue;
+      const a = order[i]!;
       const b = order[j]!;
-      const bb = segments[b]!.bounds;
-      if (bb.minX > ba.maxX + margin) break;
-      if (bb.minY > ba.maxY + margin || ba.minY > bb.maxY + margin) continue;
       pairs.push(a < b ? [a, b] : [b, a]);
     }
   }
-  pairs.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
   return pairs;
 }
 
@@ -355,6 +384,7 @@ function adjacency(
 function intersectPair(
   segments: readonly InputSegment[],
   contours: readonly InputContour[],
+  covers: readonly Cover[],
   a: number,
   b: number,
   tol: Tolerances,
@@ -365,7 +395,7 @@ function intersectPair(
   const adj = adjacency(segments, contours, a, b);
   if (adj === "forward" && meetOnlyAtJoint(A, B, tol.intersect)) return true;
   if (adj === "backward" && meetOnlyAtJoint(B, A, tol.intersect)) return true;
-  if (adj === "none" && separatedByBands(A, B, tol.intersect)) return true;
+  if (adj === "none" && coversSeparated(covers[a]!, covers[b]!, tol.intersect)) return true;
   const r = intersectSegments(A, B, { tolerance: tol.intersect });
   if (!r.complete) return false;
   for (const x of r.intersections) {
@@ -381,47 +411,145 @@ function intersectPair(
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// 交わらない組を安く除く (`intersectSegments` の前の絞り込み)
+// ---------------------------------------------------------------------------
+
 /**
- * 2 本の 3 次ベジェが交わらないと安く分かるか (`intersectSegments` の前の絞り込み)。曲線は制御点の凸包の中に
- * あるので、片方の弦の向きとその法線の向きのそれぞれで、制御点の座標の帯 (fat line と、弦に沿った幅) を作り、
- * 相手の制御点がすべて帯の片側の外 (許容値より遠く) なら交わらない。線分を含む組は `intersectSegments` が
- * 安く解くので調べない。
+ * 曲線の覆い: 曲線全体 (部分 0) と、3 次ベジェなら t を `COVER_PIECES` 等分した部分 (部分 1〜) ごとに、
+ * 制御点の範囲と、部分の弦の向き u とその法線の向きの帯 (制御点の座標の最小と最大) を持つ。曲線の各部分は
+ * 自分の制御点の凸包の中にあるので、相手の部分の制御点がすべて帯の片側の外 (許容値より遠く) なら、
+ * その 2 つの部分は交わらない。すべての部分の組がそうなら、曲線は交わらない。
+ *
+ * 入れ子の同心円のように、範囲も曲線全体の帯も重なるのに離れている組 (同じ象限の弧) が多い入力で、
+ * `intersectSegments` (1 組 3〜20 µs) を呼ばずに済ませる。部分の帯の厚さは弧の矢高なので、半径 100 の
+ * 1/4 円を 8 等分すると約 0.5 (2 px 離れた同心円を分けられる)。
  */
-function separatedByBands(a: Segment, b: Segment, tol: number): boolean {
-  if (a.kind !== "cubic" || b.kind !== "cubic") return false;
-  return bandSeparates(a, b, tol) || bandSeparates(b, a, tol);
+const COVER_PIECES = 8;
+/** 部分ごとの数: 範囲 4、原点 2、向き 2、法線の帯 2、弦の帯 2、制御点 8 */
+const STRIDE = 20;
+
+export interface Cover {
+  data: Float64Array;
+  /** 部分の数 (曲線全体を含む) */
+  count: number;
 }
 
-function bandSeparates(a: Segment, b: Segment, tol: number): boolean {
-  const dx = a.to.x - a.from.x;
-  const dy = a.to.y - a.from.y;
-  const len = Math.hypot(dx, dy);
-  if (!(len > 0)) return false;
-  const ux = dx / len;
-  const uy = dy / len;
-  const pa = controlPoints(a);
-  const pb = controlPoints(b);
-  for (const [vx, vy] of [
-    [-uy, ux],
-    [ux, uy],
-  ] as const) {
-    let aLo = Infinity;
-    let aHi = -Infinity;
-    for (const p of pa) {
-      const d = (p.x - a.from.x) * vx + (p.y - a.from.y) * vy;
-      if (d < aLo) aLo = d;
-      if (d > aHi) aHi = d;
+export function buildCover(seg: Segment): Cover {
+  const parts: Segment[] = [seg];
+  if (seg.kind === "cubic") {
+    for (let k = 0; k < COVER_PIECES; k++) {
+      parts.push(subSegment(seg, k / COVER_PIECES, (k + 1) / COVER_PIECES));
     }
-    let bLo = Infinity;
-    let bHi = -Infinity;
-    for (const p of pb) {
-      const d = (p.x - a.from.x) * vx + (p.y - a.from.y) * vy;
-      if (d < bLo) bLo = d;
-      if (d > bHi) bHi = d;
-    }
-    if (bLo > aHi + tol || bHi < aLo - tol) return true;
   }
-  return false;
+  const data = new Float64Array(parts.length * STRIDE);
+  parts.forEach((part, i) => {
+    const o = i * STRIDE;
+    const pts =
+      part.kind === "line"
+        ? [part.from, part.from, part.to, part.to]
+        : [part.from, part.c1, part.c2, part.to];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    pts.forEach((q, k) => {
+      minX = Math.min(minX, q.x);
+      minY = Math.min(minY, q.y);
+      maxX = Math.max(maxX, q.x);
+      maxY = Math.max(maxY, q.y);
+      data[o + 12 + 2 * k] = q.x;
+      data[o + 13 + 2 * k] = q.y;
+    });
+    const dx = part.to.x - part.from.x;
+    const dy = part.to.y - part.from.y;
+    const len = Math.hypot(dx, dy);
+    // 弦の長さが 0 なら x 軸の向き (帯はどの向きでも正しい)
+    const ux = len > 0 ? dx / len : 1;
+    const uy = len > 0 ? dy / len : 0;
+    let nLo = Infinity;
+    let nHi = -Infinity;
+    let sLo = Infinity;
+    let sHi = -Infinity;
+    for (const q of pts) {
+      const ex = q.x - part.from.x;
+      const ey = q.y - part.from.y;
+      const nn = ey * ux - ex * uy;
+      const ss = ex * ux + ey * uy;
+      nLo = Math.min(nLo, nn);
+      nHi = Math.max(nHi, nn);
+      sLo = Math.min(sLo, ss);
+      sHi = Math.max(sHi, ss);
+    }
+    data.set([minX, minY, maxX, maxY, part.from.x, part.from.y, ux, uy, nLo, nHi, sLo, sHi], o);
+  });
+  return { data, count: parts.length };
+}
+
+/** 2 本の曲線が (許容値より離れて) 交わらないと覆いで分かるか。 */
+export function coversSeparated(a: Cover, b: Cover, tol: number): boolean {
+  if (pieceSeparated(a.data, 0, b.data, 0, tol)) return true;
+  const aFirst = a.count > 1 ? 1 : 0;
+  const bFirst = b.count > 1 ? 1 : 0;
+  if (aFirst === 0 && bFirst === 0) return false;
+  for (let i = aFirst; i < a.count; i++) {
+    for (let j = bFirst; j < b.count; j++) {
+      if (!pieceSeparated(a.data, i * STRIDE, b.data, j * STRIDE, tol)) return false;
+    }
+  }
+  return true;
+}
+
+function pieceSeparated(
+  P: Float64Array,
+  p: number,
+  Q: Float64Array,
+  q: number,
+  tol: number,
+): boolean {
+  if (
+    P[p]! > Q[q + 2]! + tol ||
+    Q[q]! > P[p + 2]! + tol ||
+    P[p + 1]! > Q[q + 3]! + tol ||
+    Q[q + 1]! > P[p + 3]! + tol
+  ) {
+    return true;
+  }
+  return slabSeparates(P, p, Q, q, tol) || slabSeparates(Q, q, P, p, tol);
+}
+
+/** Q の部分の制御点が、P の部分の帯 (法線の向きか弦の向き) の片側の外にあるか。 */
+function slabSeparates(
+  P: Float64Array,
+  p: number,
+  Q: Float64Array,
+  q: number,
+  tol: number,
+): boolean {
+  const ox = P[p + 4]!;
+  const oy = P[p + 5]!;
+  const ux = P[p + 6]!;
+  const uy = P[p + 7]!;
+  let nMin = Infinity;
+  let nMax = -Infinity;
+  let sMin = Infinity;
+  let sMax = -Infinity;
+  for (let k = 0; k < 4; k++) {
+    const ex = Q[q + 12 + 2 * k]! - ox;
+    const ey = Q[q + 13 + 2 * k]! - oy;
+    const nn = ey * ux - ex * uy;
+    const ss = ex * ux + ey * uy;
+    if (nn < nMin) nMin = nn;
+    if (nn > nMax) nMax = nn;
+    if (ss < sMin) sMin = ss;
+    if (ss > sMax) sMax = ss;
+  }
+  return (
+    nMin > P[p + 9]! + tol ||
+    nMax < P[p + 8]! - tol ||
+    sMin > P[p + 11]! + tol ||
+    sMax < P[p + 10]! - tol
+  );
 }
 
 /**

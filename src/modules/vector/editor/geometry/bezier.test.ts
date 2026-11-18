@@ -224,6 +224,36 @@ describe("nearest point", () => {
     expect(worst).toBeLessThanOrEqual(1e-9);
   });
 
+  it("finds points on sharply turning curves (the minimum hidden inside one sample interval)", () => {
+    // 始点のすぐ先で急に折り返す曲線: 1/32 の区間の中で点から遠ざかってまた近づく (#187 のレビュー)
+    const hairpin = cubicSegment(
+      { x: 70, y: 30 },
+      { x: 70.4958, y: 28.25 },
+      { x: 63.2887, y: 63.9433 },
+      { x: 62.0772, y: 60.1597 },
+    );
+    const n = nearestPoint(hairpin, pointAt(hairpin, 0.01));
+    expect(n.distance).toBeLessThanOrEqual(1e-12);
+    expect(n.t).toBeCloseTo(0.01, 9);
+    // 乱数の曲線 (始点の近くに c1 を置いて急に折り返しやすくする) の上の点は、距離 0 で見つかる
+    let seed = 11;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) * 100;
+    let worst = 0;
+    for (let k = 0; k < 600; k++) {
+      const a = { x: rnd(), y: rnd() };
+      const seg = cubicSegment(
+        a,
+        { x: a.x + (rnd() - 50) / 25, y: a.y + (rnd() - 50) / 25 },
+        { x: rnd(), y: rnd() },
+        { x: rnd(), y: rnd() },
+      );
+      for (const t of [0.001, 0.005, 0.01, 0.02, 0.05, 0.5, 0.98, 0.995]) {
+        worst = Math.max(worst, nearestPoint(seg, pointAt(seg, t)).distance);
+      }
+    }
+    expect(worst).toBeLessThanOrEqual(1e-9);
+  });
+
   it("agrees with brute force sampling", () => {
     const probes = [
       { x: 50, y: 50 },

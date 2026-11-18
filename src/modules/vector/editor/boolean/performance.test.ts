@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { rotate } from "../geometry/matrix";
-import type { BooleanOp } from "../model/types";
+import type { BooleanOp, Subpath } from "../model/types";
 import { subpathToSegments } from "../path/segments";
 import { transformSubpaths } from "../path/transform";
 import { type BooleanOperand, booleanOperation } from "./index";
@@ -67,10 +67,21 @@ function denseIcon(): BooleanOperand[] {
   return ops;
 }
 
+/**
+ * 入れ子の同心円 50 個 (evenodd の入力 1 個) と縦の帯 (曲線 204 本)。同じ象限の弧どうしは範囲も帯も
+ * 重なるので、交わらない組を細かく分けた覆いで除けないと、組 (約 4,900) ごとに交点を求めて 20 ms を超える。
+ */
+function concentricRings(): BooleanOperand[] {
+  const rings: Subpath[] = [];
+  for (let i = 0; i < 50; i++) rings.push(...ellipse(100, 100, 5 + 2 * i));
+  return [operand(rings, "evenodd"), operand(rect(95, 0, 10, 200))];
+}
+
 describe("booleanOperation の速さ", () => {
   for (const [name, make] of [
     ["歯車のアイコン", gearIcon],
     ["重なりの多い形", denseIcon],
+    ["入れ子の同心円 50 個と帯", concentricRings],
   ] as const) {
     it(`${name}: 4 つの演算の中央値が ${BUDGET_MS} ms 以内で、結果が正しい`, () => {
       const operands = make();
