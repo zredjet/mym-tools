@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPath } from "../model/create";
 import { CANVAS_LIMITS } from "../model/limits";
+import { checkSavable } from "../model/payload";
 import { insertNode } from "../model/structure";
 import { getNode } from "../model/tree";
 import type { CanvasDocument, PathNode } from "../model/types";
@@ -296,6 +297,7 @@ describe("ダブルクリック", () => {
     expect(p.mirror).toBe("angle-length");
     expect(p.out).not.toBeNull();
     expect(t.s().revision).toBe(1);
+    expect(checkSavable(t.s().doc)).toBeNull();
     t.down(t.pageOf("sq", 0, 1).x, t.pageOf("sq", 0, 1).y, { clickCount: 2 });
     expect(t.node().subpaths[0]!.points[1]).toMatchObject({ in: null, out: null, mirror: "none" });
   });
@@ -309,6 +311,7 @@ describe("ダブルクリック", () => {
     expect(t.node().subpaths[0]!.points[3]).toMatchObject({ x: 50, y: 100 });
     expect(t.points()).toEqual([{ subpath: 0, index: 3 }]);
     expect(t.s().revision).toBe(1);
+    expect(checkSavable(t.s().doc)).toBeNull();
   });
 });
 

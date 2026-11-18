@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBoolean, createRect } from "../model/create";
 import { CANVAS_LIMITS } from "../model/limits";
+import { checkSavable } from "../model/payload";
 import { getNode, getParent } from "../model/tree";
 import type { CanvasDocument, PathNode } from "../model/types";
 import { getPathEditSnapshot, resetPathEditSession, selectedPoints } from "../path/editSession";
@@ -122,6 +123,7 @@ describe("新しいパス", () => {
     expect(path).toMatchObject({ x: 700, y: 100 });
     expect(t.s()).toMatchObject({ toolId: "select", selection: [path!.id], revision: 2 });
     expect(getPathEditSnapshot().pen).toBeNull();
+    expect(checkSavable(t.s().doc)).toBeNull();
   });
 
   it("点を 1 個しか置かずに終えたら何も残さない", () => {
@@ -346,6 +348,7 @@ describe("点の編集の中のペン", () => {
     t.click(600, 200);
     expect((getNode(t.s().doc, "open") as PathNode).subpaths[0]!.closed).toBe(true);
     expect(t.s()).toMatchObject({ toolId: "pathEdit", editingPathId: "open" });
+    expect(checkSavable(t.s().doc)).toBeNull();
   });
 
   it("続けた輪郭の Backspace は、描き始めた後に足した点だけを消す", () => {
