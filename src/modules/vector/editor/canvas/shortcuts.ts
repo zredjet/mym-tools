@@ -118,6 +118,17 @@ export const CONVERT_SHORTCUTS: Shortcut[] = [
   },
 ];
 
+// ---- 鉛筆 (H。§8.13) ----
+// Cmd/Ctrl+Shift+P はアプリ全体の割当 (プロジェクト切替) なので、Cmd/Ctrl なしの Shift+P だけ。
+// 多角形と星にはキーを割り当てない
+export const PENCIL_SHORTCUTS: Shortcut[] = [
+  {
+    id: "tool.pencil",
+    keys: [{ key: ["p"], shift: true }],
+    run: ({ store }) => store.getState().setTool("pencil"),
+  },
+];
+
 // ---- 線のアウトライン化 (I。§8.13) ----
 // 中身は `outline/convertAction.ts` (「変換」の節のボタンと同じ動作)。点の編集中は `pathEdit` ツールが先に受けて止める
 export const OUTLINE_SHORTCUTS: Shortcut[] = [
@@ -362,6 +373,7 @@ export const CANVAS_SHORTCUTS: Shortcut[] = [
 
   // ---- 第 2 段階の節 (担当ごと) ----
   ...CONVERT_SHORTCUTS,
+  ...PENCIL_SHORTCUTS,
   ...OUTLINE_SHORTCUTS,
 ];
 
