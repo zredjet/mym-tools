@@ -12,7 +12,8 @@ import { MIXED, type Mixed } from "./values";
 interface DashSession {
   targets: readonly NodeId[];
   onCommit(dash: number[], targets: readonly NodeId[]): void;
-  initial: string;
+  /** 入力を始めた時点に出ていた文字列。「混在」なら null (空の入力も実線として当てる) */
+  initial: string | null;
   text: string;
 }
 
@@ -30,6 +31,7 @@ function commitDashSession(session: DashSession | null): void {
  * 破線の欄 (§8.11)。数値をスペースかカンマで区切って入れる (例 `4 2`)。空は実線。
  * 確定の規則は `NumberField` と同じ: Enter かフォーカスが外れたときに、入力を始めた時点の対象へ当てる
  * (履歴 1 件)。Esc で取り消す。§8.3.2 の規則と上限に合わない入力は当てず、打っている間は欄を赤くする。
+ * 「混在」のときは、打ってから空にして確定しても実線として当てる (全部を実線にそろえられるように)。
  */
 export function DashField({
   ariaLabel,
@@ -45,7 +47,7 @@ export function DashField({
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const session = useRef<DashSession | null>(null);
-  const shown = value === MIXED ? "" : formatDash(value);
+  const shown = value === MIXED ? null : formatDash(value);
   const rejected = draft !== null && parseDashInput(draft) === null;
 
   useEffect(
@@ -98,7 +100,7 @@ export function DashField({
         aria-label={ariaLabel}
         aria-invalid={rejected || undefined}
         className="w-full min-w-0 bg-transparent text-[var(--fg)] tabular-nums outline-none placeholder:text-[var(--fg-muted)] focus-visible:outline-none"
-        value={draft ?? shown}
+        value={draft ?? shown ?? ""}
         placeholder={value === MIXED ? "混在" : "実線"}
         spellCheck={false}
         autoComplete="off"

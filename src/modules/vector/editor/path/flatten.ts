@@ -18,6 +18,10 @@
  * - 輪郭は重なり順に並べる。塗りのある形は `booleanOperation("union", [その形])` で向きをそろえた輪郭にして
  *   (`nonzero` で塗っても重なった所が穴にならない)、塗りのない形は輪郭をそのまま並べる。ブーリアンの結果は
  *   もとから向きがそろっている。面積のない塗りのある形 (合体が空) は輪郭をそのまま使う
+ * - ブーリアンの子をまとめるときは、塗りに関係なくどの子も自分の塗りの規則で合体して向きをそろえる (子は
+ *   塗りのある面として演算に数えられる。§8.9.2)。面積のない子は落とす
+ * - 非表示のノードはまとめに入れず、元の場所にそのまま残す (見えるようにせず、ブーリアンの演算にも数えさせない)。
+ *   選んだノードがすべて非表示なら当てない
  *
  * 当てないとき (理由を返す): ブーリアンの結果が求められない、合体が求められない形がある、形が 1 つもない
  * (大きさ 0、ブーリアンの結果が空)、結果が §3.5 と §8.3.2 の上限 (座標、大きさ、輪郭・点の数) を超える。
@@ -47,6 +51,7 @@ export type FlattenFailure =
   | "booleanFailed"
   | "unionFailed"
   | "empty"
+  | "allHidden"
   | "limits";
 
 /** 当てなかった理由の文 (画面に出す)。 */
@@ -58,6 +63,7 @@ export const FLATTEN_FAILURE_MESSAGES: Readonly<Record<FlattenFailure, string>> 
   unionFailed:
     "輪郭の向きをそろえられない (合体を求められない) 形があるため、パスに変換できません。",
   empty: "形がない (大きさが 0 か、ブーリアンの結果が空) ため、パスに変換できません。",
+  allHidden: "非表示のノードは 1 つのパスにまとめません。表示してから変換してください。",
   limits: "結果が座標・大きさ・パスの点の数の上限を超えるため、パスに変換できません。",
 };
 
@@ -173,26 +179,40 @@ function flattenOne(doc: CanvasDocument, node: FlattenableNode): PathNode | Flat
   return createPath(shape.subpaths, { ...common, fillRule: "nonzero" });
 }
 
-/** 複数のノードを 1 つのパスの輪郭にする (重なり順)。 */
+/**
+ * 複数のノードを 1 つのパスの輪郭にする (重なり順)。
+ *
+ * - ブーリアンの外: 塗りのある形は自分の塗りの規則で合体して向きをそろえ (`nonzero` で塗っても重なりが穴に
+ *   ならない)、塗りのない形は輪郭をそのまま並べる (線の見た目を残す)。面積のない塗りのある形も輪郭のまま
+ * - ブーリアンの子 (`inBoolean`): 子は自分の塗りに関係なく、自分の塗りの規則の面として演算に数えられる
+ *   (§8.9.2) ので、どれも合体して向きをそろえる。面積のない形は面がないので落とす。こうすると、まとめた
+ *   パス (`nonzero`) の面は子の面の合体と同じになり、合体・型抜きの結果は変わらない
+ * - ブーリアンの結果はもとから向きがそろっているので、そのまま並べる
+ */
 function mergedSubpaths(
   doc: CanvasDocument,
   nodes: readonly FlattenableNode[],
+  inBoolean: boolean,
 ): Subpath[] | FlattenFailure {
   const result: Subpath[] = [];
   for (const node of nodes) {
     const shape = parentSpaceShape(doc, node);
     if (!shape.ok) return shape.reason;
     if (shape.subpaths.length === 0) continue;
-    const filled = node.type !== "line" && node.fill !== null;
-    if (!filled || node.type === "boolean") {
+    if (node.type === "boolean") {
+      result.push(...shape.subpaths);
+      continue;
+    }
+    const filled = inBoolean || (node.type !== "line" && node.fill !== null);
+    if (!filled) {
       result.push(...shape.subpaths);
       continue;
     }
     const fillRule = node.type === "path" ? node.fillRule : "nonzero";
     const oriented = booleanOperation("union", [{ subpaths: shape.subpaths, fillRule }]);
     if (oriented === null) return "unionFailed";
-    // 面積のない形 (合体が空) は、線の見た目を残すため輪郭をそのまま使う
-    result.push(...(oriented.length > 0 ? oriented : shape.subpaths));
+    if (oriented.length > 0) result.push(...oriented);
+    else if (!inBoolean) result.push(...shape.subpaths);
   }
   return result;
 }
@@ -222,10 +242,15 @@ export function flattenNodes(
     draft.set(path);
   } else {
     if (getNode(doc, newId) !== undefined) return { ok: false, reason: "unsupported" };
-    const subpaths = mergedSubpaths(doc, nodes);
+    // 非表示のノードはまとめに入れず、元の場所にそのまま残す (見えるようにしない。ブーリアンの中では演算に
+    // 数えられるようにしない)。全部が非表示なら当てない
+    const merging = nodes.filter((node) => node.visible);
+    if (merging.length === 0) return { ok: false, reason: "allHidden" };
+    const parentNode = parent.kind === "node" ? getNode(doc, parent.id) : undefined;
+    const subpaths = mergedSubpaths(doc, merging, parentNode?.type === "boolean");
     if (typeof subpaths === "string") return { ok: false, reason: subpaths };
     if (subpaths.length === 0) return { ok: false, reason: "empty" };
-    const back = nodes[0] as FlattenableNode;
+    const back = merging[0] as FlattenableNode;
     path = createPath(subpaths, {
       id: newId,
       name: back.name,
@@ -234,16 +259,16 @@ export function flattenNodes(
       fillRule: "nonzero",
     });
     // 最も前面のノードの位置から、それより背面にある (外す) ノードの数を引いた位置に入れる
-    const removing = new Set(nodes.map((node) => node.id));
+    const removing = new Set(merging.map((node) => node.id));
     const siblings = draft.children(parent);
-    const front = nodes[nodes.length - 1] as FlattenableNode;
+    const front = merging[merging.length - 1] as FlattenableNode;
     const frontIndex = siblings.indexOf(front.id);
     const at = frontIndex - siblings.slice(0, frontIndex).filter((id) => removing.has(id)).length;
     draft.setChildren(
       parent,
       siblings.filter((id) => !removing.has(id)),
     );
-    for (const node of nodes) draft.removeSubtree(node.id);
+    for (const node of merging) draft.removeSubtree(node.id);
     draft.set(path);
     draft.attach(path.id, parent, at);
   }

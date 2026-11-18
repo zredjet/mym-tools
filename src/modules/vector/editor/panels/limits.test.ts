@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { alignNodes, distributeNodes } from "../model/align";
 import { createBoolean, createFrame, createPath, createRect } from "../model/create";
 import { CANVAS_LIMITS } from "../model/limits";
+import { checkSavable } from "../model/payload";
 import { translateNodes } from "../model/transform";
 import type { CanvasDocument } from "../model/types";
 import { geometryWithinLimits, pathPointsWithinLimits, withinLimitsOrSame } from "./limits";
@@ -69,8 +70,9 @@ describe("geometryWithinLimits (パスの点とハンドル)", () => {
         {
           closed: false,
           points: [
-            { x: 0, y: 0, in: null, out: handle, mirror: "none" },
-            { x: 100, y: 0, in: null, out: null, mirror: "none" },
+            { x: 0, y: 0, in: null, out: null, mirror: "none" },
+            // 開いた輪郭の最後の点の out は形に効かないので、箱を大きくせずに大きなハンドルを持てる
+            { x: 100, y: 0, in: null, out: handle, mirror: "none" },
           ],
         },
       ],
@@ -83,10 +85,10 @@ describe("geometryWithinLimits (パスの点とハンドル)", () => {
     };
   };
 
-  it("ハンドルの相対値と、点 + ハンドルの位置も確かめる", () => {
+  it("点とハンドルの相対値をそれぞれ確かめる (保存の検証と同じ。ハンドルの先は見ない)", () => {
     expect(geometryWithinLimits(pathDoc({ x: 10, y: 10 }), ["p"])).toBe(true);
     expect(geometryWithinLimits(pathDoc({ x: 0, y: max + 1 }), ["p"])).toBe(false);
-    // 相対値は範囲の中でも、点 + ハンドルが外
+    // 点もハンドルの相対値も範囲の中なら、ハンドルの先 (点 + ハンドル) が外でも通す (保存できる文書)
     const doc = pathDoc({ x: 0, y: max });
     const node = doc.nodes["p"];
     if (node?.type !== "path") throw new Error("path");
@@ -102,7 +104,8 @@ describe("geometryWithinLimits (パスの点とハンドル)", () => {
         },
       },
     };
-    expect(geometryWithinLimits(shifted, ["p"])).toBe(false);
+    expect(geometryWithinLimits(shifted, ["p"])).toBe(true);
+    expect(checkSavable(shifted)).toBeNull();
   });
 });
 

@@ -142,6 +142,27 @@ describe("線: 端・角・破線 (§8.11)", () => {
     expect(state().revision).toBe(0);
   });
 
+  it("混在の破線は、打ってから空にして確定すると全部を実線にする", () => {
+    act(() =>
+      state().apply((doc) => ({
+        ...doc,
+        nodes: {
+          ...doc.nodes,
+          l: { ...doc.nodes["l"]!, stroke: { ...createStroke(), dash: [4, 2] } } as CanvasNode,
+        },
+      })),
+    );
+    render(<PropertiesPanel />);
+    select("l", "p");
+    const input = field("破線");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "4" } });
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(node("l").stroke).toMatchObject({ dash: [] });
+    expect(node("p").stroke).toMatchObject({ dash: [] });
+  });
+
   it("違う破線は混在と出す", () => {
     act(() =>
       state().apply((doc) => ({

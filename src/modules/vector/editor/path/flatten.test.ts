@@ -273,9 +273,9 @@ describe("flattenNodes (複数)", () => {
     expect(flattenNodes(doc, ["u", "r"], "m")).toEqual({ ok: false, reason: "booleanFailed" });
   });
 
-  it("結果が座標の上限を超えるなら当てない (ハンドルの先も見る)", () => {
+  it("結果が大きさの上限を超えるなら当てない", () => {
     const max = CANVAS_LIMITS.maxCoordinate;
-    // 点もハンドルの相対値も範囲の中だが、まとめると (親の座標系で) ハンドルの先が範囲の外に出る
+    // 点もハンドルの相対値も範囲の中だが、まとめると曲線の範囲 (箱) が maxSize を超える
     const far = docOf(
       ["p", "q"],
       [
@@ -295,5 +295,125 @@ describe("flattenNodes (複数)", () => {
       ],
     );
     expect(flattenNodes(far, ["p", "q"], "m")).toEqual({ ok: false, reason: "limits" });
+  });
+});
+
+describe("flattenNodes (複数、ブーリアンの子と非表示)", () => {
+  /** union[r, p]。r は 0..100 の矩形、p は 50..150 の反時計回りの正方形のパス。どちらも塗りなし。 */
+  function boolDoc(extra: CanvasNode[] = []): CanvasDocument {
+    return docOf(
+      ["u"],
+      [
+        createBoolean("union", ["r", "p", ...extra.map((n) => n.id)], {
+          id: "u",
+          fill: solidPaint("#FF0000"),
+        }),
+        createRect({ id: "r", width: 100, height: 100, fill: null }),
+        createPath(
+          [
+            {
+              closed: true,
+              points: [
+                { x: 50, y: 50, in: null, out: null, mirror: "none" },
+                { x: 50, y: 150, in: null, out: null, mirror: "none" },
+                { x: 150, y: 150, in: null, out: null, mirror: "none" },
+                { x: 150, y: 50, in: null, out: null, mirror: "none" },
+              ],
+            },
+          ],
+          { id: "p", fill: null },
+        ),
+        ...extra,
+      ],
+    );
+  }
+
+  const inside = (doc: CanvasDocument, point: { x: number; y: number }) => {
+    const result = getBooleanResult(doc, "u");
+    if (!result) throw new Error("結果がない");
+    return containsPoint(result.subpaths, point, "nonzero");
+  };
+
+  it("ブーリアンの中では、塗りのない子も向きをそろえてまとめる (結果が変わらない)", () => {
+    const doc = boolDoc();
+    expect(inside(doc, { x: 75, y: 75 })).toBe(true);
+    const out = flattenNodes(doc, ["r", "p"], "m");
+    if (!out.ok) throw new Error(out.reason);
+    const u = out.doc.nodes["u"];
+    expect(u?.type === "boolean" && u.children).toEqual(["m"]);
+    for (const point of [
+      { x: 75, y: 75 },
+      { x: 25, y: 25 },
+      { x: 125, y: 125 },
+    ])
+      expect(inside(out.doc, point)).toBe(true);
+    expect(inside(out.doc, { x: 125, y: 25 })).toBe(false);
+    expect(checkSavable(out.doc)).toBeNull();
+  });
+
+  it("ブーリアンの中の evenodd の子は、穴を残してまとめる", () => {
+    // p (50..150) の中に、同じ向きの小さな正方形 (110..140。evenodd で穴)
+    const square = (from: number, to: number) => ({
+      closed: true,
+      points: [
+        { x: from, y: from, in: null, out: null, mirror: "none" as const },
+        { x: from, y: to, in: null, out: null, mirror: "none" as const },
+        { x: to, y: to, in: null, out: null, mirror: "none" as const },
+        { x: to, y: from, in: null, out: null, mirror: "none" as const },
+      ],
+    });
+    const base = boolDoc();
+    const holed: CanvasDocument = {
+      ...base,
+      nodes: {
+        ...base.nodes,
+        p: createPath([square(0, 100), square(60, 90)], {
+          id: "p",
+          fill: null,
+          fillRule: "evenodd",
+          x: 50,
+          y: 50,
+        }),
+      },
+    };
+    expect(inside(holed, { x: 125, y: 125 })).toBe(false);
+    const out = flattenNodes(holed, ["r", "p"], "m");
+    if (!out.ok) throw new Error(out.reason);
+    expect(inside(out.doc, { x: 125, y: 125 })).toBe(false);
+    expect(inside(out.doc, { x: 105, y: 105 })).toBe(true);
+  });
+
+  it("非表示の子はまとめず、元の場所に残す (演算に数えられるようにしない)", () => {
+    const hidden = createRect({ id: "h", x: 300, width: 10, height: 10, visible: false });
+    const doc = boolDoc([hidden]);
+    const out = flattenNodes(doc, ["r", "p", "h"], "m");
+    if (!out.ok) throw new Error(out.reason);
+    const u = out.doc.nodes["u"];
+    expect(u?.type === "boolean" && u.children).toEqual(["m", "h"]);
+    expect(out.doc.nodes["h"]).toBe(hidden);
+    expect(inside(out.doc, { x: 305, y: 5 })).toBe(false);
+  });
+
+  it("ブーリアンの外でも、非表示のノードはまとめない。全部が非表示なら当てない", () => {
+    const doc = docOf(
+      ["a", "b"],
+      [
+        createRect({ id: "a", width: 10, height: 10 }),
+        createRect({ id: "b", x: 50, width: 10, height: 10, visible: false }),
+      ],
+    );
+    const out = flattenNodes(doc, ["a", "b"], "m");
+    if (!out.ok) throw new Error(out.reason);
+    expect(out.doc.pages[0]?.children).toEqual(["m", "b"]);
+    expect(pathOf(out.doc, "m").subpaths).toHaveLength(1);
+    expect(out.doc.nodes["b"]).toBe(doc.nodes["b"]);
+    const allHidden = docOf(
+      ["a", "b"],
+      [
+        createRect({ id: "a", width: 10, height: 10, visible: false }),
+        createRect({ id: "b", x: 50, width: 10, height: 10, visible: false }),
+      ],
+    );
+    expect(flattenNodes(allHidden, ["a", "b"], "m")).toEqual({ ok: false, reason: "allHidden" });
   });
 });

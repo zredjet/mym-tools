@@ -3,7 +3,7 @@
  * `translateNodes` / `resizeNodes` / `moveNodes` / 回転・反転は上限を見ないので、確定の前に確かめる。
  *
  * - `geometryWithinLimits(doc, ids)`: 変えたノードと子孫 (ブーリアンの子を含む) の座標と大きさ。パスは点と
- *   ハンドルも見る (点の座標、ハンドルの相対値、点 + ハンドルの位置。どれも絶対値が `maxCoordinate` 以下)
+ *   ハンドルも見る (点の座標とハンドルの相対値をそれぞれ。保存の検証と同じ。絶対値が `maxCoordinate` 以下)
  * - `pathPointsWithinLimits(doc, ids)`: 変えたパスの輪郭の数・点の数と、文書の全パスの点の合計 (§8.3.2)
  */
 import { CANVAS_LIMITS } from "../model/limits";
@@ -19,16 +19,15 @@ function selfAndDescendants(doc: CanvasDocument, id: NodeId): NodeId[] {
 }
 
 /**
- * パスの点とハンドルが座標の範囲に収まっているか。保存の検証 (§8.3.2) は点の `x` `y` と、`in` `out` の
- * 各成分 (点からの相対) を見る。ハンドルの先 (点 + ハンドル) も、画面と書き出しで座標として使うので確かめる。
+ * パスの点とハンドルが座標の範囲に収まっているか。保存の検証 (§8.3.2、TypeScript と Rust) と同じく、点の
+ * `x` `y` と、`in` `out` の各成分 (点からの相対) をそれぞれ確かめる (ハンドルの先 = 点 + ハンドルは見ない。
+ * 見ると、保存できる文書のパネルでの操作まで断ってしまう)。
  */
 export function pathPointsInRange(node: PathNode): boolean {
   for (const sub of node.subpaths)
     for (const p of sub.points) {
       if (!coord(p.x) || !coord(p.y)) return false;
-      for (const h of [p.in, p.out])
-        if (h && (!coord(h.x) || !coord(h.y) || !coord(p.x + h.x) || !coord(p.y + h.y)))
-          return false;
+      for (const h of [p.in, p.out]) if (h && (!coord(h.x) || !coord(h.y))) return false;
     }
   return true;
 }
@@ -36,7 +35,7 @@ export function pathPointsInRange(node: PathNode): boolean {
 /**
  * 変えたノードとその子孫の座標と大きさが §3.5 の範囲に収まっているか。
  * group やブーリアンの位置を変えると子が範囲の外へ出ることがあるので、確定の前に確かめる。
- * パスは点とハンドルも確かめる (リサイズ・反転・回転でハンドルの先が外へ出ることがある)。
+ * パスは点とハンドルも確かめる (保存の検証と同じ規則)。
  */
 export function geometryWithinLimits(doc: CanvasDocument, ids: readonly NodeId[]): boolean {
   for (const id of ids)

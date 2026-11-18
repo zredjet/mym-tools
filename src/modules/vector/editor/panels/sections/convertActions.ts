@@ -21,11 +21,20 @@ import { booleanCandidates, createBooleanFromNodes } from "../../model/booleanOp
 import { BOOLEAN_OP_NAMES } from "../../model/create";
 import { createId } from "../../model/ids";
 import { CANVAS_LIMITS } from "../../model/limits";
-import { canBeBooleanChild, getNode, topLevelIds } from "../../model/tree";
-import type { BooleanOp, CanvasDocument, NodeId } from "../../model/types";
+import {
+  canBeBooleanChild,
+  canHaveChildOfType,
+  getAncestors,
+  getNode,
+  getParent,
+  sameParent,
+  type ParentRef,
+} from "../../model/tree";
+import type { BooleanOp, CanvasDocument, CanvasNode, NodeId, NodeType } from "../../model/types";
 import { OUTLINE_CONVERT_ACTIONS } from "../../outline/convertAction";
-import { FLATTEN_FAILURE_MESSAGES, flattenNodes, flattenTargets } from "../../path/flatten";
+import { FLATTEN_FAILURE_MESSAGES, flattenNodes } from "../../path/flatten";
 import { SVG_CONVERT_ACTIONS } from "../../svgconvert/convertAction";
+import { memoBySelection } from "../selection";
 import {
   applyConvertChange,
   refuseConvert,
@@ -45,17 +54,54 @@ function keyLabel(keys: { mod?: boolean; alt?: boolean; shift?: boolean; key: st
 }
 
 // ---------------------------------------------------------------------------
+// 選択の形 (節の出し分け用)
+// ---------------------------------------------------------------------------
+
+interface SelectionShape {
+  /** 祖先も選ばれているノードを除いた選択 (選択の順。重なり順には並べない) */
+  tops: CanvasNode[];
+  /** すべて同じ親か */
+  sameParent: boolean;
+  /** 同じ親ならその親 */
+  parent: ParentRef | null;
+}
+
+/**
+ * 節の出し分けに使う選択の形。文書と選択の組ごとに 1 回だけ求め、5 つの操作で使い回す
+ * (パネルは文書が変わるたびに描き直すので、ドラッグ中も軽く済むように)。文書全体はたどらず
+ * (`topLevelIds` の重なり順の並べ替えは要らない)、選んだノードの親と祖先だけを見る。
+ */
+const selectionShape = memoBySelection((doc, selection): SelectionShape => {
+  const selected = new Set(selection);
+  const tops: CanvasNode[] = [];
+  let parent: ParentRef | null = null;
+  let same = true;
+  for (const id of selected) {
+    const node = getNode(doc, id);
+    if (!node || getAncestors(doc, id).some((ancestor) => selected.has(ancestor.id))) continue;
+    tops.push(node);
+    const p = getParent(doc, id);
+    if (!p) same = false;
+    else if (parent === null) parent = p;
+    else if (!sameParent(parent, p)) same = false;
+  }
+  return { tops, sameParent: same, parent: same ? parent : null };
+});
+
+const FLATTENABLE: ReadonlySet<NodeType> = new Set(["rect", "ellipse", "line", "path", "boolean"]);
+
+// ---------------------------------------------------------------------------
 // パスに変換
 // ---------------------------------------------------------------------------
 
 function flattenAvailability({ doc, selection }: ConvertContext): ConvertAvailability | null {
-  if (selection.length === 0) return null;
-  const targets = flattenTargets(doc, selection);
-  if (targets.ok) return { enabled: true };
-  // 種類が合っていて親だけが違うときは、押せない理由を出す。対象にならない選択では出さない
-  if (targets.reason === "differentParents")
-    return { enabled: false, reason: FLATTEN_FAILURE_MESSAGES.differentParents };
-  return null;
+  const { tops, sameParent: same } = selectionShape(doc, selection);
+  if (tops.length === 0 || !tops.every((node) => FLATTENABLE.has(node.type))) return null;
+  if (tops.length === 1 && tops[0]?.type === "path") return null;
+  // 種類が合っていて親だけが違うときは、押せない理由を出す
+  return same
+    ? { enabled: true }
+    : { enabled: false, reason: FLATTEN_FAILURE_MESSAGES.differentParents };
 }
 
 /** パスに変換する (Cmd/Ctrl+E)。当てられなければ理由を出す。 */
@@ -98,19 +144,14 @@ const BOOLEAN_LIMITS = `ノードの数 (${CANVAS_LIMITS.maxNodes} 個) か入�
 
 /** 2 個以上の、子にできる種類だけの選択か (親は問わない)。 */
 function booleanableSelection(doc: CanvasDocument, selection: readonly NodeId[]): boolean {
-  const tops = topLevelIds(doc, selection);
-  return (
-    tops.length >= 2 &&
-    tops.every((id) => {
-      const node = getNode(doc, id);
-      return node !== undefined && canBeBooleanChild(node.type);
-    })
-  );
+  const { tops } = selectionShape(doc, selection);
+  return tops.length >= 2 && tops.every((node) => canBeBooleanChild(node.type));
 }
 
 function booleanAvailability({ doc, selection }: ConvertContext): ConvertAvailability | null {
   if (!booleanableSelection(doc, selection)) return null;
-  return booleanCandidates(doc, selection)
+  const { sameParent: same, parent } = selectionShape(doc, selection);
+  return same && parent && canHaveChildOfType(doc, parent, "boolean")
     ? { enabled: true }
     : { enabled: false, reason: DIFFERENT_PARENTS };
 }
