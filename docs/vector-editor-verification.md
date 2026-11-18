@@ -100,8 +100,8 @@ SVG-Edit (ADR-0021) の時の検証記録は、このファイルの git の履�
 
 | 対象 | 結果 |
 |---|---|
-| macOS arm64 (切替の PR の CI の成果物) | (CI の成果物で測る) |
-| Windows x64 (切替の PR の CI の成果物) | (CI の成果物で測る) |
+| macOS arm64 (手元のビルド。CI と同じ `npm run tauri -- build --target aarch64-apple-darwin --bundles app -- --locked` と `ditto -c -k --sequesterRsrc --keepParent`) | **55,512,080 bytes**、上限 80,000,000 bytes まで 24,487,920 bytes。`unzip -t` 成功 (20 ファイル)。第 1 段階の手元のビルド (55,406,056 bytes) より 106,024 bytes 大きい |
+| macOS arm64 / Windows x64 (切替の PR #195 の CI の成果物) | (CI の成果物で測る) |
 | 比較: 第 1 段階の切替 (#180) の CI の成果物 | macOS 55,434,351 bytes、Windows 55,393,155 bytes |
 
 ### そのほか未実施
