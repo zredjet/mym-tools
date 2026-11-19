@@ -9,8 +9,18 @@ import {
   type Modifier,
 } from "@dnd-kit/core";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 
+import { isEditableTarget } from "../canvas/input";
+import { canOpenContextMenu, closeContextMenu, openContextMenu } from "../menu/contextMenu";
 import { DEFAULT_NODE_NAMES } from "../model/create";
 import { getNode } from "../model/tree";
 import type { NodeId } from "../model/types";
@@ -205,6 +215,30 @@ function LayersPanelBody() {
     }
   }, []);
 
+  /**
+   * 行の右クリック (macOS の Ctrl+クリックを含む) で右クリックのメニューを開く (§5.8)。その行を選んでいなければ
+   * 先にその行だけを選ぶ (クリックと同じ)。行のない所なら選択を外して、何もない所のメニューにする。
+   * 名前の欄では OS の標準のメニューを残す。行のドラッグの途中と、点・本文の編集中は出さない。
+   */
+  const onContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      if (isEditableTarget(event.target)) return;
+      event.preventDefault();
+      closeContextMenu();
+      const state = editorStore.getState();
+      if (drag.current || !canOpenContextMenu(state)) return;
+      const row =
+        event.target instanceof Element
+          ? event.target.closest<HTMLElement>("[data-layer-id]")
+          : null;
+      const id = row?.getAttribute("data-layer-id") ?? null;
+      if (id === null) state.setSelection([]);
+      else if (!state.selection.includes(id)) onSelect(id, { shift: false, toggle: false });
+      openContextMenu(editorStore, event);
+    },
+    [onSelect],
+  );
+
   const onToggleExpanded = useCallback((id: NodeId) => {
     setCollapsed((current) => {
       const next = new Set(current);
@@ -364,6 +398,7 @@ function LayersPanelBody() {
           onClick={(event) => {
             if (event.target === event.currentTarget) editorStore.getState().setSelection([]);
           }}
+          onContextMenu={onContextMenu}
         >
           {rows.length === 0 ? (
             <p className="px-3 py-2 text-[12px] text-[var(--fg-muted)]">レイヤーはありません</p>

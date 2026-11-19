@@ -16,7 +16,8 @@ import {
 } from "lucide-react";
 import { IS_MAC } from "../canvas/input";
 import type { ViewCommand } from "../canvas/viewCommands";
-import type { ToolId } from "../state/types";
+import { booleanAvailability } from "../panels/sections/convertActions";
+import type { EditorStore, ToolId } from "../state/types";
 
 /**
  * ツールバーのまとまり。まとまりの間に区切りの線を置く。
@@ -38,7 +39,7 @@ const SHIFT = IS_MAC ? "⇧" : "Shift+";
 
 /**
  * ツールバーのボタン (§5.1)。並びは 選択、フレーム、矩形、楕円、多角形、星、線、ペン、鉛筆、
- * テキスト、画像、手のひら (この後に倍率)。メニューにまとめず、どれも 1 回で選べるように並べる。
+ * テキスト、画像、手のひら (この後にブーリアンと倍率のメニュー)。メニューにまとめず、どれも 1 回で選べるように並べる。
  * 点の編集のツール (`pathEdit`) は出さない (パスを選んで Enter かダブルクリックで入る)。
  */
 export const TOOLBAR_TOOLS: readonly ToolButtonSpec[] = [
@@ -68,4 +69,21 @@ export const ZOOM_ITEMS: readonly { command: ViewCommand; label: string; shortcu
 export function formatZoom(zoom: number): string {
   const percent = zoom * 100;
   return percent < 1 ? `${percent.toFixed(1)}%` : `${Math.round(percent)}%`;
+}
+
+/** ブーリアンを作れない選択のときの理由 (2 個未満、子にできない種類を含む)。 */
+export const BOOLEAN_NEEDS_SELECTION = "2 個以上の矩形・楕円・パス・ブーリアンを選ぶと使えます。";
+export const BOOLEAN_IN_PATH_EDIT = "点の編集中は使えません。";
+
+/**
+ * ツールバーのブーリアンのボタンを使えない理由。使えるなら null。
+ * 判定は「変換」の節と同じ `booleanAvailability` (文書と選択ごとに 1 回だけ求める)。
+ */
+export function booleanButtonBlockReason(
+  state: Pick<EditorStore, "doc" | "selection" | "pageId" | "scopeId" | "editingPathId">,
+): string | null {
+  if (state.editingPathId !== null) return BOOLEAN_IN_PATH_EDIT;
+  const availability = booleanAvailability(state);
+  if (availability === null) return BOOLEAN_NEEDS_SELECTION;
+  return availability.enabled ? null : availability.reason;
 }

@@ -9,6 +9,8 @@
  * - キーは window の keydown 1 か所で受け、`canvasKeyScope` の範囲だけを取る
  *   (エディタの外とモーダルの間は何もしない。入力欄と変換中は文字キーを効かせない。
  *   エディタの中のボタンでは Space・Enter・矢印を部品に任せる)
+ * - 右ボタンの押下と macOS の Ctrl+クリック (`isContextPress`) はツールへ渡さない (ドラッグ・範囲選択・ペンの点・
+ *   手のひらを始めない)。`contextmenu` で右クリックのメニュー (§5.8) を開く
  */
 import {
   useCallback,
@@ -16,10 +18,17 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 import type { StoreApi } from "zustand";
+import {
+  canOpenContextMenu,
+  closeContextMenu,
+  openContextMenu,
+  selectForContextMenu,
+} from "../menu/contextMenu";
 import type { TextMeasurer } from "../render/types";
 import type { EditorStore } from "../state/types";
 import { handTool } from "../tools/handTool";
@@ -29,7 +38,9 @@ import {
   canvasKeyScope,
   CONTROL_KEYS,
   isComposing,
+  isContextPress,
   isEditableTarget,
+  isModPressed,
   movedFromPress,
   nextClick,
   toCanvasKeyEvent,
@@ -77,6 +88,7 @@ export interface CanvasInput {
     onPointerCancel(event: ReactPointerEvent<HTMLElement>): void;
     onLostPointerCapture(event: ReactPointerEvent<HTMLElement>): void;
     onPointerLeave(event: ReactPointerEvent<HTMLElement>): void;
+    onContextMenu(event: ReactMouseEvent<HTMLElement>): void;
   };
   /** Space を押している間 (一時的な手のひら) */
   spaceHeld: boolean;
@@ -105,6 +117,8 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
   /** 直前のポインターの位置と修飾キー (ドラッグ中のホイールで移動を合成するため) */
   const lastPointer = useRef<PointerInput | null>(null);
   const spaceRef = useRef(false);
+  /** キーボードでメニューを開こうとした (Menu キー / Shift+F10)。次の contextmenu では選び直さない */
+  const keyboardMenu = useRef(false);
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [panning, setPanning] = useState(false);
 
@@ -203,6 +217,7 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
   // ---- キー ----
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      keyboardMenu.current = event.key === "ContextMenu" || (event.shiftKey && event.key === "F10");
       if (event.defaultPrevented || isComposing(event)) return;
       const scope = canvasKeyScope(event.target);
       if (scope === "none" || scope === "editable") return;
@@ -347,13 +362,26 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
     };
   };
 
+  /** 入力欄の値を確定させてから (選択が変わる前に)、フォーカスをキャンバスへ移す。 */
+  const takeFocus = () => {
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && isEditableTarget(focused)) focused.blur();
+    containerRef.current?.focus({ preventScroll: true });
+  };
+
   const handlers: CanvasInput["handlers"] = {
     onPointerDown(event) {
+      keyboardMenu.current = false;
       if (isIgnoredTarget(event.target) || active.current) return;
-      // 入力欄の値を確定させてから (選択が変わる前に) ツールへ渡す。フォーカスはキャンバスへ移す
-      const focused = document.activeElement;
-      if (focused instanceof HTMLElement && isEditableTarget(focused)) focused.blur();
-      containerRef.current?.focus({ preventScroll: true });
+      if (isContextPress(event)) {
+        // メニューを開く押下。ツールへ渡さず、次の押下をダブルクリックにも数えない。
+        // 本文・点の編集中はフォーカスも動かさない (編集を終えない。メニューも出さない)
+        lastClick.current = null;
+        const state = store.getState();
+        if (state.editingTextId === null && state.editingPathId === null) takeFocus();
+        return;
+      }
+      takeFocus();
       const temporaryHand = event.button === 1 || spaceRef.current;
       const tool = temporaryHand ? handTool : TOOLS[store.getState().toolId];
       const o = origin();
@@ -412,6 +440,23 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
     },
     onPointerLeave() {
       if (!active.current) store.getState().setHovered(null);
+    },
+    onContextMenu(event) {
+      const fromKeyboard = keyboardMenu.current;
+      keyboardMenu.current = false;
+      // 本文の編集欄では OS の標準のメニューを残す
+      if (isEditableTarget(event.target)) return;
+      event.preventDefault();
+      closeContextMenu();
+      // ルーラーなどツールへ渡さない所と、出さない状態 (点・本文の編集中、ドラッグの途中) では出さない
+      if (isIgnoredTarget(event.target) || active.current) return;
+      if (!canOpenContextMenu(store.getState())) return;
+      // キーボードで開いたときは押した位置がないので、選択を変えない
+      if (!fromKeyboard) {
+        const page = toCanvasPointerEvent(event, origin(), store.getState().viewport, 2, 1).page;
+        selectForContextMenu(store, page, isModPressed(event), measurer);
+      }
+      openContextMenu(store, event);
     },
   };
 

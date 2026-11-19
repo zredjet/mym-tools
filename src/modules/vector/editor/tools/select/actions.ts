@@ -148,8 +148,8 @@ export function nudgeDocument(
  */
 export function flipSelection(store: Store, axis: FlipAxis): boolean {
   const state = store.getState();
+  if (!canFlipSelection(state)) return false;
   const ids = transformableIds(state.doc, state.selection);
-  if (ids.length === 0 || !canFlip(state.doc, ids)) return false;
   state.apply((doc) => {
     const next = flipNodes(doc, ids, axis);
     return next === doc || geometryWithinLimits(next, ids) ? next : doc;
@@ -157,12 +157,37 @@ export function flipSelection(store: Store, axis: FlipAxis): boolean {
   return true;
 }
 
+/** 反転できる選択か (`flipSelection` が何かするか。右クリックのメニューの出し分けにも使う)。 */
+export function canFlipSelection(state: Pick<EditorStore, "doc" | "selection">): boolean {
+  const ids = transformableIds(state.doc, state.selection);
+  return ids.length > 0 && canFlip(state.doc, ids);
+}
+
+/** 複製して範囲を超えないか (`duplicateWithinLimits` が何かするか)。 */
+export function canDuplicateWithinLimits(state: Pick<EditorStore, "doc" | "selection">): boolean {
+  const { doc, selection } = state;
+  const dry = duplicateNodes(doc, selection, { x: PASTE_OFFSET, y: PASTE_OFFSET });
+  return dry.doc !== doc && geometryWithinLimits(dry.doc, dry.ids);
+}
+
 /** Cmd/Ctrl+D: 範囲を超えない場合だけ複製する。 */
 export function duplicateWithinLimits(store: Store): void {
-  const { doc, selection } = store.getState();
-  const dry = duplicateNodes(doc, selection, { x: PASTE_OFFSET, y: PASTE_OFFSET });
-  if (dry.doc === doc || !geometryWithinLimits(dry.doc, dry.ids)) return;
+  if (!canDuplicateWithinLimits(store.getState())) return;
   duplicateSelection(store);
+}
+
+/** 貼り付けて範囲を超えないか (`pasteWithinLimits` が何かするか)。 */
+export function canPasteWithinLimits(
+  state: EditorStore,
+  clipboard: EditorClipboard = editorClipboard,
+): boolean {
+  const content = clipboard.content;
+  if (!content) return false;
+  const target = pasteTarget(state, clipboard);
+  const offset = clipboard.pasteOffset(state.doc, target);
+  if (!offset) return false;
+  const dry = insertFragment(state.doc, content, target, { offset });
+  return dry.doc !== state.doc && geometryWithinLimits(dry.doc, dry.ids);
 }
 
 /** Cmd/Ctrl+V: 範囲を超えない場合だけ貼り付ける。 */
@@ -170,14 +195,7 @@ export function pasteWithinLimits(
   store: Store,
   clipboard: EditorClipboard = editorClipboard,
 ): void {
-  const state = store.getState();
-  const content = clipboard.content;
-  if (!content) return;
-  const target = pasteTarget(state, clipboard);
-  const offset = clipboard.pasteOffset(state.doc, target);
-  if (!offset) return;
-  const dry = insertFragment(state.doc, content, target, { offset });
-  if (dry.doc === state.doc || !geometryWithinLimits(dry.doc, dry.ids)) return;
+  if (!canPasteWithinLimits(store.getState(), clipboard)) return;
   pasteClipboard(store, clipboard);
 }
 
