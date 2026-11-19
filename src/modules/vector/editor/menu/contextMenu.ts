@@ -3,7 +3,9 @@
  *
  * - キャンバス (`canvas/useCanvasInput.ts` の `contextmenu`) とレイヤーパネルの行 (`panels/LayersPanel.tsx`) が
  *   `openContextMenu` を呼び、`ContextMenu.tsx` の `ContextMenuHost` (エディタの中に 1 つ) が出す
- * - 出さないとき (`canOpenContextMenu`): 点の編集中、ペンで描いている間、本文の編集中、ポインターのドラッグの途中
+ * - 出さないとき (`canOpenContextMenu`): 点の編集中、ペンで描いている間、本文の編集中、ポインターのドラッグの途中。
+ *   左ボタンを押したまま右ボタンを押した (和音) あとの `contextmenu` も出さない (`takeContextChord`)。
+ *   Windows は右ボタンを離したときに送るので、左のドラッグが先に終わっていても、そのドラッグの続きとして扱う
  * - 項目は開いた時点の状態で決める (`contextMenuItems.ts`)
  */
 import { useSyncExternalStore } from "react";
@@ -67,6 +69,28 @@ export function closeContextMenu(): void {
 /** 開いているか。 */
 export function isContextMenuOpen(): boolean {
   return current !== null;
+}
+
+// ---------------------------------------------------------------------------
+// 和音 (左を押したまま右を押す)
+// ---------------------------------------------------------------------------
+
+let chord = false;
+
+/**
+ * ポインターの動きから和音を覚える (`ContextMenuHost` が window で受ける)。押下のたびに忘れる。
+ * 和音の右ボタンは pointerdown を送らず、`buttons` の変わった pointermove で届く。
+ */
+export function noteContextChord(event: { type: string; buttons: number }): void {
+  if (event.type === "pointerdown") chord = false;
+  else if ((event.buttons & 3) === 3) chord = true;
+}
+
+/** 和音のあとの `contextmenu` か (1 回だけ true を返して忘れる)。 */
+export function takeContextChord(): boolean {
+  const value = chord;
+  chord = false;
+  return value;
 }
 
 // ---------------------------------------------------------------------------

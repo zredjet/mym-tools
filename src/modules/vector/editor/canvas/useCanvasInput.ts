@@ -28,6 +28,7 @@ import {
   closeContextMenu,
   openContextMenu,
   selectForContextMenu,
+  takeContextChord,
 } from "../menu/contextMenu";
 import type { TextMeasurer } from "../render/types";
 import type { EditorStore } from "../state/types";
@@ -444,10 +445,13 @@ export function useCanvasInput(options: CanvasInputOptions): CanvasInput {
     onContextMenu(event) {
       const fromKeyboard = keyboardMenu.current;
       keyboardMenu.current = false;
+      const fromChord = takeContextChord();
       // 本文の編集欄では OS の標準のメニューを残す
       if (isEditableTarget(event.target)) return;
       event.preventDefault();
       closeContextMenu();
+      // 左のドラッグの途中で右を押した和音のあと (Windows はドラッグが終わってから届く) は出さない
+      if (fromChord) return;
       // ルーラーなどツールへ渡さない所と、出さない状態 (点・本文の編集中、ドラッグの途中) では出さない
       if (isIgnoredTarget(event.target) || active.current) return;
       if (!canOpenContextMenu(store.getState())) return;

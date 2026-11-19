@@ -4,13 +4,15 @@
  *
  * - `role="menu"` / `menuitem` / `separator`。使えない項目は `aria-disabled` で出し (理由は `title`)、
  *   押しても閉じない。矢印のキーでは飛ばす
- * - 開いている間のキーは window の捕捉の段階で受けて、ほかへ渡さない (キャンバスのショートカットを効かせない)。
- *   ↑↓ Home End で移り、Enter / Space で選び、Esc で閉じる。Tab は閉じて、フォーカスを開く前の要素へ戻してから
- *   既定の移動に任せる
- * - 外を押す (`insideRef` の中は除く)、ウィンドウのフォーカスが外れる、項目を選ぶ、で閉じる。選んだときは
- *   閉じてから項目の `run` を呼ぶ
- * - マウスで押してもフォーカスを取らない (キャンバスのショートカットと Space の手のひらを妨げないため)。
- *   キーボードで移ったときだけ項目にフォーカスを置き、閉じるときに開く前の要素へ戻す
+ * - 開いたらメニューそのもの (キーボードで開いたときは最初の使える項目) にフォーカスを置き、閉じるときに開く前の
+ *   要素へ戻す。項目と区切りはマウスで押してもフォーカスを取らない
+ * - 開いている間のキーは window の捕捉の段階で受けて、ほかへ渡さず既定の動きも止める (キャンバスのショートカットや
+ *   ブラウザのすべて選択を効かせない)。↑↓ Home End で移り (切り取られたメニューは移った項目が見えるように中で
+ *   スクロールする)、Enter / Space で選び (押しっぱなしの繰り返しでは選ばない)、Esc で閉じる。Tab は閉じて、
+ *   フォーカスを開く前の要素へ戻してから既定の移動に任せる
+ * - キーの対象がメニューの外 (ダイアログなど) か、モーダルが開いているときは、閉じてキーをそのまま通す
+ * - 外を押す (`insideRef` の中は除く)、フォーカスがメニューの外へ移る、ウィンドウのフォーカスが外れる、項目を選ぶ、
+ *   で閉じる。選んだときは閉じてから項目の `run` を呼ぶ
  */
 import type { LucideIcon } from "lucide-react";
 import {
@@ -24,6 +26,7 @@ import {
 
 import { cn } from "@/lib/cn";
 
+import { isModalOpen } from "../canvas/input";
 import { keepFocus, nextEnabledIndex } from "./menuNavigation";
 
 export interface MenuItem {
@@ -54,11 +57,8 @@ export interface MenuListProps {
   /** 読み上げの名前 */
   label: string;
   entries: readonly MenuEntry[];
-  /**
-   * 開いたときのフォーカス。`first` は最初の使える項目 (キーボードで開いたとき)、`menu` はメニューそのもの、
-   * `none` は動かさない (マウスで開いたとき)
-   */
-  initialFocus?: "first" | "menu" | "none";
+  /** 開いたときのフォーカス。`first` は最初の使える項目 (キーボードで開いたとき)、`menu` はメニューそのもの */
+  initialFocus?: "first" | "menu";
   onClose(reason: MenuCloseReason): void;
   /** 押しても外とみなさない範囲 (開くボタンを含むまとまり)。省略はメニューだけ */
   insideRef?: RefObject<HTMLElement | null>;
@@ -71,7 +71,7 @@ export function MenuList({
   id,
   label,
   entries,
-  initialFocus = "none",
+  initialFocus = "menu",
   onClose,
   insideRef,
   menuRef,
@@ -95,12 +95,30 @@ export function MenuList({
   const focusIndex = (index: number) => {
     setActive(index);
     latest.current.active = index;
-    if (index < 0) rootRef.current?.focus({ preventScroll: true });
-    else itemElement(index)?.focus({ preventScroll: true });
+    const root = rootRef.current;
+    if (index < 0) {
+      root?.focus({ preventScroll: true });
+      return;
+    }
+    const element = itemElement(index);
+    element?.focus({ preventScroll: true });
+    // メニューの中だけをスクロールして、移った項目を見せる (エディタの外側はスクロールしない)
+    if (root && element && element.offsetParent === root) {
+      const top = element.offsetTop;
+      const bottom = top + element.offsetHeight;
+      if (top < root.scrollTop) root.scrollTop = top;
+      else if (bottom > root.scrollTop + root.clientHeight)
+        root.scrollTop = bottom - root.clientHeight;
+    }
   };
+
+  /** 閉じ始めたか (閉じる途中のフォーカスの移動などで、もう一度閉じない) */
+  const closedRef = useRef(false);
 
   /** 閉じる。フォーカスがメニューの中にあれば開く前の要素へ戻す (外を押したときは押した先に任せる)。 */
   const finish = (reason: MenuCloseReason, run?: () => void) => {
+    if (closedRef.current) return;
+    closedRef.current = true;
     const root = rootRef.current;
     const focused = document.activeElement;
     if (reason !== "outside" && root && focused && root.contains(focused)) {
@@ -141,8 +159,17 @@ export function MenuList({
     const onPointerDown = (event: PointerEvent) => {
       if (!isInside(event.target)) finishRef.current("outside");
     };
+    // フォーカスがメニューの外へ移った (ダイアログが開いたなど)
+    const onFocusIn = (event: FocusEvent) => {
+      if (!isInside(event.target)) finishRef.current("outside");
+    };
     const onKeyDown = (event: KeyboardEvent) => {
-      // 開いている間のキーはメニューのもの (キャンバスやアプリのショートカットへ渡さない)
+      // ダイアログが開いている、またはキーの対象がメニューの外なら、閉じてキーをそのまま通す
+      if (isModalOpen() || !isInside(event.target)) {
+        finishRef.current("outside");
+        return;
+      }
+      // 開いている間のキーはメニューのもの (キャンバスやアプリのショートカット、ブラウザの既定の動きへ渡さない)
       event.stopPropagation();
       const { entries: list, active: current } = latest.current;
       switch (event.key) {
@@ -163,6 +190,8 @@ export function MenuList({
         case "Enter":
         case " ": {
           event.preventDefault();
+          // 押しっぱなしの繰り返しでは選ばない (開いたボタンの Enter や手のひらの Space が続いて届く)
+          if (event.repeat) return;
           const entry = list[current];
           if (entry?.type === "item" && !entry.disabled) finishRef.current("select", entry.run);
           return;
@@ -172,14 +201,17 @@ export function MenuList({
           finishRef.current("tab");
           return;
         default:
+          event.preventDefault();
       }
     };
     const onBlur = () => finishRef.current("blur");
     window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("focusin", onFocusIn, true);
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("blur", onBlur);
     return () => {
       window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("focusin", onFocusIn, true);
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("blur", onBlur);
     };

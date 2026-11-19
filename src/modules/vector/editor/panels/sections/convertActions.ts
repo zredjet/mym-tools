@@ -133,6 +133,8 @@ export const BOOLEAN_OP_KEYS: Readonly<Record<BooleanOp, string>> = {
 export const BOOLEAN_OPS: readonly BooleanOp[] = ["union", "subtract", "intersect", "exclude"];
 
 const DIFFERENT_PARENTS = "ブーリアンにするには、同じ親の中で選んでください。";
+/** ブーリアンを作れない選択 (2 個未満、子にできない種類を含む) の理由。ツールバーと右クリックのメニューが出す。 */
+export const BOOLEAN_NEEDS_SELECTION = "2 個以上の矩形・楕円・パス・ブーリアンを選ぶと使えます。";
 const BOOLEAN_LIMITS = `ノードの数 (${CANVAS_LIMITS.maxNodes} 個) か入れ子の深さ (${CANVAS_LIMITS.maxDepth} 段) の上限を超えるため、ブーリアンにできません。`;
 
 /** 2 個以上の、子にできる種類だけの選択か (親は問わない)。 */

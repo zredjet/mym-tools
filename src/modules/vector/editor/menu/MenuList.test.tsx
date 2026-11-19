@@ -64,31 +64,94 @@ describe("MenuList", () => {
     expect(item("C")).toHaveFocus();
   });
 
-  it("none ならフォーカスを動かさず、↓ で最初の項目へ入る", () => {
-    render(
-      <>
-        <button type="button">外</button>
-        <MenuList label="テスト" entries={entries()} onClose={() => {}} />
-      </>,
-    );
-    const outside = screen.getByRole("button", { name: "外" });
-    outside.focus();
-    expect(outside).toHaveFocus();
-    fireEvent.keyDown(outside, { key: "ArrowDown" });
+  it("menu (既定) ならメニューそのものにフォーカスを置き、↓ で最初の項目へ入る", () => {
+    render(<MenuList label="テスト" entries={entries()} onClose={() => {}} />);
+    expect(screen.getByRole("menu")).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     expect(item("A")).toHaveFocus();
+  });
+
+  it("切り取られたメニューでは、移った項目が見えるようにメニューの中をスクロールする", () => {
+    render(<MenuList label="テスト" entries={entries()} onClose={() => {}} />);
+    const menu = screen.getByRole("menu");
+    const place = (element: HTMLElement, top: number) => {
+      Object.defineProperty(element, "offsetParent", { value: menu, configurable: true });
+      Object.defineProperty(element, "offsetTop", { value: top, configurable: true });
+      Object.defineProperty(element, "offsetHeight", { value: 28, configurable: true });
+    };
+    Object.defineProperty(menu, "clientHeight", { value: 40, configurable: true });
+    place(item("A"), 4);
+    place(item("C"), 70);
+    fireEvent.keyDown(document.activeElement!, { key: "End" });
+    expect(item("C")).toHaveFocus();
+    expect(menu.scrollTop).toBe(70 + 28 - 40);
+    fireEvent.keyDown(document.activeElement!, { key: "Home" });
+    expect(menu.scrollTop).toBe(4);
   });
 
   it("Enter と Space で選ぶ。閉じてから run を呼ぶ", () => {
     const order: string[] = [];
     const run = vi.fn((id: string) => order.push(`run:${id}`));
     const onClose = vi.fn((reason: string) => order.push(`close:${reason}`));
-    render(
+    const view = render(
       <MenuList label="テスト" entries={entries(run)} initialFocus="first" onClose={onClose} />,
     );
     fireEvent.keyDown(document.activeElement!, { key: "Enter" });
     expect(order).toEqual(["close:select", "run:a"]);
+    view.unmount();
+    render(
+      <MenuList label="テスト" entries={entries(run)} initialFocus="first" onClose={onClose} />,
+    );
     fireEvent.keyDown(document.activeElement!, { key: " " });
     expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("押しっぱなしの Enter / Space の繰り返しでは選ばない", () => {
+    const run = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <MenuList label="テスト" entries={entries(run)} initialFocus="first" onClose={onClose} />,
+    );
+    fireEvent.keyDown(document.activeElement!, { key: "Enter", repeat: true });
+    fireEvent.keyDown(document.activeElement!, { key: " ", repeat: true });
+    expect(run).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("飲み込むキーは既定の動きも止める (ブラウザのすべて選択などに落とさない)", () => {
+    render(<MenuList label="テスト" entries={entries()} onClose={() => {}} />);
+    expect(fireEvent.keyDown(document.activeElement!, { key: "a", metaKey: true })).toBe(false);
+    expect(fireEvent.keyDown(document.activeElement!, { key: "r" })).toBe(false);
+  });
+
+  it("ダイアログがフォーカスを取ったら閉じ、ダイアログのキーはそのまま通す", () => {
+    const onClose = vi.fn();
+    const dialogKeys = vi.fn();
+    render(
+      <>
+        <MenuList label="テスト" entries={entries()} initialFocus="first" onClose={onClose} />
+        <div role="dialog" aria-modal="true" onKeyDown={(event) => dialogKeys(event.key)}>
+          <button type="button">ダイアログの保存</button>
+        </div>
+      </>,
+    );
+    const save = screen.getByRole("button", { name: "ダイアログの保存" });
+    act(() => save.focus());
+    expect(onClose).toHaveBeenCalledWith("outside");
+    expect(fireEvent.keyDown(save, { key: "Enter" })).toBe(true);
+    expect(dialogKeys).toHaveBeenCalledWith("Enter");
+  });
+
+  it("モーダルが開いていれば、メニューの中のキーでも閉じて通す", () => {
+    const onClose = vi.fn();
+    render(
+      <>
+        <MenuList label="テスト" entries={entries()} initialFocus="first" onClose={onClose} />
+        <div aria-modal="true" />
+      </>,
+    );
+    expect(fireEvent.keyDown(document.activeElement!, { key: "Escape" })).toBe(true);
+    expect(onClose).toHaveBeenCalledWith("outside");
   });
 
   it("使えない項目は押しても何もせず、閉じない", () => {
@@ -144,7 +207,16 @@ describe("MenuList", () => {
     expect(onClose).toHaveBeenCalledWith("tab");
   });
 
-  it("外を押すと閉じ、中 (insideRef を含む) を押しても閉じない。ウィンドウのフォーカスが外れたら閉じる", () => {
+  it("ウィンドウのフォーカスが外れたら閉じる", () => {
+    const onClose = vi.fn();
+    render(<MenuList label="テスト" entries={entries()} onClose={onClose} />);
+    act(() => {
+      window.dispatchEvent(new Event("blur"));
+    });
+    expect(onClose).toHaveBeenCalledWith("blur");
+  });
+
+  it("外を押すと閉じ、中 (insideRef を含む) を押しても閉じない", () => {
     const onClose = vi.fn();
     const inside = { current: null as HTMLElement | null };
     render(
@@ -161,10 +233,7 @@ describe("MenuList", () => {
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.pointerDown(screen.getByRole("button", { name: "外" }));
     expect(onClose).toHaveBeenCalledWith("outside");
-    act(() => {
-      window.dispatchEvent(new Event("blur"));
-    });
-    expect(onClose).toHaveBeenCalledWith("blur");
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("マウスで押してもフォーカスを取らない", () => {

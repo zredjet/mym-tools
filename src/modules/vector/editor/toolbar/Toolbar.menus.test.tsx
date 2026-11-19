@@ -83,8 +83,8 @@ describe("ツールバーのブーリアンのボタン (§5.1)", () => {
       "交差Alt+Shift+I",
       "中マドAlt+Shift+E",
     ]);
-    // マウスで開いたときはフォーカスを動かさない
-    expect(document.activeElement).toBe(document.body);
+    // マウスで開いたときはメニューそのものにフォーカスを置く (ボタンは取らない)
+    expect(menu).toHaveFocus();
 
     fireEvent.click(menuItem("型抜き"));
     expect(screen.queryByRole("menu")).toBeNull();
@@ -94,6 +94,17 @@ describe("ツールバーのブーリアンのボタン (§5.1)", () => {
     expect(state().selection).toEqual([created?.id]);
     expect(state().revision).toBe(1);
     expect(booleanButton().querySelector("[data-op]")).toHaveAttribute("data-op", "subtract");
+  });
+
+  it("ボタンで Enter を押し続けても、開いたメニューの最初の項目を繰り返しで選ばない", () => {
+    act(() => state().setSelection(["a", "b"]));
+    render(<Toolbar />);
+    booleanButton().focus();
+    fireEvent.click(booleanButton(), { detail: 0 });
+    fireEvent.keyDown(document.activeElement!, { key: "Enter", repeat: true });
+    fireEvent.keyDown(document.activeElement!, { key: "Enter", repeat: true });
+    expect(createdBoolean()).toBeUndefined();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 
   it("キーボードで開き (Enter / Space)、↓ で移って Enter で選ぶ。Esc で閉じたらボタンへ戻る", () => {

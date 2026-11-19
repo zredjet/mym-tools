@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { IS_MAC } from "../canvas/input";
 import type { ViewCommand } from "../canvas/viewCommands";
-import { booleanAvailability } from "../panels/sections/convertActions";
+import { BOOLEAN_NEEDS_SELECTION, booleanAvailability } from "../panels/sections/convertActions";
 import type { EditorStore, ToolId } from "../state/types";
 
 /**
@@ -71,8 +71,7 @@ export function formatZoom(zoom: number): string {
   return percent < 1 ? `${percent.toFixed(1)}%` : `${Math.round(percent)}%`;
 }
 
-/** ブーリアンを作れない選択のときの理由 (2 個未満、子にできない種類を含む)。 */
-export const BOOLEAN_NEEDS_SELECTION = "2 個以上の矩形・楕円・パス・ブーリアンを選ぶと使えます。";
+export { BOOLEAN_NEEDS_SELECTION };
 export const BOOLEAN_IN_PATH_EDIT = "点の編集中は使えません。";
 
 /**

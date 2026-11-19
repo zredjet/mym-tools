@@ -1,7 +1,8 @@
 /**
  * ツールバーのメニューのボタン (§5.1。倍率とブーリアン)。押すとボタンの上にメニュー (`MenuList`) を開く。
  *
- * - マウスで押してもフォーカスを取らない。メニューを開いてもフォーカスは動かさない
+ * - マウスで押してもボタンはフォーカスを取らない。マウスで開いたメニューはメニューそのものにフォーカスを置き、
+ *   閉じたら開く前の要素 (キャンバスなど) へ戻す
  * - Tab で移ってきたときは Enter / Space / ↓ / ↑ で開き、最初の使える項目にフォーカスを置く。
  *   Esc で閉じたらボタンへ戻る
  * - 使えないときも出したまま `aria-disabled` にし、理由を `title` に出す (Tab で移れる)
@@ -39,7 +40,7 @@ export function MenuButton({
   children,
 }: MenuButtonProps) {
   /** 開いているときは開いたときのフォーカスの置き方 */
-  const [open, setOpen] = useState<"first" | "none" | null>(null);
+  const [open, setOpen] = useState<"first" | "menu" | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   // 使えなくなったら閉じる (また使えるようになっても開き直さない)
@@ -65,7 +66,7 @@ export function MenuButton({
         onClick={(event) => {
           if (disabled) return;
           // キーボード (Enter / Space) で押したときは detail が 0
-          setOpen((current) => (current !== null ? null : event.detail === 0 ? "first" : "none"));
+          setOpen((current) => (current !== null ? null : event.detail === 0 ? "first" : "menu"));
         }}
         onKeyDown={(event) => {
           if (disabled || shown) return;

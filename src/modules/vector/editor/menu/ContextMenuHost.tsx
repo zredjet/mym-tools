@@ -5,17 +5,35 @@
  *   中でスクロールする
  * - 閉じる: Esc、外を押す、項目を選ぶ、ウィンドウのフォーカスが外れる (`MenuList`)。ここでは、ホイール・ピンチ
  *   (スクロールとズーム)・ウィンドウの大きさの変更・表示位置や文書やツールの変化でも閉じる
+ * - 外れるときは閉じる。左を押したまま右を押した和音は、window の pointermove で覚える (`noteContextChord`)
  * - アプリの UI の倍率 (body の CSS `zoom`) の下でも位置が合うよう、重ねる層の見た目の大きさと CSS の大きさの比で
  *   クライアント座標を割る
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
 import { editorStore } from "../state/store";
-import { closeContextMenu, MENU_MARGIN, placeMenu, useContextMenu } from "./contextMenu";
+import {
+  closeContextMenu,
+  MENU_MARGIN,
+  noteContextChord,
+  placeMenu,
+  useContextMenu,
+} from "./contextMenu";
 import { MenuList, type MenuEntry } from "./MenuList";
 
 export function ContextMenuHost() {
   const request = useContextMenu();
+  useEffect(() => {
+    // 和音 (左を押したまま右) を覚える。キャンバス・ルーラー・レイヤーのどのドラッグでも同じに扱う
+    window.addEventListener("pointerdown", noteContextChord, true);
+    window.addEventListener("pointermove", noteContextChord, true);
+    return () => {
+      window.removeEventListener("pointerdown", noteContextChord, true);
+      window.removeEventListener("pointermove", noteContextChord, true);
+      // 開いたまま外れたら閉じる (次に付いたときに古いメニューを出さない)
+      closeContextMenu();
+    };
+  }, []);
   if (!request) return null;
   return (
     <ContextMenuLayer

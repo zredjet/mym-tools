@@ -17,6 +17,9 @@ import { EditorClipboard } from "../state/clipboard";
 import { editorStore } from "../state/store";
 import { square } from "../tools/pathEdit/testing";
 import { canOpenContextMenu, placeMenu, selectForContextMenu } from "./contextMenu";
+import { OUTLINE_FAILURE_MESSAGES } from "../outline/nodes";
+import { BOOLEAN_NEEDS_SELECTION } from "../panels/sections/convertActions";
+import { FLATTEN_FAILURE_MESSAGES } from "../path/flatten";
 import { contextMenuEntries } from "./contextMenuItems";
 import type { MenuEntry, MenuItem } from "./MenuList";
 
@@ -190,6 +193,41 @@ describe("メニューの項目 (§5.8)", () => {
     expect(byLabel(entries, "コピー").shortcut).toBe("Ctrl+C");
     expect(byLabel(entries, "合体").shortcut).toBe("Alt+Shift+U");
     expect(byLabel(entries, "最前面へ").shortcut).toBe("]");
+  });
+
+  it("使えない変換の項目は、ショートカット・ツールバーと同じ理由を title に出す", () => {
+    state().setSelection(["a"]);
+    let entries = contextMenuEntries(editorStore);
+    expect(byLabel(entries, "線のアウトライン化").title).toBe(OUTLINE_FAILURE_MESSAGES.noStroke);
+    expect(byLabel(entries, "合体").title).toBe(BOOLEAN_NEEDS_SELECTION);
+    expect(byLabel(entries, "パスに変換").title).toBeUndefined();
+    state().setSelection(["p"]);
+    entries = contextMenuEntries(editorStore);
+    expect(byLabel(entries, "パスに変換").disabled).toBe(true);
+    expect(byLabel(entries, "パスに変換").title).toBe(FLATTEN_FAILURE_MESSAGES.alreadyPath);
+    state().setSelection(["s"]);
+    entries = contextMenuEntries(editorStore);
+    expect(byLabel(entries, "線のアウトライン化").title).toBe(OUTLINE_FAILURE_MESSAGES.unsupported);
+  });
+
+  it("貼り付け・複製・グループ化は文書を作り直さずに決める (貼り付けはクリップボードに中身があれば使える)", () => {
+    const clipboard = new EditorClipboard();
+    state().setSelection(["c"]);
+    expect(byLabel(contextMenuEntries(editorStore, clipboard), "貼り付け").disabled).toBe(true);
+    clipboard.copy(state().doc, ["c"]);
+    let entries = contextMenuEntries(editorStore, clipboard);
+    expect(enabled(entries)).toEqual(
+      expect.arrayContaining(["貼り付け", "複製", "削除", "グループ化"]),
+    );
+    // ブーリアンの子は group にできない (入れ先がブーリアン)
+    state().setSelection(["a", "b"]);
+    byLabel(contextMenuEntries(editorStore, clipboard), "合体").run();
+    const boolean = state().selection[0]!;
+    state().setScope(boolean);
+    state().setSelection(["a"]);
+    entries = contextMenuEntries(editorStore, clipboard);
+    expect(byLabel(entries, "グループ化").disabled).toBe(true);
+    expect(byLabel(entries, "グループ解除").disabled).toBe(true);
   });
 
   it("同じ親の 2 個ならブーリアンを使え、親が違えば理由を title に出す", () => {

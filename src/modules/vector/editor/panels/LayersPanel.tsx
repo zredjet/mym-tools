@@ -20,7 +20,12 @@ import {
 } from "react";
 
 import { isEditableTarget } from "../canvas/input";
-import { canOpenContextMenu, closeContextMenu, openContextMenu } from "../menu/contextMenu";
+import {
+  canOpenContextMenu,
+  closeContextMenu,
+  openContextMenu,
+  takeContextChord,
+} from "../menu/contextMenu";
 import { DEFAULT_NODE_NAMES } from "../model/create";
 import { getNode } from "../model/tree";
 import type { NodeId } from "../model/types";
@@ -222,11 +227,13 @@ function LayersPanelBody() {
    */
   const onContextMenu = useCallback(
     (event: ReactMouseEvent<HTMLElement>) => {
+      const fromChord = takeContextChord();
       if (isEditableTarget(event.target)) return;
       event.preventDefault();
       closeContextMenu();
       const state = editorStore.getState();
-      if (drag.current || !canOpenContextMenu(state)) return;
+      // 行のドラッグの途中と、ドラッグの途中で右を押した和音のあと (Windows はドロップの後に届く) は出さない
+      if (fromChord || drag.current || !canOpenContextMenu(state)) return;
       const row =
         event.target instanceof Element
           ? event.target.closest<HTMLElement>("[data-layer-id]")

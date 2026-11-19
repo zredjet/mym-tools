@@ -12,7 +12,7 @@ import { LayersPanel } from "../panels/LayersPanel";
 import { editorStore } from "../state/store";
 import { DEFAULT_VIEW_OPTIONS } from "../state/types";
 import { square } from "../tools/pathEdit/testing";
-import { closeContextMenu } from "./contextMenu";
+import { closeContextMenu, getContextMenu } from "./contextMenu";
 import { ContextMenuHost } from "./ContextMenuHost";
 
 class ResizeObserverStub {
@@ -167,6 +167,33 @@ describe("キャンバスの右クリック", () => {
     // マウスの右クリックでは押した位置で選び直す
     fireEvent.contextMenu(canvas, at(500, 500));
     expect(state().selection).toEqual([]);
+  });
+
+  it("左のドラッグの途中で右を押した和音のあと、ドラッグが終わってから来る contextmenu (Windows) では出さない", () => {
+    const { canvas } = setupCanvas();
+    fireEvent.pointerDown(canvas, { pointerId: 1, button: 0, buttons: 1, ...at(10, 10) });
+    fireEvent.pointerMove(canvas, { pointerId: 1, button: -1, buttons: 1, ...at(50, 50) });
+    fireEvent.pointerMove(canvas, { pointerId: 1, button: 2, buttons: 3, ...at(60, 60) });
+    fireEvent.pointerMove(canvas, { pointerId: 1, button: 0, buttons: 2, ...at(35, 5) });
+    fireEvent.pointerUp(canvas, { pointerId: 1, button: 2, buttons: 0, ...at(35, 5) });
+    const selection = state().selection;
+    expect(fireEvent.contextMenu(canvas, at(35, 5))).toBe(false);
+    expect(menu()).toBeNull();
+    expect(state().selection).toBe(selection);
+    // 次の右クリックはふつうに開く
+    fireEvent.pointerDown(canvas, { pointerId: 1, button: 2, buttons: 2, ...at(40, 10) });
+    fireEvent.contextMenu(canvas, at(40, 10));
+    expect(menu()).not.toBeNull();
+  });
+
+  it("開いたまま外れたら閉じ、次に付いたときに古いメニューを出さない", () => {
+    const { canvas, unmount } = setupCanvas();
+    fireEvent.contextMenu(canvas, at(10, 10));
+    expect(getContextMenu()).not.toBeNull();
+    unmount();
+    expect(getContextMenu()).toBeNull();
+    setupCanvas();
+    expect(menu()).toBeNull();
   });
 
   it("要素のスクロール (選んだ行をレイヤーパネルが見せるときなど) では閉じない", () => {
