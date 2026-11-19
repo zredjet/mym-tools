@@ -63,6 +63,14 @@ export function toCanvasPointerEvent(
   };
 }
 
+/**
+ * メニューを開く押下か (右ボタン、macOS の Ctrl+クリック)。ツールへは渡さない (§5.8)。
+ * macOS の Ctrl+クリックは、ブラウザが左ボタンの押下 (`button` 0、`ctrlKey`) と `contextmenu` で送る。
+ */
+export function isContextPress(event: { button: number; ctrlKey: boolean }, mac = IS_MAC): boolean {
+  return event.button === 2 || (mac && event.button === 0 && event.ctrlKey);
+}
+
 export interface KeyInput extends ModifierInput {
   key: string;
   code: string;

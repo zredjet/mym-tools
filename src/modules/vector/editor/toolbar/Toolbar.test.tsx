@@ -91,7 +91,7 @@ describe("Toolbar のツール (§5.1)", () => {
     const labels = screen
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label"))
-      .filter((label) => label !== "倍率");
+      .filter((label) => label !== "倍率" && label !== "ブーリアン演算");
     expect(labels).toEqual([
       "選択",
       "フレーム",

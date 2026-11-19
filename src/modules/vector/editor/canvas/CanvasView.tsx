@@ -85,8 +85,9 @@ export function CanvasView() {
       tabIndex={-1}
       data-canvas-view=""
       className="absolute inset-0 overflow-hidden outline-none select-none"
-      style={{ background: CANVAS_BACKGROUND, cursor, touchAction: "none" }}
-      onContextMenu={(event) => event.preventDefault()}
+      // フォーカスを戻したとき (右クリックのメニューを閉じたときなど) に枠を出さない。全体の `:focus-visible` は
+      // 層の外なので、class の outline-none では消えない
+      style={{ background: CANVAS_BACKGROUND, cursor, touchAction: "none", outline: "none" }}
       {...handlers}
     >
       <svg className="absolute inset-0 h-full w-full" data-canvas-document="">

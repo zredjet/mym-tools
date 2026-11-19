@@ -1,5 +1,6 @@
 /**
- * 「変換」の節の操作の一覧 (§5.3)。節 (`ConvertSection`) とショートカット (`canvas/shortcuts.ts`) が使う。
+ * 「変換」の節の操作の一覧 (§5.3)。節 (`ConvertSection`)、ショートカット (`canvas/shortcuts.ts`)、
+ * ツールバーのブーリアンのボタン (`toolbar/Toolbar.tsx`)、右クリックのメニュー (`menu/contextMenuItems.ts`) が使う。
  *
  * - G: パスに変換 (`path/flatten.ts`)、ブーリアン演算の 4 つ (`model/booleanOps.ts`)
  * - I: 線のアウトライン化 (`outline/convertAction.ts` の `OUTLINE_CONVERT_ACTIONS`)
@@ -16,7 +17,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import { IS_MAC } from "../../canvas/input";
+import { shortcutLabel } from "../../canvas/shortcutLabel";
 import { booleanCandidates, createBooleanFromNodes } from "../../model/booleanOps";
 import { BOOLEAN_OP_NAMES } from "../../model/create";
 import { createId } from "../../model/ids";
@@ -43,15 +44,6 @@ import {
   type ConvertContext,
   type ConvertStore,
 } from "./convertSupport";
-
-/** ショートカットの表示。macOS は記号、ほかは文字。 */
-function keyLabel(keys: { mod?: boolean; alt?: boolean; shift?: boolean; key: string }): string {
-  if (IS_MAC)
-    return `${keys.alt ? "⌥" : ""}${keys.shift ? "⇧" : ""}${keys.mod ? "⌘" : ""}${keys.key}`;
-  return [keys.mod && "Ctrl", keys.alt && "Alt", keys.shift && "Shift", keys.key]
-    .filter(Boolean)
-    .join("+");
-}
 
 // ---------------------------------------------------------------------------
 // 選択の形 (節の出し分け用)
@@ -137,9 +129,12 @@ export const BOOLEAN_OP_KEYS: Readonly<Record<BooleanOp, string>> = {
   exclude: "E",
 };
 
-const BOOLEAN_OPS: readonly BooleanOp[] = ["union", "subtract", "intersect", "exclude"];
+/** 演算の並び (節・ツールバーのメニュー・右クリックのメニューで同じ順)。 */
+export const BOOLEAN_OPS: readonly BooleanOp[] = ["union", "subtract", "intersect", "exclude"];
 
 const DIFFERENT_PARENTS = "ブーリアンにするには、同じ親の中で選んでください。";
+/** ブーリアンを作れない選択 (2 個未満、子にできない種類を含む) の理由。ツールバーと右クリックのメニューが出す。 */
+export const BOOLEAN_NEEDS_SELECTION = "2 個以上の矩形・楕円・パス・ブーリアンを選ぶと使えます。";
 const BOOLEAN_LIMITS = `ノードの数 (${CANVAS_LIMITS.maxNodes} 個) か入れ子の深さ (${CANVAS_LIMITS.maxDepth} 段) の上限を超えるため、ブーリアンにできません。`;
 
 /** 2 個以上の、子にできる種類だけの選択か (親は問わない)。 */
@@ -148,7 +143,15 @@ function booleanableSelection(doc: CanvasDocument, selection: readonly NodeId[])
   return tops.length >= 2 && tops.every((node) => canBeBooleanChild(node.type));
 }
 
-function booleanAvailability({ doc, selection }: ConvertContext): ConvertAvailability | null {
+/**
+ * ブーリアンを作れるか (節のボタン、ツールバーのボタン、右クリックのメニューで同じ判定)。
+ * 2 個以上の子にできる種類だけの選択でなければ null、同じ親でないときは押せない理由。
+ * 点の編集中かは見ない (呼ぶ側で除く)。
+ */
+export function booleanAvailability({
+  doc,
+  selection,
+}: ConvertContext): ConvertAvailability | null {
   if (!booleanableSelection(doc, selection)) return null;
   const { sameParent: same, parent } = selectionShape(doc, selection);
   return same && parent && canHaveChildOfType(doc, parent, "boolean")
@@ -177,15 +180,24 @@ export function booleanSelection(store: ConvertStore, op: BooleanOp): void {
   if (!changed) refuseConvert(BOOLEAN_LIMITS);
 }
 
-const booleanActions: ConvertAction[] = BOOLEAN_OPS.map((op) => ({
-  id: `boolean.${op}`,
-  label: BOOLEAN_OP_NAMES[op],
-  icon: BOOLEAN_OP_ICONS[op],
-  shortcut: keyLabel({ alt: true, shift: true, key: BOOLEAN_OP_KEYS[op] }),
-  variant: "icon",
-  availability: booleanAvailability,
-  run: (store) => booleanSelection(store, op),
-}));
+/** ブーリアン演算の 4 つの操作 (演算ごと)。ツールバーと右クリックのメニューも名前・アイコン・キーの表示を使う。 */
+export const BOOLEAN_CONVERT_ACTIONS: Readonly<Record<BooleanOp, ConvertAction>> =
+  Object.fromEntries(
+    BOOLEAN_OPS.map((op): [BooleanOp, ConvertAction] => [
+      op,
+      {
+        id: `boolean.${op}`,
+        label: BOOLEAN_OP_NAMES[op],
+        icon: BOOLEAN_OP_ICONS[op],
+        shortcut: shortcutLabel({ alt: true, shift: true, key: BOOLEAN_OP_KEYS[op] }),
+        variant: "icon",
+        availability: booleanAvailability,
+        run: (store) => booleanSelection(store, op),
+      },
+    ]),
+  ) as Record<BooleanOp, ConvertAction>;
+
+const booleanActions: ConvertAction[] = BOOLEAN_OPS.map((op) => BOOLEAN_CONVERT_ACTIONS[op]);
 
 // ---------------------------------------------------------------------------
 // 一覧
@@ -197,7 +209,7 @@ export const CONVERT_ACTIONS: readonly ConvertAction[] = [
     id: "flatten",
     label: "パスに変換",
     icon: Spline,
-    shortcut: keyLabel({ mod: true, key: "E" }),
+    shortcut: shortcutLabel({ mod: true, key: "E" }),
     availability: flattenAvailability,
     run: flattenSelection,
   },

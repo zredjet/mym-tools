@@ -1,13 +1,13 @@
 /**
  * キャンバス下中央に浮かせるツールバーと倍率の表示 (§5.1)。
- * 並びは 選択、フレーム、矩形、楕円、多角形、星、線、ペン、鉛筆、テキスト、画像、手のひら、倍率で、
- * まとまり (`ToolGroup`) の間に区切りの線を置く。
+ * 並びは 選択、フレーム、矩形、楕円、多角形、星、線、ペン、鉛筆、テキスト、画像、手のひら、ブーリアン、倍率で、
+ * まとまり (`ToolGroup`) の間に区切りの線を置く。ブーリアンと倍率はメニューを開くボタン (`menu/MenuButton.tsx`)。
  *
  * ボタンはマウスで押してもフォーカスを取らない (キャンバスのショートカットと Space の手のひらを妨げないため)。
  * Tab で移ってきたときはキーボードで押せる。
  */
 import { ChevronDown } from "lucide-react";
-import { Fragment, useEffect, useId, useRef, useState, type MouseEvent } from "react";
+import { Fragment, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
 import { getCanvasViewSize, runViewCommand, type ViewCommand } from "../canvas/viewCommands";
@@ -15,94 +15,88 @@ import { importFromPicker } from "../assets/importFile";
 import { ImportNotice } from "../assets/ImportNotice";
 import { useImportFileReader } from "../assets/reader";
 import { useImportStatus } from "../assets/status";
+import { MenuButton } from "../menu/MenuButton";
+import type { MenuEntry } from "../menu/MenuList";
+import { keepFocus } from "../menu/menuNavigation";
+import type { BooleanOp } from "../model/types";
+import {
+  BOOLEAN_CONVERT_ACTIONS,
+  BOOLEAN_OP_ICONS,
+  BOOLEAN_OPS,
+} from "../panels/sections/convertActions";
 import { canvasTextMeasurer } from "../render/measureText";
 import { editorStore, useEditorStore } from "../state/store";
-import { formatZoom, TOOLBAR_TOOLS, ZOOM_ITEMS } from "./toolbarItems";
-
-/** マウスで押したときにフォーカスを取らない。 */
-function keepFocus(event: MouseEvent) {
-  event.preventDefault();
-}
+import { booleanButtonBlockReason, formatZoom, TOOLBAR_TOOLS, ZOOM_ITEMS } from "./toolbarItems";
 
 function ZoomMenu() {
   const zoom = useEditorStore((state) => state.viewport.zoom);
   const hasSelection = useEditorStore((state) => state.selection.length > 0);
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const menuId = useId();
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        setOpen(false);
-      }
-    };
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [open]);
-
-  const run = (command: ViewCommand) => {
+  const run = (command: ViewCommand) =>
     runViewCommand(command, {
       store: editorStore,
       size: getCanvasViewSize(),
       measurer: canvasTextMeasurer,
     });
-    setOpen(false);
-  };
-
   return (
-    <div ref={rootRef} className="relative">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="w-[72px] justify-between px-2 tabular-nums"
-        aria-label="倍率"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        onMouseDown={keepFocus}
-        onClick={() => setOpen((value) => !value)}
-      >
-        {formatZoom(zoom)}
-        <ChevronDown size={14} aria-hidden="true" />
-      </Button>
-      {open && (
-        <div
-          id={menuId}
-          role="menu"
-          aria-label="倍率"
-          className="absolute right-0 bottom-[calc(100%+8px)] min-w-[200px] rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg)] p-1 shadow-[0_8px_24px_rgba(0,0,0,0.10)]"
-        >
-          {ZOOM_ITEMS.map((item) => {
-            const disabled = item.command === "zoomToSelection" && !hasSelection;
-            return (
-              <button
-                key={item.command}
-                type="button"
-                role="menuitem"
-                disabled={disabled}
-                onMouseDown={keepFocus}
-                onClick={() => run(item.command)}
-                className="flex h-7 w-full items-center justify-between gap-4 rounded-[var(--radius-sm)] px-2 text-[13px] text-[var(--fg)] hover:bg-[var(--bg-muted)] disabled:cursor-not-allowed disabled:text-[var(--fg-subtle)] disabled:hover:bg-transparent"
-              >
-                <span>{item.label}</span>
-                <span className="text-[12px] text-[var(--fg-muted)]">{item.shortcut}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
+    <MenuButton
+      label="倍率"
+      className="w-[72px] justify-between px-2 tabular-nums"
+      entries={() =>
+        ZOOM_ITEMS.map(
+          (item): MenuEntry => ({
+            type: "item",
+            id: item.command,
+            label: item.label,
+            shortcut: item.shortcut,
+            disabled: item.command === "zoomToSelection" && !hasSelection,
+            run: () => run(item.command),
+          }),
+        )
+      }
+    >
+      {formatZoom(zoom)}
+      <ChevronDown size={14} aria-hidden="true" />
+    </MenuButton>
+  );
+}
+
+/**
+ * ブーリアンのボタン (§5.1)。最後にこのメニューで選んだ演算のアイコンと ▾ を出し、押すと 4 つの演算の
+ * メニューを開く。選ぶと「変換」の節・ショートカットと同じ関数 (`booleanSelection`) で作る。
+ * 作れない選択と点の編集中は使えない表示にして、理由をツールチップに出す。
+ * 最後に選んだ演算は、ツールバーを出している間 (エディタを開いている間) だけ覚える。既定は合体。
+ */
+function BooleanMenu() {
+  const [lastOp, setLastOp] = useState<BooleanOp>("union");
+  const reason = useEditorStore(booleanButtonBlockReason);
+  const Icon = BOOLEAN_OP_ICONS[lastOp];
+  return (
+    <MenuButton
+      label="ブーリアン演算"
+      title={reason === null ? "ブーリアン演算" : `ブーリアン演算 — ${reason}`}
+      disabled={reason !== null}
+      align="left"
+      className="gap-0.5 px-1"
+      entries={() =>
+        BOOLEAN_OPS.map((op): MenuEntry => {
+          const action = BOOLEAN_CONVERT_ACTIONS[op];
+          return {
+            type: "item",
+            id: op,
+            label: action.label,
+            icon: action.icon,
+            shortcut: action.shortcut,
+            run: () => {
+              setLastOp(op);
+              action.run(editorStore);
+            },
+          };
+        })
+      }
+    >
+      <Icon size={16} aria-hidden="true" data-op={lastOp} />
+      <ChevronDown size={12} aria-hidden="true" />
+    </MenuButton>
   );
 }
 
@@ -163,6 +157,8 @@ export function Toolbar() {
             </Fragment>
           );
         })}
+        <Separator />
+        <BooleanMenu />
         <Separator />
         <ZoomMenu />
       </div>

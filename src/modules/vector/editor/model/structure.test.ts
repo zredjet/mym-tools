@@ -9,6 +9,7 @@ import {
   groupNodes,
   insertNode,
   moveNodes,
+  reorderAvailability,
   reorderNodes,
   ungroupNodes,
 } from "./structure";
@@ -111,6 +112,42 @@ describe("重なり順", () => {
     const doc = frozen();
     expect(reorderNodes(doc, ["f2"], "forward")).toBe(doc);
     expect(reorderNodes(doc, ["r1"], "back")).toBe(doc);
+  });
+});
+
+describe("重なり順が変わるか (reorderAvailability)", () => {
+  it("reorderNodes で文書が変わるかと一致する", () => {
+    const doc = deepFreeze(sampleDocument());
+    const selections: string[][] = [
+      ["r0"],
+      ["f"],
+      ["f", "r0"],
+      ["r1"],
+      ["f2"],
+      ["r1", "f2"],
+      ["r1", "grp", "f2"],
+      ["r2"],
+      ["l1"],
+      ["r2", "l1"],
+      ["r3"],
+      ["r1", "r3"],
+      ["grp", "r2"],
+      [],
+      ["missing"],
+    ];
+    for (const ids of selections) {
+      const { toFront, toBack } = reorderAvailability(doc, ids);
+      expect([ids, toFront], "前面へ").toEqual([ids, reorderNodes(doc, ids, "front") !== doc]);
+      expect([ids, toFront], "1 つ前面へ").toEqual([
+        ids,
+        reorderNodes(doc, ids, "forward") !== doc,
+      ]);
+      expect([ids, toBack], "背面へ").toEqual([ids, reorderNodes(doc, ids, "back") !== doc]);
+      expect([ids, toBack], "1 つ背面へ").toEqual([
+        ids,
+        reorderNodes(doc, ids, "backward") !== doc,
+      ]);
+    }
   });
 });
 

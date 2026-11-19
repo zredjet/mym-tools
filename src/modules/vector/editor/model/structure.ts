@@ -22,6 +22,7 @@ import { CANVAS_LIMITS } from "./limits";
 import { transformInDraft, translateInDraft } from "./transform";
 import {
   canHaveChildOfType,
+  getChildren,
   getDepth,
   getDescendantIds,
   getNode,
@@ -261,6 +262,43 @@ export function reorderNodes(
   return draft.finish();
 }
 
+/**
+ * `reorderNodes` で重なり順が変わるか。文書を作り直さずに求める (右クリックのメニューの出し分け)。
+ * - `toFront` (前面へ・最前面へ): どれかの親で、選んだノードより前面に選んでいない兄弟がある
+ * - `toBack` (背面へ・最背面へ): どれかの親で、選んだノードより背面に選んでいない兄弟がある
+ */
+export function reorderAvailability(
+  doc: CanvasDocument,
+  ids: readonly NodeId[],
+): { toFront: boolean; toBack: boolean } {
+  const byParent = new Map<string, { parent: ParentRef; ids: Set<NodeId> }>();
+  for (const id of topLevelIds(doc, ids)) {
+    const parent = getParent(doc, id);
+    if (!parent) continue;
+    const key = `${parent.kind}:${parent.id}`;
+    const entry = byParent.get(key) ?? { parent, ids: new Set<NodeId>() };
+    entry.ids.add(id);
+    byParent.set(key, entry);
+  }
+  let toFront = false;
+  let toBack = false;
+  for (const { parent, ids: selected } of byParent.values()) {
+    let seenSelected = false;
+    let seenOther = false;
+    for (const id of getChildren(doc, parent)) {
+      if (selected.has(id)) {
+        seenSelected = true;
+        if (seenOther) toBack = true;
+      } else {
+        seenOther = true;
+        if (seenSelected) toFront = true;
+      }
+    }
+    if (toFront && toBack) break;
+  }
+  return { toFront, toBack };
+}
+
 // ---------------------------------------------------------------------------
 // 親の付け替え
 // ---------------------------------------------------------------------------
@@ -358,6 +396,22 @@ export function moveNodes(
 // ---------------------------------------------------------------------------
 
 /**
+ * グループ化で入れる先 (最も前面の根の親) と根 (重なり順)。木の構造の上でグループにできなければ null。
+ * 上限 (ノードの数、入れ子の深さ) は見ない (`groupNodes` が確かめる)。右クリックのメニューの出し分けにも使う。
+ */
+export function groupPlacement(
+  doc: CanvasDocument,
+  ids: readonly NodeId[],
+): { tops: NodeId[]; front: NodeId; target: ParentRef } | null {
+  const tops = topLevelIds(doc, ids);
+  const front = tops[tops.length - 1];
+  if (front === undefined) return null;
+  const target = getParent(doc, front);
+  if (!target || !canHaveChildOfType(doc, target, "group")) return null;
+  return { tops, front, target };
+}
+
+/**
  * ノードをまとめて group にする。group は最も前面のノードの親の、そのノードがあった位置に置く。
  * ほかの親にあるノードは、見た目の位置を保ったままその親へ移す (回転した frame の間でも見た目を保つ)。
  * `groupId` を渡しておくと、呼び出し側がその ID で選択し直せる。
@@ -369,12 +423,9 @@ export function groupNodes(
   groupId: NodeId = createId(doc.nodes),
   init: Partial<Omit<GroupNode, "type" | "id" | "children">> = {},
 ): CanvasDocument {
-  const tops = topLevelIds(doc, ids);
-  const front = tops[tops.length - 1];
-  if (front === undefined || getNode(doc, groupId) !== undefined) return doc;
-  const target = getParent(doc, front);
-  if (!target) return doc;
-  if (!canHaveChildOfType(doc, target, "group")) return doc;
+  const placement = groupPlacement(doc, ids);
+  if (!placement || getNode(doc, groupId) !== undefined) return doc;
+  const { tops, front, target } = placement;
   if (Object.keys(doc.nodes).length + 1 > CANVAS_LIMITS.maxNodes) return doc;
   const depth = parentDepth(doc, target);
   if (tops.some((id) => depth + 1 + subtreeHeight(doc.nodes, id) > CANVAS_LIMITS.maxDepth))

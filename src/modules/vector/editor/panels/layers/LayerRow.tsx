@@ -12,6 +12,7 @@ import { memo, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent 
 import { cn } from "@/lib/cn";
 
 import { getBooleanEvaluation } from "../../boolean/result";
+import { IS_MAC, isContextPress } from "../../canvas/input";
 import { DEFAULT_NODE_NAMES } from "../../model/create";
 import { updateNodes } from "../../model/transform";
 import { getNode } from "../../model/tree";
@@ -111,9 +112,15 @@ export const LayerRow = memo(function LayerRow({
         dropZone === "inside" && "ring-2 ring-[var(--accent)] ring-inset",
       )}
       style={{ paddingLeft: PADDING + depth * INDENT }}
-      onClick={(event) =>
-        onSelect(id, { shift: event.shiftKey, toggle: event.metaKey || event.ctrlKey })
-      }
+      onPointerDown={(event) => {
+        // macOS の Ctrl+クリックは右クリック (メニューは一覧の contextmenu が開く)。行のドラッグを始めない
+        if (isContextPress(event) && event.button === 0) event.stopPropagation();
+      }}
+      onClick={(event) => {
+        // macOS の Ctrl+クリックは右クリックなので、選択に足し引きしない (足し引きは Cmd)
+        if (IS_MAC && event.ctrlKey) return;
+        onSelect(id, { shift: event.shiftKey, toggle: event.metaKey || event.ctrlKey });
+      }}
       onDoubleClick={() => setEditing(true)}
       onPointerEnter={() => editorStore.getState().setHovered(id)}
       onPointerLeave={() => {

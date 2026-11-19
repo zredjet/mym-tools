@@ -26,7 +26,7 @@ import {
   topLevelIds,
   type ParentRef,
 } from "../model/tree";
-import type { CanvasDocument } from "../model/types";
+import type { CanvasDocument, NodeId } from "../model/types";
 import { editorClipboard, PASTE_OFFSET, type EditorClipboard } from "./clipboard";
 import type { EditorState, EditorStore } from "./types";
 
@@ -109,14 +109,20 @@ export function distributeSelection(store: Store, axis: DistributeAxis): void {
   apply((doc) => distributeNodes(doc, selection, axis));
 }
 
-/** スコープの中をすべて選ぶ (Cmd/Ctrl+A)。非表示とロック中のノードは選ばない。 */
-export function selectAll(store: Store): void {
-  const state = store.getState();
-  const ids = getChildren(state.doc, currentParent(state)).filter((id) => {
+/** すべて選択で選ぶノード: スコープの中の、表示されていてロックしていないもの。 */
+export function selectableInScope(
+  state: Pick<EditorState, "doc" | "pageId" | "scopeId">,
+): NodeId[] {
+  return getChildren(state.doc, currentParent(state)).filter((id) => {
     const node = getNode(state.doc, id);
     return node !== undefined && node.visible && !node.locked;
   });
-  state.setSelection(ids);
+}
+
+/** スコープの中をすべて選ぶ (Cmd/Ctrl+A)。非表示とロック中のノードは選ばない。 */
+export function selectAll(store: Store): void {
+  const state = store.getState();
+  state.setSelection(selectableInScope(state));
 }
 
 /** 選択をコピーする (Cmd/Ctrl+C)。 */
