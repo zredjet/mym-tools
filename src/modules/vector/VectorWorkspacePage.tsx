@@ -5,7 +5,7 @@
  * エディタ (`EditorRoot`) からなる。エディタの状態はエディタの store (`editorStore`) が持ち、
  * この画面は作品の読み込み・保存と、ファイルの入出力の登録 (`canvasIo.ts`) を受け持つ。
  *
- * - 読み込み: payload v2 を `parsePayload` で文書にし、テキストの大きさを求め直してから `load` に渡し、
+ * - 読み込み: payload v3 を `parsePayload` で文書にし、テキストの大きさを求め直してから `load` に渡し、
  *   全体を表示する。読めない payload はエラーを出し、エディタを出さない (編集させない)
  * - 保存: 本文の編集と進行中のジェスチャーを確定してから、`checkSavable` → `toPayload` で保存する。
  *   未保存かどうかは、保存した時点の `revision` とタイトル・タグで判定する
@@ -133,13 +133,13 @@ function flushEdits(mode: "save" | "leave"): void {
   }
 }
 
-/** Rust の Eager-on-Read が v1 を v2 へ変換できなかった (行は v1 のまま残っている)。 */
+/** Rust の Eager-on-Read が古い版 (v1 / v2) を今の版へ変換できなかった (行は古い版のまま残っている)。 */
 const isUpgradeFailure = (cause: unknown) =>
   typeof cause === "object" &&
   cause !== null &&
   (cause as { code?: unknown }).code === "payload_upgrade_failed";
 
-/** 作品を開けなかった理由 (Rust の Eager-on-Read が v1 を v2 へ変換できなかった場合を含む)。 */
+/** 作品を開けなかった理由 (Rust の Eager-on-Read が古い版を今の版へ変換できなかった場合を含む)。 */
 function describeOpenError(cause: unknown): string {
   if (isUpgradeFailure(cause))
     return `この作品は新しい形式に変換できないため開けません。元のデータは変えずに残しています。理由: ${describeInvokeError(cause)}`;
@@ -148,7 +148,8 @@ function describeOpenError(cause: unknown): string {
 
 /**
  * 作品を開けなかったこと。`rescuable` は、変換できない v1 の作品で、元の SVG を書き出せる
- * (`vector_export_original_svg`、ADR-0027)。
+ * (`vector_export_original_svg`、ADR-0027)。変換の失敗からは元の版が分からないので、壊れた v2 の行
+ * (§3.9) でも true になる。そのときは書き出しが「元の形式で保存されていません」と理由を出す。
  */
 interface Failure {
   message: string;

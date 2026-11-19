@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createRect } from "../model/create";
+import { insertNode } from "../model/structure";
 import { addGuide, updateNode } from "../model/transform";
 import { sampleDocument } from "../model/testing";
 import {
@@ -116,5 +118,27 @@ describe("スマートガイド", () => {
       { axis: "x", pos: 100, start: 0, end: 100 },
       { axis: "y", pos: 50, start: 0, end: 150 },
     ]);
+  });
+});
+
+describe("回転したノードの候補 (§4.11.1)", () => {
+  it("回転したノードは、ページの軸に平行な外接矩形の辺と中心", () => {
+    // 100×100 を 45° 回すと、外接矩形は中心 (50, 50) のまわりに一辺 100√2
+    const doc = insertNode(
+      sampleDocument(),
+      createRect({ id: "q", x: 0, y: 600, width: 100, height: 100, rotation: 45 }),
+      { kind: "page", id: "p1" },
+    );
+    const targets = collectSnapTargets(doc, "p1", {
+      parents: [{ kind: "page", id: "p1" }],
+      frames: [],
+      exclude: new Set(),
+    });
+    const half = 50 * Math.SQRT2;
+    const ys = targets.y.map((line) => line.pos).filter((y) => y > 550);
+    expect(ys).toHaveLength(3);
+    expect(ys[0]).toBeCloseTo(650 - half, 9);
+    expect(ys[1]).toBeCloseTo(650, 9);
+    expect(ys[2]).toBeCloseTo(650 + half, 9);
   });
 });

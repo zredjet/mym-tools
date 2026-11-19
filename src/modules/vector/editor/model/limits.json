@@ -23,6 +23,11 @@
   "maxLineHeight": 10000,
   "maxImageSide": 16384,
   "maxImagePixels": 16777216,
+  "maxSubpaths": 1000,
+  "maxPathPoints": 10000,
+  "maxTotalPathPoints": 100000,
+  "maxDashCount": 8,
+  "maxDashLength": 10000,
   "idPattern": "^[A-Za-z0-9_-]{1,32}$",
   "colorPattern": "^#[0-9A-Fa-f]{6}$"
 }

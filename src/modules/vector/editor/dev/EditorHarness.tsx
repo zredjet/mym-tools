@@ -4,7 +4,7 @@
  *
  * 検証用に `window.__canvasHarness` から store と文書の読み込みを触れる (この画面の中だけ)。
  *   __canvasHarness.store.getState()            状態
- *   __canvasHarness.load("stress")              文書を読み込む ("full" / "empty" / "sample" / "stress")
+ *   __canvasHarness.load("stage2")              文書を読み込む ("full" / "stage2" / "empty" / "sample" / "stress")
  *   __canvasHarness.setTheme("dark")            テーマ
  */
 import { useEffect, useState } from "react";

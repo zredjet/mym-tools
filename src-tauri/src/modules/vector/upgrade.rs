@@ -1,8 +1,14 @@
-//! payload v1 (`{ svg, text }`) から v2 (シーン形式) への変換 (ADR-0026、
-//! `docs/canvas-editor-design.md` §3.7)。v1 の SVG を編集できない埋め込み SVG 1 個の文書に包む。
-//! `VectorModule::upgrade_payload(1, ..)` がこの `upgrade_v1` を呼ぶ。
+//! payload の版の変換。
+//!
+//! - v1 (`{ svg, text }`) から v2 (シーン形式) へ (ADR-0026、`docs/canvas-editor-design.md` §3.7)。
+//!   v1 の SVG を編集できない埋め込み SVG 1 個の文書に包む。`upgrade_payload(1, ..)` が `upgrade_v1` を呼ぶ
+//! - v2 から v3 へ (ADR-0028、§3.9)。回転 0 と線の既定値を足すだけ。`upgrade_payload(2, ..)` が
+//!   `upgrade_v2` を呼ぶ
+//!
+//! ストレージは段ごとに `upgrade_payload` を呼ぶだけなので、各段の中で自分の結果を検証する
+//! (v1 → v2 は v2 の検証、v2 → v3 は v3 の検証)。
 
-use super::scene::{clip_reason, search_text, validate, LIMITS};
+use super::scene::{clip_reason, search_text, validate, validate_v3, LIMITS};
 use super::validation::validate_svg;
 use crate::{error::AppError, module::ModuleError};
 use quick_xml::{events::Event, Reader, XmlVersion};
@@ -75,13 +81,70 @@ pub fn upgrade_v1(payload: &Value) -> Result<Value, ModuleError> {
     document["text"] = Value::String(search_text(&document));
     // 壊れた v2 を返さない (§3.7)。今の SVG ポリシーを通らない古い作品などは変換を失敗にし、v1 のまま残す。
     validate(&document).map_err(|error| {
-        let reason = match error {
-            ModuleError::ValidationFailed { reason } => reason,
-            other => other.to_string(),
-        };
-        failed(format!("変換した文書が検証を通りません: {reason}"))
+        failed(format!(
+            "変換した文書が検証を通りません: {}",
+            reason_of(error)
+        ))
     })?;
     Ok(document)
+}
+
+/// v2 → v3 で `rotation: 0` を足すノード (箱を持つノードのうち、v2 にあったもの)。
+const ROTATED_KINDS: [&str; 6] = ["frame", "rect", "ellipse", "text", "image", "svg"];
+/// v2 → v3 で、null でない `stroke` に端・角・破線の既定値を足すノード (v2 で線を持てるもの)。
+const STROKED_KINDS: [&str; 4] = ["frame", "rect", "ellipse", "line"];
+
+/// v2 の payload を v3 にする (§3.9)。結果は入力だけで決まる。`VectorModule::upgrade_payload(2, ..)`
+/// から呼ぶ形。
+///
+/// - frame・矩形・楕円・テキスト・画像・埋め込み SVG に `rotation: 0`
+/// - frame・矩形・楕円・線の、null でない `stroke` に `cap: "butt"`、`join: "miter"`、`dash: []`
+///
+/// ほかの値と配列の順は変えない。検索用テキストは変わらないので `text` はそのまま残す。
+///
+/// 入力は凍結した v2 の検証で確かめる。壊れた v2 (検証を通らないもの) は変換を失敗にし、v2 のまま
+/// 残す (§3.9。ADR-0027 の規則 2 で上書きも拒否される)。足すだけの変換なので、v2 の検証を通る行は
+/// 必ず v3 の検証を通るが、壊れた v3 を返さないよう結果も v3 の検証で確かめる (ADR-0027 §2.1)。
+pub fn upgrade_v2(payload: &Value) -> Result<Value, ModuleError> {
+    validate(payload)
+        .map_err(|error| failed(format!("v2 の文書が検証を通りません: {}", reason_of(error))))?;
+    let mut document = payload.clone();
+    let nodes = document
+        .get_mut("nodes")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| failed("v2 の nodes がオブジェクトではありません。"))?;
+    for node in nodes.values_mut() {
+        let Some(node) = node.as_object_mut() else {
+            return Err(failed("v2 のノードがオブジェクトではありません。"));
+        };
+        let kind = node.get("type").and_then(Value::as_str).unwrap_or_default();
+        let rotated = ROTATED_KINDS.contains(&kind);
+        let stroked = STROKED_KINDS.contains(&kind);
+        if rotated {
+            node.insert("rotation".into(), Value::from(0));
+        }
+        if stroked {
+            if let Some(stroke) = node.get_mut("stroke").and_then(Value::as_object_mut) {
+                stroke.insert("cap".into(), Value::from("butt"));
+                stroke.insert("join".into(), Value::from("miter"));
+                stroke.insert("dash".into(), Value::Array(Vec::new()));
+            }
+        }
+    }
+    validate_v3(&document).map_err(|error| {
+        failed(format!(
+            "変換した文書が検証を通りません: {}",
+            reason_of(error)
+        ))
+    })?;
+    Ok(document)
+}
+
+fn reason_of(error: ModuleError) -> String {
+    match error {
+        ModuleError::ValidationFailed { reason } => reason,
+        other => other.to_string(),
+    }
 }
 
 /// 整数の値は JSON の整数で書く (契約データの `640` と同じ表現にする)。

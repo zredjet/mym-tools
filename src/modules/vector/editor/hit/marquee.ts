@@ -3,8 +3,21 @@
  *
  * どちらもドラッグの開始時に候補を 1 回だけ集め (文書はドラッグの間変わらないか、動くのは
  * 選んだノードだけ)、ポインターが動くたびに全ノードを調べ直さない。
+ *
+ * 回転 (§4.11.1、§4.11.2): 範囲選択は軸に平行な外接矩形で行う (回転した切り抜く frame の範囲は外接矩形で近似)。
+ * ドロップ先の判定は、点を frame の座標系に直してから箱で判定する (`dropFrameContains`)。
  */
-import { getPageBounds, rectContains, rectsIntersect, type Rect } from "../model/geometry";
+import { applyToPoint, invert, type Matrix, multiply } from "../geometry/matrix";
+import {
+  getPageBounds,
+  isTranslation,
+  mapRectBounds,
+  nodeTransform,
+  rectContains,
+  rectCorners,
+  rectsIntersect,
+  type Rect,
+} from "../model/geometry";
 import { getAncestors, getChildren, getNode, getPage, type ParentRef } from "../model/tree";
 import type { CanvasDocument, CanvasNode, NodeId, PageId, Point } from "../model/types";
 import { isInteractive } from "./hitTest";
@@ -134,10 +147,48 @@ export function marqueeSelect(candidates: readonly MarqueeCandidate[], rect: Rec
 // ドロップ先の frame
 // ---------------------------------------------------------------------------
 
+/** frame の箱 (frame の座標系の (0, 0)〜(width, height))。`toLocal` はページ → frame の座標系。 */
+export interface DropRegion {
+  toLocal: Matrix;
+  width: number;
+  height: number;
+}
+
 export interface DropFrame {
   id: NodeId;
-  /** ページ座標で見えている範囲 (祖先の frame が切り抜く分を除く) */
+  /**
+   * ページ座標で見えている範囲 (祖先の frame が切り抜く分を除く)。回転した frame (祖先を含む) では、
+   * 回転した箱の外接矩形を掛け合わせた近似
+   */
   rect: Rect;
+  /**
+   * 回転した frame (祖先を含む) のときだけ: 点がこの frame の中かを判定する箱 (自分と、切り抜く祖先の frame)。
+   * どれの中にもあれば中。null なら `rect` で判定する (回転していない座標系では第 1 段階と同じ)
+   */
+  regions: readonly DropRegion[] | null;
+}
+
+function regionContains(region: DropRegion, point: Point): boolean {
+  const q = applyToPoint(region.toLocal, point);
+  return q.x >= 0 && q.x <= region.width && q.y >= 0 && q.y <= region.height;
+}
+
+/** 点 (ページ座標) が frame の見えている範囲の中か (辺の上も中)。 */
+export function dropFrameContains(frame: DropFrame, point: Point): boolean {
+  if (frame.regions) return frame.regions.every((region) => regionContains(region, point));
+  const { rect } = frame;
+  return (
+    point.x >= rect.x &&
+    point.x <= rect.x + rect.width &&
+    point.y >= rect.y &&
+    point.y <= rect.y + rect.height
+  );
+}
+
+/** 矩形 (ページ座標) が丸ごと frame の見えている範囲の中か。 */
+export function dropFrameContainsRect(frame: DropFrame, rect: Rect): boolean {
+  if (!frame.regions) return rectContains(frame.rect, rect);
+  return rectCorners(rect).every((corner) => dropFrameContains(frame, corner));
 }
 
 /**
@@ -153,41 +204,51 @@ export function dropFrames(
   if (!page) return [];
   const result: DropFrame[] = [];
   const seen = new Set<NodeId>();
-  const visit = (ids: readonly NodeId[], origin: Point, clip: Rect | null) => {
+  const visit = (
+    ids: readonly NodeId[],
+    space: Matrix,
+    clip: Rect | null,
+    clipRegions: readonly DropRegion[],
+    rotated: boolean,
+  ) => {
     for (const id of ids) {
       const node: CanvasNode | undefined = getNode(doc, id);
       if (!node || seen.has(id) || exclude.has(id) || !node.visible || node.locked) continue;
       seen.add(id);
-      if (node.type === "group") visit(node.children, origin, clip);
+      // ブーリアンの子は矩形・楕円・パス・ブーリアンだけなので、frame はない
+      if (node.type === "group") visit(node.children, space, clip, clipRegions, rotated);
       else if (node.type === "frame") {
-        const rect = {
-          x: origin.x + node.x,
-          y: origin.y + node.y,
-          width: node.width,
-          height: node.height,
-        };
+        const frameSpace = multiply(space, nodeTransform(node));
+        const box = { x: 0, y: 0, width: node.width, height: node.height };
+        const rect = isTranslation(frameSpace)
+          ? { x: space.e + node.x, y: space.f + node.y, width: node.width, height: node.height }
+          : mapRectBounds(frameSpace, box);
         const visible = clip ? intersectRects(rect, clip) : rect;
         if (!visible) continue;
-        result.push({ id, rect: visible });
-        visit(node.children, { x: rect.x, y: rect.y }, node.clip ? visible : clip);
+        const toLocal = invert(frameSpace);
+        if (!toLocal) continue;
+        const own: DropRegion = { toLocal, width: node.width, height: node.height };
+        const isRotated = rotated || !isTranslation(frameSpace);
+        result.push({ id, rect: visible, regions: isRotated ? [own, ...clipRegions] : null });
+        visit(
+          node.children,
+          frameSpace,
+          node.clip ? visible : clip,
+          node.clip ? [own, ...clipRegions] : clipRegions,
+          isRotated,
+        );
       }
     }
   };
-  visit(page.children, { x: 0, y: 0 }, null);
+  visit(page.children, { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }, null, [], false);
   return result;
 }
 
 /** 点の下で最も前面の frame。なければ null (ページ直下)。 */
 export function dropTargetAt(frames: readonly DropFrame[], point: Point): NodeId | null {
   for (let i = frames.length - 1; i >= 0; i--) {
-    const { id, rect } = frames[i] as DropFrame;
-    if (
-      point.x >= rect.x &&
-      point.x <= rect.x + rect.width &&
-      point.y >= rect.y &&
-      point.y <= rect.y + rect.height
-    )
-      return id;
+    const frame = frames[i] as DropFrame;
+    if (dropFrameContains(frame, point)) return frame.id;
   }
   return null;
 }

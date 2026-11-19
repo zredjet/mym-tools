@@ -1,15 +1,41 @@
 /**
  * プロパティパネルの変更 (純関数)。どれも変わらなければ引数の文書をそのまま返す。
+ *
+ * 位置と大きさ (§4.11.5、G がパネルの欄から呼ぶ):
+ * - `readPosition(doc, selection)`: 1 個の箱を持つノードは W / H が回転の前の大きさ、X / Y が回転した箱の左上の角
+ *   (ノードの座標系の原点を親の座標系へ写した点)。複数選択・group・ブーリアンは軸に平行な外接矩形、線は始点と終点
+ * - `setBoundsField(doc, selection, field, value)`: 1 個の回転した箱を持つノードは、X / Y でその角を入力した位置へ
+ *   動かし、W / H は左上の角を動かさずに自分の向きでリサイズする (§4.11.4。大きさは整数に丸める)
+ * - `readRotation(doc, selection)`: 回転の欄の値。箱を持つノードだけの選択なら、全部同じ値ならその値、違えば
+ *   `MIXED`。箱を持たないノードを含むか、空なら null (欄を出さない)
+ * - `setRotationField(doc, selection, value)`: 各ノードを自分の中心のまわりに、入力した角度へそろえる
  */
-import { getLocalBounds, getPageBounds, isBoxNode, type BoxNode } from "../../model/geometry";
+import { applyToPoint } from "../../geometry/matrix";
+import {
+  coordinateMatrix,
+  getLocalBounds,
+  getPageBounds,
+  isBoxNode,
+  isTranslation,
+  nodeTransform,
+  parentMatrix,
+  type BoxNode,
+} from "../../model/geometry";
 import { CANVAS_LIMITS } from "../../model/limits";
-import { resizeNodes, translateNodes, updateNodes, type NodePatch } from "../../model/transform";
-import { getNode, topLevelIds } from "../../model/tree";
+import { setNodesRotation } from "../../model/rotate";
+import {
+  resizeNodeInOwnFrame,
+  resizeNodes,
+  translateNodes,
+  updateNodes,
+  type NodePatch,
+} from "../../model/transform";
+import { getNode, getParent, topLevelIds } from "../../model/tree";
 import type { CanvasDocument, CanvasNode, NodeId, Shadow, Stroke } from "../../model/types";
 import { canvasTextMeasurer } from "../../render/measureText";
 import type { TextMeasurer } from "../../render/types";
 import { fitTextNodes } from "../../text/fit";
-import { commonValue, type Mixed } from "../fields/values";
+import { commonValue, MIXED, type Mixed } from "../fields/values";
 import { geometryWithinLimits } from "../limits";
 
 export type BoundsField = "x" | "y" | "width" | "height";
@@ -19,7 +45,14 @@ export type LineField = "x1" | "y1" | "x2" | "y2";
 export const DEFAULT_SHADOW: Shadow = { x: 0, y: 4, blur: 8, color: "#000000", opacity: 0.25 };
 
 /** 線を足したときの既定 (`createStroke` と同じ)。 */
-export const DEFAULT_STROKE: Stroke = { color: "#000000", opacity: 1, width: 1 };
+export const DEFAULT_STROKE: Stroke = {
+  color: "#000000",
+  opacity: 1,
+  width: 1,
+  cap: "butt",
+  join: "miter",
+  dash: [],
+};
 
 // ---------------------------------------------------------------------------
 // 位置と大きさ
@@ -30,9 +63,27 @@ export type PositionValues =
   | { mode: "line"; values: Record<LineField, number | Mixed> };
 
 /**
+ * 1 個だけ選んだ、自分の向きで読み書きする箱を持つノード (§4.11.5)。自分が回転しているか、回転した frame の
+ * 中にあるもの (ページ上の向きが 0 でなくなりうるもの)。なければ null。
+ */
+function singleRotatedBox(doc: CanvasDocument, ids: readonly NodeId[]): BoxNode | null {
+  if (ids.length !== 1) return null;
+  const id = ids[0] as NodeId;
+  const node = getNode(doc, id);
+  if (!node || !isBoxNode(node)) return null;
+  return node.rotation !== 0 || !isTranslation(coordinateMatrix(doc, id)) ? node : null;
+}
+
+/** 回転した箱の左上の角 (ノードの座標系の原点を親の座標系へ写した点)。 */
+function boxCorner(node: BoxNode): { x: number; y: number } {
+  return applyToPoint(nodeTransform(node), { x: 0, y: 0 });
+}
+
+/**
  * 位置と大きさの節に出す値。親の座標系で見る (frame の子は frame の左上が原点)。
  * 祖先も選ばれているノードは除く (祖先と一緒に動くため)。線だけを選んでいれば始点と終点。
  * group は外接矩形。選択が空なら null。
+ * 1 個の回転した箱を持つノードは、W / H が回転の前の大きさ、X / Y が回転した箱の左上の角 (§4.11.5)。
  */
 export function readPosition(
   doc: CanvasDocument,
@@ -52,6 +103,14 @@ export function readPosition(
         y2: commonValue(lines.map((n) => n.y2)),
       },
     };
+  const rotated = singleRotatedBox(doc, ids);
+  if (rotated) {
+    const corner = boxCorner(rotated);
+    return {
+      mode: "box",
+      values: { x: corner.x, y: corner.y, width: rotated.width, height: rotated.height },
+    };
+  }
   const bounds = ids.map((id) => getLocalBounds(doc, id)).filter((b) => b !== null);
   if (bounds.length === 0) return null;
   return {
@@ -70,6 +129,9 @@ export function readPosition(
  * W と H は左上を保って大きさを変える (`resizeNodes`、整数に丸める)。複数選択はそれぞれに当てる。
  * テキストの大きさは同じ変更の中で求め直す (`auto-height` の幅を変えたら、高さが折り返しの結果になる。§4.7)。
  * 結果が範囲の外へ出るなら変えない。
+ * 1 個の回転した箱を持つノード (回転した frame の中のものを含む) は、X / Y で回転した箱の左上の角を入力した
+ * 位置へ動かし、W / H は左上の角を動かさずに自分の向きでリサイズする (§4.11.4、§4.11.5。大きさは整数に丸め、
+ * `x` `y` は丸めない)。回転した frame の中の group と複数選択の W / H は、読み取りと同じ親の座標系で比例させる。
  */
 export function setBoundsField(
   doc: CanvasDocument,
@@ -79,6 +141,30 @@ export function setBoundsField(
   measurer: TextMeasurer = canvasTextMeasurer,
 ): CanvasDocument {
   const ids = topLevelIds(doc, selection);
+  const rotated = singleRotatedBox(doc, ids);
+  if (rotated) {
+    let next: CanvasDocument;
+    if (field === "x" || field === "y") {
+      const corner = boxCorner(rotated);
+      const delta = value - corner[field];
+      next = translateNodes(
+        doc,
+        [rotated.id],
+        field === "x" ? delta : 0,
+        field === "y" ? delta : 0,
+      );
+    } else {
+      const size = Math.max(0, Math.round(value));
+      next = resizeNodeInOwnFrame(doc, rotated.id, {
+        x: 0,
+        y: 0,
+        width: field === "width" ? size : rotated.width,
+        height: field === "height" ? size : rotated.height,
+      });
+      next = fitTextNodes(next, ids, measurer);
+    }
+    return next !== doc && geometryWithinLimits(next, ids) ? next : doc;
+  }
   let next = doc;
   for (const id of ids) {
     if (field === "x" || field === "y") {
@@ -87,15 +173,26 @@ export function setBoundsField(
       const delta = value - local[field];
       next = translateNodes(next, [id], field === "x" ? delta : 0, field === "y" ? delta : 0);
     } else {
-      const from = getPageBounds(next, id);
+      // 回転した frame の中では、読み取りと同じ親の座標系の外接矩形で比例させる
+      const parent = getParent(next, id);
+      const inParent = parent !== null && !isTranslation(parentMatrix(next, parent));
+      const from = inParent ? getLocalBounds(next, id) : getPageBounds(next, id);
       if (!from) continue;
       const node = getNode(next, id);
+      // 大きさ 0 のパスは点を広げられない (どの点も同じ x か y) ので変えない
+      if (from[field] === 0 && node?.type === "path") continue;
       if (from[field] === 0 && node && isBoxNode(node)) {
         // 大きさ 0 からは比例で広げられない (`resizeNodes` は倍率 1 にする) ので、値をそのまま当てる
         next = updateNodes(next, [id], zeroSizePatch(node, field, value));
         continue;
       }
-      next = resizeNodes(next, [id], from, { ...from, [field]: value }, { round: true });
+      next = resizeNodes(
+        next,
+        [id],
+        from,
+        { ...from, [field]: value },
+        inParent && parent ? { round: true, parent } : { round: true },
+      );
     }
   }
   if (field === "width" || field === "height") next = fitTextNodes(next, ids, measurer);
@@ -112,6 +209,38 @@ function zeroSizePatch(node: BoxNode, field: "width" | "height", value: number):
   const sizing =
     field === "height" ? "fixed" : node.sizing === "auto-width" ? "auto-height" : node.sizing;
   return { ...size, sizing };
+}
+
+/**
+ * 回転の欄の値 (§4.11.5)。箱を持つノードだけの選択なら、全部同じ値ならその値、違えば `MIXED`。
+ * 箱を持たないノード (線・group・ブーリアン) を含むか、選択が空なら null (欄を出さない)。
+ */
+export function readRotation(
+  doc: CanvasDocument,
+  selection: readonly NodeId[],
+): number | Mixed | null {
+  const ids = topLevelIds(doc, selection);
+  if (ids.length === 0) return null;
+  const values: number[] = [];
+  for (const id of ids) {
+    const node = getNode(doc, id);
+    if (!node || !isBoxNode(node)) return null;
+    values.push(node.rotation);
+  }
+  const first = values[0] as number;
+  return values.every((v) => v === first) ? first : MIXED;
+}
+
+/**
+ * 回転の欄に入力した角度を当てる。各ノードを自分の中心のまわりに、その角度 (自分の `rotation`) へそろえる
+ * (-180 より大きく 180 以下、小数第 2 位で丸める)。箱を持たないノードは変えない。
+ */
+export function setRotationField(
+  doc: CanvasDocument,
+  selection: readonly NodeId[],
+  value: number,
+): CanvasDocument {
+  return setNodesRotation(doc, selection, value);
 }
 
 /** 線の始点・終点の座標を当てる (選択の中の線だけ)。 */

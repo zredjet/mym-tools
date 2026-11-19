@@ -1,12 +1,13 @@
 /**
  * キャンバス下中央に浮かせるツールバーと倍率の表示 (§5.1)。
- * 並びは 選択、フレーム、矩形、楕円、線、テキスト、画像、手のひら、倍率。
+ * 並びは 選択、フレーム、矩形、楕円、多角形、星、線、ペン、鉛筆、テキスト、画像、手のひら、倍率で、
+ * まとまり (`ToolGroup`) の間に区切りの線を置く。
  *
  * ボタンはマウスで押してもフォーカスを取らない (キャンバスのショートカットと Space の手のひらを妨げないため)。
  * Tab で移ってきたときはキーボードで押せる。
  */
 import { ChevronDown } from "lucide-react";
-import { useEffect, useId, useRef, useState, type MouseEvent } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type MouseEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
 import { getCanvasViewSize, runViewCommand, type ViewCommand } from "../canvas/viewCommands";
@@ -115,6 +116,11 @@ function startImageImport() {
   void importFromPicker(editorStore);
 }
 
+/** まとまりの間の区切りの線。 */
+function Separator() {
+  return <div className="mx-1 h-5 w-px bg-[var(--border)]" aria-hidden="true" />;
+}
+
 export function Toolbar() {
   const toolId = useEditorStore((state) => state.toolId);
   const reader = useImportFileReader();
@@ -125,36 +131,39 @@ export function Toolbar() {
       <div
         role="toolbar"
         aria-label="ツール"
-        className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg)] p-1 shadow-[0_8px_24px_rgba(0,0,0,0.10)]"
+        className="absolute bottom-3 left-1/2 z-10 flex w-max max-w-[calc(100%-24px)] -translate-x-1/2 flex-wrap items-center justify-center gap-0.5 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg)] p-1 shadow-[0_8px_24px_rgba(0,0,0,0.10)]"
       >
-        {TOOLBAR_TOOLS.map((tool) => {
+        {TOOLBAR_TOOLS.map((tool, index) => {
           const Icon = tool.icon;
           const active = tool.id === toolId;
           const title = tool.shortcut ? `${tool.label} (${tool.shortcut})` : tool.label;
+          const newGroup = index > 0 && TOOLBAR_TOOLS[index - 1]?.group !== tool.group;
           return (
-            <Button
-              key={tool.id}
-              variant="ghost"
-              size="sm"
-              aria-label={tool.label}
-              aria-pressed={active}
-              title={title}
-              className={cn(
-                "w-7 px-0",
-                active &&
-                  "bg-[var(--bg-accent-soft)] !text-[var(--accent)] hover:bg-[var(--bg-accent-soft)]",
-              )}
-              disabled={tool.id === "image" && (!reader || busy)}
-              onMouseDown={keepFocus}
-              onClick={() =>
-                tool.id === "image" ? startImageImport() : editorStore.getState().setTool(tool.id)
-              }
-            >
-              <Icon size={16} aria-hidden="true" />
-            </Button>
+            <Fragment key={tool.id}>
+              {newGroup && <Separator />}
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={tool.label}
+                aria-pressed={active}
+                title={title}
+                className={cn(
+                  "w-7 px-0",
+                  active &&
+                    "bg-[var(--bg-accent-soft)] !text-[var(--accent)] hover:bg-[var(--bg-accent-soft)]",
+                )}
+                disabled={tool.id === "image" && (!reader || busy)}
+                onMouseDown={keepFocus}
+                onClick={() =>
+                  tool.id === "image" ? startImageImport() : editorStore.getState().setTool(tool.id)
+                }
+              >
+                <Icon size={16} aria-hidden="true" />
+              </Button>
+            </Fragment>
           );
         })}
-        <div className="mx-1 h-5 w-px bg-[var(--border)]" aria-hidden="true" />
+        <Separator />
         <ZoomMenu />
       </div>
     </>

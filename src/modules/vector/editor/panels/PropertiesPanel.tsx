@@ -1,19 +1,24 @@
 import { DEFAULT_NODE_NAMES } from "../model/create";
 import { getPage } from "../model/tree";
-import type { CanvasNode, FrameNode } from "../model/types";
+import type { BooleanNode, CanvasNode, FrameNode, PathNode } from "../model/types";
 import { useEditorStore } from "../state/store";
 import { useSelectedNodes } from "./selection";
 import { AlignSection } from "./sections/AlignSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
+import { BooleanSection } from "./sections/BooleanSection";
+import { ConvertSection } from "./sections/ConvertSection";
 import { ExportSection } from "./sections/ExportSection";
 import { FillSection } from "./sections/FillSection";
 import { FrameSection } from "./sections/FrameSection";
 import { PageSection } from "./sections/PageSection";
+import { PathPointSection } from "./sections/PathPointSection";
+import { PathSection } from "./sections/PathSection";
 import { PositionSection } from "./sections/PositionSection";
 import { hasFill, hasShadow, hasStroke } from "./sections/propertyOps";
 import { ShadowSection } from "./sections/ShadowSection";
 import { StrokeSection } from "./sections/StrokeSection";
 import { TextSection } from "./sections/TextSection";
+import { ToolSettingsSection } from "./sections/ToolSettingsSection";
 
 /** パネルの幅 (§5.1)。 */
 export const PROPERTIES_PANEL_WIDTH = 240;
@@ -28,8 +33,9 @@ function summary(nodes: readonly CanvasNode[], pageName: string): string {
 
 /**
  * 右のプロパティパネル (§5.3)。選択に応じて節を出す。
- * 種別ごとの節 (塗り・線・影・フレーム) は、選択の中に対象のノードが 1 つでもあれば出し、
- * 対象のノードだけに当てる。何も選んでいないときはページの設定を出す。
+ * 種別ごとの節 (塗り・線・影・フレーム・パス・ブーリアン) は、選択の中に対象のノードが 1 つでもあれば出し、
+ * 対象のノードだけに当てる。「変換」の節は、出す操作があるときだけ出る (§5.3)。
+ * 何も選んでいないときはページの設定を出す。
  */
 export function PropertiesPanel() {
   const nodes = useSelectedNodes();
@@ -39,6 +45,8 @@ export function PropertiesPanel() {
   const shadows = nodes.filter(hasShadow);
   const frames = nodes.filter((node): node is FrameNode => node.type === "frame");
   const hasText = nodes.some((node) => node.type === "text");
+  const paths = nodes.filter((node): node is PathNode => node.type === "path");
+  const booleans = nodes.filter((node): node is BooleanNode => node.type === "boolean");
 
   return (
     <aside
@@ -52,18 +60,23 @@ export function PropertiesPanel() {
         </h2>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <ToolSettingsSection />
         {nodes.length === 0 ? (
           <PageSection />
         ) : (
           <>
             <AlignSection />
             <PositionSection />
+            <PathPointSection />
             <AppearanceSection nodes={nodes} />
             {fills.length > 0 && <FillSection nodes={fills} />}
             {strokes.length > 0 && <StrokeSection nodes={strokes} />}
             {shadows.length > 0 && <ShadowSection nodes={shadows} />}
             {hasText && <TextSection />}
             {frames.length > 0 && <FrameSection frames={frames} />}
+            {paths.length > 0 && <PathSection paths={paths} />}
+            {booleans.length > 0 && <BooleanSection booleans={booleans} />}
+            <ConvertSection />
           </>
         )}
         <ExportSection />

@@ -1,13 +1,25 @@
 import { describe, expect, it } from "vitest";
+import { multiply, rotate, translate } from "../geometry/matrix";
 import {
+  boxHandleAt,
+  boxHandleCursor,
+  boxHandlePosition,
+  boxVisibleHandles,
   guideAt,
   guideCursor,
   handleAt,
+  handleBoxAngle,
+  handleBoxCorners,
+  handleBoxRect,
   handleCursor,
   handlePosition,
   handleSides,
   lineEndAt,
+  rectHandleBox,
+  rotateCursor,
+  rotationCornerAt,
   visibleHandles,
+  type HandleBox,
 } from "./handles";
 
 const box = { x: 100, y: 100, width: 200, height: 100 };
@@ -100,5 +112,78 @@ describe("線の端点とガイド線", () => {
     expect(guideAt(guides, { x: 101, y: 0 }, 4)).toBe(null);
     expect(guideCursor("x")).toBe("ew-resize");
     expect(guideCursor("y")).toBe("ns-resize");
+  });
+});
+
+describe("回転した枠 (§4.11.3)", () => {
+  /** 200×100 の箱を中心 (200, 150) のまわりに 90° 回した枠 (ページでは 150..250, 50..250) */
+  const turned: HandleBox = {
+    matrix: multiply(translate(100, 100), rotate(90, 100, 50)),
+    width: 200,
+    height: 100,
+  };
+
+  it("軸に平行な枠は第 1 段階の関数と同じ", () => {
+    const rectBox = rectHandleBox(box);
+    expect(handleBoxRect(rectBox)).toEqual(box);
+    expect(handleBoxAngle(rectBox)).toBe(0);
+    for (const p of [
+      { x: 104, y: 103 },
+      { x: 200, y: 97 },
+      { x: 298, y: 130 },
+      { x: 200, y: 150 },
+    ])
+      expect(boxHandleAt(rectBox, p, 1)).toBe(handleAt(box, p, 1));
+    expect(boxHandlePosition(rectBox, "e")).toEqual(handlePosition(box, "e"));
+    expect(boxVisibleHandles(rectBox, 1)).toEqual(visibleHandles(box, 1));
+    expect(boxHandleCursor(rectBox, "nw")).toBe("nwse-resize");
+  });
+
+  it("回した枠は枠の座標系で当てる。ハンドルの位置と 4 隅も回す", () => {
+    expect(handleBoxRect(turned)).toBeNull();
+    expect(handleBoxAngle(turned)).toBe(90);
+    // 枠の左上 (0, 0) はページの (250, 50)
+    expect(boxHandlePosition(turned, "nw")).toEqual({ x: 250, y: 50 });
+    expect(handleBoxCorners(turned)).toEqual([
+      { x: 250, y: 50 },
+      { x: 250, y: 250 },
+      { x: 150, y: 250 },
+      { x: 150, y: 50 },
+    ]);
+    expect(boxHandleAt(turned, { x: 248, y: 53 }, 1)).toBe("nw");
+    // 枠の右の辺 (x = 200) はページの y = 250
+    expect(boxHandleAt(turned, { x: 200, y: 252 }, 1)).toBe("e");
+    expect(boxHandleAt(turned, { x: 200, y: 150 }, 1)).toBeNull();
+  });
+
+  it("カーソルはハンドルの向きに枠の角度を足した 45° 刻み", () => {
+    expect(handleCursor("e", 90)).toBe("ns-resize");
+    expect(handleCursor("n", 90)).toBe("ew-resize");
+    expect(handleCursor("nw", 45)).toBe("ns-resize");
+    expect(handleCursor("e", 30)).toBe("nwse-resize");
+    expect(handleCursor("e", 20)).toBe("ew-resize");
+    expect(boxHandleCursor(turned, "se")).toBe("nesw-resize");
+  });
+
+  it("回転のハンドルは枠の外で、角から 16 画面 px 以内", () => {
+    const rectBox = rectHandleBox(box);
+    expect(rotationCornerAt(rectBox, { x: 310, y: 210 }, 1)).toBe("se");
+    expect(rotationCornerAt(rectBox, { x: 90, y: 95 }, 1)).toBe("nw");
+    // 枠の中は回転ではない (リサイズと移動)
+    expect(rotationCornerAt(rectBox, { x: 105, y: 105 }, 1)).toBeNull();
+    // 16 画面 px より遠い
+    expect(rotationCornerAt(rectBox, { x: 312, y: 212 }, 1)).toBeNull();
+    // 倍率 2 では 8 ページ px
+    expect(rotationCornerAt(rectBox, { x: 305, y: 205 }, 2)).toBe("se");
+    expect(rotationCornerAt(rectBox, { x: 307, y: 207 }, 2)).toBeNull();
+    // 回した枠: 枠の右下 (200, 100) はページの (150, 250)
+    expect(rotationCornerAt(turned, { x: 142, y: 258 }, 1)).toBe("se");
+  });
+
+  it("回転のカーソルは SVG のカーソル。向きを 15° 刻みにする", () => {
+    expect(rotateCursor(45)).toMatch(/^url\("data:image\/svg\+xml,.*"\) 12 12, auto$/);
+    expect(rotateCursor(45)).toContain(encodeURIComponent("rotate(0 12 12)"));
+    expect(rotateCursor(135)).toContain(encodeURIComponent("rotate(90 12 12)"));
+    expect(rotateCursor(52)).toBe(rotateCursor(45));
   });
 });

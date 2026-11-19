@@ -1,6 +1,6 @@
 /**
- * キャンバス (module id `vector`) の payload v2 = シーン形式。
- * 仕様の正典は `docs/canvas-editor-design.md` §3 (ADR-0026)。
+ * キャンバス (module id `vector`) の payload v3 = シーン形式。
+ * 仕様の正典は `docs/canvas-editor-design.md` §3 (ADR-0026) と、v2 からの差分の §3 (ADR-0028)。
  *
  * この型が保存形式そのもので、エディタのメモリ上のモデルも同じ形を使う (変換層を持たない)。
  * すべてのフィールドは必須。未知のフィールドは Rust の検証で拒否される。
@@ -56,12 +56,24 @@ export interface RadialGradientPaint {
 
 export type Paint = SolidPaint | LinearGradientPaint | RadialGradientPaint;
 
-/** 線は中央揃えの単色だけ (内側・外側揃え、破線、グラデーションは持たない)。 */
+export type StrokeCap = "butt" | "round" | "square";
+export type StrokeJoin = "miter" | "round" | "bevel";
+
+/** 線は中央揃えの単色だけ (内側・外側揃え、グラデーションは持たない)。 */
 export interface Stroke {
   color: HexColor;
   /** 0〜1 */
   opacity: number;
   width: number;
+  /** 線の端 (SVG の stroke-linecap) */
+  cap: StrokeCap;
+  /** 線の角 (SVG の stroke-linejoin)。マイターの上限は SVG の既定の 4 */
+  join: StrokeJoin;
+  /**
+   * 破線の長さと間隔の並び (px)。空は実線。SVG の stroke-dasharray と同じ意味で、
+   * 奇数個なら繰り返して偶数にする。破線は輪郭の始点から始める
+   */
+  dash: number[];
 }
 
 /** ドロップシャドウ。 */
@@ -89,15 +101,20 @@ interface NodeCommon {
 }
 
 /**
- * 親の座標系での左上と大きさ。
+ * 親の座標系での左上 (回転の前の箱) と大きさ、回転。
  * 親が frame ならその左上が原点、ページ直下ならページの原点。
- * group は座標系を作らないので、group の子は group の親の座標系で持つ。
+ * group とブーリアンは座標系を作らないので、その子は自分の親の座標系で持つ。
  */
 interface BoxGeometry {
   x: number;
   y: number;
   width: number;
   height: number;
+  /**
+   * 回転 (度)。時計回りが正 (SVG の rotate と同じ向き)。箱の中心 (x + width/2, y + height/2) の
+   * まわりに回す。-180 以上 180 以下で、エディタは -180 より大きく 180 以下にそろえて書く
+   */
+  rotation: number;
 }
 
 /** 子を持ち、座標系を作る入れ物。ページ直下の frame がアートボードになる。入れ子にできる。 */
@@ -191,6 +208,34 @@ export interface SvgNode extends NodeCommon, BoxGeometry {
   assetId: AssetId;
 }
 
+/**
+ * 点と曲線で作る形 (§3.8、§4.12)。点は自分の座標系 (箱の左上が原点、回転の前) で持ち、
+ * 箱は形の曲線の範囲 (ハンドルの先は含めない) にぴったり合わせる。
+ */
+export interface PathNode extends NodeCommon, BoxGeometry {
+  type: "path";
+  /** 1 個以上 */
+  subpaths: Subpath[];
+  fillRule: FillRule;
+  fill: Paint | null;
+  stroke: Stroke | null;
+  shadow: Shadow | null;
+}
+
+/**
+ * 子の形を演算した結果を、自分の塗り・線・影で描く (§4.15)。座標系は作らず (子は自分の親の座標系で持つ)、
+ * 外接矩形は結果から求める。子の塗り・線・影は描かない。
+ */
+export interface BooleanNode extends NodeCommon {
+  type: "boolean";
+  op: BooleanOp;
+  /** 1 個以上。rect / ellipse / path / boolean だけ。重なり順は配列の順 (先頭が最背面) */
+  children: NodeId[];
+  fill: Paint | null;
+  stroke: Stroke | null;
+  shadow: Shadow | null;
+}
+
 export type CanvasNode =
   | FrameNode
   | GroupNode
@@ -199,10 +244,42 @@ export type CanvasNode =
   | LineNode
   | TextNode
   | ImageNode
-  | SvgNode;
+  | SvgNode
+  | PathNode
+  | BooleanNode;
 
 export type NodeType = CanvasNode["type"];
+/** 子を持つノードのうち frame と group。ブーリアンも子を持つが、木の規則 (§4.15.1) が違うので含めない */
 export type ContainerNode = FrameNode | GroupNode;
+
+// ---------------------------------------------------------------------------
+// パスの形 (`docs/canvas-editor-design.md` §3、§4.12)
+// ---------------------------------------------------------------------------
+
+export type FillRule = "nonzero" | "evenodd";
+
+/** ハンドルの連動。none は別々、angle は向きだけ、angle-length は向きと長さをそろえる */
+export type HandleMirror = "none" | "angle" | "angle-length";
+
+export interface PathPoint {
+  /** ノードの箱の左上を原点とする座標 (回転の前) */
+  x: number;
+  y: number;
+  /** 前の点から来る曲線のハンドル。点からの相対。null は直線で入る */
+  in: Point | null;
+  /** 次の点へ出る曲線のハンドル。点からの相対。null は直線で出る */
+  out: Point | null;
+  mirror: HandleMirror;
+}
+
+export interface Subpath {
+  /** true なら最後の点から先頭の点へ戻る線分 (または曲線) を描く */
+  closed: boolean;
+  /** 1 個以上 */
+  points: PathPoint[];
+}
+
+export type BooleanOp = "union" | "subtract" | "intersect" | "exclude";
 
 // ---------------------------------------------------------------------------
 // アセット
@@ -251,7 +328,7 @@ export interface Page {
 
 /**
  * 文書。`nodes` は ID から引く平たい表で、木の形は `children` が決める。
- * どのノードも、ちょうど 1 つの親 (ページか frame か group) の `children` に 1 回だけ現れる。
+ * どのノードも、ちょうど 1 つの親 (ページか frame か group かブーリアン) の `children` に 1 回だけ現れる。
  * `assets` はノードから参照されているものだけを持つ。
  */
 export interface CanvasDocument {
@@ -261,8 +338,8 @@ export interface CanvasDocument {
   assets: Record<AssetId, Asset>;
 }
 
-/** `items.payload` に保存する形 (payload_schema_version = 2)。 */
-export interface VectorPayloadV2 extends CanvasDocument {
+/** `items.payload` に保存する形 (payload_schema_version = 3)。 */
+export interface VectorPayloadV3 extends CanvasDocument {
   /** 検索用テキスト。`docs/canvas-editor-design.md` §3.6 の規則で文書から求める */
   text: string;
 }

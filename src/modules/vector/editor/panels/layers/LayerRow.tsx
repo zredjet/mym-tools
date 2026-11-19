@@ -1,8 +1,17 @@
-import { ChevronDown, ChevronRight, Eye, EyeOff, Lock, LockOpen } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Lock,
+  LockOpen,
+  TriangleAlert,
+} from "lucide-react";
 import { memo, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 
 import { cn } from "@/lib/cn";
 
+import { getBooleanEvaluation } from "../../boolean/result";
 import { DEFAULT_NODE_NAMES } from "../../model/create";
 import { updateNodes } from "../../model/transform";
 import { getNode } from "../../model/tree";
@@ -11,7 +20,7 @@ import { editorStore, useEditorStore } from "../../state/store";
 import { registerCommitInPlace } from "../fields/commitInPlace";
 import { isComposing } from "../fields/keys";
 import { selectionSet } from "../selection";
-import { commitLayerName, NODE_TYPE_ICONS } from "./layerActions";
+import { BOOLEAN_ROW_ICONS, commitLayerName, NODE_TYPE_ICONS } from "./layerActions";
 import { LAYER_INDENT as INDENT, LAYER_ROW_PADDING as PADDING, type DropZone } from "./layerTree";
 
 /**
@@ -53,6 +62,11 @@ export const LayerRow = memo(function LayerRow({
   const node = useEditorStore((s) => getNode(s.doc, id));
   const selected = useEditorStore((s) => selectionSet(s.selection).has(id));
   const hovered = useEditorStore((s) => s.hoveredId === id);
+  // ブーリアンの結果を求められなかった (§4.15.3)。結果は文書のノードごとに使い回されるので、毎回引いても軽い
+  const booleanFailed = useEditorStore((s) => {
+    if (getNode(s.doc, id)?.type !== "boolean") return false;
+    return getBooleanEvaluation(s.doc, id)?.result === null;
+  });
   const [editing, setEditing] = useState(false);
   const element = useRef<HTMLDivElement | null>(null);
 
@@ -61,7 +75,7 @@ export const LayerRow = memo(function LayerRow({
   }, [selected]);
 
   if (!node) return null;
-  const Icon = NODE_TYPE_ICONS[node.type];
+  const Icon = node.type === "boolean" ? BOOLEAN_ROW_ICONS[node.op] : NODE_TYPE_ICONS[node.type];
   const displayName = node.name === "" ? DEFAULT_NODE_NAMES[node.type] : node.name;
 
   const setRef = (el: HTMLDivElement | null) => {
@@ -151,6 +165,16 @@ export const LayerRow = memo(function LayerRow({
           )}
         >
           {displayName}
+        </span>
+      )}
+      {booleanFailed && (
+        <span
+          role="img"
+          aria-label="結果の形を求められません"
+          title="ブーリアンの結果の形を求められません。子の形をそのまま重ねて描いています"
+          className="flex h-6 w-5 shrink-0 items-center justify-center text-[var(--destructive)]"
+        >
+          <TriangleAlert size={13} aria-hidden="true" />
         </span>
       )}
       <button

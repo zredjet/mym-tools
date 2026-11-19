@@ -1,6 +1,14 @@
 /**
- * リサイズハンドルとガイド線の当たり (純関数)。大きさは画面 px で決め、倍率で割ってページ座標にする。
+ * リサイズハンドル・回転のハンドル・ガイド線の当たり (純関数)。大きさは画面 px で決め、倍率で割ってページ座標にする。
+ *
+ * 選択枠は 2 通り (§4.11.3)。
+ * - 軸に平行な矩形 (`Rect`): 複数選択・group・ブーリアン・線・回転していないノード。`handleAt` などの第 1 段階の関数
+ * - 回転した枠 (`HandleBox`): 1 個だけ選んだ、ページ上の角度が 0 でない箱を持つノード。`boxHandleAt` など。
+ *   軸に平行な枠を `rectHandleBox` で包んで渡すと、第 1 段階の関数と同じ値を返す
+ *
+ * 回転のハンドルは枠の 4 隅のすぐ外 (リサイズのハンドルの外側、`ROTATE_HIT` 画面 px 以内)。
  */
+import { applyToPoint, invert, type Matrix, translate } from "../geometry/matrix";
 import type { Rect } from "../model/geometry";
 import type { Guide, Point } from "../model/types";
 
@@ -104,8 +112,17 @@ export function handleAt(bounds: Rect, point: Point, zoom: number): ResizeHandle
   return best;
 }
 
-/** ハンドルの上のカーソル。 */
-export function handleCursor(handle: ResizeHandle): string {
+/**
+ * ハンドルの上のカーソル。`rotation` は枠のページ上の角度 (度)。ハンドルの向きに近い 45° 刻みのカーソルにする。
+ */
+export function handleCursor(handle: ResizeHandle, rotation = 0): string {
+  if (rotation !== 0 && Number.isFinite(rotation)) {
+    const { x, y } = handleSides(handle);
+    const direction = (Math.atan2(y, x) * 180) / Math.PI + rotation;
+    // 向きは 180° ごとに同じカーソル。0 → 左右、45 → 左上と右下、90 → 上下、135 → 右上と左下
+    const step = ((Math.round(direction / 45) % 4) + 4) % 4;
+    return (["ew-resize", "nwse-resize", "ns-resize", "nesw-resize"] as const)[step] as string;
+  }
   switch (handle) {
     case "nw":
     case "se":
@@ -119,6 +136,151 @@ export function handleCursor(handle: ResizeHandle): string {
     default:
       return "ew-resize";
   }
+}
+
+// ---------------------------------------------------------------------------
+// 回転した枠
+// ---------------------------------------------------------------------------
+
+/**
+ * 選択枠 (回転してよい)。`matrix` はページ ← 枠の座標系 (回転と平行移動だけ)。枠は枠の座標系の
+ * (0, 0)〜(`width`, `height`)。1 個の回転したノードなら `nodePageMatrix` とノードの大きさ。
+ */
+export interface HandleBox {
+  matrix: Matrix;
+  width: number;
+  height: number;
+}
+
+/** 軸に平行な矩形 (ページ座標) の枠。 */
+export function rectHandleBox(rect: Rect): HandleBox {
+  return { matrix: translate(rect.x, rect.y), width: rect.width, height: rect.height };
+}
+
+/** 平行移動だけの枠なら、その矩形 (ページ座標)。回転していれば null。 */
+export function handleBoxRect(box: HandleBox): Rect | null {
+  const m = box.matrix;
+  if (m.a !== 1 || m.b !== 0 || m.c !== 0 || m.d !== 1) return null;
+  return { x: m.e, y: m.f, width: box.width, height: box.height };
+}
+
+/** 枠のページ上の角度 (度、時計回りが正)。 */
+export function handleBoxAngle(box: HandleBox): number {
+  if (handleBoxRect(box)) return 0;
+  const angle = (Math.atan2(box.matrix.b, box.matrix.a) * 180) / Math.PI;
+  return angle === 0 ? 0 : angle;
+}
+
+/** 枠の座標系の点をページ座標へ。 */
+export function handleBoxToPage(box: HandleBox, local: Point): Point {
+  return applyToPoint(box.matrix, local);
+}
+
+/** ページ座標の点を枠の座標系へ。逆がなければ null。 */
+export function pageToHandleBox(box: HandleBox, point: Point): Point | null {
+  const back = invert(box.matrix);
+  return back ? applyToPoint(back, point) : null;
+}
+
+/** 枠の 4 隅 (ページ座標、枠の座標系の [左上, 右上, 右下, 左下])。 */
+export function handleBoxCorners(box: HandleBox): Point[] {
+  return [
+    { x: 0, y: 0 },
+    { x: box.width, y: 0 },
+    { x: box.width, y: box.height },
+    { x: 0, y: box.height },
+  ].map((p) => handleBoxToPage(box, p));
+}
+
+/** 枠の座標系の矩形 (原点が左上)。 */
+function localRect(box: HandleBox): Rect {
+  return { x: 0, y: 0, width: box.width, height: box.height };
+}
+
+/** 描くハンドル (`visibleHandles` の回転した枠の版)。 */
+export function boxVisibleHandles(box: HandleBox, zoom: number): ResizeHandle[] {
+  return visibleHandles(handleBoxRect(box) ?? localRect(box), zoom);
+}
+
+/** ハンドルの中心 (ページ座標)。 */
+export function boxHandlePosition(box: HandleBox, handle: ResizeHandle): Point {
+  const rect = handleBoxRect(box);
+  if (rect) return handlePosition(rect, handle);
+  return handleBoxToPage(box, handlePosition(localRect(box), handle));
+}
+
+/**
+ * 点 (ページ座標) の下のリサイズハンドル (`handleAt` の回転した枠の版)。枠の座標系に直して同じ規則で判定する
+ * (行列は回転と平行移動だけなので、距離は変わらない)。
+ */
+export function boxHandleAt(box: HandleBox, point: Point, zoom: number): ResizeHandle | null {
+  const rect = handleBoxRect(box);
+  if (rect) return handleAt(rect, point, zoom);
+  const local = pageToHandleBox(box, point);
+  return local ? handleAt(localRect(box), local, zoom) : null;
+}
+
+/** ハンドルの上のカーソル (枠の角度に合わせる)。 */
+export function boxHandleCursor(box: HandleBox, handle: ResizeHandle): string {
+  return handleCursor(handle, handleBoxAngle(box));
+}
+
+/** 回転のハンドルが当たる、枠の角からの距離 (画面 px)。リサイズのハンドルの外側。 */
+export const ROTATE_HIT = 16;
+
+export type RotateCorner = "nw" | "ne" | "se" | "sw";
+
+/**
+ * 点 (ページ座標) の下の回転のハンドル。枠の外で、いちばん近い角から `ROTATE_HIT` 画面 px 以内なら、その角。
+ * リサイズのハンドルを先に調べること (角のハンドルと辺の近くはリサイズ)。
+ */
+export function rotationCornerAt(box: HandleBox, point: Point, zoom: number): RotateCorner | null {
+  const local = pageToHandleBox(box, point);
+  if (!local) return null;
+  const { width, height } = box;
+  if (local.x >= 0 && local.x <= width && local.y >= 0 && local.y <= height) return null;
+  const hit = ROTATE_HIT / zoom;
+  let best: RotateCorner | null = null;
+  let bestDistance = Infinity;
+  for (const corner of ["nw", "ne", "se", "sw"] as const) {
+    const c = handlePosition(localRect(box), corner);
+    const distance = Math.hypot(local.x - c.x, local.y - c.y);
+    if (distance <= hit && distance < bestDistance) {
+      best = corner;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/** 角の外向きの向き (枠の座標系、度)。右下が 45°。 */
+export function cornerDirection(corner: RotateCorner): number {
+  const { x, y } = handleSides(corner);
+  return (Math.atan2(y, x) * 180) / Math.PI;
+}
+
+/** 回転のカーソルの角度の刻み (度)。カーソルの文字列を作り直す回数を抑える。 */
+const ROTATE_CURSOR_STEP = 15;
+
+/**
+ * 回転のカーソル。`direction` は、回転の中心からカーソルへの向き (ページ座標、度。右下が 45°)。
+ * 曲がった両向きの矢印を、その向きに回して描く (CSS に回転のカーソルはないので SVG で作る)。
+ */
+export function rotateCursor(direction: number): string {
+  const step = Math.round((direction - 45) / ROTATE_CURSOR_STEP) * ROTATE_CURSOR_STEP;
+  const angle = ((step % 360) + 360) % 360;
+  // 24×24、ホットスポットは中心。基本の形は右下の角の外 (弧の中心は左上)
+  const arc = "M15 5.5A9.5 9.5 0 0 1 5.5 15";
+  const heads = "M15 1.5L18.2 6.5L11.8 6.5Z M1.5 15L6.5 11.8L6.5 18.2Z";
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>` +
+    `<g transform='rotate(${angle} 12 12)'>` +
+    `<path d='${arc}' fill='none' stroke='white' stroke-width='4'/>` +
+    `<path d='${heads}' fill='white' stroke='white' stroke-width='2.5' stroke-linejoin='round'/>` +
+    `<path d='${arc}' fill='none' stroke='black' stroke-width='1.5'/>` +
+    `<path d='${heads}' fill='black'/>` +
+    `</g></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 12 12, auto`;
 }
 
 export type LineEnd = "start" | "end";

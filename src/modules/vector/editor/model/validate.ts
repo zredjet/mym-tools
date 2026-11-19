@@ -1,6 +1,7 @@
 /**
- * payload v2 の検証 (§3.3〜3.6)。Rust の検証と同じ規則で、契約データ `fixtures/payload-v2.json` で
- * 両者の合否をそろえる。保存の前の確認と、読み込んだ payload の確認に使う。
+ * payload v3 の検証 (§3.3〜3.6 と §3.5)。Rust の検証 (`scene::validate_v3`) と同じ規則で、
+ * 契約データ `fixtures/payload-v3.json` で両者の合否をそろえる。保存の前の確認と、読み込んだ payload の
+ * 確認に使う。古い版 (v1、v2) の payload は Rust が読み込みのときに v3 へ変換するので、ここには来ない。
  *
  * model の中で DOM に依存するのはここの SVG の検証 (`validateSvg` が DOMParser を使う) だけ。
  */
@@ -10,7 +11,7 @@ import { totalAssetBytes, utf8Length } from "./assets";
 import { hasOwn } from "./ids";
 import { CANVAS_LIMITS, HEX_COLOR_PATTERN, NODE_ID_PATTERN } from "./limits";
 import { computeSearchText } from "./searchText";
-import type { CanvasDocument, VectorPayloadV2 } from "./types";
+import type { CanvasDocument, VectorPayloadV3 } from "./types";
 
 const L = CANVAS_LIMITS;
 
@@ -184,10 +185,21 @@ function checkPaint(value: unknown, path: string): void {
 function checkStroke(value: unknown, path: string, nullable: boolean): void {
   if (value === null && nullable) return;
   const stroke = object(value, path);
-  exactKeys(stroke, ["color", "opacity", "width"], path);
+  exactKeys(stroke, ["color", "opacity", "width", "cap", "join", "dash"], path);
   color(stroke["color"], `${path}.color`);
   opacity(stroke["opacity"], `${path}.opacity`);
   range(stroke["width"], `${path}.width`, 0, L.maxStrokeWidth, true);
+  oneOf(stroke["cap"], `${path}.cap`, ["butt", "round", "square"] as const);
+  oneOf(stroke["join"], `${path}.join`, ["miter", "round", "bevel"] as const);
+  const dash = array(stroke["dash"], `${path}.dash`);
+  if (dash.length > L.maxDashCount)
+    fail(`${path}.dash`, `破線の値は ${L.maxDashCount} 個以下にしてください`);
+  let total = 0;
+  dash.forEach((value, i) => {
+    total += range(value, `${path}.dash[${i}]`, 0, L.maxDashLength);
+  });
+  if (dash.length > 0 && !(total > 0))
+    fail(`${path}.dash`, "破線は空か、合計を 0 より大きくしてください");
 }
 
 function checkShadow(value: unknown, path: string): void {
@@ -201,12 +213,52 @@ function checkShadow(value: unknown, path: string): void {
   opacity(shadow["opacity"], `${path}.opacity`);
 }
 
+/** パスの点のハンドル (点からの相対)。null か、各成分の絶対値が maxCoordinate 以下。 */
+function checkHandle(value: unknown, path: string): void {
+  if (value === null) return;
+  const handle = object(value, path);
+  exactKeys(handle, ["x", "y"], path);
+  abs(handle["x"], `${path}.x`, L.maxCoordinate);
+  abs(handle["y"], `${path}.y`, L.maxCoordinate);
+}
+
+/** パスの `subpaths` (§3.5)。点の数を返す。 */
+function checkSubpaths(value: unknown, path: string): number {
+  const subpaths = array(value, path);
+  if (subpaths.length < 1 || subpaths.length > L.maxSubpaths)
+    fail(path, `輪郭は 1〜${L.maxSubpaths} 個にしてください`);
+  let count = 0;
+  subpaths.forEach((item, i) => {
+    const sp = `${path}[${i}]`;
+    const subpath = object(item, sp);
+    exactKeys(subpath, ["closed", "points"], sp);
+    bool(subpath["closed"], `${sp}.closed`);
+    const points = array(subpath["points"], `${sp}.points`);
+    if (points.length === 0) fail(`${sp}.points`, "点は 1 個以上にしてください");
+    count += points.length;
+    if (count > L.maxPathPoints)
+      fail(path, `1 つのパスの点は合計 ${L.maxPathPoints} 個以下にしてください`);
+    points.forEach((p, j) => {
+      const pp = `${sp}.points[${j}]`;
+      const point = object(p, pp);
+      exactKeys(point, ["x", "y", "in", "out", "mirror"], pp);
+      abs(point["x"], `${pp}.x`, L.maxCoordinate);
+      abs(point["y"], `${pp}.y`, L.maxCoordinate);
+      checkHandle(point["in"], `${pp}.in`);
+      checkHandle(point["out"], `${pp}.out`);
+      oneOf(point["mirror"], `${pp}.mirror`, ["none", "angle", "angle-length"] as const);
+    });
+  });
+  return count;
+}
+
 // ---------------------------------------------------------------------------
 // ノード
 // ---------------------------------------------------------------------------
 
 const COMMON = ["id", "name", "visible", "locked", "opacity", "type"] as const;
-const BOX = ["x", "y", "width", "height"] as const;
+/** 箱を持つノードの位置と大きさ。v3 で `rotation` を足した (§3.8) */
+const BOX = ["x", "y", "width", "height", "rotation"] as const;
 const NODE_KEYS = {
   frame: [...COMMON, ...BOX, "children", "clip", "fill", "stroke", "radius", "shadow"],
   group: [...COMMON, "children"],
@@ -230,9 +282,14 @@ const NODE_KEYS = {
   ],
   image: [...COMMON, ...BOX, "assetId", "radius", "shadow"],
   svg: [...COMMON, ...BOX, "assetId"],
+  path: [...COMMON, ...BOX, "subpaths", "fillRule", "fill", "stroke", "shadow"],
+  boolean: [...COMMON, "op", "children", "fill", "stroke", "shadow"],
 } as const;
 type NodeTypeName = keyof typeof NODE_KEYS;
 const NODE_TYPES = Object.keys(NODE_KEYS) as NodeTypeName[];
+
+/** ブーリアンの子にできる種類 (§3.5) */
+const BOOLEAN_CHILD_TYPES: readonly NodeTypeName[] = ["rect", "ellipse", "path", "boolean"];
 
 interface NodeInfo {
   type: NodeTypeName;
@@ -240,6 +297,8 @@ interface NodeInfo {
   assetId: string | null;
   /** テキストノードの本文の UTF-8 のバイト数 (ほかは 0) */
   textBytes: number;
+  /** パスの点の数 (ほかは 0) */
+  pathPoints: number;
 }
 
 function checkNode(key: string, value: unknown): NodeInfo {
@@ -253,11 +312,12 @@ function checkNode(key: string, value: unknown): NodeInfo {
   bool(node["locked"], `${path}.locked`);
   opacity(node["opacity"], `${path}.opacity`);
 
-  if (type !== "group" && type !== "line") {
+  if (hasOwn(node, "x")) {
     abs(node["x"], `${path}.x`, L.maxCoordinate);
     abs(node["y"], `${path}.y`, L.maxCoordinate);
     range(node["width"], `${path}.width`, 0, L.maxSize);
     range(node["height"], `${path}.height`, 0, L.maxSize);
+    range(node["rotation"], `${path}.rotation`, -180, 180);
   }
   if (hasOwn(node, "radius")) range(node["radius"], `${path}.radius`, 0, L.maxRadius);
   if (hasOwn(node, "fill")) checkPaint(node["fill"], `${path}.fill`);
@@ -267,17 +327,25 @@ function checkNode(key: string, value: unknown): NodeInfo {
   let children: string[] | null = null;
   let assetId: string | null = null;
   let textBytes = 0;
+  let pathPoints = 0;
   switch (type) {
     case "frame":
-    case "group": {
+    case "group":
+    case "boolean": {
+      if (type === "boolean")
+        oneOf(node["op"], `${path}.op`, ["union", "subtract", "intersect", "exclude"] as const);
       children = array(node["children"], `${path}.children`).map((child, i) =>
         str(child, `${path}.children[${i}]`),
       );
-      if (type === "group" && children.length === 0)
-        fail(`${path}.children`, "group の子は 1 個以上にしてください");
+      if (type !== "frame" && children.length === 0)
+        fail(`${path}.children`, `${type} の子は 1 個以上にしてください`);
       if (type === "frame") bool(node["clip"], `${path}.clip`);
       break;
     }
+    case "path":
+      pathPoints = checkSubpaths(node["subpaths"], `${path}.subpaths`);
+      oneOf(node["fillRule"], `${path}.fillRule`, ["nonzero", "evenodd"] as const);
+      break;
     case "line":
       for (const k of ["x1", "y1", "x2", "y2"]) abs(node[k], `${path}.${k}`, L.maxCoordinate);
       break;
@@ -304,7 +372,7 @@ function checkNode(key: string, value: unknown): NodeInfo {
     default:
       break;
   }
-  return { type, children, assetId, textBytes };
+  return { type, children, assetId, textBytes, pathPoints };
 }
 
 // ---------------------------------------------------------------------------
@@ -445,16 +513,20 @@ function checkPayload(value: unknown): void {
   if (nodeKeys.length > L.maxNodes) fail("nodes", `ノードは ${L.maxNodes} 個以下にしてください`);
   const infos = new Map<string, NodeInfo>();
   let totalTextBytes = 0;
+  let totalPathPoints = 0;
   for (const key of nodeKeys) {
     const info = checkNode(key, nodes[key]);
     infos.set(key, info);
     totalTextBytes += info.textBytes;
+    totalPathPoints += info.pathPoints;
   }
   if (totalTextBytes > L.maxTotalTextBytes)
     fail(
       "nodes",
       `テキストの本文の合計は UTF-8 で ${L.maxTotalTextBytes} バイト以下にしてください`,
     );
+  if (totalPathPoints > L.maxTotalPathPoints)
+    fail("nodes", `文書のパスの点は合計 ${L.maxTotalPathPoints} 個以下にしてください`);
 
   // 木: どのノードもちょうど 1 回、ページから届き、深さは maxDepth 以下
   const seen = new Set<string>();
@@ -472,6 +544,18 @@ function checkPayload(value: unknown): void {
   for (const { path, children } of pageChildren) walk(children, path, 1);
   for (const key of nodeKeys)
     if (!seen.has(key)) fail(`nodes.${key}`, "どの親からも参照されていません");
+  // ブーリアンの子の種類 (§3.5)。木をたどった後なので、子はどれも nodes にある
+  for (const [key, info] of infos) {
+    if (info.type !== "boolean" || !info.children) continue;
+    info.children.forEach((child, i) => {
+      const childType = infos.get(child)?.type;
+      if (childType === undefined || !BOOLEAN_CHILD_TYPES.includes(childType))
+        fail(
+          `nodes.${key}.children[${i}]`,
+          `ブーリアンの子は ${BOOLEAN_CHILD_TYPES.join(" / ")} のどれかにしてください`,
+        );
+    });
+  }
 
   // アセット
   const assets = object(payload["assets"], "assets");
@@ -499,7 +583,7 @@ function checkPayload(value: unknown): void {
 }
 
 /**
- * payload v2 を検証し、規則に反する最初の理由 (`"nodes.rect1.opacity: 1 以下にしてください"` の形) を返す。
+ * payload v3 を検証し、規則に反する最初の理由 (`"nodes.rect1.opacity: 1 以下にしてください"` の形) を返す。
  * 通れば null。
  */
 export function validatePayload(value: unknown): string | null {
@@ -513,6 +597,6 @@ export function validatePayload(value: unknown): string | null {
 }
 
 /** 検証を通った payload の型ガード版。 */
-export function isValidPayload(value: unknown): value is VectorPayloadV2 {
+export function isValidPayload(value: unknown): value is VectorPayloadV3 {
   return validatePayload(value) === null;
 }

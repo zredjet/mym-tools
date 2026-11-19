@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createText } from "../model/create";
+import { createPath, createText } from "../model/create";
 import { deleteNodes, insertNode } from "../model/structure";
 import { deepFreeze, sampleDocument } from "../model/testing";
 import { resizeNodes, translateNodes, updateNode } from "../model/transform";
@@ -281,5 +281,132 @@ describe("ジェスチャーと履歴の境界 (レビューの指摘)", () => {
         ),
       );
     expect(store.getState()).toMatchObject({ revision: 0, canUndo: false });
+  });
+});
+
+describe("点の編集 (§4.13.1)", () => {
+  const SQUARE = [
+    {
+      closed: true,
+      points: [
+        { x: 0, y: 0, in: null, out: null, mirror: "none" as const },
+        { x: 10, y: 0, in: null, out: null, mirror: "none" as const },
+        { x: 10, y: 10, in: null, out: null, mirror: "none" as const },
+      ],
+    },
+  ];
+  /** sampleDocument にパス pa を足し、点の編集を始めた store */
+  const editing = () => {
+    const store = setup();
+    store
+      .getState()
+      .apply((doc) =>
+        insertNode(doc, createPath(SQUARE, { id: "pa" }), { kind: "page", id: "p1" }),
+      );
+    store.getState().startPathEdit("pa");
+    return store;
+  };
+
+  it("startPathEdit はパスを選び、ツールを pathEdit にする。パスでなければ何もしない", () => {
+    const store = editing();
+    expect(store.getState()).toMatchObject({
+      editingPathId: "pa",
+      selection: ["pa"],
+      toolId: "pathEdit",
+    });
+    const other = setup();
+    other.getState().startPathEdit("r1");
+    other.getState().startPathEdit("nope");
+    expect(other.getState()).toMatchObject({ editingPathId: null, toolId: "select" });
+  });
+
+  it("endPathEdit は点の編集を終えて選択ツールへ戻す (選択は残す)", () => {
+    const store = editing();
+    store.getState().endPathEdit();
+    expect(store.getState()).toMatchObject({
+      editingPathId: null,
+      toolId: "select",
+      selection: ["pa"],
+    });
+  });
+
+  it("ペンへの切替だけは編集を残し、ほかのツールへの切替で終える", () => {
+    const store = editing();
+    store.getState().setTool("pen");
+    expect(store.getState()).toMatchObject({ editingPathId: "pa", toolId: "pen" });
+    store.getState().setTool("pathEdit");
+    expect(store.getState()).toMatchObject({ editingPathId: "pa", toolId: "pathEdit" });
+    store.getState().setTool("rect");
+    expect(store.getState()).toMatchObject({ editingPathId: null, toolId: "rect" });
+  });
+
+  it("点の編集中でなければ pathEdit には切り替えない", () => {
+    const store = setup();
+    store.getState().setTool("pathEdit");
+    expect(store.getState().toolId).toBe("select");
+  });
+
+  it("選択を変えたら終える。同じ選択なら続ける", () => {
+    const store = editing();
+    store.getState().setSelection(["pa"]);
+    expect(store.getState().editingPathId).toBe("pa");
+    store.getState().setSelection(["pa", "r1"]);
+    expect(store.getState()).toMatchObject({
+      editingPathId: null,
+      toolId: "select",
+      selection: ["pa", "r1"],
+    });
+  });
+
+  it("ペンで編集を続けている間に選択を変えたら、編集を終えてペンのまま", () => {
+    const store = editing();
+    store.getState().setTool("pen");
+    store.getState().setSelection([]);
+    expect(store.getState()).toMatchObject({ editingPathId: null, toolId: "pen" });
+  });
+
+  it("パスを消したら終えて選択ツールへ戻す", () => {
+    const store = editing();
+    store.getState().apply((doc) => deleteNodes(doc, ["pa"]));
+    expect(store.getState()).toMatchObject({ editingPathId: null, toolId: "select" });
+  });
+
+  it("Undo / Redo はパスが残っていれば続け (選択はそのパス)、消えたら終える", () => {
+    const store = editing();
+    const s = () => store.getState();
+    // パスを足した後に別の操作を 1 つ
+    s().apply((doc) => updateNode(doc, "pa", { x: 5 }));
+    s().undo();
+    expect(s()).toMatchObject({ editingPathId: "pa", toolId: "pathEdit", selection: ["pa"] });
+    s().redo();
+    expect(s()).toMatchObject({ editingPathId: "pa", toolId: "pathEdit", selection: ["pa"] });
+    // パスを足す前まで戻すと終える
+    s().undo();
+    s().undo();
+    expect(s()).toMatchObject({ editingPathId: null, toolId: "select" });
+    expect(s().doc.nodes["pa"]).toBeUndefined();
+  });
+
+  it("本文の編集とは同時に開かない", () => {
+    const store = editing();
+    store
+      .getState()
+      .apply((doc) =>
+        insertNode(doc, createText({ id: "tx", text: "a" }), { kind: "page", id: "p1" }),
+      );
+    store.getState().startTextEdit("tx");
+    expect(store.getState()).toMatchObject({
+      editingTextId: "tx",
+      editingPathId: null,
+      toolId: "select",
+    });
+    store.getState().startPathEdit("pa");
+    expect(store.getState()).toMatchObject({ editingTextId: null, editingPathId: "pa" });
+  });
+
+  it("load で終える", () => {
+    const store = editing();
+    store.getState().load(sampleDocument());
+    expect(store.getState()).toMatchObject({ editingPathId: null, toolId: "select" });
   });
 });

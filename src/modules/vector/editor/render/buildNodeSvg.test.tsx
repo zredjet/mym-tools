@@ -7,6 +7,7 @@ import {
   createImage,
   createLine,
   createRect,
+  createStroke,
   createSvg,
   createText,
   solidPaint,
@@ -77,7 +78,7 @@ describe("buildNodeSvg: 種別ごと", () => {
       height: 40,
       radius: 4,
       fill: solidPaint("#FF0000", 0.5),
-      stroke: { color: "#00FF00", opacity: 1, width: 2 },
+      stroke: { color: "#00FF00", opacity: 1, width: 2, cap: "butt", join: "miter", dash: [] },
     });
     expect(build(docOf([rect], ["r"]), "r")).toEqual({
       tag: "rect",
@@ -118,7 +119,7 @@ describe("buildNodeSvg: 種別ごと", () => {
       y1: 2,
       x2: 3,
       y2: 4,
-      stroke: { color: "#123456", opacity: 0.3, width: 5 },
+      stroke: { color: "#123456", opacity: 0.3, width: 5, cap: "butt", join: "miter", dash: [] },
     });
     expect(build(docOf([line], ["l"]), "l")).toEqual({
       tag: "line",
@@ -170,7 +171,7 @@ describe("buildNodeSvg: 種別ごと", () => {
           radius: 8,
           clip: false,
           children: ["r"],
-          stroke: { color: "#000000", opacity: 1, width: 1 },
+          stroke: { color: "#000000", opacity: 1, width: 1, cap: "butt", join: "miter", dash: [] },
         }),
         createRect({ id: "r", x: 10, y: 10 }),
       ],
@@ -425,7 +426,7 @@ describe("buildNodeSvg: 塗り・影の定義", () => {
 
   it("frame の影: 塗りと線の矩形が落とし、必ず子の背面に描く (影だけを出す要素を先頭に置く)", () => {
     const shadow = { x: 0, y: 2, blur: 4, color: "#112233", opacity: 0.5 };
-    const stroke = { color: "#000000", opacity: 1, width: 6 };
+    const stroke = createStroke("#000000", 6);
     const frameDoc = (init: Parameters<typeof createFrame>[0]) =>
       docOf(
         [

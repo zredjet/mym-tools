@@ -4,7 +4,18 @@
  * 形の規則は `buildNodeShell` (ノード 1 個、子は差し込み位置のまま) にだけ書く。
  * 書き出し用の `buildNodeSvg` はそれを再帰で組み立て、画面 (`canvas/DocumentLayer.tsx`) は
  * ノードごとのコンポーネントが同じ関数を呼んで子のコンポーネントを差し込む。
+ *
+ * 第 2 段階 (§4.3) で足した描き方:
+ * - 回転は、ノードを描く要素のうち最も外側に `transform="rotate(θ cx cy)"` を付ける (中心は箱の中心、
+ *   親の座標系)。frame は子と切り抜きも含めて回る。回転 0 では付けない
+ * - 線の端・角・破線は `stroke-linecap` `stroke-linejoin` `stroke-dasharray`。既定値 (butt、miter、空) では
+ *   付けない
+ * - パスは `<path d>` 1 つと `fill-rule`。ブーリアンは演算の結果を `<path d>` 1 つにして自分の塗り・線・影で
+ *   描き、子を個別には描かない。結果を求められなければ、子の形をそれぞれ重ねて描く (§4.15.3)
+ * - これらの属性 (`d`、`transform`、`stroke-dasharray`) の数値は `formatPathNumber` で書く。v2 からある属性の
+ *   書き方は変えないので、回転 0 と線の既定値の文書は v2 と同じ出力になる
  */
+import { getBooleanEvaluation, operandsBounds, type BooleanEvaluation } from "../boolean/result";
 import { hasOwn } from "../model/ids";
 import { getNode, isContainer } from "../model/tree";
 import type {
@@ -17,6 +28,7 @@ import type {
   Stroke,
   TextNode,
 } from "../model/types";
+import { formatPathNumber, subpathsToPathData } from "../path/pathData";
 import { layoutText } from "../text/layout";
 import { CHILDREN_SLOT, el, fillSlot } from "./svgEl";
 import type {
@@ -28,12 +40,17 @@ import type {
   TextMeasurer,
 } from "./types";
 
-/** `buildNodeShell` に渡すもの。画像と埋め込み SVG のアセットは呼び出し側が引いて渡す。 */
+/**
+ * `buildNodeShell` に渡すもの。画像と埋め込み SVG のアセット、ブーリアンの演算の結果は
+ * 呼び出し側が引いて渡す (`assetOf`、`booleanEvaluationOf`)。
+ */
 export interface ShellContext {
   measurer: TextMeasurer;
   idPrefix: string;
   /** image / svg ノードが指すアセット。見つからなければ undefined */
   asset: Asset | undefined;
+  /** boolean ノードの演算の入力と結果。なければ何も描かない */
+  boolean?: BooleanEvaluation | undefined;
 }
 
 interface Box {
@@ -188,7 +205,26 @@ function strokeAttrs(stroke: Stroke | null): Record<string, string | number | un
     stroke: stroke.color,
     "stroke-opacity": stroke.opacity === 1 ? undefined : stroke.opacity,
     "stroke-width": stroke.width,
+    "stroke-linecap": stroke.cap === "butt" ? undefined : stroke.cap,
+    "stroke-linejoin": stroke.join === "miter" ? undefined : stroke.join,
+    "stroke-dasharray":
+      stroke.dash.length === 0 ? undefined : stroke.dash.map(formatPathNumber).join(" "),
   };
+}
+
+/** SVG の既定の `stroke-miterlimit` (描画も線のアウトライン化もこの値。§4.3、§4.16)。 */
+const MITER_LIMIT = 4;
+
+/**
+ * 線が形の輪郭から外へ届く距離の上限 (影のフィルタの範囲に使う)。マイターの角は上限の 4 倍の半分まで、
+ * 四角の端は太さの半分の √2 倍まで届く。矩形・楕円・frame は角が直角か角がないので、太さの半分で足りる。
+ */
+function strokeReach(stroke: Stroke | null, corners: boolean): number {
+  if (stroke === null) return 0;
+  const half = stroke.width / 2;
+  if (!corners) return half;
+  if (stroke.join === "miter") return half * MITER_LIMIT;
+  return stroke.cap === "square" ? half * Math.SQRT2 : half;
 }
 
 /**
@@ -201,11 +237,11 @@ function strokeAttrs(stroke: Stroke | null): Record<string, string | number | un
 function shadowFilter(
   shadow: Shadow,
   box: Box,
-  strokeWidth: number,
+  strokeReach: number,
   id: string,
   shadowOnly = false,
 ): SvgEl {
-  const pad = shadow.blur * 1.5 + strokeWidth / 2 + 1;
+  const pad = shadow.blur * 1.5 + strokeReach + 1;
   const primitives = shadowOnly
     ? [
         el("feGaussianBlur", { in: "SourceAlpha", stdDeviation: shadow.blur / 2 }),
@@ -298,11 +334,35 @@ function boxOf(node: { x: number; y: number; width: number; height: number }): B
 }
 
 /**
+ * 回転したノードの最も外側の要素に `rotate(θ cx cy)` を付ける (§4.3)。中心は箱の中心 (親の座標系)。
+ * 要素がすでに `transform` を持っていれば (子だけの frame の `translate`)、その前に置く。回転 0 なら何もしない。
+ */
+function withRotation(node: CanvasNode, shell: SvgEl): SvgEl {
+  if (!("rotation" in node) || node.rotation === 0) return shell;
+  const f = formatPathNumber;
+  const rotate = `rotate(${f(node.rotation)} ${f(node.x + node.width / 2)} ${f(node.y + node.height / 2)})`;
+  const existing = shell.attrs["transform"];
+  const transform = existing === undefined ? rotate : `${rotate} ${existing}`;
+  return { ...shell, attrs: { ...shell.attrs, transform } };
+}
+
+/** 何も描かないノードの要素 (点だけのパス、面のないブーリアン)。不透明度だけは付ける。 */
+function emptyShell(node: CanvasNode): SvgEl {
+  return wrap(node, [], [el("g")]);
+}
+
+/**
  * ノード 1 個を `SvgEl` にする。frame / group の子は `CHILDREN_SLOT` の要素で置き、
- * 呼び出し側が差し込む。`visible` が false なら null。座標は親の座標系。
+ * 呼び出し側が差し込む。ブーリアンは子を描かず、演算の結果 (`ctx.boolean`) を描く。
+ * `visible` が false なら null。座標は親の座標系。
  */
 export function buildNodeShell(node: CanvasNode, ctx: ShellContext): SvgEl | null {
   if (!node.visible) return null;
+  const shell = buildShape(node, ctx);
+  return withRotation(node, shell);
+}
+
+function buildShape(node: CanvasNode, ctx: ShellContext): SvgEl {
   const defs: SvgEl[] = [];
   const id = (kind: DefKind) => defId(ctx.idPrefix, node.id, kind);
 
@@ -320,7 +380,9 @@ export function buildNodeShell(node: CanvasNode, ctx: ShellContext): SvgEl | nul
       // 影だけを出す要素を塗りより先に置く (§4.3)。塗りも線もなければ影もない
       const fill = node.fill === null ? null : paintAttrs(node.fill, box, id("fill"), defs);
       if (node.shadow !== null && (node.fill !== null || node.stroke !== null)) {
-        defs.push(shadowFilter(node.shadow, box, node.stroke?.width ?? 0, id("shadow"), true));
+        defs.push(
+          shadowFilter(node.shadow, box, strokeReach(node.stroke, false), id("shadow"), true),
+        );
         body.push(
           el("rect", {
             ...box,
@@ -370,7 +432,9 @@ export function buildNodeShell(node: CanvasNode, ctx: ShellContext): SvgEl | nul
       const filter =
         node.shadow === null
           ? undefined
-          : (defs.push(shadowFilter(node.shadow, box, node.stroke?.width ?? 0, id("shadow"))),
+          : (defs.push(
+              shadowFilter(node.shadow, box, strokeReach(node.stroke, false), id("shadow")),
+            ),
             `url(#${id("shadow")})`);
       const paint = {
         ...paintAttrs(node.fill, box, id("fill"), defs),
@@ -456,6 +520,64 @@ export function buildNodeShell(node: CanvasNode, ctx: ShellContext): SvgEl | nul
       }
       return wrap(node, defs, [image]);
     }
+
+    case "path": {
+      const d = subpathsToPathData(node.subpaths, { x: node.x, y: node.y });
+      if (d === "") return emptyShell(node); // 点が 1 個だけの輪郭は描かない (§4.3)
+      const box = boxOf(node);
+      const filter =
+        node.shadow === null
+          ? undefined
+          : (defs.push(
+              shadowFilter(node.shadow, box, strokeReach(node.stroke, true), id("shadow")),
+            ),
+            `url(#${id("shadow")})`);
+      const path = el("path", {
+        d,
+        "fill-rule": node.fillRule,
+        ...paintAttrs(node.fill, box, id("fill"), defs),
+        ...strokeAttrs(node.stroke),
+        filter,
+      });
+      return wrap(node, defs, [path]);
+    }
+
+    case "boolean": {
+      // 結果は親の座標系で持つので transform は付けない (§4.3)
+      const evaluation = ctx.boolean;
+      if (!evaluation) return emptyShell(node);
+      const { result } = evaluation;
+      const shapes = (
+        result ? [{ subpaths: result.subpaths, fillRule: "nonzero" as const }] : evaluation.operands
+      )
+        .map((shape) => ({ d: subpathsToPathData(shape.subpaths), fillRule: shape.fillRule }))
+        .filter((shape) => shape.d !== "");
+      // グラデーションを写す箱は結果の外接矩形。求められなければ子の形を囲む範囲 (§4.3、§4.15.3)
+      const box = result ? result.bounds : operandsBounds(evaluation.operands);
+      if (shapes.length === 0 || !box) return emptyShell(node);
+      const paint = {
+        ...paintAttrs(node.fill, box, id("fill"), defs),
+        ...strokeAttrs(node.stroke),
+      };
+      const filter =
+        node.shadow === null
+          ? undefined
+          : (defs.push(
+              shadowFilter(node.shadow, box, strokeReach(node.stroke, true), id("shadow")),
+            ),
+            `url(#${id("shadow")})`);
+      const paths = shapes.map((shape) =>
+        el("path", { d: shape.d, "fill-rule": shape.fillRule, ...paint }),
+      );
+      // 求められなかったときは子の形をブーリアンの塗りでそれぞれ重ねて描き、影はまとめて落とす
+      if (paths.length === 1 && paths[0]) {
+        const only = paths[0];
+        return wrap(node, defs, [
+          filter === undefined ? only : { ...only, attrs: { ...only.attrs, filter } },
+        ]);
+      }
+      return wrap(node, defs, filter === undefined ? paths : [el("g", { filter }, paths)]);
+    }
   }
 }
 
@@ -463,6 +585,18 @@ export function buildNodeShell(node: CanvasNode, ctx: ShellContext): SvgEl | nul
 export function assetOf(doc: CanvasDocument, node: CanvasNode): Asset | undefined {
   if (node.type !== "image" && node.type !== "svg") return undefined;
   return hasOwn(doc.assets, node.assetId) ? doc.assets[node.assetId] : undefined;
+}
+
+/**
+ * boolean ノードの演算の入力と結果 (`boolean/result.ts`)。ほかのノードは undefined。
+ * 子孫が変わらなければ同じオブジェクトを返す。
+ */
+export function booleanEvaluationOf(
+  doc: CanvasDocument,
+  node: CanvasNode,
+): BooleanEvaluation | undefined {
+  if (node.type !== "boolean") return undefined;
+  return getBooleanEvaluation(doc, node.id) ?? undefined;
 }
 
 /** ノード 1 個 (子を含む) を `SvgEl` にする。契約は `render/types.ts`。 */
@@ -482,8 +616,10 @@ function buildRecursive(
     measurer: options.measurer,
     idPrefix: options.idPrefix,
     asset: assetOf(doc, node),
+    boolean: booleanEvaluationOf(doc, node),
   });
-  if (!shell || !isContainer(node)) return shell;
+  // ブーリアンは子を個別に描かない (結果を 1 つの形にして描く。§4.3) ので、子の SVG を作らない
+  if (!shell || !isContainer(node) || node.type === "boolean") return shell;
   ancestors.add(nodeId);
   const children: SvgEl[] = [];
   for (const child of node.children) {

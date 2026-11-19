@@ -2,16 +2,55 @@
  * テスト用の文書と補助 (アプリの画面からは使わない)。
  * 後続のセッションのテストでも使えるように、契約データの読み込みもここに置く。
  */
-import fixtures from "./fixtures/payload-v2.json";
+import fixtures from "./fixtures/payload-v3.json";
 import { createFrame, createGroup, createLine, createRect } from "./create";
 import { fromPayload } from "./payload";
-import type { CanvasDocument, CanvasNode, VectorPayloadV2 } from "./types";
+import type { CanvasDocument, CanvasNode, VectorPayloadV3 } from "./types";
 
-/** 契約データ `valid` の payload を名前で引く (`"empty"` / `"full"`)。 */
-export function fixturePayload(name: string): VectorPayloadV2 {
-  const entry = fixtures.valid.find((item) => item.name === name);
+/** 契約データの patch の 1 件 (§3.9)。`path` は文字列 (キー) と整数 (添字) の並び。 */
+export interface FixturePatchOp {
+  op: string;
+  path: (string | number)[];
+  value?: unknown;
+  /** `repeat` の個数 */
+  count?: number;
+}
+
+/**
+ * 契約データの patch を当てた複製を返す (元の値は変えない)。op は次のとおり (Rust のテストと同じ):
+ * - `set`: `path` に `value` を置く。`remove`: `path` を消す (配列なら詰める)。`append`: `path` の配列に足す
+ * - `repeat`: `path` に `value` の複製を `count` 個並べた配列を置く (各要素は参照を共有しない)
+ */
+export function applyFixturePatch<T>(base: T, patch: readonly FixturePatchOp[]): T {
+  const root = structuredClone(base) as Record<string | number, unknown>;
+  for (const { op, path, value, count } of patch) {
+    const parentPath = path.slice(0, -1);
+    const last = path[path.length - 1] as string | number;
+    let target = root;
+    for (const key of parentPath) target = target[key] as Record<string | number, unknown>;
+    if (op === "set") target[last] = structuredClone(value);
+    else if (op === "remove") {
+      if (Array.isArray(target)) target.splice(Number(last), 1);
+      else delete target[last];
+    } else if (op === "append") (target[last] as unknown[]).push(structuredClone(value));
+    else if (op === "repeat")
+      target[last] = Array.from({ length: count ?? 0 }, () => structuredClone(value));
+    else throw new Error(`unknown op: ${op}`);
+  }
+  return root as T;
+}
+
+type ValidEntry = (typeof fixtures.valid)[number];
+
+/**
+ * 契約データ `valid` の payload を名前で引く (`"empty"` / `"full"` ほか)。
+ * 土台と差分で書いたもの (`base` と `patch`) は、土台に差分を当てて返す。
+ */
+export function fixturePayload(name: string): VectorPayloadV3 {
+  const entry: ValidEntry | undefined = fixtures.valid.find((item) => item.name === name);
   if (!entry) throw new Error(`fixture not found: ${name}`);
-  return structuredClone(entry.payload) as unknown as VectorPayloadV2;
+  if ("payload" in entry) return structuredClone(entry.payload) as unknown as VectorPayloadV3;
+  return applyFixturePatch(fixturePayload(entry.base), entry.patch as FixturePatchOp[]);
 }
 
 /** 契約データ `valid` の文書を名前で引く。 */

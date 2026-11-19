@@ -3,15 +3,18 @@
  *
  * ノードは画面と同じ `buildNodeSvg` で `SvgEl` にし、ルートの `<svg>` も `SvgEl` で組んで
  * `svgElToString` で文字列にする (描画の規則と XML のエスケープを書き出し側に書き直さない)。
- * `viewBox` は範囲のページ座標なので、各ノードは親の座標系の原点 (ページ座標) へ移すだけでよい。
+ * `viewBox` は範囲のページ座標なので、各ノードは親の座標系 (ページ座標) へ写す。回転した frame の中のノードは、
+ * 祖先の frame の回転も掛ける (`matrix(…)`、§4.11.2。数値は §4.3 の `formatPathNumber`)。回転していなければ、
+ * これまでどおり平行移動だけ (`translate(…)`) にする (v2 の文書の出力を変えない)。
  * 背景は透明 (frame の塗りは frame のノードとして描かれる)。
  *
  * ルートには文書の言語 (`<html lang>`) を付ける (`exportLanguageAttrs`)。言語のない SVG を画像として描くと、
  * 総称フォント (`sans-serif` など)・その PC にないフォント・欧文フォントの中の和文の代わりのフォントが、
  * 画面 (`lang="ja"` の文書の SVG) と別のフォントになり、画面のフォントで決めた行の位置と折り返しに合わない。
  */
-import { nodeOrigin } from "../model/geometry";
+import { coordinateMatrix, isTranslation } from "../model/geometry";
 import type { CanvasDocument } from "../model/types";
+import { formatPathNumber } from "../path/pathData";
 import { buildNodeSvg } from "../render/buildNodeSvg";
 import { el, formatNumber, SVG_NS, svgElToString } from "../render/svgEl";
 import type { SvgEl, TextMeasurer } from "../render/types";
@@ -73,13 +76,17 @@ export function buildExportSvgEl(
   for (const id of target.nodeIds) {
     const built = buildNodeSvg(doc, id, { measurer: options.measurer, idPrefix: EXPORT_ID_PREFIX });
     if (!built) continue;
-    const origin = nodeOrigin(doc, id);
+    const m = coordinateMatrix(doc, id);
+    if (!isTranslation(m)) {
+      const f = formatPathNumber;
+      const transform = `matrix(${[m.a, m.b, m.c, m.d, m.e, m.f].map(f).join(" ")})`;
+      children.push(el("g", { transform }, [built]));
+      continue;
+    }
     children.push(
-      origin.x === 0 && origin.y === 0
+      m.e === 0 && m.f === 0
         ? built
-        : el("g", { transform: `translate(${formatNumber(origin.x)} ${formatNumber(origin.y)})` }, [
-            built,
-          ]),
+        : el("g", { transform: `translate(${formatNumber(m.e)} ${formatNumber(m.f)})` }, [built]),
     );
   }
   return el(

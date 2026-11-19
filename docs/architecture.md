@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-11-15 / ステータス: Draft (Phase 1)
+最終更新: 2026-11-18 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -600,14 +600,16 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-10-17 | 1.8 | ADR-0025を反映。§10.9 フォルダ容量境界、§11 の重い処理の方針、§13 の依存を追加 |
 | 2026-11-10 | 1.9 | ADR-0020 2026-11-10追補を反映。§10.6と§13の`System.Formats.Nrbf`を10.0.14へ更新 |
 | 2026-11-15 | 1.10 | ADR-0026を反映。末尾の「SVG-Edit統合」をキャンバスの構造に書き換え、§13 にキャンバスを追加 |
+| 2026-11-18 | 1.11 | ADR-0028を反映。末尾のキャンバスを payload v3 にし、第 2 段階の幾何 (行列と曲線、パス、ブーリアン演算、線のアウトライン化、曲線の当てはめ、埋め込み SVG の変換) の置き場所を追加 |
 
-## キャンバス (ADR-0026)
+## キャンバス (ADR-0026、ADR-0028)
 
 ベクター描画の SVG-Edit 同梱 (ADR-0021) は、自作のキャンバスエディタに置き換えた。iframe、loopback サーバ、postMessage のブリッジはない。設計の正典は [キャンバスの設計](canvas-editor-design.md)。
 
 - `VectorWorkspacePage` が作品バー (作品の切替、新規、取込、タイトル、タグ、未保存の表示、保存、削除) と、作品の読み込み・保存、未保存の確認、ファイルのダイアログを受け持つ。その下に `EditorRoot` (レイヤー、キャンバス、プロパティ、ツールバー) を置く
-- エディタの状態は `src/modules/vector/editor/state/store.ts` の Zustand の vanilla store 1 つ (`editorStore`) が持つ。アプリ全体の状態 (`useAppStore`) には入れず、Context も使わない。文書は payload v2 と同じ形で、変換層を持たない
+- エディタの状態は `src/modules/vector/editor/state/store.ts` の Zustand の vanilla store 1 つ (`editorStore`) が持つ。アプリ全体の状態 (`useAppStore`) には入れず、Context も使わない。文書は payload v3 と同じ形で、変換層を持たない
 - モデル、状態、ツール、ヒットテストは DOM に依存しない。描画はノードを `SvgEl` (SVG 要素の素朴な木) にしてから、画面では React 要素、SVG 書き出しでは文字列にする。PNG はその SVG を画像として読み込んで canvas に描く
 - ファイルの読み書きは、画面が `canvasIo.ts` の関数をエディタの登録口 (`setImportFileReader`、`setExportWriter`) に渡す。エディタは Tauri の IPC を直接呼ばない。OS からのドロップは Tauri の webview のイベントで受ける (HTML5 のドラッグ&ドロップは使わない)
-- `modules/vector` の Rust は payload v2 の検証と検索用テキストの照合 (`scene.rs`)、v1 からの変換 (`upgrade.rs`、Eager-on-Read)、取込の検証 (`vector_read_file` / `vector_read_image`、SVG ポリシー `validation.rs`)、書き出し (`vector_write_file`、拡張子と大きさ、XML として整形式でルートが `svg` であることを確かめて原子的に書く)、変換できない v1 の元の SVG の書き出し (`vector_export_original_svg`、行は変えない、ADR-0027) を持つ。SVG ポリシーは `src/modules/vector/policy/` にあり、TypeScript と Rust が同じ `policy.json` と `validation-fixtures.json` を読む
+- `modules/vector` の Rust は payload v3 の検証と検索用テキストの照合 (`scene.rs`。v2 の検証は v1 → v2 の段と v2 の入力のために凍結して残す)、v1 と v2 からの変換 (`upgrade.rs`、Eager-on-Read。1 段ずつ)、取込の検証 (`vector_read_file` / `vector_read_image`、SVG ポリシー `validation.rs`)、書き出し (`vector_write_file`、拡張子と大きさ、XML として整形式でルートが `svg` であることを確かめて原子的に書く)、変換できない v1 の元の SVG の書き出し (`vector_export_original_svg`、行は変えない、ADR-0027) を持つ。SVG ポリシーは `src/modules/vector/policy/` にあり、TypeScript と Rust が同じ `policy.json` と `validation-fixtures.json` を読む
 - 軽量な一覧は共通ストレージから metadata だけを SELECT し、検索はモジュール宣言 (`search_preview_field() = "text"`) から表示用 payload を SQL 投影する。画像を含む payload を一覧や検索の IPC に載せない
+- 第 2 段階 (ADR-0028) の幾何はエディタの中の純関数で、依存を足さずに自作した: 行列と曲線 (`geometry/`)、パスの形と点の操作 (`path/`)、ブーリアン演算 (`boolean/`、結果は保存せず、ノードのオブジェクトをキーに使い回す)、線のアウトライン化 (`outline/`)、曲線の当てはめ (`pencil/`)、埋め込み SVG の変換 (`svgconvert/`、DOM の `DOMParser` で読む)。どれも求められないときに例外で画面を止めず、理由を返す

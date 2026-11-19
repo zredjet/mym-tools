@@ -2,8 +2,8 @@
  * 検索用テキスト (§3.6)。Rust も同じ規則で求め直し、一致しない payload を拒否する。
  */
 import { getOwn } from "./ids";
-import { walkPage } from "./tree";
-import type { CanvasDocument } from "./types";
+import { getNode } from "./tree";
+import type { CanvasDocument, NodeId } from "./types";
 
 /**
  * 空白の集合。Unicode の White_Space で、Rust の `char::is_whitespace` と同じ。
@@ -36,7 +36,10 @@ export function collapseWhiteSpace(value: string): string {
 /**
  * 文書から検索用テキストを求める。ページを配列の順に、各ページを深さ優先・背面からたどり、
  * frame の名前、テキストの本文、埋め込み SVG のアセットの `text` を拾う
- * (group は拾わずに子へ進む。非表示でも拾う)。
+ * (group とブーリアンは拾わずに子へ進む。非表示でも拾う。§3.6、§3.5)。
+ *
+ * Rust の `scene::search_text` と同じたどり方にするため、木の参照 (`tree.ts` の `walkPage`) は使わずに
+ * 自分でたどる。同じノードは 1 回しか訪れない (壊れた文書の循環でも止まる)。
  */
 export function computeSearchText(doc: CanvasDocument): string {
   const parts: string[] = [];
@@ -44,14 +47,34 @@ export function computeSearchText(doc: CanvasDocument): string {
     const collapsed = collapseWhiteSpace(value);
     if (collapsed) parts.push(collapsed);
   };
-  for (const page of doc.pages)
-    walkPage(doc, page.id, (node) => {
-      if (node.type === "frame") push(node.name);
-      else if (node.type === "text") push(node.text);
-      else if (node.type === "svg") {
-        const asset = getOwn(doc.assets, node.assetId);
-        if (asset?.kind === "svg") push(asset.text);
+  const seen = new Set<NodeId>();
+  const visit = (ids: readonly NodeId[]) => {
+    for (const id of ids) {
+      const node = getNode(doc, id);
+      if (!node || seen.has(id)) continue;
+      seen.add(id);
+      switch (node.type) {
+        case "frame":
+          push(node.name);
+          visit(node.children);
+          break;
+        case "group":
+        case "boolean":
+          visit(node.children);
+          break;
+        case "text":
+          push(node.text);
+          break;
+        case "svg": {
+          const asset = getOwn(doc.assets, node.assetId);
+          if (asset?.kind === "svg") push(asset.text);
+          break;
+        }
+        default:
+          break;
       }
-    });
+    }
+  };
+  for (const page of doc.pages) visit(page.children);
   return parts.join(" ");
 }
