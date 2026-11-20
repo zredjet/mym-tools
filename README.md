@@ -7,7 +7,7 @@
 
 - **対象 OS**: macOS / Windows (Linux は対象外)
 - **配布形式**: portable 差し替え方式 (自動更新なし)
-- **図編集**: Mermaid 11.17.2 / draw.io 31.5.3を全資産同梱で完全オフライン実行
+- **図とデザイン**: Mermaid 11.17.2 / draw.io 31.5.3 を全資産同梱で完全オフライン実行。キャンバスは依存を足さない自作のエディタ (ADR-0026)
 - **PNG最適化**: 自作の shotq を内蔵し、`shotq --quality=70-85 --speed 11` と同じ結果をファイル単位・フォルダ単位で得る (ADR-0023)
 - **データ保存**: ローカル SQLite (アプリ実行ファイルとは別ディレクトリ)
 - **ライセンス**: MIT
@@ -53,18 +53,22 @@
   </tr>
 </table>
 
+キャンバスは自作のエディタで、作品のプロジェクト保存、画像と SVG の取込、SVG/PNG の書き出しに対応します。アイコン・ロゴ向けに、回転と反転、ペンと点の編集、多角形・星・鉛筆、元の図形を残すブーリアン演算、パスに変換、線のアウトライン化、線の端・角・破線を持ちます。ベクター描画 (SVG-Edit) で作った作品は、開いたときに埋め込み SVG として引き継ぎ、必要なら編集できる形に変換できます。[設計](docs/canvas-editor-design.md)、[ADR-0026](docs/decisions/0026-self-built-canvas-editor.md)、[ADR-0028](docs/decisions/0028-canvas-stage2-paths-rotation.md)、[検証・実機受入](docs/vector-editor-verification.md)を参照してください。
+
 ## ドキュメント
 
 | 文書 | 内容 |
 |------|------|
-| [docs/requirements.md](docs/requirements.md) | 何を作るか / 作らないか、決定事項 D-01〜D-14 |
+| [docs/requirements.md](docs/requirements.md) | 何を作るか / 作らないか、決定事項 D-01〜D-19 |
 | [docs/architecture.md](docs/architecture.md) | プロセス / スレッドモデル、レイヤ責務 |
 | [docs/data-model.md](docs/data-model.md) | SQLite スキーマ、payload バージョニング、エクスポート JSON |
 | [docs/module-contract.md](docs/module-contract.md) | モジュール / コア境界の API 契約 |
 | [docs/ui-design.md](docs/ui-design.md) | UI トークン、画面スケルトン、キーボードショートカット |
 | [docs/developer-tools-plan.md](docs/developer-tools-plan.md) | 開発ツールモジュールの範囲、段階、品質条件 |
+| [docs/canvas-editor-design.md](docs/canvas-editor-design.md) | キャンバスの保存形式 (payload v3)、内部の境界、画面、段階 |
+| [docs/vector-editor-verification.md](docs/vector-editor-verification.md) / [docs/diagram-editor-verification.md](docs/diagram-editor-verification.md) | キャンバス・ダイアグラムの検証と実機受入 |
 | [docs/release-process.md](docs/release-process.md) | 担当者向けの手動リリース手順、公開後検証、失敗時対応 |
-| [docs/decisions/](docs/decisions/) | ADR-0001〜0025 (モジュール化 / ローカル処理境界 / リリース方式) |
+| [docs/decisions/](docs/decisions/) | ADR-0001〜0028 (モジュール化 / ローカル処理境界 / リリース方式 / キャンバス) |
 | [CLAUDE.md](CLAUDE.md) | 作業時の不変条件と参照優先順位 |
 
 ## 開発
@@ -73,13 +77,18 @@
 
 - Node.js **22 系** LTS (`.nvmrc` 参照)
 - Rust **1.88+** stable (`rust-toolchain.toml` / `src-tauri/Cargo.toml` の `rust-version` 参照)
+- .NET SDK **10.0.302** (`global.json` 参照。BinaryFormatter 解析の sidecar をビルドする時)
 - macOS は Xcode CLT、Windows は MSVC build tools
 
 ### セットアップ
 
 ```bash
+git submodule update --init   # draw.io (ADR-0017)
 npm install
+npm run prepare:nrbf          # BinaryFormatter 解析の sidecar (ADR-0020)
 ```
+
+draw.io の資産 (`npm run prepare:drawio`) は `dev` / `build` の前に自動で作られる。
 
 ### よく使うコマンド
 
@@ -108,12 +117,13 @@ cargo test --workspace --lib --all-features --locked
 担当者向けの準備、PR、tag作成、実行、公開確認、失敗時対応は
 [docs/release-process.md](docs/release-process.md)にまとめている。
 
-1. `package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json`のversionを同じSemVerへ更新
-2. 変更を`main`へ反映し、`v<version>`タグをpush
+1. release準備PRで`package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json`のversionを同じSemVerへ更新し、Release本文 (`scripts/release/release-notes.md`) を書き換える
+2. required check 6件の成功後に`main`へマージし、マージのコミットへ`v<version>`タグを付けてpush
 3. Actions画面でversionを入力してworkflowを実行 (`v`は省略可)
 
 入力・タグ・3設定のversionが一致し、macOS / Windowsの両ビルドが成功した場合だけ、
 `MyMyTools_<version>_macos_aarch64.zip`と`MyMyTools_<version>_windows_x64.zip`を公開する。
+通常はrelease準備PRのCIが作ったZIPを検証して再利用する (ADR-0019)。
 既存のGitHub Releaseは上書きしない。
 
 ## 開発状況
@@ -121,7 +131,8 @@ cargo test --workspace --lib --all-features --locked
 **Phase 1 の主要機能を実装済み (`0.1.0-alpha.24`)**。
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
-rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing / lopdf / shotq (PNG最適化、`src-tauri/crates/shotq` に複製) の Rust バックエンドで構成。
+rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing / reqwest (HTTP) / lopdf / encoding_rs / shotq (PNG最適化、`src-tauri/crates/shotq` に複製) の Rust バックエンドと、
+BinaryFormatter 解析の .NET 10 NativeAOT sidecar で構成。
 プロジェクト管理、カテゴリ表示付き29モジュール、横断検索、`settings.json`、バックアップ、
 アプリ全体／プロジェクト単位の JSON export / import を備える。
 
@@ -133,5 +144,3 @@ PR 経由マージのみ受付け、6 ジョブ全 green が必須。
 
 - [Tauri 2 公式](https://v2.tauri.app/)
 - リリース告知・配布: GitHub Releases (portable ZIP / 手動更新)
-
-キャンバスは自作のエディタで、作品のプロジェクト保存、画像と SVG の取込、SVG/PNG の書き出しに対応します。アイコン・ロゴ向けに、回転と反転、ペンと点の編集、多角形・星・鉛筆、元の図形を残すブーリアン演算、パスに変換、線のアウトライン化、線の端・角・破線を持ちます。ベクター描画 (SVG-Edit) で作った作品は、開いたときに埋め込み SVG として引き継ぎ、必要なら編集できる形に変換できます。[設計](docs/canvas-editor-design.md)、[ADR-0026](docs/decisions/0026-self-built-canvas-editor.md)、[ADR-0028](docs/decisions/0028-canvas-stage2-paths-rotation.md)、[検証・実機受入](docs/vector-editor-verification.md)を参照してください。
