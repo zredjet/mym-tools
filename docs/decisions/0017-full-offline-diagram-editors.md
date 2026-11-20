@@ -141,6 +141,35 @@ CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこ�
 
 ローカルの値は、検証用identifierのrelease buildを同じ作業ツリーで比べたものである。CIの値は、31.5.3がmain（commit `adc3cdb`）、32.7.4がこの更新のPRのbuild-tauriである。両ZIPは§4の80,000,000 bytes上限とCIのsize gate（macOS 61,390,662 / Windows 61,105,964 bytes）を満たし、size gateまでの余裕はmacOS 13,960,299 bytes、Windows 13,650,923 bytesになる。
 
+### 10. 2026-11-20追補: Mermaid 12.3.0へ更新
+
+- Mermaidの固定先を12.3.0へ更新する（§2の「11.17.2へ固定」を置き換える）。動的import、§3の`securityLevel: strict`・HTML label無効・描画後の再除去、§6の書出し契約は変えない。11.x系は11.17.2が最後で、以後の修正は12.x系にだけ入る。
+- 更新理由:
+  - DOMPurifyの下限が`^3.4.17`になる（12.3.0）。lockのDOMPurifyは3.4.18。11.17.2のままでも範囲内で3.4.18にできるが、Mermaid自身の下限が上がるので古い版へ戻らない。
+  - KaTeXが0.18系になり、GHSA-238p-pmpm-9mq7（low、0.18.2で修正）が`npm audit`から消える（12.2.0）。数式は`foreignObject`に描かれ`sanitizeRenderedSvg`が除去するので、11.17.2でも表示には届いていなかった。
+  - flowchartの構文解析とfront matterの正規表現にあった二次時間の処理が直る（12.0.0 / 12.1.0）。
+- 見た目は12の既定を採る。既定のlayoutはELK、既定のlookは`neo`で、`initialize`では`layout` / `look`を指定しない。テーマ（`default` / `dark`）は従来どおり明示する。
+- 保存済みの図はsourceを変えないまま、次に開いた時から新しい並びと見た目で描かれる。変わるのは、flowchart / state / class / ER / requirementの並び（辺は直角に曲がる）、影や光彩、ひし形などの図形の大きさとラベルの折返し。PNG書出しも同じ見た目になる。diagramのfront matterで`layout: dagre`や`look: classic`を指定すれば、図ごとに従来の見た目へ戻せる。
+- 互換性:
+  - edge IDに`[ ] ( ) { } |`を含む図は構文errorになり、§3どおり保存を拒否する。
+  - ラベル中の`</br>`は改行として扱う。
+- ELKは`elkjs` 0.12.1（EPL-2.0 OR GPL-3.0-or-later、MyMyToolsはEPL-2.0を選ぶ）で、Mermaidのbuildが遅延chunkとして含む。同一originのchunkから読み、外部から取得しない。§5と同じく、license全文（`licenses/elkjs-LICENSE.txt`）とsource linkを配布assetとAboutに加える。
+- 動作環境: Mermaid 12はES2024 / Safari 17.4以上を前提にする。macOSのWKWebViewはシステムのWebKitを使うため、macOS 12 / 13はSafari 17.4以降へ、macOS 14は14.4以降へ更新していることを前提にする（requirements §3.2に注記）。WindowsのWebView2は自動更新されるため影響しない。macOS 12〜14の実機では確かめていない。
+- 実描画の検証: 単体testはMermaidをmockするため、ローカル専用の`npm run test:mermaid:browser`（Chromium）を足した。
+  - 本番と同じvite buildの出力に、アプリのCSPを付けて`127.0.0.1`から配信する。
+  - 17種類の図（`scripts/mermaid/corpus.mjs`）を、default / darkの両テーマで`renderMermaid`と`renderMermaidPng`に通す。
+  - 全件が描画できること、ラベルの文字がSVGに残ること、active content / 外部参照が残らないこと、CSP違反・外向き通信・console errorが0件であることを確かめる。
+  - 版ごとのPNGを`.generated/mermaid-verification/compare.html`に並べる。
+  - 11.17.2と12.3.0の両方で34件すべて成功した。12.3.0ではELKのchunkが同一originから読み込まれた。
+  - 12.3.0が出したSVG 34件は、書出しのRust側の検証（`validate_safe_mermaid_svg`）にもすべて通った。
+- macOSの実アプリ（WKWebView、QA用identifier、release build）で次を確かめた: ELKの並びでの描画、保存と開き直し、darkテーマ、構文error時の保存拒否と直前previewの維持、未保存の変更の確認、Aboutの表記。OSの保存dialogを通る書出しは画面操作で確かめていない（PNGの生成はChromium、SVGの検証はRustのtestで確かめた）。
+
+| 対象 | 11.17.2 | 12.3.0 |
+|---|---:|---:|
+| Mermaid部分のbuild出力（検証用entry、JS / CSS） | 61 files / 3,412,409 bytes | 62 files / 5,223,038 bytes |
+| 同上のBrotli（品質9）合計 | 895,510 bytes | 1,370,543 bytes（+475,033） |
+| うちELKのchunk | — | 1,512,970 bytes |
+
 ## Consequences
 
 - 図編集はネットワーク断でも同じ機能・資産で動き、図データ送信のオンライン経路を持たない。
@@ -175,3 +204,7 @@ CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこ�
 - GHSA-55cm-f4p8-xq88: <https://github.com/jgraph/drawio/security/advisories/GHSA-55cm-f4p8-xq88>
 - DOMPurify GHSA-cg2g-xh64-v4q7 / GHSA-mrv2-3pqr-j5jr / GHSA-c6gr-qvv4-5v3f: <https://github.com/cure53/DOMPurify/security/advisories>
 - draw.io embed mode: <https://www.drawio.com/doc/faq/embed-mode>
+- Mermaid 12.3.0（§10）: <https://github.com/mermaid-js/mermaid/releases/tag/mermaid%4012.3.0>
+- Mermaid 12.0.0の変更点（§10）: <https://github.com/mermaid-js/mermaid/releases/tag/mermaid%4012.0.0>
+- elkjs 0.12.1（§10）: <https://github.com/kieler/elkjs/tree/0.12.1>
+- GHSA-238p-pmpm-9mq7（§10）: <https://github.com/advisories/GHSA-238p-pmpm-9mq7>
