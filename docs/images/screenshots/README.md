@@ -50,7 +50,7 @@
 | `palette.png` | パレットの作成タブ (開いた直後の状態) |
 | `mermaid.png` | 「デプロイの流れ」 |
 | `diagram.png` | 「システム構成」の 1 ページ目 |
-| `vector.png` | 「アプリアイコン案」 |
+| `vector.png` | 「アプリアイコン案」のパス「M」をレイヤーパネルで選び、プロパティに線の端・角が見える状態 |
 | `regex.png` | `(?<date>\d{4}-\d{2}-\d{2}) (?<level>ERROR\|WARN) (?<msg>.+)`、フラグ `gm`、5 行のログ、置換 `[$<level>] $<msg> ($<date>)` |
 | `text-diff.png` | 設定ファイル (YAML) の新旧を行差分で比較し、差分が見える位置までスクロール |
 | `jwt.png` | HS256 のデモ用トークン (`sub` / `name` / `role` / `iss` / `iat` / `exp`) を解析し、日時の claim が見える位置までスクロール |
