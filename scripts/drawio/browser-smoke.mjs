@@ -417,7 +417,15 @@ try {
   step = "undoRedo";
   result.undoRedo = await verifyUndoRedo({ load, invoke, saveXml, textContent, smokeXml });
   step = "pageMove";
-  result.pageMove = await verifyPageMove({ page, frame, load, invoke, saveXml, smokeXml });
+  result.pageMove = await verifyPageMove({
+    page,
+    frame,
+    load,
+    invoke,
+    saveXml,
+    smokeXml,
+    pageMoveKey: expectations.pageMoveKey,
+  });
 
   // 手動受入用のファイル。1 MiB 未満の図は保存時の膨張を見込んで 32 KiB 以上の余裕を取る。
   writeFileSync(resolve(OUTPUT, "smoke-multipage.drawio"), smokeXml);

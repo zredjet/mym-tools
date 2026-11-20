@@ -12,6 +12,8 @@ export const EXPECTED_JA = { save: "保存", orthogonalEnds: "直角の端点" }
 /**
  * 同梱版ごとに、実行時に確かめる期待値。
  * 版を上げたら行を足し、古い行は基準の再実行のために残す。
+ * pageMoveKey は、選択が無い時に表示中のページを 1 つ右へ移すキー (Playwright の表記)。
+ * 32.6.2 から Shift+矢印はフォーカスの移動になり、ページの移動は Ctrl (macOS は ⌘) + Shift+矢印になった。
  */
 export const RUNTIME_EXPECTATIONS = {
   "31.4.1": {
@@ -19,12 +21,14 @@ export const RUNTIME_EXPECTATIONS = {
     orthogonalEnds: false,
     atlassian2: false,
     strayCellAdopted: false,
+    pageMoveKey: "Shift+ArrowRight",
   },
   "31.5.3": {
     exportUrlIsNull: true,
     orthogonalEnds: true,
     atlassian2: true,
     strayCellAdopted: true,
+    pageMoveKey: "Shift+ArrowRight",
   },
 };
 

@@ -139,10 +139,18 @@ async function verifyDanglingEdges({ invoke, snapshot, textContent }) {
 }
 
 /**
- * ページの並べ替えを、キー操作 (選択が無い時の Shift+→) とページタブのドラッグで確かめる。
+ * ページの並べ替えを、キー操作 (選択が無い時の pageMoveKey) とページタブのドラッグで確かめる。
  * どちらも MovePage を 1 つの undo 可能な編集として実行し、保存 XML のページ順に反映される。
  */
-export async function verifyPageMove({ page, frame, load, invoke, saveXml, smokeXml }) {
+export async function verifyPageMove({
+  page,
+  frame,
+  load,
+  invoke,
+  saveXml,
+  smokeXml,
+  pageMoveKey,
+}) {
   const snapshot = async () => normalizeDrawioFile(await saveXml());
   const order = (xml) => [...xml.matchAll(/<diagram\b[^>]*\bid="([^"]+)"/g)].map(([, id]) => id);
 
@@ -150,12 +158,12 @@ export async function verifyPageMove({ page, frame, load, invoke, saveXml, smoke
   const initial = await snapshot();
   assert.deepEqual(order(initial), ["page-1", "page-2"], "ページ移動: 初期のページ順が違う");
 
-  // 何も選択していない状態で Shift+→ を押すと、表示中のページが 1 つ右へ移る。
+  // 何も選択していない状態で pageMoveKey を押すと、表示中のページが 1 つ右へ移る。
   await frame.locator(".geDiagramContainer").click({ position: { x: 700, y: 600 } });
   await invoke("selectNone");
-  await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press(pageMoveKey);
   const moved = await snapshot();
-  assert.deepEqual(order(moved), ["page-2", "page-1"], "ページ移動: Shift+→ で移動しない");
+  assert.deepEqual(order(moved), ["page-2", "page-1"], `ページ移動: ${pageMoveKey} で移動しない`);
   await invoke("undo");
   assert.equal(await snapshot(), initial, "ページ移動: undo で元の順に戻らない");
   await invoke("redo");

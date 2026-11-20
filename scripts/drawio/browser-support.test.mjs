@@ -6,6 +6,7 @@ import { DRAWIO_VERSION } from "./prepare-assets.mjs";
 import {
   EXPECTED_JA,
   MAX_DIAGRAM_BYTES,
+  RUNTIME_EXPECTATIONS,
   atlassian2DiagramXml,
   contentTypeFor,
   editorAssetContract,
@@ -98,5 +99,11 @@ describe("draw.io browser smoke support", () => {
     expect(runtimeExpectations(DRAWIO_VERSION)).toBeDefined();
     expect(() => runtimeExpectations("0.0.0")).toThrow("draw.io 0.0.0");
     expect(EXPECTED_JA.save).toBe("保存");
+  });
+
+  it("gives every draw.io version the same runtime expectation keys", () => {
+    const keys = Object.values(RUNTIME_EXPECTATIONS).map((row) => Object.keys(row).sort().join());
+    expect(new Set(keys).size).toBe(1);
+    expect(runtimeExpectations(DRAWIO_VERSION).pageMoveKey).toMatch(/\+ArrowRight$/);
   });
 });
