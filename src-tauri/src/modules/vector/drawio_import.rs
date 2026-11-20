@@ -414,6 +414,21 @@ mod tests {
             ],
             colors: &["fill: rgb(218, 232, 252)", "fill: #ffffff"],
         },
+        // 32.x は前景色を light-dark() でなく var(--ge-adaptive-fg, #000000) で書く
+        DrawioExport {
+            version: "32.7.4",
+            svg: include_str!("fixtures/drawio-export-32.7.4.svg"),
+            notices: &[
+                "HTML のラベル 2 件",
+                "ダークモード用の色指定",
+                "外部リンク付きの注意書き",
+            ],
+            colors: &[
+                "fill: rgb(218, 232, 252)",
+                "fill: #ffffff",
+                "stroke: #000000",
+            ],
+        },
     ];
 
     #[test]

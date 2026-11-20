@@ -6,12 +6,14 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 
 export const MAX_DIAGRAM_BYTES = 1024 * 1024;
 
-/** 31.5.3 の resources/dia_ja.txt にある訳語。31.4.1 には orthogonalEnds が無い。 */
+/** 31.5.3 以降の resources/dia_ja.txt にある訳語。31.4.1 には orthogonalEnds が無い。 */
 export const EXPECTED_JA = { save: "保存", orthogonalEnds: "直角の端点" };
 
 /**
  * 同梱版ごとに、実行時に確かめる期待値。
  * 版を上げたら行を足し、古い行は基準の再実行のために残す。
+ * pageMoveKey は、選択が無い時に表示中のページを 1 つ右へ移すキー (Playwright の表記)。
+ * 32.6.2 から Shift+矢印はフォーカスの移動になり、ページの移動は Ctrl (macOS は ⌘) + Shift+矢印になった。
  */
 export const RUNTIME_EXPECTATIONS = {
   "31.4.1": {
@@ -19,12 +21,21 @@ export const RUNTIME_EXPECTATIONS = {
     orthogonalEnds: false,
     atlassian2: false,
     strayCellAdopted: false,
+    pageMoveKey: "Shift+ArrowRight",
   },
   "31.5.3": {
     exportUrlIsNull: true,
     orthogonalEnds: true,
     atlassian2: true,
     strayCellAdopted: true,
+    pageMoveKey: "Shift+ArrowRight",
+  },
+  "32.7.4": {
+    exportUrlIsNull: true,
+    orthogonalEnds: true,
+    atlassian2: true,
+    strayCellAdopted: true,
+    pageMoveKey: "ControlOrMeta+Shift+ArrowRight",
   },
 };
 

@@ -112,6 +112,35 @@ Windowsの最終ZIP実測はWindows release workflowで行い、両OSの検査�
 
 CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこの更新のPRのbuild-tauriである。両ZIPは§4の80,000,000 bytes上限と、CIのsize gate（ADR-0020、alpha.10比+10,000,000 bytes以下: macOS 61,390,662 / Windows 61,105,964 bytes）を満たし、size gateまでの余裕はmacOS 5,380,947 bytes、Windows 5,212,643 bytesである。
 
+### 9. 2026-11-20追補: draw.io 32.7.4へ更新
+
+- draw.ioの固定先を32.7.4（tag `v32.7.4`、commit `f411a11f4f6b8994d869bdbc45f4d4d9e2284f34`）へ更新する。§2の資産範囲（11 directoryと4 file）とprepare方式、§3のセキュリティ境界、§4の配布契約は変えない。上流の`js/PreConfig.js`は31.5.3から1 byteも変わっておらず、引き続きMyMyToolsの上書き版で置き換える。
+- 更新理由（同梱資産のうち実行時に使われるもの）:
+  - 図に置いたSVG画像のstyle `editableCssRules`の正規表現によるReDoS（GHSA-55cm-f4p8-xq88、medium、32.6.8以前が対象）。32.6.9で正規表現を制限し、32.6.10でselectorごとの長さの上限を加えた。細工した`.drawio`を開くとeditor iframeが応答しなくなる。macOSではiframeが親画面と同じWeb Content processで動くため、アプリの画面全体が止まり得る。31.x系に修正は無い。
+  - `js/app.min.js`に内包され実行時に使われるDOMPurifyを3.4.16から3.4.18へ更新する。3.4.16には低深刻度の既知の問題が3件ある（GHSA-cg2g-xh64-v4q7 / GHSA-mrv2-3pqr-j5jr / GHSA-c6gr-qvv4-5v3f、いずれも3.4.17で修正）。draw.ioの`Graph.sanitizeNode`は`IN_PLACE`で呼び、`afterSanitizeAttributes` hookで`node.remove()`を行うため、GHSA-mrv2（IN_PLACEのhookで親や兄弟を消すと、切り離された部分のevent handlerが残る）の条件に近い。
+  - 31.6〜32.7で入った、実行時に使われる部分の強化: DOMPurifyの後でsanitize済みの属性を確かめる（32.3.0）、XMLのdecodeに最大の深さを設け、methodへのdecodeを止め、styleを文字列としてだけ読む（32.3.0）、MathJaxのsafe filterを起動時に適用しAsciiMathの出力にも掛ける（31.6.0）、細工した値に対する図形・layout・ELKの上限（32.4〜32.6）。
+- 32.0での構成の変化と、変わらないもの:
+  - stencil XMLが上流のrepositoryから無くなり、`js/stencils.min.js`の新しいbinary形式のbundleだけになった。`stencils/`は206から2 files（LICENSEとclipartのPNG 1つ）になる。stencilは同一loopback originの`js/stencils.min.js`から読まれ、`/stencils/*.xml`への要求は起きない。
+  - MathJaxは31.6.0から1 fileのbundle（`math4/es5/drawio-mathjax.min.js`）になり、`math4/`は78から2 filesになる。数式の描画ではWorkerを作らず、検証でもCSP違反は起きなかった。bundleには読み上げ（speech rule engine）用に`blob:`のWorkerを作る経路があるが、31.5.3の`math4/es5/core.js`にも同じ経路があり、使われてもeditor CSPの`worker-src 'none'`が遮断する。
+  - 同梱資産は3,366から3,065 files、`du -sk`で153,868から117,136 KiBになる。§2の11 directoryと4 fileはすべて残り、新しい拡張子は無いため、`CLIENT_DIRECTORIES` / `CLIENT_FILES`と`protocol.rs`のMIME表は変えない。
+  - `index.html`は起動中の表示（logoとstatus）だけが変わり、読み込むfileは同じ。embed JSON protocolの追加（hostが`configure`を送った時の`configuration` event、plugin向けの`embedLoaded`、`load` eventの`readOnly`など）は`drawioBridge`の解釈を変えず、実ブラウザ検証でもアプリが拒否するmessageは0件だった。`mxfile`形式の変更は省略できる属性の追加だけ。したがって親画面、`drawioBridge`、Rustのasset serverとCSPは変えない。
+  - `resources/dia_ja.txt`は2,022から2,998 keysになる。`save` / `orthogonalEnds`の訳は同じ。
+  - SVG書出しは前景色を`light-dark()`でなくCSS変数`var(--ge-adaptive-fg, #000000)`で書く。キャンバスの取込変換（`drawio_import.rs`）はこれを既定値へ置き換え、32.7.4の書出しをfixtureに加えた。
+- §8の訂正: §8は「Mermaid / ELK / JSZipは実行時に変化しない`js/extensions.min.js`から読む」としたが、32.7.4では`js/extensions.min.js`も3,909,802から4,745,297 bytesへ変わる（同梱のJSZipは3.10.0から3.10.1）。今回の更新では、`js/extensions.min.js`の変更も実行時に反映される。
+- 32.6.2から、選択が無い時のShift+矢印はフォーカスの移動になり、ページの移動はCtrl（macOSは⌘）+Shift+矢印になった。上流の操作の変更であり、アプリでは上書きしない。
+- 主な回帰リスクは、stencilとMathJaxの読込み方式の変更、XMLのdecodeの強化による旧版の図の読込み、undo / redoである。Chromium上の自動検証（`npm run test:diagram:browser`、ローカル専用）とmacOS実アプリの手動受入で確かめた。記録は[ダイアグラムの検証と実機受入](../diagram-editor-verification.md)に置く。
+- 32.6.10（commit `c72c9a98b7a6ce392556ed04c05e0ff19f43f5c3`、上流のstable channel、DOMPurify 3.4.17）へ戻すのは、32.7.4でだけ起き、実アプリで手動再現できる回帰（図の読込み・保存・書出し、既存の図の表示、undo / redo）を確認した場合だけとする。32.6.10もGHSA-55cm-f4p8-xq88とDOMPurifyの3件の修正を含み、§9の構成の変化とページ移動のキーも32.7.4と同じである。今回は該当しなかった。
+
+| 対象 | 31.5.3 | 32.7.4 |
+|---|---:|---:|
+| draw.io生成asset（`du -sk`）/ files | 153,868 KiB / 3,366 | 117,136 KiB / 3,065 |
+| Tauri release binary（macOS arm64、ローカル） | 70,554,784 bytes | 62,447,376 bytes |
+| portable ZIP（macOS arm64、ローカル） | 55,516,891 bytes | 47,431,683 bytes |
+| portable ZIP（macOS arm64、CI） | 55,512,992 bytes | **47,430,363 bytes**（−8,082,629） |
+| portable ZIP（Windows x64、CI） | 55,468,756 bytes | **47,455,041 bytes**（−8,013,715） |
+
+ローカルの値は、検証用identifierのrelease buildを同じ作業ツリーで比べたものである。CIの値は、31.5.3がmain（commit `adc3cdb`）、32.7.4がこの更新のPRのbuild-tauriである。両ZIPは§4の80,000,000 bytes上限とCIのsize gate（macOS 61,390,662 / Windows 61,105,964 bytes）を満たし、size gateまでの余裕はmacOS 13,960,299 bytes、Windows 13,650,923 bytesになる。
+
 ## Consequences
 
 - 図編集はネットワーク断でも同じ機能・資産で動き、図データ送信のオンライン経路を持たない。
@@ -121,7 +150,7 @@ CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこ�
 
 ## Validation Criteria
 
-- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（56,009,715 bytes、§8のdraw.io 31.5.3）
+- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（47,430,363 bytes、§9のdraw.io 32.7.4）
 - [ ] Windowsの実portable ZIPが80,000,000 bytes以下
 - [ ] Windows 10 / 11、macOS 12最新patch、現行macOSで編集、全asset、保存、再読込、SVG / PNG書出しが成功
 - [ ] 代表操作中の外向き通信0件、全asset requestがlocal originで解決
@@ -140,4 +169,9 @@ CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこ�
 - draw.io ChangeLog（31.5.3）: <https://github.com/jgraph/drawio/blob/0f419a92c769adb5fb20f2b18053a5ae8c7e4993/ChangeLog>
 - GHSA-ff67-v9r9-6877: <https://github.com/jgraph/drawio/security/advisories/GHSA-ff67-v9r9-6877>
 - GHSA-v2pv-rjf8-9w9v: <https://github.com/jgraph/drawio/security/advisories/GHSA-v2pv-rjf8-9w9v>
+- draw.io pinned source（§9、32.7.4）: <https://github.com/jgraph/drawio/tree/f411a11f4f6b8994d869bdbc45f4d4d9e2284f34>
+- draw.io ChangeLog（32.7.4）: <https://github.com/jgraph/drawio/blob/f411a11f4f6b8994d869bdbc45f4d4d9e2284f34/ChangeLog>
+- draw.io 32.6.10（§9の戻し先）: <https://github.com/jgraph/drawio/tree/c72c9a98b7a6ce392556ed04c05e0ff19f43f5c3>
+- GHSA-55cm-f4p8-xq88: <https://github.com/jgraph/drawio/security/advisories/GHSA-55cm-f4p8-xq88>
+- DOMPurify GHSA-cg2g-xh64-v4q7 / GHSA-mrv2-3pqr-j5jr / GHSA-c6gr-qvv4-5v3f: <https://github.com/cure53/DOMPurify/security/advisories>
 - draw.io embed mode: <https://www.drawio.com/doc/faq/embed-mode>
