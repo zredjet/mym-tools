@@ -30,7 +30,8 @@ import shotqNotices from "../../third_party/shotq-NOTICES.txt?raw";
 
 const RELEASES_URL = "https://github.com/zredjet/mym-tools/releases";
 const REPO_URL = "https://github.com/zredjet/mym-tools";
-const MERMAID_URL = "https://github.com/mermaid-js/mermaid/tree/v11.17.2";
+const MERMAID_URL = "https://github.com/mermaid-js/mermaid/tree/mermaid@12.3.0";
+const ELK_URL = "https://github.com/kieler/elkjs/tree/0.12.1";
 const DRAWIO_URL = "https://github.com/jgraph/drawio/tree/f411a11f4f6b8994d869bdbc45f4d4d9e2284f34";
 const NRBF_URL =
   "https://github.com/dotnet/runtime/tree/v10.0.14/src/libraries/System.Formats.Nrbf";
@@ -202,9 +203,19 @@ export function AboutPage() {
                 className="underline underline-offset-2 hover:text-[var(--fg)]"
                 onClick={() => void openExternal(MERMAID_URL)}
               >
-                Mermaid 11.17.2
+                Mermaid 12.3.0
               </button>{" "}
               — MIT License
+            </li>
+            <li>
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-[var(--fg)]"
+                onClick={() => void openExternal(ELK_URL)}
+              >
+                elkjs 0.12.1 (Mermaid のレイアウト)
+              </button>{" "}
+              — Eclipse Public License 2.0
             </li>
             <li>
               <button
