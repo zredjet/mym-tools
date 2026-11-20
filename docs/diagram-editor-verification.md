@@ -131,11 +131,15 @@ CSP 違反は service worker の 1 件だけで、MathJax の bundle による `
 | release binary (macOS arm64、ローカル) | 70,554,784 bytes | 62,447,376 bytes |
 | `.app` (`du -sk`、ローカル) | 71,660 KiB | 63,740 KiB |
 | portable ZIP macOS arm64 (ローカル) | 55,516,891 bytes | 47,431,683 bytes |
+| portable ZIP macOS arm64 (CI) | 55,512,992 bytes | 47,430,363 bytes (−8,082,629) |
+| portable ZIP Windows x64 (CI) | 55,468,756 bytes | 47,455,041 bytes (−8,013,715) |
 
 ローカルの値は、上の QA identifier の release build (Tauri 2.11.6、同じ作業ツリー) を `ditto -c -k --sequesterRsrc --keepParent` で固めたものである。参考値として扱う。
 
+CI の値のうち、31.5.3 の列は main (commit `adc3cdb`、run 44686278984) のもの、32.7.4 の列はこの更新の PR (commit `a4d4d45`、run 44695012244) のものである。
+
 上限は次の 2 つ:
-- CI のサイズゲート (alpha.10 比 +10,000,000 bytes): macOS 61,390,662 bytes / Windows 61,105,964 bytes。31.5.3 の main (commit `adc3cdb`、run 44686278984) の CI の ZIP は macOS 55,512,992 bytes / Windows 55,468,756 bytes で、余裕は macOS 5,877,670 bytes / Windows 5,637,208 bytes
+- CI のサイズゲート (alpha.10 比 +10,000,000 bytes): macOS 61,390,662 bytes / Windows 61,105,964 bytes。余裕は macOS 5,877,670 → 13,960,299 bytes、Windows 5,637,208 → 13,650,923 bytes になる
 - 80,000,000 bytes の上限
 
 ## 32.6.10 へ戻す判断

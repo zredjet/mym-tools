@@ -136,8 +136,10 @@ CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこ�
 | draw.io生成asset（`du -sk`）/ files | 153,868 KiB / 3,366 | 117,136 KiB / 3,065 |
 | Tauri release binary（macOS arm64、ローカル） | 70,554,784 bytes | 62,447,376 bytes |
 | portable ZIP（macOS arm64、ローカル） | 55,516,891 bytes | 47,431,683 bytes |
+| portable ZIP（macOS arm64、CI） | 55,512,992 bytes | **47,430,363 bytes**（−8,082,629） |
+| portable ZIP（Windows x64、CI） | 55,468,756 bytes | **47,455,041 bytes**（−8,013,715） |
 
-ローカルの値は、検証用identifierのrelease buildを同じ作業ツリーで比べたものである。
+ローカルの値は、検証用identifierのrelease buildを同じ作業ツリーで比べたものである。CIの値は、31.5.3がmain（commit `adc3cdb`）、32.7.4がこの更新のPRのbuild-tauriである。両ZIPは§4の80,000,000 bytes上限とCIのsize gate（macOS 61,390,662 / Windows 61,105,964 bytes）を満たし、size gateまでの余裕はmacOS 13,960,299 bytes、Windows 13,650,923 bytesになる。
 
 ## Consequences
 
@@ -148,7 +150,7 @@ CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこ�
 
 ## Validation Criteria
 
-- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（56,009,715 bytes、§8のdraw.io 31.5.3）
+- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（47,430,363 bytes、§9のdraw.io 32.7.4）
 - [ ] Windowsの実portable ZIPが80,000,000 bytes以下
 - [ ] Windows 10 / 11、macOS 12最新patch、現行macOSで編集、全asset、保存、再読込、SVG / PNG書出しが成功
 - [ ] 代表操作中の外向き通信0件、全asset requestがlocal originで解決
