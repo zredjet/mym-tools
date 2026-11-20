@@ -169,6 +169,10 @@ CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこ�
 | Mermaid部分のbuild出力（検証用entry、JS / CSS） | 61 files / 3,412,409 bytes | 62 files / 5,223,038 bytes |
 | 同上のBrotli（品質9）合計 | 895,510 bytes | 1,370,543 bytes（+475,033） |
 | うちELKのchunk | — | 1,512,970 bytes |
+| portable ZIP（macOS arm64、CI） | 47,430,260 bytes | **47,917,150 bytes**（+486,890） |
+| portable ZIP（Windows x64、CI） | 47,456,432 bytes | **47,940,143 bytes**（+483,711） |
+
+CIの値は、どちらもmainへのpushのbuild-tauriで、11.17.2がcommit `fc14c97`（§9のdraw.io 32.7.4を含む、run 44698831689）、12.3.0がこの更新のマージのcommit `d5ff832`（run 44713508465）である。Tauriはfrontendのassetをrelease binaryにBrotliで圧縮して埋め込むため、ZIPの増分は上のBrotli合計の増分（+475,033 bytes）に近い。両ZIPは§4の80,000,000 bytes上限とCIのsize gate（macOS 61,390,662 / Windows 61,105,964 bytes）を満たし、size gateまでの余裕はmacOS 13,473,512 bytes、Windows 13,165,821 bytesになる。
 
 ## Consequences
 
@@ -179,7 +183,7 @@ CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこ�
 
 ## Validation Criteria
 
-- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（47,430,363 bytes、§9のdraw.io 32.7.4）
+- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（47,917,150 bytes、§10のMermaid 12.3.0）
 - [ ] Windowsの実portable ZIPが80,000,000 bytes以下
 - [ ] Windows 10 / 11、macOS 12最新patch、現行macOSで編集、全asset、保存、再読込、SVG / PNG書出しが成功
 - [ ] 代表操作中の外向き通信0件、全asset requestがlocal originで解決
