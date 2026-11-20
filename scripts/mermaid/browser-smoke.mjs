@@ -149,6 +149,7 @@ try {
               external,
               gradients: document_.querySelectorAll("linearGradient, radialGradient").length,
               filters: document_.querySelectorAll("filter").length,
+              svg,
               png,
             };
           } catch (error) {
@@ -164,6 +165,8 @@ try {
         continue;
       }
       await page.locator("#stage").screenshot({ path: resolve(RESULT_DIR, `${key}.png`) });
+      // 書出し (mermaid_write_file) の Rust 側の検証に通すため、SVG も残す
+      writeFileSync(resolve(RESULT_DIR, `${key}.svg`), outcome.svg);
       writeFileSync(
         resolve(RESULT_DIR, `${key}.export.png`),
         Buffer.from(outcome.png.slice(outcome.png.indexOf(",") + 1), "base64"),
@@ -175,6 +178,7 @@ try {
         failures.push(`${key}: 外部参照が残った (${outcome.external.slice(0, 3).join(", ")})`);
       const summary = { ...outcome };
       delete summary.png;
+      delete summary.svg;
       results.push({ key, ...summary, milliseconds });
     }
   }

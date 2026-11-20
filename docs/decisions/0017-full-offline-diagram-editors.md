@@ -161,6 +161,8 @@ CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこ�
   - 全件が描画できること、ラベルの文字がSVGに残ること、active content / 外部参照が残らないこと、CSP違反・外向き通信・console errorが0件であることを確かめる。
   - 版ごとのPNGを`.generated/mermaid-verification/compare.html`に並べる。
   - 11.17.2と12.3.0の両方で34件すべて成功した。12.3.0ではELKのchunkが同一originから読み込まれた。
+  - 12.3.0が出したSVG 34件は、書出しのRust側の検証（`validate_safe_mermaid_svg`）にもすべて通った。
+- macOSの実アプリ（WKWebView、QA用identifier、release build）で次を確かめた: ELKの並びでの描画、保存と開き直し、darkテーマ、構文error時の保存拒否と直前previewの維持、未保存の変更の確認、Aboutの表記。OSの保存dialogを通る書出しは画面操作で確かめていない（PNGの生成はChromium、SVGの検証はRustのtestで確かめた）。
 
 | 対象 | 11.17.2 | 12.3.0 |
 |---|---:|---:|
