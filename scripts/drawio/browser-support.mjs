@@ -6,7 +6,7 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 
 export const MAX_DIAGRAM_BYTES = 1024 * 1024;
 
-/** 31.5.3 の resources/dia_ja.txt にある訳語。31.4.1 には orthogonalEnds が無い。 */
+/** 31.5.3 以降の resources/dia_ja.txt にある訳語。31.4.1 には orthogonalEnds が無い。 */
 export const EXPECTED_JA = { save: "保存", orthogonalEnds: "直角の端点" };
 
 /**
@@ -29,6 +29,13 @@ export const RUNTIME_EXPECTATIONS = {
     atlassian2: true,
     strayCellAdopted: true,
     pageMoveKey: "Shift+ArrowRight",
+  },
+  "32.7.4": {
+    exportUrlIsNull: true,
+    orthogonalEnds: true,
+    atlassian2: true,
+    strayCellAdopted: true,
+    pageMoveKey: "ControlOrMeta+Shift+ArrowRight",
   },
 };
 

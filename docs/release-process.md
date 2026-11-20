@@ -25,7 +25,7 @@ MyMyToolsのmacOS / Windows向けportable ZIPを、GitHub Actionsから手動公
 - `main`のbranch protectionを迂回せず、release準備もPR経由でマージする
 - 対象versionのtagとGitHub Releaseがまだ存在しない
 - 作業開始時のworktreeがcleanである
-- draw.io submoduleがcommit `0f419a92c769adb5fb20f2b18053a5ae8c7e4993`で初期化されている
+- draw.io submoduleがcommit `f411a11f4f6b8994d869bdbc45f4d4d9e2284f34`で初期化されている
 
 以下では例として次の変数を使う。実際に公開するversionとPR番号へ置き換える。
 

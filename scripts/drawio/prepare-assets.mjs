@@ -5,10 +5,10 @@ import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export const DRAWIO_COMMIT = "0f419a92c769adb5fb20f2b18053a5ae8c7e4993";
-export const DRAWIO_VERSION = "31.5.3";
+export const DRAWIO_COMMIT = "f411a11f4f6b8994d869bdbc45f4d4d9e2284f34";
+export const DRAWIO_VERSION = "32.7.4";
 // js/app.min.js に内包され実行時に使われる DOMPurify。js/sanitizer/purify.min.js は読み込まれない。
-export const DRAWIO_DOMPURIFY_VERSION = "3.4.16";
+export const DRAWIO_DOMPURIFY_VERSION = "3.4.18";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, "../..");
