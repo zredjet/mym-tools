@@ -7,7 +7,7 @@
 
 - **対象 OS**: macOS / Windows (Linux は対象外)
 - **配布形式**: portable 差し替え方式 (自動更新なし)
-- **図とデザイン**: Mermaid 11.17.2 / draw.io 31.5.3 を全資産同梱で完全オフライン実行。キャンバスは依存を足さない自作のエディタ (ADR-0026)
+- **図とデザイン**: Mermaid 12.3.0 / draw.io 32.7.4 を全資産同梱で完全オフライン実行。キャンバスは依存を足さない自作のエディタ (ADR-0026)
 - **PNG最適化**: 自作の shotq を内蔵し、`shotq --quality=70-85 --speed 11` と同じ結果をファイル単位・フォルダ単位で得る (ADR-0023)
 - **データ保存**: ローカル SQLite (アプリ実行ファイルとは別ディレクトリ)
 - **ライセンス**: MIT
@@ -128,7 +128,7 @@ cargo test --workspace --lib --all-features --locked
 
 ## 開発状況
 
-**Phase 1 の主要機能を実装済み (`0.1.0-alpha.24`)**。
+**Phase 1 の主要機能を実装済み (`0.1.0-alpha.25`)**。
 
 Tauri 2 + React 19 + TypeScript + Tailwind v4 + Zustand のフロントエンドと、
 rusqlite (bundled) + FTS5 / tokio + tokio-util / tracing / reqwest (HTTP) / lopdf / encoding_rs / shotq (PNG最適化、`src-tauri/crates/shotq` に複製) の Rust バックエンドと、

@@ -1,6 +1,6 @@
 # アーキテクチャ (Architecture)
 
-最終更新: 2026-11-18 / ステータス: Draft (Phase 1)
+最終更新: 2026-11-20 / ステータス: Draft (Phase 1)
 
 このドキュメントは「**どのような構造で**作るか」を定義する。
 「何を作るか」は `requirements.md`、「データはどう持つか」は `data-model.md`、
@@ -437,8 +437,8 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 
 ### 10.4 完全オフライン図編集境界
 
-- Mermaid 11.17.2は画面を開いたときだけdynamic importし、300ms debounce後に`securityLevel: strict` / HTML label無効で描画する。render tokenが古い非同期結果を破棄する
-- draw.io 31.5.3は固定submoduleから`.generated/public/drawio`へ決定的にprepareし、Vite `publicDir`経由でTauri assetへ埋め込む。build時にnetwork取得しない
+- Mermaid 12.3.0は画面を開いたときだけdynamic importし、300ms debounce後に`securityLevel: strict` / HTML label無効で描画する。render tokenが古い非同期結果を破棄する。既定のレイアウトのELK (`elkjs`) もbuildが遅延chunkとして含み、外部から取得しない
+- draw.io 32.7.4は固定submoduleから`.generated/public/drawio`へ決定的にprepareし、Vite `publicDir`経由でTauri assetへ埋め込む。build時にnetwork取得しない
 - draw.io iframeはmoduleを開いた時だけ`127.0.0.1`のrandom portへbindするasset serverを起動し、親と異なるloopback originでlazy初期化する。serverはGET / HEAD、厳密なHost、asset pathだけを受理し、図dataは扱わない
 - editor originは同梱資産読込みだけを許可するCSP `connect-src 'self'`、sandbox `allow-scripts allow-same-origin`で動かす。Tauri ACLはapp commandをlocal app originだけへ許可し、remote扱いのloopback editorにはcore / plugin IPC権限を付与しない。親との唯一のdata pathは`postMessage`
 - 親は`event.source`、origin、init後のevent順序、request ID、1MiB XML/text、export受信sizeを検証する。不正messageはstateへ反映しない
@@ -543,8 +543,8 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 全文検索 | SQLite FTS5 (items 更新と同一トランザクション、トリガで自動同期) |
 | ロギング | `tracing` |
 | Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` (ADR-0002 で確定) |
-| Mermaid図 | Mermaid 11.17.2、strict security、dynamic import |
-| 自由図編集 | draw.io 31.5.3固定submodule、IPC権限なしloopback origin、sandboxed iframe |
+| Mermaid図 | Mermaid 12.3.0 (ELK同梱)、strict security、dynamic import |
+| 自由図編集 | draw.io 32.7.4固定submodule、IPC権限なしloopback origin、sandboxed iframe |
 | キャンバス | 自作エディタ (React の SVG 描画、モジュール内の Zustand store 1 つ)。実行時の依存を足さない (ADR-0026) |
 | PDF結合 | `lopdf 0.45`（MSRV 1.88、`aes 0.9.2`固定、展開済みstream 64 MiB上限、終端のないstreamの事前検査） |
 | 文字コード判定・変換 | `encoding_rs 0.8`（WHATWG。`_without_replacement`系だけを使う）、`same-file 1`（出力先と入力の同一判定） |
@@ -601,6 +601,8 @@ OS 標準のユーザーデータディレクトリを使用 (Tauri 標準の `a
 | 2026-11-10 | 1.9 | ADR-0020 2026-11-10追補を反映。§10.6と§13の`System.Formats.Nrbf`を10.0.14へ更新 |
 | 2026-11-15 | 1.10 | ADR-0026を反映。末尾の「SVG-Edit統合」をキャンバスの構造に書き換え、§13 にキャンバスを追加 |
 | 2026-11-18 | 1.11 | ADR-0028を反映。末尾のキャンバスを payload v3 にし、第 2 段階の幾何 (行列と曲線、パス、ブーリアン演算、線のアウトライン化、曲線の当てはめ、埋め込み SVG の変換) の置き場所を追加 |
+| 2026-11-20 | 1.12 | ADR-0017 §9追補を反映。§10.4と§13のdraw.io固定版を32.7.4へ更新 |
+| 2026-11-20 | 1.13 | ADR-0017 §10追補を反映。§10.4と§13のMermaidを12.3.0へ更新し、ELKの遅延chunkを追記 |
 
 ## キャンバス (ADR-0026、ADR-0028)
 

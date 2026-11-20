@@ -112,6 +112,68 @@ Windowsの最終ZIP実測はWindows release workflowで行い、両OSの検査�
 
 CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこの更新のPRのbuild-tauriである。両ZIPは§4の80,000,000 bytes上限と、CIのsize gate（ADR-0020、alpha.10比+10,000,000 bytes以下: macOS 61,390,662 / Windows 61,105,964 bytes）を満たし、size gateまでの余裕はmacOS 5,380,947 bytes、Windows 5,212,643 bytesである。
 
+### 9. 2026-11-20追補: draw.io 32.7.4へ更新
+
+- draw.ioの固定先を32.7.4（tag `v32.7.4`、commit `f411a11f4f6b8994d869bdbc45f4d4d9e2284f34`）へ更新する。§2の資産範囲（11 directoryと4 file）とprepare方式、§3のセキュリティ境界、§4の配布契約は変えない。上流の`js/PreConfig.js`は31.5.3から1 byteも変わっておらず、引き続きMyMyToolsの上書き版で置き換える。
+- 更新理由（同梱資産のうち実行時に使われるもの）:
+  - 図に置いたSVG画像のstyle `editableCssRules`の正規表現によるReDoS（GHSA-55cm-f4p8-xq88、medium、32.6.8以前が対象）。32.6.9で正規表現を制限し、32.6.10でselectorごとの長さの上限を加えた。細工した`.drawio`を開くとeditor iframeが応答しなくなる。macOSではiframeが親画面と同じWeb Content processで動くため、アプリの画面全体が止まり得る。31.x系に修正は無い。
+  - `js/app.min.js`に内包され実行時に使われるDOMPurifyを3.4.16から3.4.18へ更新する。3.4.16には低深刻度の既知の問題が3件ある（GHSA-cg2g-xh64-v4q7 / GHSA-mrv2-3pqr-j5jr / GHSA-c6gr-qvv4-5v3f、いずれも3.4.17で修正）。draw.ioの`Graph.sanitizeNode`は`IN_PLACE`で呼び、`afterSanitizeAttributes` hookで`node.remove()`を行うため、GHSA-mrv2（IN_PLACEのhookで親や兄弟を消すと、切り離された部分のevent handlerが残る）の条件に近い。
+  - 31.6〜32.7で入った、実行時に使われる部分の強化: DOMPurifyの後でsanitize済みの属性を確かめる（32.3.0）、XMLのdecodeに最大の深さを設け、methodへのdecodeを止め、styleを文字列としてだけ読む（32.3.0）、MathJaxのsafe filterを起動時に適用しAsciiMathの出力にも掛ける（31.6.0）、細工した値に対する図形・layout・ELKの上限（32.4〜32.6）。
+- 32.0での構成の変化と、変わらないもの:
+  - stencil XMLが上流のrepositoryから無くなり、`js/stencils.min.js`の新しいbinary形式のbundleだけになった。`stencils/`は206から2 files（LICENSEとclipartのPNG 1つ）になる。stencilは同一loopback originの`js/stencils.min.js`から読まれ、`/stencils/*.xml`への要求は起きない。
+  - MathJaxは31.6.0から1 fileのbundle（`math4/es5/drawio-mathjax.min.js`）になり、`math4/`は78から2 filesになる。数式の描画ではWorkerを作らず、検証でもCSP違反は起きなかった。bundleには読み上げ（speech rule engine）用に`blob:`のWorkerを作る経路があるが、31.5.3の`math4/es5/core.js`にも同じ経路があり、使われてもeditor CSPの`worker-src 'none'`が遮断する。
+  - 同梱資産は3,366から3,065 files、`du -sk`で153,868から117,136 KiBになる。§2の11 directoryと4 fileはすべて残り、新しい拡張子は無いため、`CLIENT_DIRECTORIES` / `CLIENT_FILES`と`protocol.rs`のMIME表は変えない。
+  - `index.html`は起動中の表示（logoとstatus）だけが変わり、読み込むfileは同じ。embed JSON protocolの追加（hostが`configure`を送った時の`configuration` event、plugin向けの`embedLoaded`、`load` eventの`readOnly`など）は`drawioBridge`の解釈を変えず、実ブラウザ検証でもアプリが拒否するmessageは0件だった。`mxfile`形式の変更は省略できる属性の追加だけ。したがって親画面、`drawioBridge`、Rustのasset serverとCSPは変えない。
+  - `resources/dia_ja.txt`は2,022から2,998 keysになる。`save` / `orthogonalEnds`の訳は同じ。
+  - SVG書出しは前景色を`light-dark()`でなくCSS変数`var(--ge-adaptive-fg, #000000)`で書く。キャンバスの取込変換（`drawio_import.rs`）はこれを既定値へ置き換え、32.7.4の書出しをfixtureに加えた。
+- §8の訂正: §8は「Mermaid / ELK / JSZipは実行時に変化しない`js/extensions.min.js`から読む」としたが、32.7.4では`js/extensions.min.js`も3,909,802から4,745,297 bytesへ変わる（同梱のJSZipは3.10.0から3.10.1）。今回の更新では、`js/extensions.min.js`の変更も実行時に反映される。
+- 32.6.2から、選択が無い時のShift+矢印はフォーカスの移動になり、ページの移動はCtrl（macOSは⌘）+Shift+矢印になった。上流の操作の変更であり、アプリでは上書きしない。
+- 主な回帰リスクは、stencilとMathJaxの読込み方式の変更、XMLのdecodeの強化による旧版の図の読込み、undo / redoである。Chromium上の自動検証（`npm run test:diagram:browser`、ローカル専用）とmacOS実アプリの手動受入で確かめた。記録は[ダイアグラムの検証と実機受入](../diagram-editor-verification.md)に置く。
+- 32.6.10（commit `c72c9a98b7a6ce392556ed04c05e0ff19f43f5c3`、上流のstable channel、DOMPurify 3.4.17）へ戻すのは、32.7.4でだけ起き、実アプリで手動再現できる回帰（図の読込み・保存・書出し、既存の図の表示、undo / redo）を確認した場合だけとする。32.6.10もGHSA-55cm-f4p8-xq88とDOMPurifyの3件の修正を含み、§9の構成の変化とページ移動のキーも32.7.4と同じである。今回は該当しなかった。
+
+| 対象 | 31.5.3 | 32.7.4 |
+|---|---:|---:|
+| draw.io生成asset（`du -sk`）/ files | 153,868 KiB / 3,366 | 117,136 KiB / 3,065 |
+| Tauri release binary（macOS arm64、ローカル） | 70,554,784 bytes | 62,447,376 bytes |
+| portable ZIP（macOS arm64、ローカル） | 55,516,891 bytes | 47,431,683 bytes |
+| portable ZIP（macOS arm64、CI） | 55,512,992 bytes | **47,430,363 bytes**（−8,082,629） |
+| portable ZIP（Windows x64、CI） | 55,468,756 bytes | **47,455,041 bytes**（−8,013,715） |
+
+ローカルの値は、検証用identifierのrelease buildを同じ作業ツリーで比べたものである。CIの値は、31.5.3がmain（commit `adc3cdb`）、32.7.4がこの更新のPRのbuild-tauriである。両ZIPは§4の80,000,000 bytes上限とCIのsize gate（macOS 61,390,662 / Windows 61,105,964 bytes）を満たし、size gateまでの余裕はmacOS 13,960,299 bytes、Windows 13,650,923 bytesになる。
+
+### 10. 2026-11-20追補: Mermaid 12.3.0へ更新
+
+- Mermaidの固定先を12.3.0へ更新する（§2の「11.17.2へ固定」を置き換える）。動的import、§3の`securityLevel: strict`・HTML label無効・描画後の再除去、§6の書出し契約は変えない。11.x系は11.17.2が最後で、以後の修正は12.x系にだけ入る。
+- 更新理由:
+  - DOMPurifyの下限が`^3.4.17`になる（12.3.0）。lockのDOMPurifyは3.4.18。11.17.2のままでも範囲内で3.4.18にできるが、Mermaid自身の下限が上がるので古い版へ戻らない。
+  - KaTeXが0.18系になり、GHSA-238p-pmpm-9mq7（low、0.18.2で修正）が`npm audit`から消える（12.2.0）。数式は`foreignObject`に描かれ`sanitizeRenderedSvg`が除去するので、11.17.2でも表示には届いていなかった。
+  - flowchartの構文解析とfront matterの正規表現にあった二次時間の処理が直る（12.0.0 / 12.1.0）。
+- 見た目は12の既定を採る。既定のlayoutはELK、既定のlookは`neo`で、`initialize`では`layout` / `look`を指定しない。テーマ（`default` / `dark`）は従来どおり明示する。
+- 保存済みの図はsourceを変えないまま、次に開いた時から新しい並びと見た目で描かれる。変わるのは、flowchart / state / class / ER / requirementの並び（辺は直角に曲がる）、影や光彩、ひし形などの図形の大きさとラベルの折返し。PNG書出しも同じ見た目になる。diagramのfront matterで`layout: dagre`や`look: classic`を指定すれば、図ごとに従来の見た目へ戻せる。
+- 互換性:
+  - edge IDに`[ ] ( ) { } |`を含む図は構文errorになり、§3どおり保存を拒否する。
+  - ラベル中の`</br>`は改行として扱う。
+- ELKは`elkjs` 0.12.1（EPL-2.0 OR GPL-3.0-or-later、MyMyToolsはEPL-2.0を選ぶ）で、Mermaidのbuildが遅延chunkとして含む。同一originのchunkから読み、外部から取得しない。§5と同じく、license全文（`licenses/elkjs-LICENSE.txt`）とsource linkを配布assetとAboutに加える。
+- 動作環境: Mermaid 12はES2024 / Safari 17.4以上を前提にする。macOSのWKWebViewはシステムのWebKitを使うため、macOS 12 / 13はSafari 17.4以降へ、macOS 14は14.4以降へ更新していることを前提にする（requirements §3.2に注記）。WindowsのWebView2は自動更新されるため影響しない。macOS 12〜14の実機では確かめていない。
+- 実描画の検証: 単体testはMermaidをmockするため、ローカル専用の`npm run test:mermaid:browser`（Chromium）を足した。
+  - 本番と同じvite buildの出力に、アプリのCSPを付けて`127.0.0.1`から配信する。
+  - 17種類の図（`scripts/mermaid/corpus.mjs`）を、default / darkの両テーマで`renderMermaid`と`renderMermaidPng`に通す。
+  - 全件が描画できること、ラベルの文字がSVGに残ること、active content / 外部参照が残らないこと、CSP違反・外向き通信・console errorが0件であることを確かめる。
+  - 版ごとのPNGを`.generated/mermaid-verification/compare.html`に並べる。
+  - 11.17.2と12.3.0の両方で34件すべて成功した。12.3.0ではELKのchunkが同一originから読み込まれた。
+  - 12.3.0が出したSVG 34件は、書出しのRust側の検証（`validate_safe_mermaid_svg`）にもすべて通った。
+- macOSの実アプリ（WKWebView、QA用identifier、release build）で次を確かめた: ELKの並びでの描画、保存と開き直し、darkテーマ、構文error時の保存拒否と直前previewの維持、未保存の変更の確認、Aboutの表記。OSの保存dialogを通る書出しは画面操作で確かめていない（PNGの生成はChromium、SVGの検証はRustのtestで確かめた）。
+
+| 対象 | 11.17.2 | 12.3.0 |
+|---|---:|---:|
+| Mermaid部分のbuild出力（検証用entry、JS / CSS） | 61 files / 3,412,409 bytes | 62 files / 5,223,038 bytes |
+| 同上のBrotli（品質9）合計 | 895,510 bytes | 1,370,543 bytes（+475,033） |
+| うちELKのchunk | — | 1,512,970 bytes |
+| portable ZIP（macOS arm64、CI） | 47,430,260 bytes | **47,917,150 bytes**（+486,890） |
+| portable ZIP（Windows x64、CI） | 47,456,432 bytes | **47,940,143 bytes**（+483,711） |
+
+CIの値は、どちらもmainへのpushのbuild-tauriで、11.17.2がcommit `fc14c97`（§9のdraw.io 32.7.4を含む、run 44698831689）、12.3.0がこの更新のマージのcommit `d5ff832`（run 44713508465）である。Tauriはfrontendのassetをrelease binaryにBrotliで圧縮して埋め込むため、ZIPの増分は上のBrotli合計の増分（+475,033 bytes）に近い。両ZIPは§4の80,000,000 bytes上限とCIのsize gate（macOS 61,390,662 / Windows 61,105,964 bytes）を満たし、size gateまでの余裕はmacOS 13,473,512 bytes、Windows 13,165,821 bytesになる。
+
 ## Consequences
 
 - 図編集はネットワーク断でも同じ機能・資産で動き、図データ送信のオンライン経路を持たない。
@@ -121,7 +183,7 @@ CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこ�
 
 ## Validation Criteria
 
-- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（56,009,715 bytes、§8のdraw.io 31.5.3）
+- [x] 現行macOS arm64の実portable ZIPが80,000,000 bytes以下（47,917,150 bytes、§10のMermaid 12.3.0）
 - [ ] Windowsの実portable ZIPが80,000,000 bytes以下
 - [ ] Windows 10 / 11、macOS 12最新patch、現行macOSで編集、全asset、保存、再読込、SVG / PNG書出しが成功
 - [ ] 代表操作中の外向き通信0件、全asset requestがlocal originで解決
@@ -140,4 +202,13 @@ CIの値は、31.4.1がTauri 2.11.6のmain（commit `73de392`）、31.5.3がこ�
 - draw.io ChangeLog（31.5.3）: <https://github.com/jgraph/drawio/blob/0f419a92c769adb5fb20f2b18053a5ae8c7e4993/ChangeLog>
 - GHSA-ff67-v9r9-6877: <https://github.com/jgraph/drawio/security/advisories/GHSA-ff67-v9r9-6877>
 - GHSA-v2pv-rjf8-9w9v: <https://github.com/jgraph/drawio/security/advisories/GHSA-v2pv-rjf8-9w9v>
+- draw.io pinned source（§9、32.7.4）: <https://github.com/jgraph/drawio/tree/f411a11f4f6b8994d869bdbc45f4d4d9e2284f34>
+- draw.io ChangeLog（32.7.4）: <https://github.com/jgraph/drawio/blob/f411a11f4f6b8994d869bdbc45f4d4d9e2284f34/ChangeLog>
+- draw.io 32.6.10（§9の戻し先）: <https://github.com/jgraph/drawio/tree/c72c9a98b7a6ce392556ed04c05e0ff19f43f5c3>
+- GHSA-55cm-f4p8-xq88: <https://github.com/jgraph/drawio/security/advisories/GHSA-55cm-f4p8-xq88>
+- DOMPurify GHSA-cg2g-xh64-v4q7 / GHSA-mrv2-3pqr-j5jr / GHSA-c6gr-qvv4-5v3f: <https://github.com/cure53/DOMPurify/security/advisories>
 - draw.io embed mode: <https://www.drawio.com/doc/faq/embed-mode>
+- Mermaid 12.3.0（§10）: <https://github.com/mermaid-js/mermaid/releases/tag/mermaid%4012.3.0>
+- Mermaid 12.0.0の変更点（§10）: <https://github.com/mermaid-js/mermaid/releases/tag/mermaid%4012.0.0>
+- elkjs 0.12.1（§10）: <https://github.com/kieler/elkjs/tree/0.12.1>
+- GHSA-238p-pmpm-9mq7（§10）: <https://github.com/advisories/GHSA-238p-pmpm-9mq7>
