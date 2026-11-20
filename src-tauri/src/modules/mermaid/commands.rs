@@ -193,4 +193,29 @@ mod tests {
         )
         .is_err());
     }
+
+    #[test]
+    fn rejects_dtd_even_when_the_shared_svg_check_accepts_it() {
+        // 共通の SVG 判定は draw.io の書出しのために `<!DOCTYPE svg …>` を通すが、
+        // Mermaid の SVG は DTD を含まないので、この画面の判定で拒否する
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("diagram.svg");
+        for svg in [
+            concat!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+                "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" ",
+                "\"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n",
+                "<svg xmlns=\"http://www.w3.org/2000/svg\"/>"
+            ),
+            "<!DOCTYPE svg><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+        ] {
+            let error =
+                write_file(path.display().to_string(), "svg".into(), svg.into()).unwrap_err();
+            assert!(
+                matches!(&error, AppError::Validation { reason, .. } if reason.contains("DTD")),
+                "{error:?}"
+            );
+        }
+        assert!(!path.exists());
+    }
 }
