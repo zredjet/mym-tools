@@ -381,7 +381,7 @@ const diagrams = [
   item("diagram", "システム構成", { xml: diagramXml, text: diagramLabels.join(" ") }),
 ];
 
-// キャンバスの payload v2 (`docs/canvas-editor-design.md` §3)。`text` は §3.6 の規則
+// キャンバスの payload v3 (`docs/canvas-editor-design.md` §3)。`text` は §3.6 の規則
 // (frame の名前、テキストの本文を、ページの深さ優先の順に空白 1 個でつなぐ) と一致させる
 const common = (id, name) => ({ id, name, visible: true, locked: false, opacity: 1 });
 const solid = (color, opacity = 1) => ({ type: "solid", color, opacity });
@@ -392,6 +392,7 @@ const label = (id, name, text, x, y, width, fontSize, fontWeight, color) => ({
   y,
   width,
   height: Math.ceil(fontSize * 1.4),
+  rotation: 0,
   text,
   fontFamily: "Hiragino Sans",
   fontSize,
@@ -412,6 +413,7 @@ const vectorNodes = [
     y: 0,
     width: 640,
     height: 480,
+    rotation: 0,
     children: ["badge", "mark", "dot", "title", "caption"],
     clip: true,
     fill: solid("#FFFFFF"),
@@ -426,6 +428,7 @@ const vectorNodes = [
     y: 60,
     width: 240,
     height: 240,
+    rotation: 0,
     fill: {
       type: "linear",
       stops: [
@@ -440,13 +443,30 @@ const vectorNodes = [
     shadow: { x: 0, y: 12, blur: 24, color: "#1E1B4B", opacity: 0.25 },
   },
   {
+    // ペンで描いた M (開いたパス、端と角は丸)
     ...common("mark", "M"),
-    type: "line",
-    x1: 260,
-    y1: 240,
-    x2: 380,
-    y2: 130,
-    stroke: { color: "#FFFFFF", opacity: 1, width: 22 },
+    type: "path",
+    x: 262,
+    y: 128,
+    width: 116,
+    height: 114,
+    rotation: 0,
+    subpaths: [
+      {
+        closed: false,
+        points: [
+          [0, 114],
+          [0, 0],
+          [58, 68],
+          [116, 0],
+          [116, 114],
+        ].map(([x, y]) => ({ x, y, in: null, out: null, mirror: "none" })),
+      },
+    ],
+    fillRule: "nonzero",
+    fill: null,
+    stroke: { color: "#FFFFFF", opacity: 1, width: 22, cap: "round", join: "round", dash: [] },
+    shadow: null,
   },
   {
     ...common("dot", "点"),
@@ -455,6 +475,7 @@ const vectorNodes = [
     y: 78,
     width: 36,
     height: 36,
+    rotation: 0,
     fill: solid("#F59E0B"),
     stroke: null,
     shadow: null,
@@ -473,7 +494,7 @@ const vectors = [
       text: "アプリアイコン案 MyMyTools アイコン案 A",
     },
     [],
-    2,
+    3,
   ),
 ];
 
@@ -515,7 +536,7 @@ const document = {
         1,
       ]),
     ),
-    vector: 2,
+    vector: 3,
   },
   projects,
 };

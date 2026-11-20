@@ -113,7 +113,6 @@ SVG-Edit (ADR-0021) の時の検証記録は、このファイルの git の履�
 
 ### そのほか未実施
 
-- README の画面イメージ (`docs/images/screenshots/vector.png`) は SVG-Edit の画面のまま。撮り直しは撮影用の identifier の手元ビルドが要る (`docs/images/screenshots/README.md`。デモデータ `scripts/screenshots/demo-data.mjs` は v2 の文書で、開くと v3 に変換される)
 - macOS 12 と Windows (WebView2) での第 2 段階の操作
 
 ## 第 1 段階 (#180)
