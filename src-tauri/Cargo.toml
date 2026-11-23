@@ -77,7 +77,7 @@ sha2 = "0.10"
 
 # M-PDF Merge: 非暗号化PDFの検査・ページツリー結合。展開サイズ上限 (0.44〜) と、
 # 相互参照streamの巨大な/W幅でabortしない修正 (0.45、lopdf #532) を使うため0.45以上。
-lopdf = { version = "0.45", default-features = false }
+lopdf = { version = "0.47", default-features = false }
 # lopdf 0.45の許容範囲 (aes ^0.9) でaes 0.9.3を選ぶとRust 1.89が必要になるため、MSRV 1.88対応版へ固定する。
 aes = "=0.9.2"
 
