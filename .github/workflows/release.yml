@@ -42,7 +42,7 @@ jobs:
       windows_artifact_id: ${{ steps.candidate.outputs.windows_artifact_id }}
     steps:
       # workflow_dispatchで選択したrefの検証スクリプトを取得する。
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Require main workflow
         shell: bash
@@ -61,7 +61,7 @@ jobs:
         run: node scripts/release/release-contract.mjs normalize "${INPUT_VERSION}" >> "${GITHUB_OUTPUT}"
 
       # ユーザー入力から導出したtag commitを別ディレクトリへcheckoutする。
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.release.outputs.tag }}
           fetch-depth: 0
@@ -130,7 +130,7 @@ jobs:
       ARCHIVE_NAME: MyMyTools_${{ needs.validate-release.outputs.version }}_${{ matrix.archive_suffix }}.zip
     steps:
       # tag移動の影響を受けないよう、検証済みcommit SHAを直接checkoutする。
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.validate-release.outputs.release_sha }}
           submodules: true
@@ -256,9 +256,9 @@ jobs:
       IS_PRERELEASE: ${{ needs.validate-release.outputs.prerelease }}
     steps:
       # 検証スクリプトはmain、release notesとtag再検証はtag commitから取得する。
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.validate-release.outputs.tag }}
           fetch-depth: 0
